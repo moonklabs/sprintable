@@ -100,6 +100,9 @@ export interface ProofCapsuleProps {
   /** card 밀도 전용(story #32dcc294) — StateHeader 아래·claim 위에 삽입할 콘텐츠(예: 「다음:
    * …」1급 라인·카테고리 칩). 없으면 기존과 동일(렌더 자체가 생략) — 다른 소비처 무영향. */
   cardHeader?: ReactNode;
+  /** audit density only (story 4892): drop the actor's NAME text from the right-hand «time + name» chunk and keep the avatar badge — for a row squeezed into a narrow list column.
+   *  The caller keeps the name in its own accessible name (the activity row's overlay button carries «actor · claim · time»), so no information is lost. */
+  compactActor?: boolean;
   className?: string;
 }
 
@@ -114,11 +117,11 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader, compactActor,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
-      <AuditRow proofState={proofState} claim={claim} now={now} human={human} agent={agent} className={className} />
+      <AuditRow proofState={proofState} claim={claim} now={now} human={human} agent={agent} className={className} compactActor={compactActor} />
     );
   }
   if (density === 'row') {
@@ -147,7 +150,7 @@ export function ProofCapsule({
 
 function CutCornerShell({ state, className, children }: { state: ProofState; className?: string; children: React.ReactNode }) {
   // story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4) — 컷코너(clip-path) 전면 폐지,
-  // 소프트 라운드(proof-surface, --proof-radius-soft 13px)+뜬 표면 그림자(proof-surface-lift)
+  // 소프트 라운드(proof-surface, --proof-radius-soft) — story 4919: 결 · 뜬 그림자는 걷었다(면 + 헤어라인뿐)
   // 로 교체. 옛 `cut`(24/16px) prop은 클립 크기 조절용이었는데 클립 자체가 없어져 무의미 —
   // 제거(호출부 3곳 전부 --proof-cut 오버라이드가 아니라 그냥 균일 13px 라운드로 수렴).
   // story #2978(선생님 실사용 발견) — 이 셸의 `overflow-hidden`은 CSS flexbox 스펙상 자신의
@@ -158,7 +161,7 @@ function CutCornerShell({ state, className, children }: { state: ProofState; cla
   // 스크롤이 원천 봉쇄된다. shrink-0으로 자기 내용 실제 높이를 지키면 초과분이 정상적으로
   // 조상 체인을 타고 올라가 진짜 스크롤러에서 스크롤 가능해진다(재질만 바뀜, 이 규칙 무변경).
   return (
-    <div className={cn('proof-surface proof-surface-lift flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
+    <div data-slot="proof-capsule" className={cn('proof-surface flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
       <Proofline state={state} />
       {children}
     </div>
@@ -428,7 +431,7 @@ function InlineRow({
 // 안 넘어옴 — 위 ProofCapsule 본체 참고) human/agent 구분 신호가 텍스트 role 문자열 하나뿐이라
 // 도크트린④(자동화 경계, 항상 구분된 마커)를 audit density만 못 채우고 있었다. 공유 Avatar를
 // size=16(시안 .av 16px 그대로)으로 재사용 — 신규 아바타 컴포넌트 0.
-function AuditRow({ proofState, claim, now, human, agent, className }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'agent' | 'className'>) {
+function AuditRow({ proofState, claim, now, human, agent, className, compactActor }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'agent' | 'className' | 'compactActor'>) {
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
@@ -441,7 +444,7 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
       {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
+      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, compactActor ? null : actorLabel].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

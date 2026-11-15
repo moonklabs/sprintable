@@ -3,14 +3,16 @@
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
-import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { hasRecipeStageLabel, recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { composeEventPreviewFallback, readableSlug } from '@/components/chat/event-block-card';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Chip } from '@/components/ds/chip';
+import { cn } from '@/lib/utils';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -41,7 +43,9 @@ export interface BacklinkItem {
      * recipe-stage-label.ts/gate-approver-label.ts(#4464) SSOT 재구성 렌더를 쓴다.
      * role/gate_type/approver/name은 BE가 정의를 못 찾으면(삭제 등) 지어내지 않고 null. */
     event: {
-      definition_key: string; name: string | null; stage: string;
+      definition_key: string; name: string | null;
+      /** story 4925 — null for an event with no stage (the steer instruction · an org's own event): the card is then the key and the name only */
+      stage: string | null;
       role: string | null; gate_type: string | null; approver: string | null;
     } | null;
   } | null;
@@ -72,15 +76,33 @@ const SOURCE_TYPE_ICON = {
  * 않는다는 원칙 그대로). gate_type이 있을 때만(그 stage에 실제로 게이트가 걸릴 때만) 승인자
  * 세그먼트를 덧붙인다 — #4076이 처방한 _render_event_message_content의 "게이트 있을 때만
  * approver를 말한다" 관례와 동형. */
-function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string): string {
-  const name = event!.name ?? event!.definition_key;
-  const stage = recipeStageLabel(event!.stage, tOrg);
+function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string, tEventCard: (key: string) => string): string {
+  // story 4925 — no definition name (deleted …): the one word «이벤트» (4921's rule), never the definition KEY; a stage no label knows reads as words, not as its slug
+  const name = event!.name?.trim() || tEventCard('genericEventHeader');
+  const rawStage = typeof event!.stage === 'string' ? event!.stage.trim() : '';
+  // no stage at all → the line is just the name (never a dangling « · »)
+  const stage = rawStage ? (hasRecipeStageLabel(rawStage) ? recipeStageLabel(rawStage, tOrg) : readableSlug(rawStage)) : null;
   const role = event!.role ? ` (${stageRoleLabel(event!.role, tOrg)})` : '';
   const approver = event!.gate_type ? ` · ${gateApproverLabel(tOrg, event!.approver)}` : '';
-  return `${name} · ${stage}${role}${approver}`;
+  return `${name}${stage ? ` · ${stage}` : ''}${role}${approver}`;
 }
 
-function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): string | undefined {
+/**
+ * story 4925 — the line for a chat message that a backlink / the story origin points at. An event message (structured `event`) is rebuilt from it; a message whose snippet is the machine text an AGENT reads
+ * («[이벤트] preset.x - key: value …» — an old row with no `event`) is the one word «이벤트» (4921's fallback function); anything else is the snippet as plain text, as before.
+ */
+export function backlinkMessageLabel(
+  message: BacklinkItem['message'],
+  tOrg: (key: string) => string,
+  tEventCard: (key: string) => string,
+): string | undefined {
+  if (message?.event) return eventBacklinkLabel(message.event, tOrg, tEventCard);
+  const snippet = message?.content_snippet;
+  if (snippet == null) return undefined;
+  return composeEventPreviewFallback(snippet, undefined, undefined, { tEventCard }) ?? toPlainPreview(snippet);
+}
+
+function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string, tEventCard: (key: string) => string): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
     // story #3949 — content_snippet은 메시지 원문 조각이라 마크다운 링크/entity 참조
@@ -88,8 +110,7 @@ function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): strin
     // #4091의 event 구조화 렌더 분기는 그대로 두고, 그 분기가 아닐 때(raw
     // content_snippet 폴백)만 평문화를 적용한다.
     case 'chat_message':
-      if (item.message?.event) return eventBacklinkLabel(item.message.event, tOrg);
-      return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
+      return backlinkMessageLabel(item.message, tOrg, tEventCard);
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
     case 'evidence': return item.evidence?.title;
@@ -97,37 +118,8 @@ function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): strin
   }
 }
 
-interface CollectionScope {
-  source_types: string[];
-  forms: string;
-  excludes: string[];
-}
-
-interface BacklinksMeta {
-  collection_scope?: CollectionScope;
-}
-
-/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로).
- * story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
- * 정식 source_type이라 이 exclude 사유 자체가 소멸 — backlinks.py::list_entity_backlinks
- * 응답 참조). 소비처 0인 키를 죽은 채 남기지 않는다(i18n 키=소비처 1:1 규율). */
-const EXCLUDE_LABEL_KEYS: Record<string, string> = {
-  pr_sid_text_convention: 'backlinksExcludePrSid',
-};
-
-// story #4096(리허설 1호 실측, 2026-09-21) — collection_scope.source_types 코드(BE
-// app/services/backlinks.py::BACKLINKS_ALLOWED_SOURCE_TYPES, 4종 고정)가 EXCLUDE_LABEL_KEYS
-// 와 달리 사람 낱말 매핑 없이 원문 그대로(«source=chat_message» 등) 화면에 샜다 — 같은
-// 패턴(코드→i18n 키 조회 테이블)으로 처방. 매핑에 없는 코드(향후 BE가 늘릴 경우)는 excludes와
-// 동일 원칙으로 원문 코드 그대로(번역 키 오조회 대신 "정상 경로").
-const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
-  chat_message: 'backlinksSourceChatMessage',
-  doc: 'backlinksSourceDoc',
-  meeting: 'backlinksSourceMeeting',
-  story: 'backlinksSourceStory',
-  evidence: 'backlinksSourceEvidence',
-  artifact: 'backlinksSourceArtifact',
-};
+// story 4906 — the empty line used to carry the collection scope (which sources were read, «PR/commit [SID:XXX] text convention not collected») — the server's
+// bookkeeping, not something a customer can act on. The response still has `meta.collection_scope`; the screen no longer reads it: one plain sentence.
 
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
  * 아닌 조회 테이블로 연다 — PROJECT_ID_RESOLVERS와 같은 성격(종류-분기가 아니라 표기 파생).
@@ -166,6 +158,8 @@ export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;
 interface EntityBacklinksSectionProps {
   entityType: BacklinksEntityType;
   entityId: string;
+  /** 4910 — 바깥 선이 이미 있는 틀(산출물 상세 오른쪽 열의 구분선)에서는 `border-t-0`로 겹선을 없앤다. */
+  className?: string;
 }
 
 /**
@@ -184,14 +178,14 @@ interface LoadedResult {
   entityType: BacklinksEntityType;
   entityId: string;
   items: BacklinkItem[];
-  scope: CollectionScope | null;
 }
 
-export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
+export function EntityBacklinksSection({ entityType, entityId, className }: EntityBacklinksSectionProps) {
   const t = useTranslations('board');
   // story #4091(§c) — recipe-stage-label.ts/stage-role.ts/gate-approver-label.ts SSOT가
   // 전부 organization 네임스페이스에 산다(recipe-detail-view.tsx 등 기존 소비처와 동일).
   const tOrg = useTranslations('organization');
+  const tEventCard = useTranslations('eventCard'); // story 4925
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
@@ -203,11 +197,11 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
     let cancelled = false;
     const segment = ENTITY_ROUTE_SEGMENT[entityType];
     fetchWithAuth(`/api/${segment}/${entityId}/backlinks`, { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[]; meta?: BacklinksMeta }>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[] }>) : null))
       .then((json) => {
         if (cancelled) return;
         if (!json) { setResult('failed'); return; }
-        setResult({ entityType, entityId, items: json.data ?? [], scope: json.meta?.collection_scope ?? null });
+        setResult({ entityType, entityId, items: json.data ?? [] });
       })
       .catch(() => { if (!cancelled) setResult('failed'); });
     return () => { cancelled = true; };
@@ -215,57 +209,34 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
 
   // 조용한 폴백 — 다른 애드온 섹션(stuck-handoff-section 등)과 동형, 로딩/실패/전환-중으로 노이즈를 안 낸다.
   if (result === null || result === 'failed' || result.entityType !== entityType || result.entityId !== entityId) return null;
-  const { items, scope } = result;
+  const { items } = result;
   // story #2267(C-9) AC4 — relation==='created_from'인 항목은 「출처」(story-origin-section.tsx
   // 전용)이지 「이것을 가리키는 것들」(멘션)이 아니다. 같은 응답을 두 섹션이 각자 걸러 쓴다.
   const mentionItems = items.filter((item) => item.relation !== 'created_from');
 
   return (
-    <div className="border-t border-border/60 px-4 py-3">
-      <p className="mb-2 text-xs font-medium text-muted-foreground">{t('backlinksTitle')}</p>
+    <div className={cn('border-t border-ds-line px-4 py-3', className)}>
+      <p className="mb-2 text-ds-small font-semibold text-ds-ink-2">{t('backlinksTitle')}</p>
       {mentionItems.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {scope
-            ? (() => {
-                // story #4096 — excludes 목록(마지막 항목 기준)에 맞는 「은/는」을 렌더
-                // 시점에 결정적으로 고른다(korean-particle.ts, more/page.tsx::moreTabHint와
-                // 동일 패턴) — 조사를 메시지 문자열에 고정하지 않는다.
-                const excludesText = scope.excludes
-                  .map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k))
-                  .join('·');
-                return t('backlinksEmptyScoped', {
-                  // 매핑에 없는 코드(향후 BE가 source_types를 늘릴 경우)는 원문 코드
-                  // 그대로 — 번역 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은
-                  // 원칙, excludes와 동형).
-                  sources: scope.source_types
-                    .map((k) => (SOURCE_TYPE_LABEL_KEYS[k] ? t(SOURCE_TYPE_LABEL_KEYS[k]!) : k))
-                    .join('·'),
-                  excludes: excludesText,
-                  particle: pickEunNeunJosa(excludesText),
-                });
-              })()
-            : t('backlinksEmptyFallback')}
-        </p>
+        <p className="text-ds-small text-ds-ink-3">{t('backlinksEmpty')}</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {mentionItems.map((item) => {
             const Icon = SOURCE_TYPE_ICON[item.source_type];
-            const label = backlinkLabel(item, tOrg);
+            const label = backlinkLabel(item, tOrg, tEventCard);
             const creatorName = item.created_by?.name;
             return (
               <li
                 key={item.id}
-                className={`flex items-start gap-2 text-xs ${item.still_exists ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={`flex items-start gap-2 text-ds-small ${item.still_exists ? 'text-ds-ink' : 'text-ds-ink-3'}`}
               >
                 <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <span className="[overflow-wrap:anywhere]">{label ?? item.source_id}</span>
                   {!item.still_exists && (
-                    <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-micro text-muted-foreground">
-                      {t('backlinksTargetGone')}
-                    </span>
+                    <Chip className="ml-1.5">{t('backlinksTargetGone')}</Chip>
                   )}
-                  <div className="text-micro text-muted-foreground">
+                  <div className="text-ds-small text-ds-ink-3">
                     {creatorName ? `${creatorName} · ` : ''}
                     {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                   </div>

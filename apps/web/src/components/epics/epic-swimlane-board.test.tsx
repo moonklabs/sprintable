@@ -373,7 +373,7 @@ describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
     });
     for (const n of [1, 2, 3]) expect(container.textContent).toContain(`에픽${n}`);
     expect(container.textContent).not.toContain('에픽4');
-    expect(container.textContent).toContain('에픽 2개 더 보기');
+    expect(container.textContent).toContain('목표 2개 더 보기');
 
     const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('더 보기'));
     await act(async () => { toggle!.click(); });
@@ -887,9 +887,13 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
     await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await waitForCondition(() => container.textContent?.includes('삭제될카드') ?? false, '패널 오픈');
 
-    const deleteTrigger = container.querySelector('[aria-label="스토리 삭제"]') as HTMLElement;
-    expect(deleteTrigger, '삭제 트리거를 못 찾음').not.toBeNull();
-    await act(async () => { deleteTrigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4945 — 지우기는 «더 보기 ⋯» 메뉴 안(닫기 옆 늘 떠 있던 휴지통을 옮김): ⋯ → «스토리 삭제» 항목
+    const moreButton = container.querySelector<HTMLButtonElement>('button[aria-label="더 보기"]');
+    expect(moreButton, '⋯ 더 보기 단추를 못 찾음').not.toBeNull();
+    await act(async () => { moreButton!.click(); });
+    const deleteItem = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((i) => i.textContent?.trim() === '스토리 삭제');
+    expect(deleteItem, '삭제 항목을 못 찾음').toBeDefined();
+    await act(async () => { deleteItem!.click(); });
 
     // Dialog는 document.body에 포탈되므로 container가 아닌 document 전체에서 찾는다.
     const confirmBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '영구 삭제');
@@ -1054,6 +1058,28 @@ describe('EpicSwimlaneBoard — 인라인 StoryCard 배지 org 라벨 오버라�
 // 본문에 별도 마스트헤드가 없어(3946 AC1 실측) TopBarSlot의 h1이 그대로 유일한 h1이다.
 describe('EpicSwimlaneBoard — 페이지 h1 1개(story #3946)', () => {
   it('⭐h1이 정확히 1개다(TopBarSlot 제목)', async () => {
+    await mount({ epics: [], stories: [] });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});
+
+// story #4888(UI-5 목표 화면 첫 조각) — 목표 화면(/goals)의 «스윔레인» 보기로 열릴 땐 `embedded`: 그 화면이 이미 h1(마스트헤드) · 상단바 슬롯을 쥐고 있어
+// 보드가 자기 상단바 슬롯(= h1)을 또 그리면 상단바가 «목표 스윔레인»으로 덮이고 화면 h1이 둘이 된다. 나머지(h2 소제목 · 축 전환 · 레인)는 그대로.
+describe('EpicSwimlaneBoard — embedded(story #4888)', () => {
+  async function mountEmbedded(stub: FetchStub) {
+    stubFetch(stub);
+    await act(async () => { root.render(withIntl(<EpicSwimlaneBoard projectId="p1" embedded />)); });
+    await act(async () => { await waitForCondition(() => container.textContent?.includes('5단계 클래식') ?? false, 'embedded 로딩 完了'); });
+  }
+
+  it('⭐embedded면 자기 상단바 슬롯(= h1)을 안 그린다 — h1 0개(화면 h1은 바깥 마스트헤드 몫) · h2 소제목과 축 전환은 그대로', async () => {
+    await mountEmbedded({ epics: [], stories: [] });
+    expect(container.querySelectorAll('h1')).toHaveLength(0);
+    expect(container.querySelector('h2')?.textContent).toBe('목표 스윔레인');
+    expect(container.textContent).toContain('5단계 클래식');
+  });
+
+  it('embedded가 아니면(= /epics 탭 화면) 예전 그대로 h1 하나', async () => {
     await mount({ epics: [], stories: [] });
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });

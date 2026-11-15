@@ -1,6 +1,8 @@
 'use client';
 
+// story 4891 (UI-8 · the notifications tab's tail card · PO 11-10): the interval chips were raw 34 px buttons — on a phone every press is ≥ 44 now (the ds Button's touch floor), the picked one is the primary look + aria-pressed (same values, same handler).
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ds/button';
 import { INTERVAL_OPTIONS, useRefreshContext } from '@/contexts/refresh-context';
 
 export function RefreshSettings() {
@@ -8,21 +10,17 @@ export function RefreshSettings() {
   const t = useTranslations('settings');
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2" data-testid="refresh-settings">
       {INTERVAL_OPTIONS.map((opt) => (
-        <button
+        <Button
           key={opt.value}
           type="button"
+          variant={intervalMs === opt.value ? 'primary' : 'secondary'}
           aria-pressed={intervalMs === opt.value}
           onClick={() => setIntervalMs(opt.value)}
-          className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-            intervalMs === opt.value
-              ? 'border-primary bg-primary/10 text-primary'
-              : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-          }`}
         >
           {t(opt.labelKey)}
-        </button>
+        </Button>
       ))}
     </div>
   );

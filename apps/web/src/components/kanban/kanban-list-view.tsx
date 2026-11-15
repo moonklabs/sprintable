@@ -4,10 +4,12 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ds/layers';
 import { COLUMNS, type KanbanStory, type KanbanMember, type LineStatusSummary } from './types';
 import { StoryCard } from './story-card';
 import type { LabelData } from '@/components/ui/label-chip';
 import { CountBadge } from '@/components/ui/count-badge';
+import { ListStoryComposer } from './list-story-composer';
 
 interface KanbanListViewProps {
   stories: KanbanStory[];
@@ -28,6 +30,17 @@ interface KanbanListViewProps {
   /** story #3287 AC4 — org 라벨 오버라이드(useOrgDomainLabels().statusLabel). 없으면
    * 기존 t(col.i18nKey) 그대로(회귀 0). 그룹 헤더+카드 내부 배지 둘 다에 쓰인다. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
+  selectedStoryId?: string | null;
+  assignableMembers?: KanbanMember[];
+  onToggleAssignee?: (storyId: string, memberId: string) => void;
+  onRenameStory?: (storyId: string, title: string) => void;
+  onKickoffStory?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
+  /** story 4945 — 행 우클릭 메뉴의 «스토리 수정(열기)» · «스토리 삭제»: 보드 카드 메뉴와 같은 두 항목(없으면 항목도 없다 — 삭제는 사람만, 넘기는 쪽이 정한다). */
+  onEditStory?: (storyId: string) => void;
+  onDeleteStory?: (storyId: string) => void;
+  /** story #4888 — 목록 보기에도 «스토리 추가» 입구 한 자리(같은 동작: 상태 backlog로 만든다). 없으면 입구도 없다(옛 호출부 무변). */
+  onCreateStory?: (title: string) => Promise<boolean | void> | boolean | void;
 }
 
 interface StatusGroupProps {
@@ -45,16 +58,25 @@ interface StatusGroupProps {
   storyLineMap?: KanbanListViewProps['storyLineMap'];
   projectId?: string;
   getStatusLabel?: KanbanListViewProps['getStatusLabel'];
+  selectedStoryId?: string | null;
+  assignableMembers?: KanbanListViewProps['assignableMembers'];
+  onToggleAssignee?: KanbanListViewProps['onToggleAssignee'];
+  onRenameStory?: KanbanListViewProps['onRenameStory'];
+  onKickoffStory?: KanbanListViewProps['onKickoffStory'];
+  onEditStory?: KanbanListViewProps['onEditStory'];
+  onDeleteStory?: KanbanListViewProps['onDeleteStory'];
 }
 
 function StatusGroup({
   columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory, onKickoffStory, onEditStory, onDeleteStory,
 }: StatusGroupProps) {
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
   return (
-    <div>
+    // 4908 — 폰 목록 보기의 한 상태 묶음 = 내용 칸 층(LAYER.panel) + 얇은 테두리: 열 보드의 «열 면»과 같은 자리다. 이 면이 없으면 카드(글 줄 층)가 바탕 위에 맨몸으로 떠
+    // 라이트 390에서 카드 ↔ 바탕이 0.025로 층 규칙(≥ 0.05)에 모자랐다(카디르군 «후» 실측 11-13).
+    <div data-testid={`list-group-${columnId}`} className={cn('rounded-xl border border-ds-line p-1', LAYER.panel)}>
       <button
         type="button"
         className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50"
@@ -81,7 +103,6 @@ function StatusGroup({
             stories.map((story) => (
               <div key={story.id} className="w-full">
                 <StoryCard
-                  className="max-w-none"
                   story={story}
                   epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
                   assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
@@ -96,6 +117,13 @@ function StatusGroup({
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                   getStatusLabel={getStatusLabel}
+                  selected={selectedStoryId === story.id}
+                  assignableMembers={assignableMembers}
+                  onToggleAssignee={onToggleAssignee}
+                  onRename={onRenameStory}
+                  onKickoff={onKickoffStory}
+                  onEdit={onEditStory}
+                  onDelete={onDeleteStory}
                 />
               </div>
             ))
@@ -108,12 +136,14 @@ function StatusGroup({
 
 export function KanbanListView({
   stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory, onKickoffStory, onEditStory, onDeleteStory,
 }: KanbanListViewProps) {
   const t = useTranslations('board');
 
   return (
-    <div className="space-y-2">
+    // story 4945 — `data-board-list`: 방향키 ↑↓가 상태 묶음을 가로질러 다음/이전 카드로 간다(card-nav.ts)
+    <div className="space-y-2" data-board-list>
+      {onCreateStory ? <ListStoryComposer onCreate={onCreateStory} /> : null}
       {COLUMNS.map((col) => {
         const colStories = stories.filter((s) => s.status === col.id);
         return (
@@ -133,6 +163,13 @@ export function KanbanListView({
             storyLineMap={storyLineMap}
             projectId={projectId}
             getStatusLabel={getStatusLabel}
+            selectedStoryId={selectedStoryId}
+            assignableMembers={assignableMembers}
+            onToggleAssignee={onToggleAssignee}
+            onRenameStory={onRenameStory}
+            onKickoffStory={onKickoffStory}
+            onEditStory={onEditStory}
+            onDeleteStory={onDeleteStory}
           />
         );
       })}

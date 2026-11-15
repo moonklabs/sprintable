@@ -23,10 +23,13 @@ let mockInitialActivationComplete: boolean | undefined;
 let mockInitialActivationCollapsed: boolean | undefined;
 // story #4219 F1(PO 리뷰) — 컨텍스트 org(지금 보는 org)와 레이아웃이 시드를 조회한 org(activationOrgId)를 따로 바꿀 수 있게.
 const mockOrg = { orgId: 'org-1', activationOrgId: 'org-1' as string | undefined, seedFromHint: false };
+// story #4888 — the v3 flags the dashboard context carries (all off by default, as in production today)
+const mockFlags: { current: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean } | undefined } = { current: undefined };
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
     projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.activationOrgId, activationSeedFromHint: mockOrg.seedFromHint,
     initialActivationComplete: mockInitialActivationComplete, initialActivationCollapsed: mockInitialActivationCollapsed,
+    navV3Flags: mockFlags.current,
   }),
 }));
 const routerPushMock = vi.fn();
@@ -73,6 +76,7 @@ beforeEach(() => {
   mockInitialActivationComplete = undefined;
   mockInitialActivationCollapsed = undefined;
   mockOrg.orgId = 'org-1'; mockOrg.activationOrgId = 'org-1'; mockOrg.seedFromHint = false;
+  mockFlags.current = undefined;
   document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
@@ -260,7 +264,8 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
 
     expect(container.textContent).not.toContain('이메일 인증하기');
     expect(container.textContent).toContain('가입 완료 2/5');
-    expect(document.cookie).toContain('sp_activation_collapsed=org-1');
+    // story #4888 — 접힘이 기본값이라 접으면 «열어 둔 org» 기억을 지운다(쿠키 없음 = 접힘)
+    expect(decodeURIComponent(document.cookie)).not.toContain('sp_activation_collapsed=open:');
   });
 
   it('접힌 칩을 다시 누르면 펼쳐진다', async () => {
@@ -276,6 +281,8 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
     await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
     expect(container.textContent).toContain('이메일 인증하기');
+    // story #4888 — 펼치면 이 org를 «열어 둔 org»로 세션 쿠키에 기억한다(다음 문서도 펼침)
+    expect(decodeURIComponent(document.cookie)).toContain('sp_activation_collapsed=open:org-1');
   });
 });
 
@@ -639,6 +646,30 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(container.querySelectorAll('[data-testid="activation-skeleton-expanded"] li')).toHaveLength(5);
   });
 
+  it('⭐the collapsed chip keeps its visible 30px and gets a transparent press band on touch only — the chip\'s own classes did not change (4888)', async () => {
+    // jsdom has no layout, so the pins are the classes that make the numbers: the visible size comes from py-1.5 + text-xs (nothing may add a min-height to the chip itself) = 30; the press area comes from the band
+    // (inside the button, `absolute inset-x-0 -inset-y-2` = 8px above and below → 46) which `hidden touch:block` shows on touch only. «The band overlaps no other pressable» is measured on the real browser (dev) — see the PR.
+    mockInitialActivationCollapsed = true;
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    const chip = container.querySelector('[data-testid="activation-chip"]') as HTMLButtonElement;
+    const cls = chip.className.split(/\s+/);
+    expect(cls).toEqual(expect.arrayContaining(['py-1.5', 'text-xs']));
+    expect(cls.some((c) => /(^|:)min-h-|(^|:)h-\d|(^|:)py-(?!1\.5$)/.test(c))).toBe(false); // nothing grows the visible chip
+    const band = chip.querySelector('[data-testid="activation-chip-hit"]') as HTMLElement;
+    expect(band, 'the band is INSIDE the button — a press on it is a press on the chip').not.toBeNull();
+    expect(band.getAttribute('aria-hidden')).toBe('true');
+    const bandCls = band.className.split(/\s+/);
+    expect(bandCls).toEqual(expect.arrayContaining(['absolute', 'inset-x-0', '-inset-y-2', 'hidden', 'touch:block']));
+    expect(bandCls).not.toContain('block'); // touch-only: a mouse gets no invisible band
+    expect((chip.parentElement as HTMLElement).className).toBe('relative'); // the band is placed against the chip's own box
+    // a press on the band reaches the chip's handler
+    await act(async () => { band.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-chip"]')).toBeNull(); // opened
+  });
+
   it('the finish and the collapsed chip use the local words (ko · en); the hosted words stay hosted', async () => {
     expect(koMessages.activation.doneTitleLocal).toBe('시작 준비를 마쳤어요');
     expect(koMessages.activation.doneBodyLocal).toBe('첫 지시를 보냈고 회신도 받았어요 — 두 단계가 모두 끝났어요.');
@@ -646,7 +677,6 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(enMessages.activation.bannerTitleLocal).toBe('Connect your first agent?');
     expect(enMessages.activation.collapsedChipLocal).toBe('Getting started {completed}/{total}');
     stubChecklist(LOCAL);
-    document.cookie = 'sp_activation_collapsed=1; Path=/';
     mockInitialActivationCollapsed = true;
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();
@@ -654,3 +684,101 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(container.textContent).not.toContain('가입 완료');
   });
 });
+
+// story #4888 (UI-5 home) — the checklist has its place inside the home (a card at the top of its list); the shell's band steps aside there and no longer stands over the chat screens.
+describe('ActivationChecklistBanner — placement (story #4888)', () => {
+  afterEach(() => { mockPath.current = '/dashboard'; });
+
+  it('the shell band is not drawn over /chats or a chat room — not while loading either (no empty box above the chat list)', async () => {
+    for (const path of ['/chats', '/chats/abc-123']) {
+      mockPath.current = path;
+      deferredChecklistResponse();
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      expect(container.innerHTML, `${path} while loading`).toBe('');
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.innerHTML, path).toBe('');
+    }
+  });
+
+  it('a path that only starts with the same letters as /chats keeps the band', async () => {
+    mockPath.current = '/chatsettings';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('on the home the shell band steps aside, and the home\'s own copy (placement="home") draws the checklist there', async () => {
+    mockPath.current = '/org-briefing';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.innerHTML).toBe('');
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner placement="home" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-banner"]')).not.toBeNull();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('every other page keeps the shell band exactly as before', async () => {
+    for (const path of ['/flow', '/inbox', '/glance', '/today']) {
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.textContent, path).toContain('가입을 마무리해 볼까요?');
+    }
+  });
+
+  // two copies of the banner on the home (the shell's, stepped aside, and the home's own) must not run two refresh loops for one checklist
+  it('the shell copy that steps aside on the home does not read again on its own timer; the home copy does; elsewhere the shell copy reads as before', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const reads = () => (fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    const run = async (path: string, placement: 'shell' | 'home') => {
+      _resetActivationStatusCacheForTests();
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner placement={placement} />)); });
+      await flush();
+      const first = reads();
+      await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 2 + 1); });
+      await flush();
+      const later = reads() - first;
+      await act(async () => { root.render(wrap(<div />)); });
+      return later;
+    };
+    expect(await run('/org-briefing', 'shell')).toBe(0); // stepped aside: the home's copy ticks
+    expect(await run('/org-briefing', 'home')).toBeGreaterThan(0);
+    expect(await run('/flow', 'shell')).toBeGreaterThan(0);
+  });
+
+  // the home screen (and its own card) is at the same place whatever the v3 flags point the rail at: with the today flag on, the rail goes to the flagged screen, but the home list is still
+  // reachable directly — it must not get two cards. The flagged screen does not draw the home list, so it keeps the shell band.
+  // (the flagged /today screen sits outside the dashboard shell, so in production nothing mounts the shell band there at all — this only pins that the band does not hide itself by the FLAGGED route name)
+  it('with the today v3 flag on: the home route still has no shell copy (the home draws its own) — and the banner does not hide by the flagged route name', async () => {
+    mockFlags.current = { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false };
+    mockPath.current = '/org-briefing';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.innerHTML).toBe('');
+    mockPath.current = '/today';
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('with the chat v3 flag on: neither chat route (/chats or /chat) has the band', async () => {
+    mockFlags.current = { todayV3Enabled: false, chatV3Enabled: true, connectRulesV3Enabled: false };
+    for (const path of ['/chats', '/chats/abc', '/chat', '/chat/abc']) {
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.innerHTML, path).toBe('');
+    }
+  });
+});
+

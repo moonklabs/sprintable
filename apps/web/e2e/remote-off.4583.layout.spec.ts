@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
@@ -65,7 +66,7 @@ async function build() {
   });
   const js = out.outputFiles[0]!.text;
   // every class the bundle can render — no length cap (PR 4972: a cut Button base string drew the wrong border and ring)
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
+  const candidates = tailwindCandidates(js);
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
@@ -318,13 +319,13 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await expect(card).toHaveAttribute('id', 'remote-control');
     await expect(page.getByTestId('desktop-remote-control-off-effect')).toHaveText(KO.offEffect);
     await expect(page.getByTestId('desktop-remote-control-owner-only')).toHaveCount(0);
-    await expect(card.locator('[data-slot="switch"]')).toHaveAttribute('aria-checked', 'false');
+    await expect(card.locator('[data-slot="ds-toggle"]')).toHaveAttribute('aria-checked', 'false');
     expect(await pixelContrast(page, page.getByTestId('desktop-remote-control-off-effect'), `5a-${tag}`)).toBeGreaterThanOrEqual(4.5);
     await shot(page, card, `4583-web-5a-card-owner-${tag}`);
 
     await open(page, { kind: 'card', width, theme, api: org({ owner: false }) });
     await expect(page.getByTestId('desktop-remote-control-owner-only')).toHaveText(KO.ownerOnlyOff(THREE));
-    await expect(card.locator('[data-slot="switch"]')).toHaveCount(0);
+    await expect(card.locator('[data-slot="ds-toggle"]')).toHaveCount(0);
     expect(await pixelContrast(page, page.getByTestId('desktop-remote-control-owner-only'), `5b-${tag}`)).toBeGreaterThanOrEqual(4.5);
     await shot(page, card, `4583-web-5b-card-member-${tag}`);
 
@@ -338,7 +339,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
 
     // 5c — the owner arrives at /desktop#remote-control from far below: the card in view, the switch focused with a visible ring, still off
     await open(page, { kind: 'card-far', width, theme, hash: '#remote-control', api: org({ owner: true }) });
-    const sw = card.locator('[data-slot="switch"]');
+    const sw = card.locator('[data-slot="ds-toggle"]');
     await expect(sw).toBeFocused();
     await expect(sw).toHaveAttribute('aria-checked', 'false');
     await page.mouse.move(0, 0);
@@ -357,7 +358,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await frames(page);
     await settled(sw); // 4600: the ring's transition out has finished before the ring-less shot
     const after = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-slot') ?? null);
-    expect(after, 'the person moved the focus off the switch').not.toBe('switch');
+    expect(after, 'the person moved the focus off the switch').not.toBe('ds-toggle');
     const blurred = await page.screenshot({ clip });
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
@@ -379,7 +380,7 @@ for (const theme of ['L', 'D'] as const) {
     const link = page.getByTestId('remote-off-link');
     const box = (await link.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    const sw = page.getByTestId('desktop-remote-control').locator('[data-slot="switch"]');
+    const sw = page.getByTestId('desktop-remote-control').locator('[data-slot="ds-toggle"]');
     await sw.waitFor();
     await expect(sw).toBeFocused();
     await expect(sw).toHaveAttribute('aria-checked', 'false');

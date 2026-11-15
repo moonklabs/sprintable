@@ -106,4 +106,23 @@ describe('AdsSpendCell — story #3806(Phase3·3-2 PR5 조각⑥)', () => {
     expect(el?.textContent).toMatch(/초과/);
     expect(el?.textContent).not.toMatch(/잔여/);
   });
+
+  it('⭐남은 한도 줄 색: 초과면 실패 색(ds-failed)', () => {
+    mount({
+      gate_id: 'gate-1', gate_status: 'approved', sealed_budget_minor: 50_000, sealed_currency: 'KRW',
+      captured_spend_minor: 55_000, remaining_minor: -5_000, run_status: 'running',
+    });
+    const tail = container.querySelector('[data-testid="ads-spend-cell-value"] > span:last-child') as HTMLElement;
+    expect(tail.className).toContain('text-ds-failed');
+  });
+
+  it('⭐남은 한도 줄 색: 남았으면 보조 색(ds-ink-3), 실패 색 아님', () => {
+    mount({
+      gate_id: 'gate-1', gate_status: 'approved', sealed_budget_minor: 50_000, sealed_currency: 'KRW',
+      captured_spend_minor: 30_000, remaining_minor: 20_000, run_status: 'running',
+    });
+    const tail = container.querySelector('[data-testid="ads-spend-cell-value"] > span:last-child') as HTMLElement;
+    expect(tail.className).toContain('text-ds-ink-3');
+    expect(tail.className).not.toContain('text-ds-failed');
+  });
 });

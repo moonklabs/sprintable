@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Loader2, RotateCcw, XCircle } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Chip } from '@/components/ds/chip';
+import { Button } from '@/components/ds/button';
 import { useToast } from '@/components/ui/toast';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
@@ -108,22 +108,22 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const btn = {
     // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이
     // 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례와 같은 처방.
-    idle: { cls: 'bg-destructive text-on-scrim dark:text-proof-bg hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
-    notifying: { cls: 'bg-destructive-tint text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
-    notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
-    failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
+    idle: { variant: 'primary' as const, cls: 'border-ds-failed bg-ds-failed text-ds-on-action', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
+    notifying: { variant: 'secondary' as const, cls: '', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
+    notified: { variant: 'secondary' as const, cls: '', Icon: Check, label: t('fallbackNotified'), disabled: true },
+    failed: { variant: 'danger' as const, cls: '', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
   }[fallback];
   const BtnIcon = btn.Icon;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-3">
+    <div className="rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
       <p className="mb-2 text-micro font-mono uppercase tracking-wide text-muted-foreground">{t('workflowLineContext')}</p>
       <div className="space-y-2.5">
         {/* ⓐ 경고 헤더 */}
-        <Badge variant="destructive" className="gap-1">
+        <Chip tone="failed" className="h-auto min-h-5 gap-1 py-0.5 font-sans text-xs">
           <AlertTriangle className="size-3 shrink-0" />
           <span>{t('lineHandoffStuck')}</span>
-        </Badge>
+        </Chip>
         {/* ⓑ S11 GateLineContext 재사용(무변경) */}
         {/* [SID:4286] 승인자 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원».
             [SID:4300] 표 = 넘겨받은 프로젝트 범위 + 없을 때 조직 범위(approverNames) · 받는 동안은 빈 글자(문장 안이라 줄 높이 불변). */}
@@ -132,7 +132,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
         <StuckHandoffDetail step={step} />
         {/* ⓓ fallback action(상태머신) */}
         <Button
-          variant="ghost"
+          variant={btn.variant}
           className={`w-full gap-1.5 ${btn.cls}`}
           disabled={btn.disabled}
           onClick={() => void handleFallback()}
@@ -142,7 +142,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
         </Button>
         {/* story #2272 — ⓔ withdraw(형제 fallback-notify와 같은 흐름). 되돌릴 수 없어 confirm 단계 */}
         {withdraw === 'withdrawn' ? (
-          <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 rounded-md bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-muted-foreground">
             <Check className="size-3.5 shrink-0" />
             {t('withdrawn')}
           </div>
@@ -153,10 +153,10 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
               {/* story #3869(AC1) — 이 버튼은 withdraw==='confirming'에서만 렌더되고, 그
                   조상 div가 상시 bg-destructive-tint(리터럴, 132행)라 text-muted-foreground는
                   AA 미달(#3839류) — text-foreground로 교체(§③ ink 규칙, 새 토큰 0). */}
-              <Button variant="ghost" size="sm" className="flex-1 text-foreground" onClick={() => setWithdraw('idle')}>
+              <Button variant="quiet" className="flex-1 text-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
-              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
+              <Button variant="quiet" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
                 <XCircle className="size-3.5 shrink-0" />
                 {t('withdrawConfirm')}
               </Button>
@@ -164,9 +164,8 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           </div>
         ) : (
           <Button
-            variant="ghost"
-            size="sm"
-            className="w-full gap-1.5 text-muted-foreground hover:text-destructive"
+            variant="quiet"
+            className="w-full gap-1.5 text-ds-ink-3 hover:text-ds-failed"
             disabled={withdraw === 'withdrawing'}
             onClick={() => void handleWithdraw()}
           >

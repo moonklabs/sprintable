@@ -9,7 +9,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, GitFork, Loader2, MoreHorizontal, Paperclip, Plus, Tag, X } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
@@ -22,7 +22,7 @@ import { AttachmentFile } from '@/components/chat/attachment-file';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
-import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
+import { LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
@@ -31,7 +31,8 @@ import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
 import { pickRelevantMergeGate } from '@/services/verify';
-import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
+import type { WorkcellMessage, WorkcellPipelineStage } from '@/components/workcell/workcell';
+import { WorkcellFold } from '@/components/workcell/workcell-fold';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
@@ -50,18 +51,15 @@ import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ds/button';
+import { LAYER } from '@/components/ds/layers';
+import { Input, Textarea } from '@/components/ds/input';
 import { isImeComposing } from '@/lib/ime-composition';
-import { Textarea } from '@/components/ui/textarea';
-import { StatusBadge } from '@/components/ui/status-badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Chip } from '@/components/ds/chip';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { COLUMNS } from './types';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { ConfirmDialog } from '@/components/ds/dialog';
 import { useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -142,10 +140,19 @@ interface StoryDetailPanelProps {
   overlayPosition?: { top: number; heightPx: number };
 }
 
+/** story 4945 — ⌘Enter / Ctrl+Enter in the description · acceptance-criteria editor saves it (the comment box already does). An IME's Enter is a letter-confirm key, never a save. */
+function saveOnCmdEnter(e: React.KeyboardEvent<HTMLElement>, saving: boolean, save: () => void | Promise<void>) {
+  if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || isImeComposing(e)) return;
+  // 글 칸에서 누른 것만 — 취소 단추 같은 곳의 ⌘Enter는 저장이 아니다. 그리고 `#` 피커가 이미 이 Enter를 먹었으면(preventDefault) 저장하지 않는다(고른 참조가 낡은 초안으로 덮이며 창이 닫힘).
+  if (e.defaultPrevented || !(e.target instanceof HTMLTextAreaElement)) return;
+  e.preventDefault();
+  if (!saving) void save();
+}
+
 function taskTone(status: string) {
-  if (status === 'done') return 'bg-success';
-  if (status === 'in-progress') return 'bg-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
-  return 'bg-background/20';
+  if (status === 'done') return 'bg-ds-done';
+  if (status === 'in-progress') return 'bg-ds-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
+  return 'bg-ds-line-control';
 }
 
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
@@ -224,9 +231,9 @@ const descriptionViewerComponents = {
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-editorial-ui text-foreground">{children}</pre>,
-  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-ui text-foreground">{children}</code>,
-  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-ds-surface-sunk p-3 text-editorial-ui text-foreground">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-ds-surface-sunk px-1 py-0.5 font-mono text-editorial-ui text-foreground">{children}</code>,
+  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-ds-line pl-3 text-muted-foreground">{children}</blockquote>,
   // 긴급 정정(2026-07-28, PO 검수): description/AC 뷰어는 부모 div에 클릭=편집모드 진입
   // onClick이 걸려 있다(1093·1140줄) — 링크가 stopPropagation 없이 렌더돼 클릭이 그대로
   // 버블링, 링크가 새 탭으로 열리는 동시에 편집모드까지 열렸다. 링크 클릭은 여기서 끊는다.
@@ -235,7 +242,7 @@ const descriptionViewerComponents = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-primary underline underline-offset-2"
+      className="text-ds-action-text underline underline-offset-2"
       onClick={(e) => e.stopPropagation()}
     >
       {children}
@@ -243,7 +250,7 @@ const descriptionViewerComponents = {
   ),
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
-  hr: () => <hr className="my-2 border-border" />,
+  hr: () => <hr className="my-2 border-ds-line" />,
 };
 
 // story #2269(C-11) AC0 — chat-bubble.tsx의 isGhostReference와 동형(레지스트리 분리 이유는
@@ -380,6 +387,18 @@ function isOlderStory(incoming: Pick<KanbanStory, 'updated_at'>, current: Pick<K
   return Number.isFinite(a) && Number.isFinite(b) && a < b;
 }
 
+/** story 4906 ⑩ — the trust-pipeline step a status comes straight from (backend trust_pipeline.derive_trust_stage: queued ← backlog / ready-for-dev · running ← in-progress · claimed_done ← in-review).
+ * The Workcell gauge caption uses the story's STATUS word only while the pipeline stage is the one this status maps to. */
+/** 4908 — 머리 상태 칩의 색. 색은 «뜻»일 때만: 일하는 중 = action(점 + 글) · 끝남 = done · 나머지는 중립. 낱말은 언제나 같이 간다(색만으로 말하지 않는다). */
+const STATUS_CHIP_TONE: Record<string, 'neutral' | 'action' | 'done'> = {
+  'in-progress': 'action',
+  done: 'done',
+};
+
+const STATUS_BACKED_STAGE: Record<string, WorkcellPipelineStage | undefined> = {
+  backlog: 'queued', 'ready-for-dev': 'queued', 'in-progress': 'running', 'in-review': 'claimed_done',
+};
+
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
@@ -434,6 +453,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀).
   const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
   const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 더블클릭 = 열기(저장소 · 결재함 · 에이전트 목록과 같은 뜻, 5690의 꼴): 카드를 두 번 누르면 첫 클릭이 이 서랍을 열고 그 자리에 깔린 배경 막을 둘째 클릭(`detail` ≥ 2)이 눌러 서랍을 곧바로 닫았다.
+  // 시간(ms)이 아니라 브라우저가 세는 클릭 횟수를 쓰되, «카드를 눌러 연 뒤 서랍 안쪽을 안 누른 동안»의 둘째 이후 클릭만 무시한다 — 서랍 안쪽 누름 · 첫 클릭의 막 누름이 표식을 지운다.
+  // 서랍은 카드를 누를 때 새로 서므로(스토리마다 새로 마운트) 서 있는 순간이 곧 «카드로 막 연» 때다.
+  const openedByCardRef = useRef(true);
   // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
   // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
   // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
@@ -1558,11 +1581,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     <span className="inline-flex flex-wrap items-center gap-1 align-middle">
       {oldLabel != null ? (
         <>
-          <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="min-h-5 rounded bg-ds-surface-sunk px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
           <span className="text-muted-foreground">→</span>
         </>
       ) : null}
-      <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+      <span className="min-h-5 rounded bg-ds-surface-sunk px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
   // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
@@ -1611,7 +1634,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
           지도를 시각적으로 가리지 않는다(blur/dim 없음 — AC2 "누른 노드를 가리지 않는다"). */}
       <div
         className={overlayPosition ? 'fixed inset-0 z-40' : 'fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent'}
-        onClick={onClose}
+        onClick={(e) => {
+          if (e.detail > 1 && openedByCardRef.current) return;
+          openedByCardRef.current = false;
+          onClose();
+        }}
         aria-hidden="true"
       />
 
@@ -1620,6 +1647,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
           «재사용»이지 새 컴포넌트가 아니다(story #2354 AC7). */}
       <div
         ref={panelTrapRef}
+        onPointerDownCapture={() => { openedByCardRef.current = false; }}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
@@ -1627,12 +1655,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
         // --elev-overlay.
         className={overlayPosition
-          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
-          : 'fixed inset-0 z-50 bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+          ? `fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-ds-line ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full`
+          : `fixed inset-0 z-50 ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-4xl lg:border-l lg:border-ds-line`}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
-        <div className="flex items-start justify-between border-b border-border p-5">
+        <div className="flex items-start justify-between border-b border-ds-line p-5">
           <div className="flex-1 space-y-2 pr-3">
             {story.story_number ? (
               <span className="block text-xs font-medium text-muted-foreground">#{story.story_number}</span>
@@ -1650,13 +1678,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     if (isImeComposing(e)) return;
                     if (e.key === 'Enter') void handleSaveTitle();
                   }}
-                  className="h-auto bg-muted px-2 py-1 text-lg font-semibold lg:text-lg dark:bg-muted"
+                  className="h-auto px-2 py-1 text-lg font-semibold lg:text-lg"
                 />
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={handleSaveTitle} disabled={savingTitle || !titleDraft.trim()}>
+                  <Button variant="primary" onClick={handleSaveTitle} disabled={savingTitle || !titleDraft.trim()}>
                     {savingTitle ? t('loading') : t('save')}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setEditingTitle(false); setTitleDraft(story.title); }}>
+                  <Button variant="quiet" onClick={() => { setEditingTitle(false); setTitleDraft(story.title); }}>
                     {t('cancel')}
                   </Button>
                 </div>
@@ -1664,7 +1692,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             ) : (
               <Button
                 type="button"
-                variant="ghost"
+                variant="quiet"
                 // [SID:4362] 디자인 Button 기본이 whitespace-nowrap이라 제목이 한 줄로 패널 밖까지 늘었다(390에서 525px · 초점 링도 패널 밖) →
                 // 줄바꿈 허용 · 긴 낱말(경로 · URL)도 꺾음.
                 className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 whitespace-normal p-0 text-left font-normal"
@@ -1675,32 +1703,36 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </Button>
             )}
             <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger
+              <Menu>
+                <MenuTrigger
                   render={
-                    <Button type="button" variant="ghost" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
-                      <StatusBadge status={localStatus} label={statusLabel} interactive />
+                    <Button type="button" variant="quiet" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
+                      {/* 4908 — 머리에서 가장 눈에 띄는 요소라 공용 Badge(눌린 거친 결)가 아니라 ds Chip(점 + 글 + 경계 ds-line · 결 없음)으로. 이 자리만 — 공용 Badge는 그대로. 메뉴의 ✓ 표시와 같은 낱말(statusLabel). */}
+                      <Chip tone={STATUS_CHIP_TONE[localStatus] ?? 'neutral'} dot className="h-6 cursor-pointer px-2.5 transition hover:brightness-95" data-testid="story-detail-status-chip">
+                        {statusLabel}
+                        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                      </Chip>
                     </Button>
                   }
                 />
-                <DropdownMenuContent align="start">
+                <MenuContent align="start">
                   {COLUMNS.map((col) => {
                     const isCurrent = col.id === localStatus;
                     // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
                     // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
                     return (
-                      <DropdownMenuItem
+                      <MenuItem
                         key={col.id}
                         disabled={savingStatus || isCurrent}
                         onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                       >
                         <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
                         {getStatusLabel?.(col.id) ?? t(statusKeyMap[col.id] ?? col.i18nKey)}
-                      </DropdownMenuItem>
+                      </MenuItem>
                     );
                   })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </MenuContent>
+              </Menu>
               {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
                   대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
                   배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당).
@@ -1708,24 +1740,23 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
                   라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
-                  <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
+                // 4908 — 옛 proof 헤어라인 칩 → ds Chip(점 + 낱말): 입력 필요 = 손 필요(needs-hand) · 병합 대기 = 끝남 쪽(done).
+                <Chip data-testid="story-detail-trust-chip" tone={trustChip === 'merge_ready' ? 'done' : 'needs-hand'} dot className="h-6 px-2.5">
                   {trustChipLabel}
-                </span>
+                </Chip>
               ) : null}
               {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
               {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
-                <span className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
-                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
+                <Chip tone="needs-hand" dot className="h-6 px-2.5">
                   {t('verificationPending')}
-                </span>
+                </Chip>
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => void handleRequestVerification()}
                   disabled={requestingVerification}
-                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-xl border border-border bg-transparent px-2 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-xl border border-ds-line bg-transparent px-2 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   {requestingVerification ? t('loading') : t('requestVerification')}
                 </Button>
@@ -1753,24 +1784,37 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
                 미리 숨긴다. */}
             <HumanOnlyAction>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
-                aria-label={t('deleteStory')}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {/* story 4945 — 닫기(✕) 바로 옆에 지우기가 늘 떠 있어 잘못 누르기 쉬웠다(PO 11-14). 지우기는 «더 보기 ⋯» 안으로 — 같은 동작 · 확인 창(ConfirmDialog)은 그대로. */}
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      className="h-auto min-h-0 min-w-0 rounded-md border border-ds-line px-2.5 py-2 text-muted-foreground hover:text-foreground"
+                      aria-label={t('panelMoreActions')}
+                      data-testid="story-detail-more"
+                    >
+                      <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  }
+                />
+                <MenuContent align="end">
+                  <MenuItem variant="danger" onClick={() => setShowDeleteConfirm(true)} data-testid="story-detail-delete">
+                    {t('deleteStory')}
+                  </MenuItem>
+                </MenuContent>
+              </Menu>
             </HumanOnlyAction>
-            <Button type="button" variant="ghost" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-border px-3 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/50">✕</Button>
+            <Button type="button" variant="quiet" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-ds-line px-3 py-2 text-muted-foreground hover:text-foreground">✕</Button>
           </div>
         </div>
         {/* story #2528 — 전역 스크롤바 숨김(#2165) 하에선 스크롤은 되나 바가 안 보여 하단
             (완료조건·댓글)을 인지할 신호가 없었다. .scrollbar-visible은 globals.css의 범용
             옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
         <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
-          <div className="space-y-5">
+          {/* 4908 — 첫 화면 위는 제목 · 상태(머리) 바로 아래 속성 칸이다. lg 이상: 왼쪽 열 = 작업 칸 줄(접힘) · 본문, 오른쪽 열 = 속성 칸(스크롤해도 따라오는 sticky). 좁은 폭: 작업 칸 한 줄 → 속성 칸 → 본문(담당 · 상태가 첫 화면 안에 든다). DOM 순서 = 작업 칸 줄 → 속성 칸 → 본문(초점 순서도 같다). */}
+          <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:grid-rows-[auto_1fr] lg:gap-x-6">
             {/* E-UI-DAEGBYEON P0 — Workcell 데뷔(최소 실화면 배선, story `e5310d1b`) + story #2922
                 W1 2×2 재설계. Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/
                 StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님).
@@ -1779,11 +1823,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 보인다" 실사고로 이어졌다. 이제 무조건 렌더 — 각자 정직한 빈 상태로 대체
                 (owner=null→"책임자 미지정", pipelineStage=null→"파이프라인 범위 밖"). 지어낸
                 값은 여전히 0(no-fiction 원칙 유지). */}
-            <Workcell
+            <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
+            <WorkcellFold
+              evidenceCount={workcellEvidence ? [workcellEvidenceSignal, workcellTrustSeal, workcellGate].filter(Boolean).length : 0}
+              conversationCount={chatProofSummary === undefined ? undefined : (chatProofSummary.count ?? 0) + workcellMessages.length}
               title={story.title}
               pipelineStage={pipelineStage}
+              // story 4906 ⑩ (PO 11-12 [A]): the three steps that come straight from the status say the STATUS word — the same word as the status chip above (not «Queued» beside «Ready for Dev»)
+              // — only while status and stage AGREE (the live stage refresh updates the stage first; a status word for a stage the status does not map to would be stale): then the stage word stays
+              currentStageLabel={STATUS_BACKED_STAGE[localStatus] === pipelineStage ? statusLabel : undefined}
               brief={{
-                goal: story.description?.trim() || story.title,
+                goal: story.description?.trim() || null,
                 // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열
                 // 키를 직접 호출해 넘겼으나, 이제 null로 정직하게 부재를 표현한다. 표시
                 // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
@@ -1800,18 +1850,25 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 tools: [],
                 scopes: [],
                 blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
-                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? null,
               }}
               evidence={workcellEvidence}
               conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
             />
+            {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
+            <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
+            </div>
+
+            {/* 4908 — 본문 / 속성 칸 분리. 좁은 폭(<lg)에서는 속성 칸이 본문 앞에 서고(예전 순서와 같다: 담당 · 레시피 · 디스패치 · 포인트 · 라벨 · PR), lg 이상에서는 오른쪽 열 맨 위에 붙어 따라온다(sticky). */}
+              {/* 4908 — 서랍 = 내용 칸 층(LAYER.panel) · 속성 칸 = 한 단 다른 면(LAYER.rowOthers) + 경계: 자리만 나뉘지 않고 눈으로 갈린다(서랍 → 속성 칸 ≥ 0.05, layer-rule.test). 이 면 위에서 옛 흐린 글(muted-foreground)이 다크 4.44:1로 모자라 속성 칸 안에서만 ds-ink-3(다크 4.56:1)로 바꾼다. */}
+              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className={`min-w-0 space-y-5 rounded-lg border border-ds-line ${LAYER.rowOthers} p-3 [--muted-foreground:var(--ds-ink-3)] lg:sticky lg:top-0 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start`}>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
                 {!editingAssignee && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAssignee(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -1820,12 +1877,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingAssignee ? (
-                <div className="mt-1 flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-1">
+                <div className="mt-1 flex flex-col gap-1 rounded-md border border-ds-line bg-ds-surface p-1">
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => void handleClearAssignees()}
-                    className="h-auto min-h-0 w-full min-w-0 justify-start rounded px-2 py-1.5 text-left text-sm font-normal text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 w-full min-w-0 justify-start rounded px-2 py-1.5 text-left text-sm font-normal text-muted-foreground"
                   >
                     — {t('clearAssignees')}
                   </Button>
@@ -1844,26 +1901,26 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <Button
                         key={m.id}
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         onClick={() => void handleToggleAssignee(m.id)}
                         aria-pressed={selected}
-                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
+                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-foreground">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-surface-sunk text-micro font-medium text-foreground">
                           {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
                           {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
                         {/* [SID:4362 · PO 18:11Z 전수] 디자인 Button 기본 nowrap이라 긴 구성원 이름이 줄 밖으로 넘쳤다(390에서 글 483px · 줄 338px) → 줄바꿈 · 긴 낱말 꺾음. */}
                         <span data-assignee-name="" className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
-                        {selected && <span className="ml-auto shrink-0 text-primary">✓</span>}
+                        {selected && <span className="ml-auto shrink-0 text-ds-action-text">✓</span>}
                       </Button>
                     );
                   })}
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAssignee(false)}
-                    className="h-auto min-h-0 mt-1 w-full min-w-0 rounded px-2 py-1 text-center text-xs font-normal text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 mt-1 w-full min-w-0 rounded px-2 py-1 text-center text-xs font-normal text-muted-foreground"
                   >
                     {t('cancel')}
                   </Button>
@@ -1884,7 +1941,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
             {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
             {projectId && (
-              <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <div className="rounded-lg border border-ds-line bg-ds-surface p-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('dispatch')}</p>
                 <EntityDispatchPanel
                   entityType="story"
@@ -1903,33 +1960,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </div>
             )}
 
-            {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
-            <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
-
-            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
-                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
-                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
-            <StoryOriginSection storyId={story.id} />
-
-            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
-                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
-                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
-                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
-                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
-                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
-                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
-                못 가른다). */}
-            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
-
-            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
-                (doc [slug]/view는 후속 판). */}
-            <EntityBacklinksSection entityType="story" entityId={story.id} />
-
-            {/* story #2357 — 이 스토리가 기각한 관계 목록 + 되살리기(doc `flow-port-slot-spec`
-                ㉣, "되살리기 UI용" BE가 이미 있었는데 FE 소비처가 0건이었다). 빈 목록이면
-                아무것도 안 그린다(AC4). */}
-            <RejectedRelationsSection storyId={story.id} />
-
             {story.story_points != null ? (
               <div>
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
@@ -1937,6 +1967,121 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </div>
             ) : null}
 
+            {/* Labels */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
+                  <Tag className="size-3" />
+                  <span>{t('labelsSectionTitle')}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="quiet"
+                  onClick={() => setShowLabelPicker((v) => !v)}
+                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground"
+                >
+                  {showLabelPicker ? tc('close') : t('addGeneric')}
+                </Button>
+              </div>
+
+              {loadingLabels ? (
+                <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              ) : (
+                <>
+                  {storyLabels.length > 0 ? (
+                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
+                      {storyLabels.map((label) => (
+                        <span key={label.itemLabelId} className="group relative inline-flex max-w-full">
+                          <Chip className="h-auto min-h-5 max-w-full py-0.5 font-sans text-xs text-ds-ink"><span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? LABEL_PRESET_COLORS[LABEL_PRESET_COLORS.length - 1] }} /><span className="min-w-0 truncate">{label.name}</span></Chip>
+                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
+                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            onClick={() => void handleDetachLabel(label.itemLabelId)}
+                            className={cn('group/button h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
+                            aria-label={t('removeItemAction', { item: label.name })}
+                          >
+                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
+                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-ds-ink-3/20 text-ds-ink group-hover/button:bg-ds-failed group-hover/button:text-ds-on-action">
+                              <X className="size-2" />
+                            </span>
+                          </Button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
+                  )}
+
+                  {showLabelPicker && (
+                    <div className="space-y-2 rounded-lg border border-ds-line bg-ds-surface p-2">
+                      {/* Existing org labels */}
+                      {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {orgLabels
+                            .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
+                            .map((label) => (
+                              <Button
+                                key={label.id}
+                                type="button"
+                                variant="quiet"
+                                onClick={() => void handleAttachLabel(label.id)}
+                                className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-ds-line-strong bg-ds-surface px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-ds-surface-highest"
+                              >
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
+                                {label.name}
+                              </Button>
+                            ))}
+                        </div>
+                      )}
+                      {/* New label form */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex gap-1">
+                          {LABEL_PRESET_COLORS.map((hex) => (
+                            <Button
+                              key={hex}
+                              type="button"
+                              variant="quiet"
+                              aria-pressed={newLabelColor === hex}
+                              onClick={() => setNewLabelColor(hex)}
+                              className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
+                              style={{ backgroundColor: hex }}
+                              aria-label={hex}
+                            />
+                          ))}
+                        </div>
+                        <Input
+                          type="text"
+                          value={newLabelName}
+                          onChange={(e) => setNewLabelName(e.target.value)}
+                          // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
+                          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
+                          placeholder={t('newLabelNamePlaceholder')}
+                          className="h-auto min-w-0 flex-1 bg-ds-surface px-2 py-1 lg:text-xs dark:bg-ds-surface"
+                        />
+                        <Button
+                          type="button"
+                          variant="primary"
+                          onClick={() => void handleCreateLabel()}
+                          disabled={!newLabelName.trim() || creatingLabel}
+                          className="h-auto min-h-0 min-w-0 rounded px-2 py-1 text-xs font-normal disabled:opacity-50"
+                        >
+                          {creatingLabel ? '...' : t('createLabel')}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* E-GHAPP Bot-L.2: PR↔story 명시연결 관리(2-tier·connect-prompt 자체 처리) */}
+            <PrLinkSection storyId={story.id} />
+
+              </aside>
+              <div data-testid="story-detail-main" className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-2">
             {/* Description */}
             <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
@@ -1944,7 +2089,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {!editingDescription && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingDescription(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -1953,7 +2098,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingDescription ? (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2" onKeyDown={(e) => saveOnCmdEnter(e, savingDescription, handleSaveDescription)}>
                   {/* story #2264(C-6) AC3: 새 자리 비용 = 설정 한 줄 — <textarea>를
                       <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
                       참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
@@ -1964,16 +2109,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onPaste={handlePasteAttach}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="field-sizing-content min-h-[160px] resize-y py-2 font-mono lg:text-sm"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
+                    <Button variant="primary" onClick={handleSaveDescription} disabled={savingDescription}>
                       {savingDescription ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingDescription(false); clearDescriptionDraft(); }}>
+                    <Button variant="quiet" onClick={() => { setEditingDescription(false); clearDescriptionDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>
@@ -1992,9 +2137,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setEditingDescription(true)}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-ds-action hover:text-ds-action-text"
                 >
                   + {t('addDescription')}
                 </Button>
@@ -2008,7 +2153,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {!editingAC && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAC(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -2017,23 +2162,23 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingAC ? (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2" onKeyDown={(e) => saveOnCmdEnter(e, savingAC, handleSaveAC)}>
                   {/* story #2264(C-6) AC3: 같은 설정 한 줄 — description과 동일 컴포넌트 재사용. */}
                   <EntityAwareTextarea
                     value={acDraft}
                     onChange={setAcDraft}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="field-sizing-content min-h-[160px] resize-y py-2 font-mono lg:text-sm"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
+                    <Button variant="primary" onClick={handleSaveAC} disabled={savingAC}>
                       {savingAC ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); clearAcDraft(); }}>
+                    <Button variant="quiet" onClick={() => { setEditingAC(false); clearAcDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>
@@ -2048,9 +2193,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setEditingAC(true)}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-ds-action hover:text-ds-action-text"
                 >
                   + {t('addAcceptanceCriteria')}
                 </Button>
@@ -2069,7 +2214,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => attachInputRef.current?.click()}
                   disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-1 p-0 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-40"
@@ -2103,7 +2248,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         ) : null}
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="quiet"
                           onClick={() => handleRemoveAttachment(att.url)}
                           // story #4345 — 누르는 자리 24×24(아이콘 그대로 · padding) · 첨부 위 모서리 자리 그대로 바깥쪽으로(안쪽 가장자리 고정).
                           className={cn('h-auto absolute -right-1 -top-1 rounded bg-destructive-tint p-1.5 text-destructive hover:brightness-95', HOVER_REVEAL, HOVER_REVEAL_HIT)}
@@ -2118,9 +2263,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : !uploadingAttachment ? (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => attachInputRef.current?.click()}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-ds-action hover:text-ds-action-text"
                 >
                   + {t('addAttachment')}
                 </Button>
@@ -2137,116 +2282,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               )}
             </div>
 
-            {/* Labels */}
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
-                  <Tag className="size-3" />
-                  <span>{t('labelsSectionTitle')}</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setShowLabelPicker((v) => !v)}
-                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
-                >
-                  {showLabelPicker ? tc('close') : t('addGeneric')}
-                </Button>
-              </div>
-
-              {loadingLabels ? (
-                <p className="text-xs text-muted-foreground">{t('loading')}</p>
-              ) : (
-                <>
-                  {storyLabels.length > 0 ? (
-                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
-                      {storyLabels.map((label) => (
-                        <span key={label.itemLabelId} className="group relative inline-flex">
-                          <LabelChip label={label} />
-                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
-                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
-                            aria-label={t('removeItemAction', { item: label.name })}
-                          >
-                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
-                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
-                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-on-scrim dark:group-hover/button:text-proof-bg">
-                              <X className="size-2" />
-                            </span>
-                          </Button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
-                  )}
-
-                  {showLabelPicker && (
-                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-2">
-                      {/* Existing org labels */}
-                      {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {orgLabels
-                            .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
-                            .map((label) => (
-                              <Button
-                                key={label.id}
-                                type="button"
-                                variant="ghost"
-                                onClick={() => void handleAttachLabel(label.id)}
-                                className="h-auto min-h-0 min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-normal text-foreground hover:bg-muted"
-                              >
-                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
-                                {label.name}
-                              </Button>
-                            ))}
-                        </div>
-                      )}
-                      {/* New label form */}
-                      <div className="flex items-center gap-1.5">
-                        <div className="flex gap-1">
-                          {LABEL_PRESET_COLORS.map((hex) => (
-                            <Button
-                              key={hex}
-                              type="button"
-                              variant="ghost"
-                              aria-pressed={newLabelColor === hex}
-                              onClick={() => setNewLabelColor(hex)}
-                              className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
-                              style={{ backgroundColor: hex }}
-                              aria-label={hex}
-                            />
-                          ))}
-                        </div>
-                        <Input
-                          type="text"
-                          value={newLabelName}
-                          onChange={(e) => setNewLabelName(e.target.value)}
-                          // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
-                          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
-                          placeholder={t('newLabelNamePlaceholder')}
-                          className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => void handleCreateLabel()}
-                          disabled={!newLabelName.trim() || creatingLabel}
-                          className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                        >
-                          {creatingLabel ? '...' : t('createLabel')}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
             {/* Dependencies — v2 (그래프 + 추가 + 경고) */}
             <div>
               <div className="mb-2 flex items-center justify-between">
@@ -2256,9 +2291,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 </div>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setShowAddDep((v) => !v)} aria-expanded={showAddDep}
-                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
+                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground"
                 >
                   <Plus className="size-3" />{t('dep.add')}
                 </Button>
@@ -2288,7 +2323,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <div className="space-y-1.5">
                   {/* 컴팩트 그래프 */}
                   {deps.length > 0 && (
-                    <div className="mb-2 rounded-lg border border-border bg-muted/10 p-2">
+                    <div className="mb-2 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-2">
                       <DependencyGraph
                         storyId={story.id}
                         deps={deps}
@@ -2303,16 +2338,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     const blocker = storyMap[d.from_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockedByLabel')}</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2323,17 +2358,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
                     const blocked = storyMap[d.to_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockingLabel')}</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2344,17 +2379,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'depends_on' && d.from_id === story.id).map((d) => {
                     const target = storyMap[d.to_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependsOnLabel')}</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2365,17 +2400,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'depends_on' && d.to_id === story.id).map((d) => {
                     const source = storyMap[d.from_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 -rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependedByLabel')}</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-ds-surface-highest', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2386,16 +2421,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
               {/* + 의존성 추가 폼 */}
               {showAddDep && (
-                <div className="mt-2 space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                <div className="mt-2 space-y-2 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-2">
                   <div className="flex gap-1">
                     {(['blocks', 'depends_on'] as const).map((type) => (
                       <Button
                         key={type}
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         aria-pressed={depType === type}
                         onClick={() => setDepType(type)}
-                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-micro font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-micro font-medium ${depType === type ? 'bg-ds-action text-ds-on-action' : 'bg-ds-surface-sunk text-ds-ink-2 hover:text-ds-ink'}`}
                       >
                         {type === 'blocks' ? t('dep.typeBlocks') : t('dep.typeDepends')}
                       </Button>
@@ -2406,7 +2441,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                    className="h-auto bg-ds-surface px-2 py-1 lg:text-xs "
                   />
                   {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
                       이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
@@ -2414,7 +2449,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     const { items, showingCandidates } = selectDepPickerItems(depQuery, depCandidates, depQueryResults);
                     if (items.length === 0) return null;
                     return (
-                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
+                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-ds-line bg-ds-surface">
                         {showingCandidates && (
                           // story #2328 — 유나 규격 원문의 「── ... ──」는 "구분선이 있다"를
                           // 아스키로 흉내낸 표기였지 문자로 넣으라는 뜻이 아니었다(2026-07-30
@@ -2429,10 +2464,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <li key={s.id}>
                             <Button
                               type="button"
-                              variant="ghost"
+                              variant="quiet"
                               onClick={() => void handleAddDep(s.id)}
                               disabled={addingDep}
-                              className="h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start px-2 py-1.5 text-left text-xs font-normal hover:bg-muted disabled:opacity-50"
+                              className="h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start px-2 py-1.5 text-left text-xs font-normal disabled:opacity-50"
                             >
                               <span className="block truncate">{s.title}</span>
                               {showingCandidates ? (
@@ -2451,8 +2486,29 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               )}
             </div>
 
-            {/* E-GHAPP Bot-L.2: PR↔story 명시연결 관리(2-tier·connect-prompt 자체 처리) */}
-            <PrLinkSection storyId={story.id} />
+            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
+                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
+                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
+            <StoryOriginSection storyId={story.id} />
+
+            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
+                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
+                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
+                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
+                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
+                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
+                못 가른다). */}
+            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
+
+            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
+                (doc [slug]/view는 후속 판). */}
+            <EntityBacklinksSection entityType="story" entityId={story.id} />
+
+            {/* story #2357 — 이 스토리가 기각한 관계 목록 + 되살리기(doc `flow-port-slot-spec`
+                ㉣, "되살리기 UI용" BE가 이미 있었는데 FE 소비처가 0건이었다). 빈 목록이면
+                아무것도 안 그린다(AC4). */}
+            <RejectedRelationsSection storyId={story.id} />
 
             {/* Outcome result (read-only) + 연결 가설 chip/picker — 인라인 intent 입력은
                 S8c서 연결 가설 affordance로 대체(스토리서 가설 생성 금지·AC①). 결과 카드는
@@ -2519,7 +2575,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     {tasks.length > 0 ? (
                       <ul className="space-y-2">
                         {tasks.map((task) => (
-                          <li key={task.id} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                          <li key={task.id} className="flex items-center gap-3 rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-3 py-2 text-sm">
                             <span className={`h-2.5 w-2.5 rounded-full ${taskTone(task.status)}`} />
                             <span className={task.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{task.title}</span>
                           </li>
@@ -2539,7 +2595,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     ) : null}
                     {nextTasksCursor ? (
                       <div className="mt-3 text-center">
-                        <Button variant="outline" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
+                        <Button variant="secondary" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
                           {loadingMoreTasks ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2563,8 +2619,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     }}
                   />
                   <div className="flex justify-end">
-                    <Button
-                      size="sm"
+                    <Button variant="primary"
                       onClick={handleSubmitComment}
                       disabled={!commentInput.trim() || submittingComment}
                     >
@@ -2582,7 +2637,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-3">
                       {comments.map((comment) => (
-                        <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
+                        <li key={comment.id} className="rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                             <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
@@ -2594,7 +2649,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     </ul>
                     {nextCommentsCursor ? (
                       <div className="text-center">
-                        <Button variant="outline" size="sm" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
+                        <Button variant="secondary" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
                           {loadingMoreComments ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2616,7 +2671,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (
-                          <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
+                          <li key={activity.id} className="rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
                             <div className="text-sm">{formatActivityMessage(activity, expanded)}</div>
                             <div className="mt-1 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                               <span>{actorName}</span>
@@ -2625,9 +2680,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                               {isLong ? (
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="quiet"
                                   onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
-                                  className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:text-foreground"
                                 >
                                   {expanded ? t('collapseSection') : t('expandSection')}
                                 </Button>
@@ -2639,7 +2694,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     </ul>
                     {nextActivitiesCursor ? (
                       <div className="text-center">
-                        <Button variant="outline" size="sm" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
+                        <Button variant="secondary" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
                           {loadingMoreActivities ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2648,35 +2703,24 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </TabsContent>
             </Tabs>
+              </div>
           </div>
         </div>
       </div>
     </div>
 
       {/* Delete confirm dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('deleteStoryDialogTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('storyDeleteIrreversible')}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-              {tc('cancel')}
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void handleDelete()}
-              disabled={deleting}
-            >
-              {deleting ? tc('deleting') : t('permanentDelete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={(open) => { if (!deleting) setShowDeleteConfirm(open); }}
+        title={t('deleteStoryDialogTitle')}
+        description={t('storyDeleteIrreversible')}
+        confirmLabel={deleting ? tc('deleting') : t('permanentDelete')}
+        cancelLabel={tc('cancel')}
+        tone="danger"
+        loading={deleting}
+        onConfirm={() => void handleDelete()}
+      />
 
     </>
   );

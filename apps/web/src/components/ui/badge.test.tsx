@@ -61,14 +61,14 @@ describe('Badge — chip variant 대비(story #2937)', () => {
 // 적발). 다른 파일의 렌더 결과로 간접 확인하는 게 아니라 badge.tsx 자신의 className을
 // 직접 대조한다.
 describe('Badge — story #7d7634ee proof-surface 뿌리 회귀가드(76파일/223콜사이트 캐스케이드)', () => {
-  it('proof-surface + proof-surface-press를 쓰고, 폐지된 proof-cut/proof-cut-xs는 남아있지 않다', async () => {
+  it('proof-surface(모양)를 쓰고, 눌린 엠보스(proof-surface-press · story 4919)와 폐지된 proof-cut/proof-cut-xs는 남아있지 않다', async () => {
     await act(async () => {
       root.render(<Badge>기본</Badge>);
     });
     const el = container.querySelector('[data-slot="badge"]') as HTMLElement;
     const classes = el.className.split(' ');
     expect(classes).toContain('proof-surface');
-    expect(classes).toContain('proof-surface-press');
+    expect(classes).not.toContain('proof-surface-press');
     expect(classes).not.toContain('proof-cut');
     expect(classes).not.toContain('proof-cut-xs');
   });

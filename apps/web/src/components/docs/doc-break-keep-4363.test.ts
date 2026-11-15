@@ -39,7 +39,7 @@ const SITES: Site[] = [
   { name: 'gate · 반려 사유 입력 안내', file: GATE, re: /className="([^"]*)">\{t\('docGateRejectReasonLabel'\)\}/g },
   { name: 'gate · 반려 사유 입력 placeholder', file: GATE, re: /placeholder=\{t\('docGateRejectReasonPlaceholder'\)\}\s*className="([^"]*)"/g },
   { name: 'rail · 전이 오류', file: RAIL, re: /className="([^"]*)">\{error\}<\/p>/g },
-  { name: 'rail · 반려 사유', file: RAIL, re: /<div className="([^"]*)">\s*<span className="font-medium">\{t\('docGateDeniedReason'\)\}/g, userText: true },
+  { name: 'rail · 반려 사유', file: RAIL, re: /<div className="([^"]*)">\s*<span className="font-semibold">\{t\('docGateDeniedReason'\)\}/g, userText: true },
   { name: 'rail · 응답 대기 문구', file: RAIL, re: /className="([^"]*)">\{t\('docGateAwaitingGeneric'\)\}/g },
   { name: 'rail · 결재 이력 메모', file: RAIL, re: /className="([^"]*)">\{ev\.note\}/g, userText: true },
   { name: '편집 화면 · 문서 없음', file: PAGE, re: /className="([^"]*)">\{t\('notFound'\)\}/g },

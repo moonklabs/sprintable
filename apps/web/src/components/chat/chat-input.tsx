@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
-import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Compass, FolderOpen, Loader2, Terminal, Type, X, Hash } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
-import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ds/icon-button';
+import { Chip } from '@/components/ds/chip';
+import { Button as DsButton } from '@/components/ds/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,7 +17,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getFileIcon } from '@/lib/file-icon';
@@ -34,10 +35,12 @@ import {
   shouldAcceptEntityPickerSelection, shouldHighlightEntityCandidate, type EntityResult,
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
+import { LAYER } from '@/components/ds/layers';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { FIELD_FOCUS_WITHIN } from '@/components/ds/field-focus';
 import { isImeComposing } from '@/lib/ime-composition';
 import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
 import { draftOwnerSegment } from '@/lib/tab-owner';
@@ -197,9 +200,13 @@ interface ChatInputProps {
    * 클릭"임을 구분).
    */
   prefillCommand?: { text: string; nonce: number } | null;
+  /** story 4946 — files the ROOM took (a drop on the messages, not on this strip): the composer attaches them as it does its own drops. A new `nonce` is a new set (the same file dropped twice still counts twice). */
+  incomingFiles?: { nonce: number; files: File[] } | null;
+  /** story 4906 — told the whole text of the box whenever it changes (the room's «moved from 홈» note goes when the box is emptied). */
+  onDraftChange?: (text: string) => void;
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, incomingFiles, onDraftChange }: ChatInputProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -221,8 +228,22 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const blurCloseTimer = useRef<number | null>(null);
   useEffect(() => () => { if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current); }, []);
   const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
-  // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
-  const [text, setText] = useState(() => loadDraft(threadId));
+  // story #2032 AC2/AC3: 대화별 초안 복원 — 마운트 시 1회, 리마운트당 재평가.
+  // story 4906 — AFTER the mount, not in the useState initializer: the server draws the box without a draft (there is no localStorage there), and a first client render that reads the
+  // draft differs from that HTML — React does not patch an attribute that differs, so on a reload the box showed the draft while [보내기] stayed `disabled` (measured on dev: React's prop
+  // `disabled=false`, the DOM button `disabled`). The first client render now equals the server's; the restore is an ordinary state update (the effect below), and the DOM follows.
+  const [text, setText] = useState('');
+  useEffect(() => { onDraftChange?.(text); }, [text, onDraftChange]);
+  // true from the restore until the save effect has run once: that first save would write the still-empty `text` and REMOVE the stored draft for the instant before the restored text is written
+  // back (a tab closing in that instant lost the draft — codex on 5657)
+  const restoringDraftRef = useRef(false);
+  useEffect(() => {
+    const draft = loadDraft(threadId);
+    if (!draft) return;
+    restoringDraftRef.current = true;
+    setText(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount (a room switch remounts the input: key={conversation_id})
+  }, []);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
   const [droppedFiles, setDroppedFiles] = useState(0);
@@ -265,6 +286,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // S6: 첨부 메뉴(파일 업로드/스토리지에서 선택) + 자산 피커.
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const attachMoreRef = useRef<HTMLButtonElement | null>(null); // the ▾ of the split attach button — where focus goes back when the storage picker is dismissed with Escape
   // command 후보 = 레지스트리에서 prefix 필터(로컬·fetch 0). query '' → 전체.
   const commandCandidates = commandQuery === null
     ? []
@@ -346,11 +368,17 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   useEffect(() => {
     adjustHeight();
   }, []);
+  // …and again when the restored draft arrives (story 4906: it is set after the mount now)
+  useEffect(() => {
+    adjustHeight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- adjustHeight is a plain closure over the ref
+  }, [text === '']);
 
   // story #2032 AC2/AC6: 대화별 초안 자동저장 — text가 바뀔 때마다 그 대화의 슬롯에 쓴다.
   // 전송 성공 시 handleSend가 setText('')를 부르면 이 effect가 뒤이어 빈 문자열을 써서
   // saveDraft 내부 분기가 자동으로 항목을 지운다(AC6, 별도 clearDraft 호출 불요).
   useEffect(() => {
+    if (restoringDraftRef.current) { restoringDraftRef.current = false; return; } // the mount pass of a restore: the stored draft is not touched
     saveDraft(threadId, text);
   }, [threadId, text]);
 
@@ -490,7 +518,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // 그대로 보여준다(임의 문구 창작 금지 — extractBackendErrorMessage 기존 관례).
   const handleSendSteer = async () => {
     const instruction = text.trim();
-    if (!instruction || !steerTargetId || !steerWorkItem || steerSending || disabled) return;
+    if (!instruction || steerSending || disabled) return;
+    // story 4920 — the work item is OPTIONAL context (an instruction is «to whom · what»: the target and the text). A missing target is said out loud: Enter used to do nothing at all.
+    if (!steerTargetId) { setSteerError(t('steerNeedTarget')); return; }
     setSteerSending(true);
     setSteerError(null);
     try {
@@ -501,8 +531,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           definition_key: 'preset.steer.instruct',
           conversation_id: threadId,
           payload: {
-            work_item_type: steerWorkItem.entity_type,
-            work_item_id: steerWorkItem.entity_id,
+            // story 4920 — the work item rides along only when one was picked (the server routes the card to its stakeholders then; without one the instruction goes to the target alone)
+            ...(steerWorkItem ? { work_item_type: steerWorkItem.entity_type, work_item_id: steerWorkItem.entity_id } : {}),
             target_member_id: steerTargetId,
             instruction,
           },
@@ -618,6 +648,15 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     addFiles(Array.from(e.dataTransfer.files));
   };
 
+  // story 4946 — files the room took are attached once per `nonce` (the effect re-runs on every render; the ref remembers what was already applied)
+  const appliedIncomingNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!incomingFiles || appliedIncomingNonceRef.current === incomingFiles.nonce) return;
+    appliedIncomingNonceRef.current = incomingFiles.nonce;
+    addFiles(incomingFiles.files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- addFiles is re-made each render; the nonce is the signal
+  }, [incomingFiles]);
+
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
     setDroppedFiles(0);
@@ -626,21 +665,24 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
   const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !sending && !disabled;
-  const canSteerSend = text.trim().length > 0 && !!steerTargetId && !!steerWorkItem && !steerSending && !disabled;
+  const canSteerSend = text.trim().length > 0 && !!steerTargetId && !steerSending && !disabled; // story 4920 — the work item is not required
 
   return (
     <div
-      className="relative flex-shrink-0 border-t border-border/80 bg-background px-3 py-2"
+      className="relative flex-shrink-0 border-t border-ds-line bg-ds-background px-2 py-3 sm:px-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
       {/* S6: 스토리지 자산 피커 — 첨부 메뉴 '스토리지에서 선택' 진입(목업 ①). */}
       {pickerOpen && projectId && (
-        <AssetPickerPopover
-          projectId={projectId}
-          onSelect={selectAsset}
-          onClose={() => setPickerOpen(false)}
-        />
+        // story 4887 (UI-4 P5-a): Escape ANYWHERE in the picker (its search field, a scope button, an asset row — the picker's own handler only sits on the search field) closes it and puts focus back on the ▾ that opened it (the focused element was inside the picker and is gone with it — focus fell to the page), and marks the Escape as USED (preventDefault — «one Escape = one layer», story 4367: an enclosing drawer's focus trap reads defaultPrevented and stays open). Only Escape: a click outside closes the picker too, and must NOT steal the focus from wherever the person clicked; choosing an asset puts focus in the text box (selectAsset).
+        <div onKeyDown={(e) => { if (e.key === 'Escape' && !isImeComposing(e)) { e.preventDefault(); setPickerOpen(false); attachMoreRef.current?.focus(); } }}>
+          <AssetPickerPopover
+            projectId={projectId}
+            onSelect={selectAsset}
+            onClose={() => setPickerOpen(false)}
+          />
+        </div>
       )}
       {/* Pending file chips (전송 전) */}
       {pendingFiles.length > 0 && (
@@ -687,6 +729,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           조합(#2419 계보) — 새 토큰 발명 없이 위치만 옮겨 해소. */}
       {steerError && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
+      )}
+      {/* story 4920 — why the send button is off: the person typed an instruction but chose nobody (the one thing an instruction needs besides its text). Said as a status line, not by a silent disabled button. The alert above (Enter pressed) says the same thing, so it stands in then. */}
+      {steerMode && !steerError && !steerTargetId && text.trim().length > 0 && (
+        <p role="status" data-testid="steer-need-target" className="mb-1 text-xs text-muted-foreground">{t('steerNeedTarget')}</p>
       )}
       {droppedFiles > 0 ? (
         // story #4474 — the files over the cap are named by count and reason (a status, so a screen reader hears it too)
@@ -752,76 +798,72 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           0, doc §4 "참가자로 한정"), work item 피커=workItemPicker(useEntityPicker 독립
           인스턴스) 검색 결과 목록. */}
       {steerMode && (
-        <div className="mb-2 space-y-1.5 rounded-lg border border-info/30 bg-info/8 p-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-            <Compass className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-            {t('steerPanelTitle')}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {/* 조종 패널은 info 색 면(bg-info/8) 안이라 두 칸 모두 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30). */}
-            <Select
-              aria-label={t('steerPanelTargetLabel')}
-              value={steerTargetId}
-              onChange={(e) => setSteerTargetId(e.target.value)}
-              className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
-            >
-              <option value="">{t('steerPanelTargetPlaceholder')}</option>
-              {steerTargets.map((p) => (
-                // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
-                // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
-                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
-                // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
-                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
-              ))}
-            </Select>
-            <div className="relative min-w-0 flex-1">
-              <Input
-                type="text"
-                value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
-                onChange={(e) => {
-                  setSteerWorkItem(null);
-                  setSteerWorkItemQuery(e.target.value);
-                  workItemPicker.setEntityQuery(e.target.value);
-                }}
-                onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
-                placeholder={t('steerPanelWorkItemPlaceholder')}
-                aria-label={t('steerPanelWorkItemLabel')}
-                className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
-              />
-              {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
-                  멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
-              {workItemPicker.entityResults.length > 0 && (
-                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
-                  {workItemPicker.entityResults.map((ent) => (
-                    <li key={`${ent.entity_type}:${ent.entity_id}`}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setSteerWorkItem({ entity_type: ent.entity_type, entity_id: ent.entity_id, title: ent.title });
-                          setSteerWorkItemQuery('');
-                          workItemPicker.close();
-                        }}
-                        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
-                      >
-                        <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
-                        <span className="truncate">{ent.title}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+        // story 4887 (UI-4 P5-b · AC3 «지시 대상 이름표 칩»): the steer panel (an info-coloured box: a title row, then the controls under it) is ONE chip strip — the «조종» chip, then the target and the work item on the same line (they wrap on a narrow screen). The same controls, the same data, the same `preset.steer.instruct` event: only the place and the shape changed.
+        <div role="group" aria-label={t('steerPanelTitle')} data-testid="steer-strip" className="mb-2 flex flex-wrap items-center gap-1.5">
+          <Chip tone="info" icon="explore" aria-hidden="true" data-testid="steer-chip">{t('steerPanelTitle')}</Chip>
+          <Select
+            aria-label={t('steerPanelTargetLabel')}
+            value={steerTargetId}
+            onChange={(e) => { setSteerTargetId(e.target.value); if (e.target.value) setSteerError(null); }}
+            className="h-auto min-w-[7rem] flex-1 border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+          >
+            <option value="">{t('steerPanelTargetPlaceholder')}</option>
+            {steerTargets.map((p) => (
+              // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
+              // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
+              // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
+              // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
+              <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
+            ))}
+          </Select>
+          <div className="relative min-w-[7rem] flex-1">
+            <Input
+              type="text"
+              value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
+              onChange={(e) => {
+                setSteerWorkItem(null);
+                setSteerWorkItemQuery(e.target.value);
+                workItemPicker.setEntityQuery(e.target.value);
+              }}
+              onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
+              placeholder={t('steerPanelWorkItemPlaceholder')}
+              aria-label={t('steerPanelWorkItemLabel')}
+              className="h-auto border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+            />
+            {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
+                멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
+            {workItemPicker.entityResults.length > 0 && (
+              <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+                {workItemPicker.entityResults.map((ent) => (
+                  <li key={`${ent.entity_type}:${ent.entity_id}`}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSteerWorkItem({ entity_type: ent.entity_type, entity_id: ent.entity_id, title: ent.title });
+                        setSteerWorkItemQuery('');
+                        workItemPicker.close();
+                      }}
+                      className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
+                    >
+                      <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
+                      <span className="truncate">{ent.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       )}
 
-      <div className="relative flex items-end gap-2">
+      {/* story 4887 (UI-4 screen PR · the approved composer): the controls and the field are ONE bordered box — the clip (+ its ▾), the steer compass when there is someone to steer, the text and a «⏎ 보내기» at the right end. */}
+      <div className={`relative flex items-end gap-0.5 max-sm:flex-wrap rounded-ds-control border border-ds-line-control ${LAYER.field} px-0.5 py-1.5 ${FIELD_FOCUS_WITHIN}`} data-testid="chat-composer-box">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 max-w-[calc(100%-2.5rem)] overflow-y-auto overflow-x-hidden rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -835,11 +877,13 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
                       mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
-                  <span className="font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
+                  <span className="shrink-0 font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
+                  {/* story 4887 (UI-4 P1) — the argument hint is the part that may be long (`/priority ‹스토리#› ‹critical|high|medium|low›` ran past the list's width and was cut mid-word):
+                      it now takes what is left and ends in «…» (the whole hint stays on the title); the name and the description keep their room. */}
                   {cmd.argHintKey ? (
-                    <span className="shrink-0 whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
+                    <span title={t(cmd.argHintKey)} className="min-w-0 truncate whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
                   ) : null}
-                  <span className="ml-auto truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
+                  <span className="ml-auto max-w-[45%] shrink-0 truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
                 </button>
               </li>
             ))}
@@ -848,14 +892,14 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown 실패 상태 — story #3687: 조용한 0건과 구분되는 별도 얼굴. */}
         {mentionQuery !== null && mentionLoadFailed && (
-          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 max-w-[calc(100%-2.5rem)] rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
             {t('mentionLoadFailed')}
           </div>
         )}
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 max-w-[calc(100%-2.5rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {/* story #4284(유나 판정) — 행 라벨: 이름 없는 행이 둘 이상이면 역할 라벨로 갈리지 않을 때 «· ID 앞 8자»(본문 `@…`엔 꼬리 없음). */}
             {(() => {
               const rowLabels = memberRowLabels(mentionMembers, tc, (m) => (m.role ? mentionMemberRoleLabel(m, tSettings, tOrg) : ''));
@@ -881,7 +925,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 max-w-[calc(100%-2.5rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -920,44 +964,47 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
-        {/* Attach — S6: 메뉴(파일 업로드 / 스토리지에서 선택). 피커 열림 시 info 틴트(목업 .iconbtn.on). */}
-        <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
-          <DropdownMenuTrigger
-            type="button"
-            disabled={disabled}
-            aria-label={t('attachMenuLabel')}
-            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
-              attachMenuOpen || pickerOpen
-                ? 'bg-info/10 text-info'
-                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-            }`}
-          >
-            <Paperclip className="h-4 w-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
-            <DropdownMenuItem
-              disabled={atMaxAttachments}
-              onClick={() => {
-                setAttachMenuOpen(false);
-                fileInputRef.current?.click();
-              }}
+        {/* Attach — story 4887 (UI-4 P5-a · AC3 «클립 분할»): the clip opens the file window AT ONCE (one action — a click, a tap, Enter or Space on the focused button: it is a native button element), and the ▾ beside it holds the other way in, «스토리지에서 선택». It was a menu first — clip → «파일 업로드» → file window: one hand more for the common case. The info tint (목업 .iconbtn.on) follows the storage picker being open. */}
+        <div
+          data-testid="chat-attach-split"
+          className={`flex flex-shrink-0 items-center rounded-md transition-colors ${
+            attachMenuOpen || pickerOpen ? 'bg-info/10 text-info' : 'text-muted-foreground'
+          }`}
+        >
+          <IconButton
+            icon="attach_file"
+            label={t('attachMenuUpload')}
+            data-testid="chat-attach-upload"
+            disabled={disabled || atMaxAttachments}
+            onClick={() => fileInputRef.current?.click()}
+            // the ds IconButton paints its own ink colour, so the split's «open» tint (the container's text-info) must be passed on to it, or only the ▾ turns blue
+            className={`rounded-l-md rounded-r-none ${attachMenuOpen || pickerOpen ? 'text-info hover:text-info' : ''}`}
+          />
+          <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
+            <DropdownMenuTrigger
+              ref={attachMoreRef}
+              type="button"
+              data-testid="chat-attach-more"
+              disabled={disabled}
+              aria-label={t('attachMenuLabel')}
+              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
             >
-              <Upload className="size-4 text-muted-foreground" aria-hidden />
-              {t('attachMenuUpload')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={!projectId}
-              onClick={() => {
-                setAttachMenuOpen(false);
-                setPickerOpen(true);
-              }}
-            >
-              <FolderOpen className="size-4 text-info" aria-hidden />
-              {t('attachMenuStorage')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
+              <DropdownMenuItem
+                disabled={!projectId}
+                onClick={() => {
+                  setAttachMenuOpen(false);
+                  setPickerOpen(true);
+                }}
+              >
+                <FolderOpen className="size-4 text-info" aria-hidden />
+                {t('attachMenuStorage')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
         {/* STEER 토글 — story #2942(2921-S5). doc §4: 대상이 0명(본인만 있는 대화 등)이면
             발행 자체가 원천 불가라 토글을 안 보인다(죽은 버튼 금지). */}
@@ -971,7 +1018,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               setSteerMode((v) => !v);
               setSteerError(null);
             }}
-            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
+            // a 44 × 44 press on a touch screen (it was 28 × 28 — the phone-bar spec's «every press ≥ 44» found it)
+            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center ${
               steerMode ? 'bg-info/10 text-info' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
             }`}
           >
@@ -1019,20 +1067,24 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="min-h-0 flex-1 resize-none bg-muted/30 disabled:opacity-40 dark:bg-muted/30"
+          // story 4906 (Yuna lap 3): on a phone the text is written FROM THE LEFT AT THE TOP of the box — the field takes the whole first row (`max-sm:order-first` + `flex-[1_1_100%]`) and the clip · ▾ · compass row sits under it with the send button at the right end; from `sm` up the one row is as before
+          className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none placeholder:truncate focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent max-sm:order-first max-sm:flex-[1_1_100%]"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 
-        {/* Send */}
-        <Button
-          size="icon"
-          className="h-9 w-9 flex-shrink-0 rounded-xl"
+        {/* Send — a words button at the right end of the box (the Enter key still sends; Shift+Enter breaks the line) */}
+        <DsButton
+          type="button"
+          variant={(steerMode ? canSteerSend : canSend) ? 'primary' : 'quiet'}
+          className="flex-shrink-0 disabled:border-transparent max-sm:ms-auto"
           onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
           disabled={steerMode ? !canSteerSend : !canSend}
           aria-label={t('sendAction')}
+          data-testid="chat-send"
         >
-          <Send className="h-4 w-4" />
-        </Button>
+          <span aria-hidden>⏎</span>
+          <span className="max-sm:sr-only">{t('sendAction')}</span>
+        </DsButton>
       </div>
     </div>
   );

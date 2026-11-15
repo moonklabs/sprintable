@@ -20,7 +20,7 @@ describe('entityTypeLabel — ㉠ 종류를 글자로, ㉢ 모르는 종류도 �
   it('알려진 종류는 한글 라벨을 낸다', () => {
     expect(entityTypeLabel('story')).toBe('스토리');
     expect(entityTypeLabel('doc')).toBe('문서');
-    expect(entityTypeLabel('epic')).toBe('에픽');
+    expect(entityTypeLabel('epic')).toBe('목표'); // story 4888 P1: 1925 이름 바꾸기 마무리 — 사람에게 보이는 이름은 «목표» 하나
     expect(entityTypeLabel('task')).toBe('작업');
   });
 
@@ -33,15 +33,15 @@ describe('entityTypeLabel — ㉠ 종류를 글자로, ㉢ 모르는 종류도 �
   // story #3884(AC2) — t 인자로 로케일 대응(entityTypeLabel의 ko 고정 상수가 en 사용자
   // 에게도 새 나가던 결함 처방). t 생략(위 두 테스트)은 기존 ko-only 폴백 그대로(회귀 0).
   it('t 인자를 주면 그 t()로 해석한다(값은 ko 고정 상수와 동일 — §②-1 정합, 새 낱말 0)', () => {
-    const t = (key: string) => ({ entityTypeStory: '스토리', entityTypeDoc: '문서', entityTypeEpic: '에픽', entityTypeTask: '작업' })[key] ?? `⟨missing:${key}⟩`;
+    const t = (key: string) => ({ entityTypeStory: '스토리', entityTypeDoc: '문서', entityTypeEpic: '목표', entityTypeTask: '작업' })[key] ?? `⟨missing:${key}⟩`;
     expect(entityTypeLabel('story', t)).toBe('스토리');
     expect(entityTypeLabel('doc', t)).toBe('문서');
-    expect(entityTypeLabel('epic', t)).toBe('에픽');
+    expect(entityTypeLabel('epic', t)).toBe('목표');
     expect(entityTypeLabel('task', t)).toBe('작업');
   });
 
   it('t 인자를 en t()로 주면 Title Case 영단어를 낸다(§②-1 관례)', () => {
-    const tEn = (key: string) => ({ entityTypeStory: 'Story', entityTypeDoc: 'Doc', entityTypeEpic: 'Epic', entityTypeTask: 'Task' })[key] ?? `⟨missing:${key}⟩`;
+    const tEn = (key: string) => ({ entityTypeStory: 'Story', entityTypeDoc: 'Doc', entityTypeEpic: 'Goal', entityTypeTask: 'Task' })[key] ?? `⟨missing:${key}⟩`;
     expect(entityTypeLabel('story', tEn)).toBe('Story');
     expect(entityTypeLabel('story')).toBe('스토리'); // t 생략 시 여전히 ko-only(회귀 0).
   });

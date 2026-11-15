@@ -207,7 +207,7 @@ describe('[4547] not a Mac — one line where the warning and [다운로드] wer
     expect(macPart()).toEqual({ title: false, steps: false, oldMac: false, button: false });
     const line = q('desktop-download-open-on-mac');
     expect(line?.textContent).toBe('Mac에서 이 화면을 열어 받아 주세요');
-    expect(line?.className).toContain('text-muted-foreground');
+    expect(line?.className).toContain('text-ds-ink-3');
     expect(q('desktop-download-card')?.querySelector('a, button')).toBeNull();
   });
 

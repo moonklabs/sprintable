@@ -413,6 +413,11 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story 4892 (UI-9 상세 열 — the «읽기 | 고치기» pair) — `docs.modeRead` («읽기») is the exact label of one side of the mode switch in the reading screen's header; `docs.readMinutes`
+  // («읽기 {minutes}분») is the byline's reading time. Not the shape this guard is for (#2352/#2365: two COUNTED phrases read as one another): the label counts nothing — it names a
+  // side of a switch — and the byline's number is its whole point; they sit in different places (header switch / article byline) and tests find the switch by role + name.
+  // Look again if the label ever carries a number («읽기 · {n}»).
+  'docs.modeRead <-> docs.readMinutes',
   // story #4733 (S4b · Yuna 4733 sheet §2/§4/§5 — «세션 관리» on the phone) — three pairs that are the sheet's own words on purpose:
   //  · `startOne` («세션 시작», the row button) inside `out.alone` («이 중 {k}개는 먼저 따로 종료했어요 — 모든 세션 시작을 누르면 함께 시작해요.») and `startAll`
   //    («모든 세션 시작») inside it: the sentence POINTS at the card's own button by its label, so the label's words are the point. The row button is drawn only in the
@@ -503,18 +508,7 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 전환"/"채널에서 보기")이 들어가 렌더 결과는 갈린다, 템플릿 문자열 자체의
   // 우연한 형태 일치일 뿐.
   'content.commentsResubmitAriaLabel <-> content.commentsRetryAriaLabel',
-  // 위와 같은 이유 — 둘 다 "{n}번째 댓글 {label}" 템플릿 공유(§22-18 표 그대로).
-  'settings.agentMember <-> settings.agentToggleAriaLabel',
-  // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
-  // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
-  // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
-  // story #4049(E-RECIPE-1 ①) — events/page.tsx가 마케팅 적용 성공 토스트에
-  // eventApplySuccessToast("배정 {count}건 저장 완료")를 새로 쓰면서 같은 파일 안
-  // eventEditSubmit("저장", 기존 EventFormDialog 저장 버튼)과 부분문자열로 겹친다.
-  // 토스트(적용 다이얼로그 제출 뒤 비동기로 잠깐 뜸)와 정의 수정 다이얼로그의 저장
-  // 버튼(별개 다이얼로그, 별개 트리거)은 화면에 동시에 설 자리가 없다 — docs.title
-  // <-> docs.indexDocCount류와 동형(짧은 낱말이 다른 문장 속에 자연스럽게 재등장).
-  'organization.eventApplySuccessToast <-> organization.eventEditSubmit',
+  // 4913 C2 — `organization.eventApplySuccessToast <-> organization.eventEditSubmit`(story #4049) 항목을 지웠다: 이 가드는 «같은 파일 안»의 겹침만 잡는데, 정의 만들기·고치기 창이 events/page.tsx에서 components/organization/event-definition-dialogs.tsx로 옮겨 가며(저장 단추 eventEditSubmit) 토스트와 한 파일에 서지 않는다 — 죽은 예외(scanRepository 실측 확認).
   // story #4043 Tier1(2026-09-19) — eventsTitle/eventRowActionAriaLabel이 "이벤트"→
   // "레시피"/"워크플로우"로 낱말 정정되며 원래의 부분문자열 충돌이 사라졌다(죽은 예외,
   // scanRepository 실측 확認 — organization.eventRowActionAriaLabel <->
@@ -527,9 +521,9 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 하나뿐)가 더는 numberAdjacent가 아니게 됐다 — 애초에 "혼동 여지 실질 0"이라고 적어
   // 뒀던 그 판단이 이제 구조로도 맞아떨어진 것(EXEMPT였던 게 아예 후보에서 빠짐, 죽은
   // 예외 축적 아님 — 아래 회귀가드가 "선언된 건 전부 실제로 걸린다"를 지킨다).
-  'docs.indexDocCount <-> docs.title',
+  // story 4892 (UI-9 문서 화면): `docs.indexDocCount <-> docs.title` left the list — the docs first screen was rebuilt (head line = title + count), `indexDocCount` is gone, so the exemption would be dead.
   'sprints.days <-> sprints.overdueBadge',
-  'onboarding.projectLimitExceededError <-> settings.tabProjects',
+  // story 4891 (settings list rebuild): `onboarding.projectLimitExceededError <-> settings.tabProjects` is no longer exempted — the tab's label is now read only from settings-nav.ts (a data list), not in a file that also reads the long sentence, so the pair does not meet any more (the dead-exemption guard below asks for its removal).
   // story #3758 2회차(위 docstring 정정 참고) — memberLimitExceededError가 "구성원을"로
   // 바뀌며 add-member-modal.tsx 안에서 roleMember="구성원"(단순 라벨)과 다시 겹친다.
   // tabProjects 짝과 완전히 동형(짧은 라벨 vs 그 라벨을 포함하는 긴 안내문) — 실제
@@ -697,16 +691,11 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정확히 같은 클래스 — 「프로젝트」·「플랜」·「삭제」모두 그 자체엔 수가 없는 짧은
   // 라벨/탭 제목/버튼 동사고, 헷갈리는 건 «두 개의 서로 다른 수»가 아니라 그 라벨을
   // 포함하는 긴 안내 문장 하나뿐이다(docs.title<->docs.indexDocCount류 정상 패턴).
-  'settings.orgDeleteImpactProjects <-> settings.tabProjects',
-  // orgPlanLabel="플랜"(조직 탭 필드 라벨) <-> onboarding.projectLimitExceededError
-  // ("무료 플랜은 프로젝트를 {limit}개까지...", 온보딩 플랜-한도 토스트) — 두 화면이
-  // 동시에 뜨는 자리가 아니고, "플랜"이라는 공통 명사 하나만 겹친다.
-  'onboarding.projectLimitExceededError <-> settings.orgPlanLabel',
-  // deleteProject="삭제"(프로젝트 관리 섹션의 다른 행 버튼) <-> orgDeleteImpactProjects
-  // ("프로젝트 {count}개 영구 삭제", 조직 삭제 영향도 문장 안의 "영구 삭제") — 서로
-  // 다른 대상(프로젝트 행 삭제 버튼 vs 조직 전체 삭제 영향도 서술)이 우연히 "삭제"
-  // 한 글자만 공유한다.
-  'settings.deleteProject <-> settings.orgDeleteImpactProjects',
+  // (story 4891: `settings.orgDeleteImpactProjects <-> settings.tabProjects` removed for the same reason — see above.)
+  // (story 4891 ⑤a: `onboarding.projectLimitExceededError <-> settings.orgPlanLabel` removed — the organization card moved out of settings/page.tsx
+  // into organization-section.tsx, where the page's limit toast is not read any more, so the pair no longer collides (the guard names a dead exemption).)
+  // (story 4891 ⑥: `settings.deleteProject <-> settings.orgDeleteImpactProjects` removed — the project list (and its «삭제» button) moved out of settings/page.tsx into
+  // projects-section.tsx / project-delete-dialog.tsx, while the organization-delete window is org-delete-dialog.tsx, so the two no longer stand in one file and the pair no longer collides.)
   // orgDeleteConfirmCta="영구 삭제"(다이얼로그 확인 버튼 라벨) <-> orgDeleteImpactProjects
   // ("프로젝트 {count}개 영구 삭제", 영향도 문장 조각) — 이 스토리(#3789) 자체가 요구한
   // 의도된 분리다: 유나 定 §5 "「영구 삭제」가 두 뜻이다 — 반드시 둘로 갈라야 한다"(버튼
@@ -961,16 +950,16 @@ export const EXEMPT_PAIRS = new Set<string>([
 // 둘 다 삭제(ActionZone(command-center) 은퇴 코드 정리 — /dashboard는 이미 /chats로
 // 리다이렉트돼 실 소비처 0, story #3179). "판단 보류"가 아니라 그 쌍 자체가 없어진 것 —
 // 재확認: 삭제 前후 재스캔, 이 1건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0.
+// story #4888(UI-5 목표 화면, 2026-11-11) — 15→13. goals.spExceededDetail <-> goals.title · goals.steerCappedNote <-> goals.steerCurated:
+// 목표 화면을 머리 · 행 · 상세 열 파일로 나누면서 두 키가 «같은 파일에서 함께 쓰이던 자리»가 없어졌다(제목은 머리, 포인트 초과 문구는 상세 열 / 조타 개수 안내는 목록, 조타 마커는 행).
+// «판단 보류»가 아니라 그 쌍 자체가 없어진 것 — 선언 수와 실걸림 수가 계속 일치한다.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
-  'chats.agentCount <-> chats.you',
   'chats.participantsOthers <-> chats.personCount',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
-  'goals.spExceededDetail <-> goals.title',
-  'goals.steerCappedNote <-> goals.steerCurated',
   'hypotheses.target <-> retro.hTargetLine',
   'inbox.bellAriaLabelCount <-> inbox.panelTitle',
   'presence.fabLabelWorking <-> presence.panelTitle',

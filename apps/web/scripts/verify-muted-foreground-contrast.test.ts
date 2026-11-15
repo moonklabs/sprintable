@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeMutedForegroundContrasts } from './verify-muted-foreground-contrast';
+import { readGlobalsCss } from './lib/read-globals-css';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 
@@ -51,7 +51,7 @@ describe('computeMutedForegroundContrasts — 양성대조: 미달 정의는 빨
 });
 
 describe('real repo globals.css — story #2480: muted-foreground가 muted/background/card 전 조합에서 AA(4.5)를 통과한다', () => {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const results = computeMutedForegroundContrasts(css);
 
   it('checks all 6 combinations (3 backgrounds × 2 themes)', () => {
@@ -69,8 +69,8 @@ describe('real repo globals.css — story #2480: muted-foreground가 muted/backg
   // story #3826(2026-09-13, doc 3dc24888) — v3 룩앤필로 ink-3이 #6E6C67로 재조정(doc §⑥
   // sunk 위 4.56:1 — bg 팔레트 자체도 같이 바뀌어 이 조합의 실측은 4.56). 4.5 문턱 자체는
   // 위 「every combination passes 4.5」 테스트가 계속 지킨다.
-  it('light on bg-muted lands at ~4.56 (story #3826 v3 ink-3/bg 조정 후 실측치 — 회귀 시 4.5 쪽으로 움직인다)', () => {
+  it('light on bg-muted lands at ~5.10 (story 4919 — muted-foreground=ds-ink-3 #586274 on muted=ds-surface-sunk #e6eaf1, 옛 4.56에서 올랐다 · 회귀 시 4.5 쪽으로 움직인다)', () => {
     const lightOnMuted = results.find((r) => r.theme === 'light' && r.bgVar === 'muted')!;
-    expect(lightOnMuted.ratio).toBeCloseTo(4.56, 1);
+    expect(lightOnMuted.ratio).toBeCloseTo(5.1, 1);
   });
 });

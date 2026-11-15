@@ -1,11 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +11,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@/components/ds/dialog';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { Tag } from './settings-parts';
 import { fetchWithAuth } from '@/lib/db/client';
 import { pickEulReulJosa } from '@/lib/korean-particle';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
@@ -45,6 +45,8 @@ export function RemoveOrgMemberDialog({
   const [affected, setAffected] = useState<AffectedProject[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -71,12 +73,12 @@ export function RemoveOrgMemberDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md" initialFocus={cancelRef} aria-labelledby={titleId}>
         <DialogHeader>
-          <DialogTitle>{ts('removeMemberTitle')}</DialogTitle>
+          <DialogTitle id={titleId}>{ts('removeMemberTitle')}</DialogTitle>
           <DialogDescription>
-            <span className="font-medium text-foreground">{member.name}</span>
-            {member.email ? <span className="text-muted-foreground"> ({member.email})</span> : null}
+            <span className="font-medium text-ds-ink">{member.name}</span>
+            {member.email ? <span className="text-ds-ink-3"> ({member.email})</span> : null}
             {/* story #4120 — 조사는 이름 뒤에 공백 없이 바로 붙는다(한글 맞춤법). 이전엔
                 고정 "을/를" 병기 앞에 literal 공백까지 있어 "{name} 을/를 조직에서"로
                 이중으로 샜다 — 조사 선택과 함께 그 공백도 뗀다. */}
@@ -85,46 +87,39 @@ export function RemoveOrgMemberDialog({
         </DialogHeader>
 
         {loading ? (
-          <div className="space-y-2">
-            <div className="h-4 animate-pulse rounded bg-muted" />
-            <div className="h-12 animate-pulse rounded bg-muted" />
-            <div className="h-12 animate-pulse rounded bg-muted" />
-          </div>
+          <SkeletonGroup label={tc('loading')} className="space-y-2">
+            <Skeleton variant="text" />
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+          </SkeletonGroup>
         ) : error ? (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+          <Banner tone="failed">{error}</Banner>
         ) : affected && affected.length > 0 ? (
           <div className="space-y-3">
-            <Alert variant="warning">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                {ts('affectedProjectsWillBeRemoved')}
-              </AlertDescription>
-            </Alert>
-            <div className="space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <Banner tone="note">{ts('affectedProjectsWillBeRemoved')}</Banner>
+            <div className="space-y-1 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-3 py-2">
               {affected.map((p) => (
-                <div key={p.project_id} className="flex items-center justify-between gap-3 py-1 text-sm">
-                  <span className="truncate text-foreground">{p.project_name}</span>
-                  <Badge variant="outline">{resolveRoleLabel(p.role, null, to)}</Badge>
+                <div key={p.project_id} className="flex items-center justify-between gap-3 py-1 text-ds-body">
+                  <span className="min-w-0 truncate text-ds-ink">{p.project_name}</span>
+                  <Tag>{resolveRoleLabel(p.role, null, to)}</Tag>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">{ts('removeMemberIrreversible')}</p>
+            <p className="text-ds-small text-ds-ink-3">{ts('removeMemberIrreversible')}</p>
           </div>
         ) : (
-          <div className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{ts('memberNotInAnyProject')}</p>
-            <p className="text-xs text-muted-foreground">{ts('removeMemberIrreversible')}</p>
+          <div className="space-y-2 text-ds-body">
+            <p className="text-ds-ink-3">{ts('memberNotInAnyProject')}</p>
+            <p className="text-ds-small text-ds-ink-3">{ts('removeMemberIrreversible')}</p>
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={confirming}>
+          <Button ref={cancelRef} variant="quiet" onClick={onCancel} disabled={confirming}>
             {tc('cancel')}
           </Button>
           <Button
-            variant="destructive"
+            variant="danger"
             onClick={() => void handleConfirm()}
             disabled={loading || !!error || confirming}
           >

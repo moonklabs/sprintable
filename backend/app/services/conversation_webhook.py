@@ -19,6 +19,7 @@ from typing import NamedTuple
 import httpx
 
 from app.core.db_error_redaction import safe_exception_text
+from app.core.log_safe import redact_urls, url_host
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.webhook_config import WebhookConfig
 # c60dd33c: Discord payload 변환은 공용 헬퍼(discord_webhook)로 단일화 — fire_webhooks 와 공유.
@@ -132,7 +133,7 @@ async def deliver_injected_event_webhook(
                 else:
                     logger.warning(
                         "injected-event webhook delivery failed recipient=%s event=%s url=%s: %s",
-                        recipient_id, event_type, wh.url, safe_exception_text(exc)[:200],  # story #4741: no text built from an exception before the record
+                        recipient_id, event_type, url_host(wh.url), redact_urls(safe_exception_text(exc))[:200],  # story #4741: no text built from an exception before the record; story 4869: the host only, and no URL in the exception text (an HTTP status error holds the whole request URL)
                     )
 
 
@@ -461,7 +462,7 @@ async def _fail_linked_a2a_task_if_all_deliveries_failed(db, message_id: uuid.UU
     await fail_task_if_still_working(
         db, task.id,
         f"webhook delivery failed on all {len(deliveries)} channel(s) after "
-        f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}",
+        f"{latest.attempt_count} attempts: {redact_urls(latest.last_error or 'unknown error')}",  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
     )
 
 
@@ -519,7 +520,7 @@ async def _retry_deliver(
             return
 
         except Exception as exc:
-            error_msg = safe_exception_text(exc)[:500]  # story #4741: logged and stored below — a database error's text carries the row's values
+            error_msg = redact_urls(safe_exception_text(exc))[:500]  # story #4741: logged and stored below — a database error's text carries the row's values; story 4869: and an HTTP status error's text holds the whole request URL (the webhook's secret)
             if attempt < _MAX_RETRIES:
                 backoff = _BACKOFF_BASE * (2 ** (attempt - 1))
                 logger.warning(

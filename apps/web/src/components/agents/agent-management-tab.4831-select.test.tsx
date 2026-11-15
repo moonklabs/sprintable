@@ -10,6 +10,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AgentManagementTab } from './agent-management-tab';
 
+// story 4912 — the rows open the detail through the router (Enter / double click): a stub router, the push is not under test here
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -45,7 +48,9 @@ async function mount(role: 'admin' | 'member') {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 const boxes = () => [...container.querySelectorAll<HTMLElement>('[role="checkbox"]')];
-const box = (name: string) => boxes().find((b) => b.getAttribute('aria-label') === ariaFor(name))!;
+// story 4912 — the ds Checkbox names itself by aria-labelledby (a hidden text), not aria-label
+const nameOf = (b: HTMLElement) => document.getElementById(b.getAttribute('aria-labelledby') ?? '')?.textContent ?? b.getAttribute('aria-label');
+const box = (name: string) => boxes().find((b) => nameOf(b) === ariaFor(name))!;
 const bulkButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(agents.runProfileBulkOpen));
 const press = async (el: Element, key: string) => {
   await act(async () => {
@@ -57,8 +62,8 @@ const press = async (el: Element, key: string) => {
 describe('AgentManagementTab — 실행 설정 고르기 체크박스 (story 4831 부품 교체)', () => {
   it('관리자에게는 데스크톱 런타임 행(claude-code · codex)에만 바탕 Checkbox가 보인다', async () => {
     await mount('admin');
-    expect(boxes().map((b) => b.getAttribute('aria-label'))).toEqual([ariaFor('조사'), ariaFor('작성')]);
-    expect(boxes().every((b) => b.getAttribute('data-slot') === 'checkbox')).toBe(true);
+    expect(boxes().map((b) => nameOf(b))).toEqual([ariaFor('조사'), ariaFor('작성')]);
+    expect(boxes().every((b) => b.getAttribute('data-slot') === 'ds-checkbox')).toBe(true);
     expect(bulkButton()).toBeUndefined(); // 고른 것이 없으면 단추도 없다
   });
 

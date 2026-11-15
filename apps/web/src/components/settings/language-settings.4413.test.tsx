@@ -42,30 +42,47 @@ async function mount(locale: 'ko' | 'en') {
   });
 }
 
-async function openMenu() {
-  const trigger = container.querySelector('button') as HTMLButtonElement;
-  await act(async () => { trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); trigger.click(); });
-  await act(async () => { await Promise.resolve(); });
-  return [...document.querySelectorAll('[role="menuitem"]')] as HTMLElement[];
+// story 4891 (piece ③): the row is a ds NativeSelect now (the phone's own picker) — choosing = a change event on the select
+const select = () => container.querySelector('select') as HTMLSelectElement;
+async function choose(value: string) {
+  await act(async () => { select().value = value; select().dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
 describe('설정 언어 행(story #4413)', () => {
-  it.each(['ko', 'en'] as const)('⭐UI가 %s여도 선택지는 늘 «한국어 · English»(자기 언어 이름) · 지금 언어가 보인다', async (locale) => {
+  it.each(['ko', 'en'] as const)('⭐UI가 %s여도 선택지는 늘 «한국어 · English»(자기 언어 이름) · 지금 언어가 골라져 있다', async (locale) => {
     await mount(locale);
-    expect(container.querySelector('button')!.textContent).toContain(locale === 'ko' ? '한국어' : 'English');
-    const items = await openMenu();
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['한국어', 'English']);
+    expect(select().value).toBe(locale);
+    expect([...select().options].map((o) => o.textContent?.trim())).toEqual(['한국어', 'English']);
+    // the name is a real <label for> (not a bare text) — the picker is named for a screen reader
+    expect(container.querySelector(`label[for="${select().id}"]`)?.textContent).toBe((locale === 'ko' ? koMessages : enMessages).settings.languageSelectLabel);
   });
 
   it('⭐다른 언어를 고르면 사이드바 전환기와 같은 applyLocale을 부른다 · 지금 언어를 다시 고르면 안 부른다', async () => {
     await mount('ko');
-    let items = await openMenu();
-    await act(async () => { items[1]!.click(); });
+    await choose('en');
     expect(applyLocaleSpy).toHaveBeenCalledWith('en');
     applyLocaleSpy.mockReset();
-    items = await openMenu();
-    await act(async () => { items[0]!.click(); });
+    await choose('ko');
     expect(applyLocaleSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('설정 언어 행 — 반대 방향 · 지역 표기(story 4891 ③)', () => {
+  it('English UI → «한국어»를 고르면 applyLocale(ko) (고정된 en이 아니다), 같은 English를 다시 고르면 안 부른다', async () => {
+    await mount('en');
+    await choose('ko');
+    expect(applyLocaleSpy).toHaveBeenCalledWith('ko');
+    applyLocaleSpy.mockReset();
+    await choose('en');
+    expect(applyLocaleSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([['en-US', 'en'], ['ko-KR', 'ko']] as const)('locale %s → 선택 상자는 %s로 보인다(지역 표기를 접는다)', async (locale, shown) => {
+    const { LanguageSettings } = await import('./language-settings');
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale={locale} messages={shown === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><LanguageSettings /></NextIntlClientProvider>);
+    });
+    expect(select().value).toBe(shown);
   });
 });
 

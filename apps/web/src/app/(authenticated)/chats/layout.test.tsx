@@ -39,11 +39,25 @@ vi.mock('next/navigation', () => ({
 // 그대로 받는지만 확認하는 얕은 스텁.
 const chatListViewProps: Array<{ projectId: string | null }> = [];
 vi.mock('@/components/chat/chat-list-view', () => ({
-  ChatListView: (props: { open?: boolean; projectId: string | null }) => {
+  // story 4887 (UI-4 screen PR) — the list head («대화 · + · ⋯») is the list's own now: the layout hands it `canStartRoom` and the modal's open / onOpenChange; this stub draws the head's heading and the «+» as the real list does
+  ChatListView: (props: { open?: boolean; onOpenChange?: (v: boolean) => void; canStartRoom?: boolean; headingLevel?: 1 | 2; projectId: string | null }) => {
     chatListViewProps.push({ projectId: props.projectId });
-    return <div data-testid="chat-list-view">chat-list-view(open={String(props.open)})</div>;
+    return (
+      <div data-testid="chat-list-view">
+        {props.headingLevel === 2 ? <h2 id="chat-rail-heading">대화</h2> : <h1 id="chat-rail-heading">대화</h1>}
+        {props.canStartRoom ? <button type="button" onClick={() => props.onOpenChange?.(true)}>새 대화</button> : null}
+        chat-list-view(open={String(props.open)})
+      </div>
+    );
   },
 }));
+
+// story 4903 AC3 — the layout mounts the server's «message deleted» subscription ONCE (the hook's own behaviour is pinned in use-chat-message-deleted-sse.test.tsx)
+const deletedSse = vi.hoisted(() => ({ mounts: 0, unmounts: 0 }));
+vi.mock('@/hooks/use-chat-message-deleted-sse', async () => {
+  const { useEffect: useEffectInMock } = await import('react');
+  return { useChatMessageDeletedSse: () => { useEffectInMock(() => { deletedSse.mounts += 1; return () => { deletedSse.unmounts += 1; }; }, []); } };
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -101,6 +115,17 @@ afterEach(async () => {
 });
 
 describe('ChatsLayout — story #2921 S1(영구 스플릿뷰 shell)', () => {
+  it('⭐ story 4903 AC3 — the layout subscribes to another person\'s deletes exactly ONCE for the whole chats screen (list + room + thread listen to the announcement it makes), and lets go when it goes away', async () => {
+    deletedSse.mounts = 0; deletedSse.unmounts = 0;
+    usePathnameMock.mockReturnValue('/chats/c-1');
+    await act(async () => { root.render(wrap(<ChatsLayout><div>children</div></ChatsLayout>)); });
+    expect(deletedSse.mounts).toBe(1); // reverted (the layout does not mount it) → 0
+    await act(async () => { root.render(wrap(<ChatsLayout><div>other children</div></ChatsLayout>)); });
+    expect(deletedSse.mounts, 'a re-render does not subscribe again').toBe(1);
+    await act(async () => { root.render(wrap(<div />)); });
+    expect(deletedSse.unmounts).toBe(1);
+  });
+
   it('ChatListView는 정확히 1곳만 마운트된다(리스트 경로·대화 경로 둘 다 — 이중 구독 방지가 이 story의 핵심 근거)', async () => {
     usePathnameMock.mockReturnValue('/chats');
     await act(async () => {
@@ -131,6 +156,16 @@ describe('ChatsLayout — story #2921 S1(영구 스플릿뷰 shell)', () => {
     expect(rail?.className).toMatch(/(^|\s)hidden(\s|$)/);
     expect(outlet?.className).toContain('flex');
     expect(outlet?.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+  });
+
+  it('⭐ one h1 per page: the list is the page\'s h1 on /chats, and an h2 on /chats/[id] (the room head owns the h1 there — the rail stays beside it on desktop)', async () => {
+    for (const [pathname, tag] of [['/chats', 'H1'], ['/chats/conv-123', 'H2']] as const) {
+      usePathnameMock.mockReturnValue(pathname);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<ChatsLayout><div>outlet</div></ChatsLayout>)); });
+      expect(container.querySelector('#chat-rail-heading')?.tagName, pathname).toBe(tag); // reverted (always h1) → H1 on the room route too
+    }
   });
 
   it('두 경로 다 lg:flex(데스크톱 항상 병렬)를 갖는다 — 반응형 토글은 모바일 전용', async () => {
@@ -212,7 +247,7 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     // story #2921 S6 후속(PO dev 라이브 실측, 2026-08-22) — 오버레이 rail에 배경이 없어
     // 뒤 GNB 텍스트가 그대로 비쳐 가독을 깼다(docked 상태는 뒤에 아무것도 없어 안 보였다).
     // 불투명 배경+테두리 회귀가드.
-    expect(rail?.className).toContain('bg-background');
+    expect(rail?.className).toContain('bg-ds-background'); // 4913 셸 바탕 PR — 쪽 바탕 층 토큰(옛 bg-background 아님)
     expect(rail?.className).toContain('border-border');
     // 오버레이 상태에선 collapsed 전용 재호출 토글이 !hidden으로 숨고(DOM 부재 아님 — 카디르
     // #3337 QA 처방, 포커스 복귀 안정성), backdrop이 대신 뜬다(장식용 click-catcher —

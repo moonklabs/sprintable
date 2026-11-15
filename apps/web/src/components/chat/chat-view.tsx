@@ -1,7 +1,9 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
+import { LAYER } from '@/components/ds/layers';
+import { ComposeMovedNotice } from './compose-moved-notice';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -9,6 +11,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { ChatBubble } from './chat-bubble';
+import { continuesRun } from './timeline-grouping';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
@@ -16,6 +19,8 @@ import { AgentWakeNotice } from './agent-wake-notice';
 import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
+import { SupportLauncherClearance } from '@/components/support-widget/support-launcher-clearance';
+import { useRoomFileDrop } from './use-room-file-drop';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
@@ -35,6 +40,7 @@ import { CitationComposeBar, type CitationSaveState } from './citation-compose-b
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
+import { announceChatMessageDeleted, knownDeletedAt, onChatMessageDeleted, tombstoneKnownDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
@@ -75,6 +81,10 @@ interface ChatViewProps {
   // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
   // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
   initialComposeText?: string;
+  /** story 4906 — a line above the composer saying the text in it was moved here from «홈» and not sent (and why). Gone once the person sends or clears the text. */
+  composeNotice?: string;
+  /** story 4906 — the id of the hand-over that brought the line here (the URL's `composeNote`): the note's «done» memory is per room + id, so a reload of the same hand-over stays quiet and a later hand-over is new. */
+  composeNoticeId?: string;
 }
 
 interface MessageGroup {
@@ -159,7 +169,7 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText, composeNotice, composeNoticeId }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
   const backHref = backHrefProp ?? flatHref('/chats');
@@ -197,12 +207,33 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #3831 — initialComposeText가 있으면 마운트 시 그 값으로 시드(nonce 0). threadId가
   // 바뀌어도(다른 대화로 재마운트) 이 초기값 계산은 최초 렌더 1회뿐이라 재프리필되지 않는다
   // (useState 초기화자 관례 그대로 — 의도적으로 effect가 아니라 이 자리에 둔다).
+  // story 4946 — files dropped on the room (not on the composer's strip) go to the composer as attachments, once per drop
+  const [incomingFiles, setIncomingFiles] = useState<{ nonce: number; files: File[] } | null>(null);
+  const roomDrop = useRoomFileDrop(useCallback((files: File[]) => setIncomingFiles((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, files })), []));
   const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(
     () => (initialComposeText ? { text: initialComposeText, nonce: 0 } : null),
   );
   const handleFillComposer = useCallback((text: string) => {
     setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
+  // story 4906 — the note lives while the moved text is in the composer: it goes when the person has had text there and the box is empty again (sent or cleared).
+  // `sawDraft` keeps the first empty report (before the prefill lands) from closing it.
+  const [composeNoticeOpen, setComposeNoticeOpen] = useState(true);
+  const sawDraftRef = useRef(false);
+  // Once the person has sent or cleared the moved line the note is DONE for that hand-over: the marked URL (`?compose=…&composeNote=<id>`) stays in the address bar, and a reload / a visit back to it re-seeds the
+  // composer (3831) — without this the note would come back and say «not sent» about a line that was sent (a duplicate-send nudge). The memory is per room + the hand-over's OWN id (never the words, never a hash of
+  // them): a later hand-over of the same text into the same room has a new id and is a new note; a picked room (no id) writes nothing. Browser storage, per tab; unreadable → just no memory.
+  const noticeDoneKey = composeNoticeId ? `sprintable:compose-note-done:${threadId}:${composeNoticeId}` : null;
+  useEffect(() => {
+    if (!noticeDoneKey) return;
+    try { if (window.sessionStorage.getItem(noticeDoneKey)) setComposeNoticeOpen(false); } catch { /* storage unreadable: the note simply has no memory */ }
+  }, [noticeDoneKey]);
+  const handleDraftChange = useCallback((draft: string) => {
+    if (draft.trim()) { sawDraftRef.current = true; return; }
+    if (!sawDraftRef.current) return;
+    setComposeNoticeOpen(false);
+    if (noticeDoneKey) { try { window.sessionStorage.setItem(noticeDoneKey, '1'); } catch { /* as above */ } }
+  }, [noticeDoneKey]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -624,13 +655,38 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         return;
       }
       const body = (await res.json()) as { deleted_at?: string | null };
+      const deletedAt = body.deleted_at ?? new Date().toISOString();
+      // the room LIST keeps this room's latest message as a one-line preview: tell it (the server scrubs it on refetch — the list does the same now, not at the next refetch)
+      const gone = messagesRef.current.find((m) => m.id === messageId);
+      if (gone) announceChatMessageDeleted({ conversationId: threadId, createdAt: gone.created_at, messageId, threadId: gone.parent_id ?? null, deletedAt }); // with the id: the list matches by it, and remembers it for a response already in flight (5664 codex)
       setMessages((prev) => prev.map((m) => (
-        m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
+        m.id === messageId ? { ...m, content: '', deleted_at: deletedAt } : m
       )));
+      // the open thread holds its own COPY of its original: the same tombstone there, or the panel keeps showing the text of a message that is gone (codex round 1 on the thread-menu PR)
+      setActiveThread((prev) => (prev && prev.id === messageId ? { ...prev, content: '', deleted_at: deletedAt } : prev));
     } catch {
       addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
     }
   }, [apiPrefix, threadId, addToast, t]);
+
+  // story 4903 AC3 — ANOTHER person deleted a message of this room: the server's frame (`useChatMessageDeletedSse`, mounted by the chats layout) reaches this open room as the same
+  // «message deleted» announcement — with the message's id (a delete made on THIS screen announces none: it has already tombstoned its own copies). The row turns into the tombstone
+  // at once, and so does the open thread's COPY of its original.
+  // …and a fetch that was already in flight when the frame arrived (the first load · an older page · a reconnect's backfill) must not bring the text back: after every change of the list — before it
+  // is painted — what is known to be deleted is a tombstone again. The same list comes back when nothing changes, so this never loops.
+  useLayoutEffect(() => {
+    setMessages((prev) => tombstoneKnownDeleted(prev, threadId));
+    setActiveThread((prev) => {
+      if (!prev || prev.deleted_at) return prev;
+      const at = knownDeletedAt(threadId, prev.id);
+      return at === undefined ? prev : { ...prev, content: '', deleted_at: at ?? new Date().toISOString() };
+    });
+  }, [messages, activeThread, threadId]);
+  useEffect(() => onChatMessageDeleted((d) => {
+    if (d.conversationId !== threadId || !d.messageId) return;
+    setMessages((prev) => withMessageTombstoned(prev, d.messageId!, d.deletedAt));
+    setActiveThread((prev) => (prev && prev.id === d.messageId && !prev.deleted_at ? { ...prev, content: '', deleted_at: d.deletedAt ?? new Date().toISOString() } : prev));
+  }), [threadId]);
 
   // story #2349 — 사용자 차단. 낙관적 오버레이(blockedMemberIds)는 이미 로드된 메시지 목록을
   // 새로고침 없이 즉시 마스킹하려는 것 — 서버 is_blocked_sender는 다음 fetch부터 반영된다.
@@ -952,7 +1008,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   return (
     <ReadingPanelProvider value={readingPanelContextValue}>
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className={`flex h-full flex-col overflow-hidden ${LAYER.page}`}>
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
       {isMobileThreadView && (
@@ -973,7 +1029,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
+        <div className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`} {...roomDrop.handlers}>
+          {/* story 4946 — the drop guide while a file is over the room (the storage screen's own guide: the same dashed panel, no new part) */}
+          {roomDrop.dragging ? (
+            <div data-testid="room-drop-overlay" role="status" className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-ds-panel border-2 border-dashed border-ds-action bg-ds-action-soft/80 text-ds-body font-semibold text-ds-action-text">
+              {t('dropToAttach')}
+            </div>
+          ) : null}
           {/* story #2987 AC2 후반+#3621(유나 CHANGES, 단일화) — ConnectionLostBanner
               (connection-lost-banner.tsx) 참고. */}
           {showDisconnectedBanner && (
@@ -1062,7 +1124,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
                     {group.messages.map((msg, idx) => {
                       const prev = group.messages[idx - 1];
-                      const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
+                      // story 4887 (UI-4 P4-a) — one run = the same sender with no gap over five minutes (timeline-grouping.ts)
+                      const isGrouped = continuesRun(prev, msg);
                       return (
                         <Fragment key={msg.id}>
                           {/* story #1977: "여기부터 안읽음" — info 톤(안내), 빨강 0(시안 768e89b5 v2). */}
@@ -1186,19 +1249,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             />
           )}
 
-          {/* Input */}
-          <ChatInput
-            threadId={threadId}
-            onSend={handleSend}
-            onUploadFile={handleUploadFile}
-            projectId={projectId}
-            commandTargets={commandTargets}
-            placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
-            onEscape={() => router.replace(backHref)}
-            currentTeamMemberId={currentTeamMemberId}
-            participants={participants}
-            prefillCommand={prefillCommand}
-          />
+          {composeNotice && composeNoticeOpen ? <ComposeMovedNotice text={composeNotice} /> : null}
+
+          {/* Input — story 4906: while the round support button is drawn the composer keeps its right 64px free, so [Send] is not under it */}
+          <SupportLauncherClearance>
+            <ChatInput
+              threadId={threadId}
+              onSend={handleSend}
+              onUploadFile={handleUploadFile}
+              projectId={projectId}
+              commandTargets={commandTargets}
+              placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
+              onEscape={() => router.replace(backHref)}
+              currentTeamMemberId={currentTeamMemberId}
+              participants={participants}
+              prefillCommand={prefillCommand}
+              incomingFiles={incomingFiles}
+              onDraftChange={handleDraftChange}
+            />
+          </SupportLauncherClearance>
 
           {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
               StoryPickerDialog 재사용(새 피커 0). projectId 없으면(비-프로젝트 DM 등)
@@ -1218,7 +1287,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           // story #2910(S2f/R3) — ReadingPanel과 동형 slide-in(1회, activeThread가 null→값
           // 전환될 때만 — 다른 스레드로 전환은 ThreadPanel 자체 key가 담당, 이 wrapper는 안
           // 리마운트돼 재발화 없음). exit 애니 의도적 무(ReadingPanel과 동일 판정).
-          <div className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileThreadView ? 'flex-1' : 'hidden w-80 flex-shrink-0 lg:flex'}`}>
+          // story 4887 (UI-4 P6-b) — this wrapper exists ONLY while a thread is open (activeThread), which is exactly when isMobileThreadView is true: the old
+          // `isMobileThreadView ? 'flex-1' : 'hidden w-80 …'` therefore always took the first branch, and on desktop the thread panel was `flex-1` like the main
+          // column — an even split of the space, not the fixed 320 px slot the second branch described (that branch was dead code). Now: full screen on a phone
+          // (`flex-1`), a FIXED slot from lg up (`flex-none`): 300 px between lg and xl, 320 px from xl.
+          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden flex-1 lg:w-[300px] lg:flex-none xl:w-80">
             <ThreadPanel
               key={activeThread.id}
               parentMessage={activeThread}
@@ -1229,6 +1302,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
               onMarkRead={markRead}
+              onDeleteParent={handleDeleteMessage}
               entityStatusByKey={entityStatusByKey}
               eventDefinitionsByKey={eventDefinitionsByKey}
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}

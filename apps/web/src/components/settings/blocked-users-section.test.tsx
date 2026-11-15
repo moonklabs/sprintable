@@ -4,6 +4,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { BlockedUsersSection } from './blocked-users-section';
+
+// the toast hook is the one old import the section keeps — observe what it is asked to show
+const { addToast } = vi.hoisted(() => ({ addToast: vi.fn() }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,6 +24,7 @@ function wrap(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  addToast.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -256,7 +261,9 @@ describe('BlockedUsersSection', () => {
       unblockBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('까심');
+    expect(addToast).toHaveBeenCalledWith({ type: 'error', title: koMessages.settings.unblockUserErrorTitle });
   });
 
   // [SID:4286 · 까디르 873bcf080] 이름 null(dev 41명)이나 조회 실패면 원시 UUID가 이름 칸에 나가던 것 — memberNameById(4646 한 벌) + 꼬리 규칙.
@@ -276,7 +283,7 @@ describe('BlockedUsersSection', () => {
       await act(async () => { root.render(wrap(<BlockedUsersSection />)); });
       for (let i = 0; i < 3; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     }
-    const rowTexts = () => Array.from(container.querySelectorAll('span.flex.items-center')).map((el) => el.textContent ?? '');
+    const rowTexts = () => Array.from(container.querySelectorAll('[data-slot="ds-list-row"] .truncate')).map((el) => el.textContent ?? '') // story 4891: the name is the ds ListRow's title;
 
     it('이름 null → «이름 없는 구성원» · 조회 실패(!ok) → «알 수 없는 구성원» · 이름 칸에 UUID 0(꼬리 없음 — 겹치지 않음)', async () => {
       await renderWith({ [IDS[0]!]: { ok: true, name: null }, [IDS[1]!]: { ok: false } });

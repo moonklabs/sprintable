@@ -10,6 +10,9 @@ import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { AgentManagementTab } from './agent-management-tab';
 
+// story 4912 — the rows open the detail through the router (Enter / double click): a stub router, the push is not under test here
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -28,8 +31,8 @@ async function mount(agents: object[], locale: 'ko' | 'en' = 'ko') {
   await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><AgentManagementTab /></NextIntlClientProvider>); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
-const cards = () => [...container.querySelectorAll('a[href$="/organization/workforce/a1"], a[href$="/organization/workforce/a2"], a[href$="/organization/workforce/a3"], a[href$="/organization/workforce/a4"]')]
-  .filter((a) => a.classList.contains('flex-1'));
+// story 4912 — a row is a RowList item (the words moved from a chip into the row's second line)
+const cards = () => [...container.querySelectorAll('[role="listitem"][data-testid^="agent-row-"]')];
 
 describe('[SID:4686] AgentManagementTab — «모델 · 런타임 기본값» on an agent that names no model', () => {
   it('run_model_unset true → the badge on that card only; false · null · absent → none', async () => {
@@ -40,7 +43,7 @@ describe('[SID:4686] AgentManagementTab — «모델 · 런타임 기본값» on
       { id: 'a4', name: '번역', role: 'member', is_active: true, runtime_type: 'codex' }, // an older server: the field is absent
     ]);
     const text = (container.textContent ?? '').split('모델 · 런타임 기본값');
-    expect(text.length - 1).toBe(1); // exactly one badge in the whole list
+    expect(text.length - 1).toBe(1); // the words appear exactly once in the whole list
     const marked = cards().filter((c) => c.textContent?.includes('모델 · 런타임 기본값'));
     expect(marked).toHaveLength(1);
     expect(marked[0].textContent).toContain('조사');

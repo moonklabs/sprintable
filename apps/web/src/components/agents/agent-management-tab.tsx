@@ -1,14 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronRight, Plus } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Checkbox } from '@/components/ds/checkbox';
+import { Chip } from '@/components/ds/chip';
+import { DataText, joinDot } from '@/components/ds/data-text';
+import { Icon } from '@/components/ds/icon';
+import { useEmbeddedServer } from '@/components/embedded-server-context';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem, type RowAction } from '@/components/ds/row-list';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Button as DialogButton } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -25,11 +32,16 @@ import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { AgentRunProfileBulkDialog } from '@/components/agents/agent-run-profile-bulk-dialog';
 import { CountBadge } from '@/components/ui/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { orgRoleLabel } from '@/lib/org-role-label';
+import { agentRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
+import { StatusLabel } from '@/components/ds/status-label';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { useAgentStates } from '@/hooks/use-agent-states';
+import { sessionStateLabel, shownState } from '@/components/chat/agent-session-strip';
+import { limitHeld, limitLooksAgain } from '@/lib/agent-session-limit';
+import { stateMark, type AgentStateRow } from '@/lib/agent-state-list';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { DeviceChip } from '@/components/desktop/device-chip';
 
 /**
  * story #4129 — 워크포스 1줄(«런타임 vX · (플러그인 vY) · 세션 시작 N시간 전», PO 확定
@@ -125,6 +137,8 @@ export function requiresDeactivateConfirm(agent: Pick<OrgAgent, 'is_active'>): b
  */
 export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
+  const router = useRouter();
+  const embedded = useEmbeddedServer(); // story 4832: one computer — a computer name that tells two apart says nothing there
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const tc = useTranslations('common');
@@ -134,8 +148,11 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
   // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
-  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => orgRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => agentRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
 
+  // story 4889 (W1): the list reads the SAME live state as the DM strip and the Today list (one read: /api/agents/desktop-sessions) — a row of an agent on a computer wears its state
+  const { rows: stateRows } = useAgentStates();
+  const stateByAgent = useMemo(() => new Map(stateRows.map((r) => [r.agent_id, r])), [stateRows]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -155,9 +172,14 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   // 체인 안에서 setState가 일어나도 react-hooks/set-state-in-effect가 useCallback 체인만큼
   // 깊이 추적하지 않는다(AgentPerformancePanel·AgentProjectAccessSection은 위임 없이 자체
   // setState라 통과, 여기선 refreshAgents/refreshGrantCounts로 위임하므로 plain fn 유지).
-  const refreshAgents = async () => {
+  // story 4912 D1 — a failed FIRST read used to return silently, so the list said «조직에 등록된 에이전트가 없어요» (an error read as «none»). The mount load passes `strict`, so a non-OK answer
+  // throws into the load's catch (→ the error state with [다시 시도], which was already there for a rejected request). The re-reads after a toggle / bulk save stay quiet: the list already on screen is kept.
+  const refreshAgents = async (strict = false) => {
     const res = await fetchWithAuth('/api/team-members?type=agent&include_inactive=true');
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (strict) throw new Error('agent list read failed');
+      return;
+    }
     const json = await res.json() as { data?: OrgAgent[] };
     setAgents(json.data ?? []);
   };
@@ -204,7 +226,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           const json = await projectsRes.json() as { data?: ProjectOption[] };
           projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
         }
-        await Promise.all([refreshAgents(), refreshGrantCounts(projectList)]);
+        await Promise.all([refreshAgents(true), refreshGrantCounts(projectList)]);
       } catch {
         setLoadError(true);
       } finally {
@@ -249,140 +271,111 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
     await handleToggleActive(target);
   };
 
-  return (
-    <div className="p-6">
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">{t('orgAgentsTitle')}</h2>
-              <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
-            </div>
-            {isAdmin ? (
-              <div className="flex shrink-0 items-center gap-2">
-                {chosen.size > 0 ? (
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setBulkOpen(true)}>
-                    {ta('runProfileBulkOpen')} <CountBadge count={chosen.size} />
-                  </Button>
-                ) : null}
-                <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
-                  <Plus className="size-3.5" /> {ta('manageAddAgent')}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody className="space-y-4">
-          {message ? (
-            <Alert variant={message.type === 'success' ? 'success' : 'destructive'}>
-              <AlertDescription>{message.text}</AlertDescription>
-            </Alert>
-          ) : null}
+  // story 4912 (UI-R4 · PR A1) — one row = ListRow(56): a name that is the link to the detail, a SECOND LINE of text (role · projects · computer · model · runtime — chips used to say all of it),
+  // only the states that must be SAID as chips on the right (inactive · not connected · restart needed + the live state), and the row's actions in ONE array that draws both the «⋯» menu and the
+  // right-click menu. Enter and double click open the detail (`onOpen`, the pointer version of Enter).
+  const rowActions = (agent: OrgAgent, index: number): RowAction[] => {
+    const list: RowAction[] = [];
+    if (!isSystemPublisher(agent.runtime_type) && agent.verified === false) {
+      list.push({ key: 'connection', label: ta('viewConnectionSettings'), icon: 'link', onSelect: () => router.push(flatHref(`/organization/workforce/${agent.id}`)) });
+    }
+    if (isAdmin) {
+      // story #3592(§17-20 ⑧·§22-18 동형) — the toggle's name carries the row's ordinal; story #3608 — «…» is spelled as a word. The menu item says what it does now.
+      const visibleLabel = togglingId === agent.id ? t('agentToggling') : agent.is_active ? t('deactivateAgent') : t('activateAgent');
+      list.push({ key: 'toggle', label: visibleLabel, icon: agent.is_active ? 'block' : 'check_circle', variant: agent.is_active ? 'danger' : 'default', disabled: togglingId === agent.id, onSelect: () => requestToggle(agent), separatorBefore: list.length > 0 });
+    }
+    void index;
+    return list;
+  };
 
-          {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />)}
-            </div>
-          ) : loadError ? (
-            <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border px-3 py-8 text-center">
-              <p className="text-sm text-muted-foreground">{tc('error')}</p>
-              <p className="text-xs text-muted-foreground">{tc('errorDescription')}</p>
-              <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
-                {tc('retry')}
-              </Button>
-            </div>
-          ) : agents.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
-              <p className="text-sm text-muted-foreground">{t('noOrgAgents')}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{t('noOrgAgentsCta')}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {agents.map((agent, index) => (
-                <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                  {isAdmin && isDesktopRuntime(agent.runtime_type) ? (
-                    <Checkbox
-                      checked={chosen.has(agent.id)}
-                      onCheckedChange={(checked) => setChosen((prev) => {
-                        const next = new Set(prev);
-                        if (checked) next.add(agent.id); else next.delete(agent.id);
-                        return next;
-                      })}
-                      aria-label={ta('runProfileChooseAria', { name: rowLabels.get(agent.id) ?? agent.name })}
-                    />
-                  ) : isAdmin ? <span className="size-4 shrink-0" aria-hidden /> : null}
-                  <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <RowName className="font-medium text-foreground hover:underline hover:text-primary" label={rowLabels.get(agent.id)} id={agent.id} />
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary">{t('agentMember')}</Badge>
-                      {/* [SID:4282 · 유나 결정] agent.role은 조직 역할(owner/admin/member)이다 — 직무 해석기(resolveRoleLabel)에 넣으면
-                          원문(«member»)이 샜다(배포 27 기기 탐색 점검 7번). 조직 역할 라벨로 · 모르는 값만 원문. */}
-                      {(() => { const roleText = orgRoleLabel(agent.role, to); return roleText ? <Badge variant="outline">{roleText}</Badge> : null; })()}
-                      <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
-                      {/* [SID:4282 · 유나 결정] 비활성은 칩 줄로(정체 → 범위 → 상태) · 되돌릴 수 있는 상태라 빨강 아님(secondary). 이름 줄엔 이름만. */}
-                      {!agent.is_active ? <Badge variant="secondary">{t('agentInactiveBadge')}</Badge> : null}
-                      {isSystemPublisher(agent.runtime_type) ? (
-                        <span className="text-xs text-muted-foreground">{ta('systemPublisherNeutralDescription')}</span>
-                      ) : agent.verified === false ? (
-                        <Badge variant="warning">{ta('agentNotConnected')}</Badge>
-                      ) : null}
-                      {agent.needs_restart ? (
-                        <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
-                      ) : null}
-                      {/* story 4686 (AC3 · Yuna run-info-1014 (4)): no model named → the runtime's default runs — a neutral badge (not an error: a choice
-                          not made), the settings screen's own word; only for a desktop agent whose profile names none */}
-                      {agent.run_model_unset === true ? <Badge variant="outline">{ta('modelUnsetBadge')}</Badge> : null}
-                      {/* story 4675 (F2): the computer, last in the chip line — two agents with one name are told apart here */}
-                      <DeviceChip name={agent.device_name} />
-                    </div>
-                    {(() => {
-                      const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
-                      return runtimeLine ? (
-                        <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
-                      ) : null;
-                    })()}
-                  </Link>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? (
-                      <Link
-                        href={flatHref(`/organization/workforce/${agent.id}`)}
-                        // [SID:4282 · 유나 추가 결정] 카드 · 화살표와 같은 곳으로 가는 중복 링크 — lg 미만에선 숨겨 이름 칸을 돌려준다(390 en 이름 22px).
-                        className="hidden whitespace-nowrap text-xs font-medium text-primary hover:underline lg:inline"
-                      >
-                        {ta('viewConnectionSettings')}
-                      </Link>
-                    ) : null}
-                    {isAdmin ? (() => {
-                      // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」/
-                      // 「활성화」 접근 이름이라 보조기술 버튼 목록에서 어느 에이전트
-                      // 행인지 못 가른다. 순번+현재 보이는 라벨을 그대로 품는다.
-                      // story #3608(유나 §22-18 ④-2) — "..."는 아래 aria-label
-                      // 안에도 그대로 들어간다(발견 시점 실측). 낱말("변경 중…")로.
-                      const visibleLabel = togglingId === agent.id ? t('agentToggling') : agent.is_active ? t('deactivateAgent') : t('activateAgent');
-                      return (
-                        <Button
-                          variant="glass"
-                          size="sm"
-                          onClick={() => requestToggle(agent)}
-                          disabled={togglingId === agent.id}
-                          aria-label={t('agentToggleAriaLabel', { n: index + 1, label: visibleLabel })}
-                        >
-                          {visibleLabel}
-                        </Button>
-                      );
-                    })() : null}
-                    <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="text-muted-foreground hover:text-foreground">
-                      <ChevronRight className="size-4" />
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCardBody>
-      </SectionCard>
+  const subtitleOf = (agent: OrgAgent): ReactNode[] => {
+    const parts: ReactNode[] = [];
+    const roleText = agentRoleLabel(agent.role, to); // story 4912 D8: the ONE role label function (org roles + default job keys; an unknown value shows raw) — the detail's chip uses the same one
+    if (roleText) parts.push(roleText);
+    parts.push(ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 }));
+    if (agent.device_name && !embedded) parts.push(<DataText key="device">{agent.device_name}</DataText>); // story 4675 (F2): the computer — two agents with one name are told apart here (hidden where there is one computer, story 4832)
+    if (agent.run_model_unset === true) parts.push(ta('modelUnsetBadge')); // story 4686 (AC3): no model named → the runtime's default runs
+    if (isSystemPublisher(agent.runtime_type)) parts.push(ta('systemPublisherNeutralDescription'));
+    const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
+    if (runtimeLine) parts.push(runtimeLine);
+    return joinDot(parts);
+  };
+
+  const addAgentButton = isAdmin ? (
+    <Button variant="primary" onClick={onAddAgent} iconStart={<Icon name="add" size={14} />}>{ta('manageAddAgent')}</Button>
+  ) : null;
+
+  return (
+    <PageFrame width="reading">
+      <PageHead description={t('orgAgentsDescription')} actions={addAgentButton} />
+
+      {message ? <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner> : null}
+
+      {isAdmin && chosen.size > 0 ? (
+        <div data-testid="agent-selection-bar" className="flex items-center justify-between gap-3 rounded-ds-control border border-ds-action/40 bg-ds-action-soft px-3 py-2 text-ds-small text-ds-action-text">
+          <span role="status">{ta('runProfileChosenCount', { count: chosen.size })}</span>
+          <Button onClick={() => setBulkOpen(true)}>
+            {ta('runProfileBulkOpen')} <CountBadge count={chosen.size} />
+          </Button>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <SkeletonGroup label={tc('loading')} className="space-y-2" data-testid="agent-list-loading">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
+        </SkeletonGroup>
+      ) : loadError ? (
+        <EmptyState
+          title={tc('error')}
+          description={tc('errorDescription')}
+          action={<Button onClick={() => setRetryKey((k) => k + 1)}>{tc('retry')}</Button>}
+        />
+      ) : agents.length === 0 ? (
+        <EmptyState title={t('noOrgAgents')} description={t('noOrgAgentsCta')} />
+      ) : (
+        <RowList aria-label={t('orgAgentsTitle')} header={{ title: t('orgAgentsTitle'), count: agents.length }} data-testid="agent-row-list">
+          {agents.map((agent, index) => {
+            const detailHref = flatHref(`/organization/workforce/${agent.id}`);
+            const label = rowLabels.get(agent.id);
+            const actions = rowActions(agent, index);
+            const common = {
+              'data-testid': `agent-row-${agent.id}`,
+              leading: isAdmin ? (
+                isDesktopRuntime(agent.runtime_type) ? (
+                  <Checkbox
+                    checked={chosen.has(agent.id)}
+                    onCheckedChange={(checked) => setChosen((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(agent.id); else next.delete(agent.id);
+                      return next;
+                    })}
+                    label={<span className="sr-only">{ta('runProfileChooseAria', { name: label ?? agent.name })}</span>}
+                  />
+                ) : <span className="size-4 shrink-0" aria-hidden />
+              ) : undefined,
+              title: (
+                <Link href={detailHref} className="block min-w-0 hover:underline">
+                  <RowName label={label} id={agent.id} />
+                </Link>
+              ),
+              subtitle: subtitleOf(agent),
+              // bounded + wrapping: the state chips sit in the row's right slot, which does not shrink — with all four at 402px they would push the row wider than the screen (the 402px overflow guard)
+              statusMark: (
+                <span className="flex max-w-56 flex-wrap items-center justify-end gap-1.5">
+                  <AgentStateMark row={stateByAgent.get(agent.id) ?? null} />
+                  {!agent.is_active ? <Chip>{t('agentInactiveBadge')}</Chip> : null}
+                  {!isSystemPublisher(agent.runtime_type) && agent.verified === false ? <Chip tone="needs-hand">{ta('agentNotConnected')}</Chip> : null}
+                  {agent.needs_restart ? <Chip tone="needs-hand">{ta('agentNeedsRestartBadge')}</Chip> : null}
+                </span>
+              ),
+              onOpen: () => router.push(detailHref),
+            };
+            return actions.length > 0
+              ? <RowListItem key={agent.id} {...common} actions={actions} actionsLabel={ta('agentRowActionsAria', { name: label ?? agent.name })} />
+              : <RowListItem key={agent.id} {...common} />;
+          })}
+        </RowList>
+      )}
 
       <AgentRunProfileBulkDialog
         agents={agents.filter((a) => chosen.has(a.id))}
@@ -402,19 +395,31 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <DialogDescription>{t('deactivateAgentDialogBody')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeactivateTarget(null)} disabled={togglingId === deactivateTarget?.id}>
+            <DialogButton variant="ghost" onClick={() => setDeactivateTarget(null)} disabled={togglingId === deactivateTarget?.id}>
               {tc('cancel')}
-            </Button>
-            <Button
+            </DialogButton>
+            <DialogButton
               variant="destructive"
               onClick={() => void confirmDeactivate()}
               disabled={togglingId === deactivateTarget?.id}
             >
               {togglingId === deactivateTarget?.id ? '...' : t('deactivateAgentDialogConfirm')}
-            </Button>
+            </DialogButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageFrame>
   );
+}
+
+/** story 4889 (W1): the live state of an agent that runs on a computer — a ds StatusLabel in the strip's own words; nothing for an agent with no session (the row as it was). */
+function AgentStateMark({ row }: { row: AgentStateRow | null }) {
+  const tState = useTranslations('chats.agentSession');
+  if (!row || row.state === null) return null;
+  const word = shownState(row);
+  // story 4889 (PO 11-11): a FINISHED session («끝») reads the same as no session in this list — it is the place to find who is running or needs a hand, and ~60 hollow dots only made noise. (The Today list keeps its «끝» line — that screen's own call.)
+  if (word === 'stopped') return null;
+  const limitRests = limitHeld(word, row.limit) || limitLooksAgain(word, row.limit) || (word === 'waiting_input' && !!row.limit?.self_resume);
+  const mark = stateMark(word, { ask: !!row.first_screen?.ask, limitRests });
+  return <StatusLabel status={mark} label={sessionStateLabel(row, tState)} data-testid="agent-state-mark" data-agent-id={row.agent_id} className="shrink-0 text-ds-small" />;
 }

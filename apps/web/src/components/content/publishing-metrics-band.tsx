@@ -87,18 +87,18 @@ export function PublishingMetricsBand({ orgId, window: win }: { orgId: string; w
 
   return (
     <div
-      className="rounded-md border border-border bg-muted/20 p-3 text-xs text-foreground"
+      className="rounded-ds-control border border-ds-line bg-ds-surface-high p-3 text-ds-small text-ds-ink"
       data-testid="publishing-metrics-band"
     >
       {/* PO CHANGES⑦(2026-09-09) — 표 바로 아래라 구획 경계는 최소한(별도 카드 톤
           없이 작은 라벨 한 줄). 기간(「지난 N일 — 화면 기간을 따릅니다」류)은 안
           그린다 — 이 화면 자체의 기간 컨트롤이 이미 있어 중복이다. */}
-      <p className="mb-1.5 font-medium text-foreground" data-testid="publishing-metrics-title">
+      <p className="mb-1.5 font-medium text-ds-ink" data-testid="publishing-metrics-title">
         {t('publishingMetricsTitle')}
       </p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         {loadFailed ? (
-          <span className="text-muted-foreground" data-testid="publishing-metrics-load-failed">
+          <span className="text-ds-ink-3" data-testid="publishing-metrics-load-failed">
             {t('publishingMetricsLoadFailed')}
           </span>
         ) : metrics ? (
@@ -121,7 +121,7 @@ export function PublishingMetricsBand({ orgId, window: win }: { orgId: string; w
               </span>
             ) : null}
             {metrics.computed_at ? (
-              <span className="ml-auto text-muted-foreground" data-testid="publishing-metrics-computed-at">
+              <span className="ml-auto text-ds-ink-3" data-testid="publishing-metrics-computed-at">
                 {t('publishingMetricsComputedAt', { time: formatViewerScheduledAt(metrics.computed_at, displayTimezone).display })}
               </span>
             ) : null}

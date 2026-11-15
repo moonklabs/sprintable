@@ -78,7 +78,7 @@ describe('[SID:4380] 폴더 나무 — 펼침 상태 · 키보드로 펼치고 �
     expect(cls).toContain('focus-visible:-outline-offset-2');
     expect(cls).not.toContain('outline-none');
     expect(cls).not.toContain('focus-visible:bg-muted');
-    expect(cls).toContain('bg-info/10');
+    expect(cls).toContain('bg-ds-action-soft');
   });
 
   // PO(10:50Z): 같은 부류 — «모두» 행 · 검색 중 평면 목록 행도 같은 초점 규칙.
@@ -97,7 +97,7 @@ describe('[SID:4380] 폴더 나무 — 펼침 상태 · 키보드로 펼치고 �
     expect(cls).toContain('focus-visible:-outline-offset-2');
     expect(cls).not.toContain('outline-none');
     expect(cls).not.toContain('focus-visible:bg-muted');
-    expect(cls).toContain('bg-info/10');
+    expect(cls).toContain('bg-ds-action-soft');
   });
 });
 
@@ -113,7 +113,7 @@ describe('[SID:4380] 폴더 검색칸 초점', () => {
     });
     const input = container.querySelector<HTMLInputElement>(`input[placeholder="${koMessages.storage.folderSearchPlaceholder}"]`)!;
     const box = input.parentElement!.className.split(/\s+/);
-    expect(box).toContain('focus-within:ring-2');
-    expect(box).toContain('focus-within:ring-ring');
+    expect(box).toContain('focus-within:border-ds-ink-2'); // 4910 — 글 칸 초점 규칙(테두리만 중립으로 짙어짐 · 파란 고리 없음 · FIELD_FOCUS_WITHIN)
+    expect(box).not.toContain('focus-within:ring-ds-action');
   });
 });

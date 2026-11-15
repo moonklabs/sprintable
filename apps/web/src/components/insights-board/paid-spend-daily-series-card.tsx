@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
+import { Skeleton } from '@/components/ds/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 
@@ -72,14 +73,14 @@ export function PaidSpendDailySeriesCard({ orgId }: { orgId: string }) {
   if (state.status === 'loading') {
     return (
       <Card className="p-3" data-testid="paid-spend-daily-series-card-loading">
-        <div className="h-16 animate-pulse rounded-md bg-muted" />
+        <Skeleton className="h-16 w-full" />
       </Card>
     );
   }
 
   if (state.status === 'failed') {
     return (
-      <Card className="p-3 text-xs text-muted-foreground" data-testid="paid-spend-daily-series-card-failed">
+      <Card className="p-3 text-ds-small text-ds-ink-3" data-testid="paid-spend-daily-series-card-failed">
         {t('paidSpendDailySeriesLoadFailed')}
       </Card>
     );
@@ -91,16 +92,16 @@ export function PaidSpendDailySeriesCard({ orgId }: { orgId: string }) {
   const maxSpend = Math.max(1, ...points.map((p) => p.spend_minor ?? 0));
 
   return (
-    <Card className="p-3 text-xs" data-testid="paid-spend-daily-series-card">
-      <p className="font-medium text-foreground" data-testid="paid-spend-daily-series-title">
+    <Card className="p-3 text-ds-small" data-testid="paid-spend-daily-series-card">
+      <p className="font-medium text-ds-ink" data-testid="paid-spend-daily-series-title">
         {t('paidSpendDailySeriesTitle')}
       </p>
-      <p className="mb-2 text-muted-foreground" data-testid="paid-spend-daily-series-caption">
+      <p className="mb-2 text-ds-ink-3" data-testid="paid-spend-daily-series-caption">
         {t('paidSpendDailySeriesCaption')}
       </p>
 
       {points.length === 0 ? (
-        <span className="text-muted-foreground" data-testid="paid-spend-daily-series-empty">
+        <span className="text-ds-ink-3" data-testid="paid-spend-daily-series-empty">
           {t('paidSpendDailySeriesEmpty')}
         </span>
       ) : (
@@ -122,19 +123,19 @@ export function PaidSpendDailySeriesCard({ orgId }: { orgId: string }) {
               >
                 {mixed ? (
                   <span
-                    className="h-2 w-2 rounded-full bg-muted-foreground"
+                    className="h-2 w-2 rounded-full bg-ds-ink-3"
                     data-testid="paid-spend-daily-series-point-mixed-dot"
                     aria-label={label}
                   />
                 ) : (
                   <div
-                    className="w-3 rounded-t-sm bg-foreground"
+                    className="w-3 rounded-t-ds-control bg-ds-ink"
                     data-testid="paid-spend-daily-series-point-bar"
                     style={{ height: `${heightPct}px` }}
                     aria-label={label}
                   />
                 )}
-                <span className="text-micro text-muted-foreground">{point.date.slice(5)}</span>
+                <span className="font-mono text-ds-mono-sm text-ds-ink-3">{point.date.slice(5)}</span>
               </li>
             );
           })}

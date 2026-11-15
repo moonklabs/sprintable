@@ -430,6 +430,33 @@ describe('SettingsPage — story #3789: 조직 탭·삭제 다이얼로그 i18n 
     expect(text).not.toContain('Member ');
   });
 
+  it('story 4891 ⑤a — 조직 이름 바꾸기: 소유자가 새 이름을 적고 [저장]을 누르면 PATCH /api/organizations/{id}로 새 이름이 가고, 그 이름이 화면에 남는다(페이지가 카드에 핸들러를 건다)', async () => {
+    const base = mockOrgFetch();
+    const patches: unknown[] = [];
+    const fetchWithAuthMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/organizations/org-1' && init?.method === 'PATCH') {
+        patches.push(JSON.parse(String(init.body)));
+        return Promise.resolve({ ok: true, json: async () => ({ data: { name: '새 이름' } }) });
+      }
+      return base(url);
+    });
+    await mountOrgTab(fetchWithAuthMock as unknown as ReturnType<typeof mockOrgFetch>);
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input.value).toBe('문클랩');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '새 이름');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const save = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.common.save) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await act(async () => { save.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(patches).toEqual([{ name: '새 이름' }]);
+    // the page took the saved name into its organization state: the field now shows it as the CURRENT name, so [저장] is held again
+    const saveAfter = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.common.save) as HTMLButtonElement;
+    expect(saveAfter.disabled).toBe(true);
+  });
+
   it('조직 탭 — Danger Zone 경고문·삭제 버튼이 신설 키를 쓴다(다이얼로그 제목과 같은 키 재사용)', async () => {
     await mountOrgTab(mockOrgFetch());
     const text = container.textContent ?? '';
@@ -639,5 +666,40 @@ describe('SettingsPage — story #4184: /api/me 요청 공유', () => {
     expect(container.textContent).toContain('테스트');
     expect(container.textContent).not.toContain(koMessages.settings.accountInfoLoadError);
     expect(fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me')).toHaveLength(1);
+  });
+});
+
+
+describe('SettingsPage — story #4897: the project create form is for every member (the API allows it)', () => {
+  async function mountProjectsTab(role: string) {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=projects'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve({ ok: true, json: async () => ({ data: { role, user_id: 'u1' } }) });
+      if (url === '/api/current-project') return Promise.resolve({ ok: true, json: async () => ({ data: { project_id: 'p1', org_id: 'org-1' } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it.each(['member', 'admin'])('⭐%s — the name field and the create button are on the screen, and no «admins only» line is', async (role) => {
+    await mountProjectsTab(role);
+    // story 4891: the box is found by its words — the placeholder (old screen) or the visible name the ds Field gives it (new screen)
+    const nameBoxes = Array.from(container.querySelectorAll('input')).filter((i) => i.placeholder === koMessages.settings.projectNamePlaceholder || (i.labels?.[0]?.textContent ?? '').trim() === koMessages.settings.projectNamePlaceholder);
+    expect(nameBoxes.length).toBeGreaterThan(0);
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(buttons).toContain(koMessages.settings.createProjectAction);
+    expect(container.textContent).not.toContain('조직 관리자만 가능해요');
+  });
+
+  it('the line that said only organization admins can create a project is gone from both languages', () => {
+    expect((koMessages.settings as Record<string, string>).projectAdminRequired).toBeUndefined();
+    expect((enMessages.settings as Record<string, string>).projectAdminRequired).toBeUndefined();
   });
 });

@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Field, type FieldControlProps } from '@/components/ds/field';
+import { NativeSelect } from '@/components/ds/select';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { SettingsSection } from './settings-section';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 import { memberLookup } from '@/lib/member-display';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { cn } from '@/lib/utils';
 
 /**
  * story e0c1b24c — org 게이트 정책(posture·merge_gate_default_approver_member_id) 설정
@@ -30,6 +31,9 @@ import { cn } from '@/lib/utils';
  * "org_owner 하드코딩" 실사고 처방(org owner≠마케팅 담당인 org에서 레시피 사람 게이트가
  * 전부 owner 결재함으로만 가던 것).
  */
+
+/** a candidate in the approver picker (value = member id) */
+type SelectOption = { value: string; label: string };
 
 type Posture = 'conservative' | 'balanced' | 'permissive';
 const POSTURES: Posture[] = ['conservative', 'balanced', 'permissive'];
@@ -160,7 +164,6 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
     }
   };
 
-  const approverSelectOptions: SelectOption[] = [{ value: '', label: t('approverUnset') }, ...approverOptions];
   // [SID:4286] 지정 승인자가 후보(owner/admin)에 없을 때 UUID 통째를 이름 칸에 싣던 것 — 후보 목록을 다 불러왔으면
   // «알 수 없는 구성원», 불러오는 중이면 빈 칸(자리 칸이 «불러오는 중» placeholder를 이미 보인다).
   const approverLabelTable = Object.fromEntries(approverOptions.map((o) => [o.value, o.label])) as Record<string, string>;
@@ -175,100 +178,76 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
     ? (memberLookup(approverNames.memberMap, recipeApproverId, tc, { loaded: approverNames.loaded })?.label ?? '')
     : t('approverUnset');
 
+  // a native select: the unset choice first; while the candidate list is still being read, a value that is set shows «불러오는 중» (the old dropdown's placeholder) instead of a raw id
+  const approverSelect = (value: string, onChange: (v: string) => void, control: FieldControlProps) => (
+    <NativeSelect {...control} value={value} disabled={loadingApprovers || saving} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{t('approverUnset')}</option>
+      {approverOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      {value && !approverOptions.some((o) => o.value === value) ? <option value={value}>{loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}</option> : null}
+    </NativeSelect>
+  );
+
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
-          <p className="text-sm text-muted-foreground">{t('description')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {message && (
-          <Alert
-            variant={message.type === 'success' ? 'success' : 'destructive'}
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-          >
-            <AlertDescription>{message.text}</AlertDescription>
-          </Alert>
-        )}
+    <SettingsSection title={t('title')} description={t('description')}>
+      {message && (
+        <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner>
+      )}
 
-        {loading ? (
+      {loading ? (
+        <SkeletonGroup label={tc('loading')} className="space-y-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-7 w-64" />
+        </SkeletonGroup>
+      ) : (
+        <>
           <div className="space-y-2">
-            <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-            <div className="h-7 w-64 animate-pulse rounded bg-muted" />
-          </div>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">{t('postureLabel')}</p>
-              {canEdit ? (
-                <div className="flex gap-1" role="group" aria-label={t('postureLabel')}>
-                  {POSTURES.map((p) => (
-                    <Button
-                      key={p}
-                      type="button"
-                      variant="glass"
-                      size="sm"
-                      disabled={saving}
-                      aria-pressed={posture === p}
-                      onClick={() => setPosture(p)}
-                      className={cn(
-                        'min-w-[80px]',
-                        posture === p
-                          ? 'border-primary bg-primary-tint text-foreground'
-                          : 'border-border text-muted-foreground hover:bg-muted/40',
-                      )}
-                    >
-                      {t(POSTURE_LABEL_KEY[p])}
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t(POSTURE_LABEL_KEY[posture])}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">{t('approverLabel')}</p>
-              {canEdit ? (
-                <OperatorDropdownSelect
-                  value={approverId}
-                  onValueChange={setApproverId}
-                  options={approverSelectOptions}
-                  placeholder={loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}
-                  disabled={loadingApprovers || saving}
-                />
-              ) : (
-                <p className="min-h-5 text-sm text-muted-foreground">{currentApproverLabel}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">{t('recipeApproverLabel')}</p>
-              {canEdit ? (
-                <OperatorDropdownSelect
-                  value={recipeApproverId}
-                  onValueChange={setRecipeApproverId}
-                  options={approverSelectOptions}
-                  placeholder={loadingApprovers ? t('approverLoading') : t('approverPickPlaceholder')}
-                  disabled={loadingApprovers || saving}
-                />
-              ) : (
-                <p className="min-h-5 text-sm text-muted-foreground">{currentRecipeApproverLabel}</p>
-              )}
-            </div>
-
+            <p className="text-ds-small font-semibold text-ds-ink">{t('postureLabel')}</p>
             {canEdit ? (
-              <Button type="button" size="sm" onClick={() => void handleSave()} disabled={saving}>
-                {saving ? tc('saving') : t('save')}
-              </Button>
-            ) : null}
-          </>
-        )}
-      </SectionCardBody>
-    </SectionCard>
+              <div className="flex flex-wrap gap-1" role="group" aria-label={t('postureLabel')}>
+                {POSTURES.map((p) => (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant={posture === p ? 'primary' : 'secondary'}
+                    disabled={saving}
+                    aria-pressed={posture === p}
+                    onClick={() => setPosture(p)}
+                    className="min-w-[80px]"
+                  >
+                    {t(POSTURE_LABEL_KEY[p])}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-ds-body text-ds-ink-3">{t(POSTURE_LABEL_KEY[posture])}</p>
+            )}
+          </div>
+
+          {canEdit ? (
+            <Field label={t('approverLabel')}>{(ctl) => approverSelect(approverId, setApproverId, ctl)}</Field>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-ds-small font-semibold text-ds-ink">{t('approverLabel')}</p>
+              <p className="min-h-5 text-ds-body text-ds-ink-3">{currentApproverLabel}</p>
+            </div>
+          )}
+
+          {canEdit ? (
+            <Field label={t('recipeApproverLabel')}>{(ctl) => approverSelect(recipeApproverId, setRecipeApproverId, ctl)}</Field>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-ds-small font-semibold text-ds-ink">{t('recipeApproverLabel')}</p>
+              <p className="min-h-5 text-ds-body text-ds-ink-3">{currentRecipeApproverLabel}</p>
+            </div>
+          )}
+
+          {canEdit ? (
+            <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? tc('saving') : t('save')}
+            </Button>
+          ) : null}
+        </>
+      )}
+    </SettingsSection>
   );
 }

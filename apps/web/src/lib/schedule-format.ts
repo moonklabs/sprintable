@@ -121,7 +121,7 @@ export function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss:
 
 /** dateKey에 달력일 기준으로 n일을 더한다(시각 정보 없는 순수 날짜 산술 — DST·tz 무관,
  * B1③ shiftRange가 ms 산술로 DST tz에서 하루 밀리던 것의 근본 수정 재료). */
-function addCalendarDays(dateKey: string, days: number): string {
+export function addCalendarDays(dateKey: string, days: number): string {
   const [y, mo, d] = dateKey.split('-').map(Number);
   const noon = Date.UTC(y, (mo ?? 1) - 1, d, 12); // 정오 기준 — 자정 근처 반올림 오차 회피.
   const shifted = new Date(noon + days * 86400000);

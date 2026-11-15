@@ -18,6 +18,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
+from app.core.log_safe import url_host
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import (
     AuthContext,
@@ -648,7 +649,7 @@ def _msg_payload(
             ),
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
-        "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
+        "summary": _build_message_summary(_preview_content(msg), sender.name if sender else None, bool(attachments)),  # story 4921 — an event message's summary is the human line, not the machine text
         "created_at": msg.created_at.isoformat(),
     }
     # story #2263 AC6(오르테가 판정 2026-07-29, 스레드 7256d5cc): 읽기 경로(list_messages·
@@ -677,13 +678,12 @@ def _msg_payload(
         payload["delivery_withheld"] = withheld
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
-    # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
-    payload.update(_approval_payload(msg))
-    # story #2637 AC 0-a: 이벤트 발행 메시지 스키마 top-level 노출(없으면 None·additive).
-    payload.update(_event_payload(msg))
-    # story #3143(9a5abc24) PO 리뷰 델타: 서버 집행 커맨드 결과 카드 스키마 top-level
-    # 노출(없으면 None·additive) — FE가 텍스트 휴리스틱 없이 이 카드를 식별하는 축.
-    payload.update(_server_command_payload(msg))
+    # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
+    # (an approval's resolution note, an event's payload…) that the tombstone (`content = ""`) did not clear. The keys stay, empty (the shape is the same).
+    _cards = (_approval_payload, _event_payload, _server_command_payload)
+    for _card in _cards:
+        _fields = _card(msg)
+        payload.update({k: None for k in _fields} if msg.deleted_at is not None else _fields)
     return payload
 
 
@@ -792,6 +792,15 @@ def _operator_reply_target_gate_id(root_msg: "ConversationMessage | None") -> uu
         return None
 
 
+def _preview_content(msg: "ConversationMessage") -> str:
+    """story 4921 — the text a person sees for this message in a preview (the bell's summary · a notification body · the activity log): for an event message whose `content` is the machine text an
+    agent reads («[이벤트] preset.x», «- key: value» lines) it is the human line built from the event card; every other content is returned as it is."""
+    from app.services.event_message_text import human_event_text
+
+    content = msg.content or ""
+    return human_event_text(content, _event_payload(msg).get("event")) or content
+
+
 def _event_payload(msg: "ConversationMessage") -> dict:
     """story #2637 AC 0-a: msg_metadata['event'] → payload top-level(없으면 None).
     _approval_payload와 동형(additive·__dict__ 전용 read — 동일 greenlet_spawn 회피 이유).
@@ -800,6 +809,15 @@ def _event_payload(msg: "ConversationMessage") -> dict:
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     event = meta.get("event") if isinstance(meta, dict) else None
     return {"event": event if isinstance(event, dict) else None}
+
+
+def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
+    """story #4883 — the `event` of a notification row: the message's own card (`event_key`, `payload`, `refs` — whatever the sender put in `event_context`) with the sender's name the SERVER worked
+    out. The name is written LAST: it was written first and the card spread after it, so a sender that put `sender_name` in its `event_context` replaced it (and 4875's withheld copy, which keeps only
+    the name, kept the forged one). Every other key is as the sender sent it."""
+    card = _event_payload(msg).get("event") or {}
+    # story #4903 — the message's id rides on the card (an id, never words): a delete finds ITS notification rows by it (the row has no other link to the message). Written last, like the name.
+    return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
 
 
 def _server_command_payload(msg: "ConversationMessage") -> dict:
@@ -1356,7 +1374,7 @@ async def _dispatch_discord_outbound(
                 await client.post(wh_url, json=discord_payload)
         except Exception:
             logger.warning(
-                "Discord outbound failed member_id=%s url=%s", decision.member_id, wh_url, exc_info=True
+                "Discord outbound failed member_id=%s url=%s", decision.member_id, url_host(wh_url), exc_info=True  # story 4869: the host only (the path of a Discord webhook is its secret)
             )
 
 
@@ -1544,6 +1562,25 @@ class SendMessageRequest(BaseModel):
         if len(v) > _MAX_ATTACHMENTS:
             raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
         return v
+
+
+class HttpSendMessageRequest(SendMessageRequest):
+    """story 4894 — the body of the PUBLIC `POST /conversations/{id}/messages`.
+
+    `event_context` is the card of a message the SERVER published (`publish_registry_event` builds a `SendMessageRequest` and hands it to `send_message_core` in-process — no HTTP). On the
+    public route it used to be accepted from anyone in the room, so a participant (a person or an agent) could stamp a message with the card of an event the server never published (a gate
+    verdict, an assignment — `event_key` · `payload` · `refs` with names and links of their choosing) and that card was stored, delivered to the readers of the room and copied into the other
+    participants' notification rows. A caller of the public route may not set it: any value is a 422. The in-process callers keep `SendMessageRequest` (this subclass only narrows the HTTP
+    input), so nothing the server publishes changes."""
+
+    event_context: None = Field(default=None, description="Set by the server only (the card of an event the server published). Sending a value is refused with 422.")
+
+    @field_validator("event_context", mode="before")
+    @classmethod
+    def _event_context_is_server_only(cls, v: object) -> None:
+        if v is not None:
+            raise ValueError("event_context is set by the server only (it is the card of an event the server published); it cannot be sent to this endpoint")
+        return None
 
 
 class UploadConversationAttachmentRequest(BaseModel):
@@ -1814,10 +1851,15 @@ async def list_conversations(
 
     result = []
     for conv in convs:
+        # PO 11-13 (4912 follow-up, decided): a THREAD REPLY counts. The room's preview is the newest message that is still there, replies included — the same rule that moves the row's time, its place in the
+        # list (`updated_at`) and its unread count (every message counts): they all read «a thread reply is new activity in the room». Taking replies out of the preview alone would make a room jump to the top
+        # with «1 unread» over an older text; changing all four is a product decision about how thread activity shows in the list, not a defect fix. Pinned by test_4912_list_latest_includes_thread_realdb.py.
+        # story #4903 — the room's latest message is the newest one that is NOT deleted (a tombstone is not «the latest message»: it used to be chosen, so a room whose last message was deleted
+        # showed «no message» while older messages were still there). All deleted → None («no message», as for an empty room).
         latest_msg = (await db.execute(
             select(ConversationMessage)
-            .where(ConversationMessage.conversation_id == conv.id)
-            .order_by(ConversationMessage.created_at.desc())
+            .where(ConversationMessage.conversation_id == conv.id, ConversationMessage.deleted_at.is_(None))
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())  # same tie-break as the room's own message list: two messages of one microsecond never pick «any»
             .limit(1)
         )).scalar_one_or_none()
 
@@ -1841,6 +1883,7 @@ async def list_conversations(
             # story #2925(2921-S2 선행) — 참조 없으면 null(fail-safe, 거짓 색 금지).
             "linked_proof": linked_proof_map.get(conv.id),
             "latest_message": {
+                "id": str(latest_msg.id),  # story #4903 — which message it is (two messages of one microsecond are told apart; a delete names its message by id)
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
                 # story #3973(E-UX-OVERHAUL·「대화」 3/N) — 목록 행 클립 아이콘용. tombstone
@@ -1853,7 +1896,7 @@ async def list_conversations(
                 # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
                 # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
                 # 목록이 이미 씀·additive)를 그대로 재사용 — 새 스키마·새 조회 0.
-                **_event_payload(latest_msg),
+                **({"event": None} if latest_msg.deleted_at is not None else _event_payload(latest_msg)),  # story #4903: a deleted message's card is not served
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
             "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
@@ -2374,6 +2417,46 @@ async def get_message(
     )
 
 
+MESSAGE_DELETED_EVENT = "conversation.message_deleted"
+
+
+async def _announce_message_deleted(
+    db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID, sender_id: uuid.UUID, thread_id: uuid.UUID | None, created_at: datetime,
+    deleted_at: datetime | None,
+) -> None:
+    """story #4903 AC2 — tell the room's people that a message was deleted, so a screen that stays open turns it into a tombstone without a reload.
+
+    - **who**: the people (not agents) in the room NOW, by the SAME resolver a new message uses (`conversation_member_ids_in_org(…, humans_only=True)`: only when the
+      conversation is this org's, only this org's members, an old aliased id resolved to the live one — stories #4500 / #4505) — each through their open streams
+      (`_push_to_agent`: every tab and device). An agent reads the tombstone when it reads the room; a person who left the room, or whose participant row belongs to
+      another org, hears nothing. A person who BLOCKED the sender is left out too (as a new message leaves them out: a blocked sender's message never reached them,
+      and a frame about it would tell them one existed).
+    - **what**: ids and moments only — `id` · `conversation_id` · `thread_id` · `created_at` (the message's own moment: a list row says which message is its latest by it) ·
+      `deleted_at`. Never the words, a summary or an attachment (the frame is also kept in the stream's replay buffer, and a person who reconnects gets it).
+    - **when**: after the commit (the message is a tombstone before anyone hears of it), once — the first delete only.
+    - a failure here never fails the delete: the tombstone is committed, a reload still shows it."""
+    try:
+        from app.services.member_resolver import conversation_member_ids_in_org
+
+        # the reads run inside a savepoint: a failure rolls back only the savepoint, so the session (and the route's own objects) stay usable after the commit
+        async with db.begin_nested():
+            people = await conversation_member_ids_in_org(db, conversation_id, org_id, humans_only=True)
+            blockers = set((await db.execute(select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender_id))).scalars().all())
+        people = people - blockers
+        frame = {
+            "event_type": MESSAGE_DELETED_EVENT,
+            "conversation_id": str(conversation_id),
+            "id": str(message_id),
+            "thread_id": str(thread_id) if thread_id else None,
+            "created_at": created_at.isoformat() if created_at else None,
+            "deleted_at": deleted_at.isoformat() if deleted_at else None,
+        }
+        for pid in sorted(people, key=str):
+            _push_to_agent(str(pid), {**frame, "recipient_id": str(pid)})
+    except Exception:
+        logger.warning("conversation.message_deleted announce failed conversation_id=%s message_id=%s", conversation_id, message_id, exc_info=True)
+
+
 @router.delete("/{conversation_id}/messages/{message_id}", status_code=200)
 async def delete_message(
     conversation_id: uuid.UUID,
@@ -2417,16 +2500,25 @@ async def delete_message(
     if msg.sender_id != member.id:
         raise HTTPException(status_code=403, detail="Not the message owner")
 
-    # ⛔AC7 블라인드스팟(의도적 범위 밖, 선언) — 이 삭제는 다른 참가자의 이미 열려 있는 화면에
-    # 실시간(SSE) 반영되지 않는다. send_message의 실시간 fan-out(_dispatch_conversation_event)은
-    # Event insert·recipient_seq·webhook-dedup까지 얽힌 별도 배선이라, 이 스토리 하나로 같이
-    # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
-    # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
+    # story #4903 AC2 — this delete used to reach no other open screen (the old «AC7 blind spot»: reload showed it, a screen that stayed open did not). It is announced now:
+    # after the commit, the room's people (their open streams) are told which message was deleted — ids and moments only, never words (see `_announce_message_deleted`).
+    first_delete = msg.deleted_at is None
+    # story #4903 AC1 — the words were also copied when the message was sent (event rows · bell rows · notification rows · delivery jobs · activity rows):
+    # they go too, in this same transaction; the rows stay, only the words are removed. A REPEAT delete runs the id-based part again (it repairs a tombstone
+    # that was made before this scrub existed); the old-form match needs the words, which only the first delete still has.
+    old_content = msg.content if msg.deleted_at is None else None
     if msg.deleted_at is None:
         msg.deleted_at = datetime.now(timezone.utc)
         msg.content = ""  # ③ 오발송 스크럽 — 플레이스홀더 문구는 FE가 deleted_at 보고 렌더(i18n).
         await db.flush()
-        await db.commit()
+    from app.services.deleted_message_scrub import scrub_stored_copies_of_deleted_message
+    await scrub_stored_copies_of_deleted_message(
+        db, org_id=org_id, message_id=msg.id, conversation_id=conversation_id, created_at=msg.created_at, old_content=old_content,
+        summary_without_words=_build_message_summary("", member.name, False),
+    )
+    await db.commit()
+    if first_delete:
+        await _announce_message_deleted(db, org_id=org_id, conversation_id=conversation_id, message_id=msg.id, sender_id=msg.sender_id, thread_id=msg.thread_id, created_at=msg.created_at, deleted_at=msg.deleted_at)
 
     return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 
@@ -2781,7 +2873,7 @@ async def add_participant(
 @router.post("/{conversation_id}/messages", status_code=201)
 async def send_message(
     conversation_id: uuid.UUID,
-    body: SendMessageRequest,
+    body: HttpSendMessageRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -3507,7 +3599,7 @@ async def send_message_core(
                             # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
                             # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
                             title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
-                            body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
+                            body=plain_text_preview(_preview_content(msg), NOTIFICATION_BODY_PREVIEW_MAX),
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
                             # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
@@ -3515,10 +3607,7 @@ async def send_message_core(
                             # 구조 그대로, _event_payload 재사용)까지 같이 싣는다. FE가 event
                             # 있으면 eventCard 조합(신규 낱말 0)으로 제목·요약을 짓고, 없으면
                             # 위 title/body로 폴백.
-                            event={
-                                "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
-                                **(_event_payload(msg).get("event") or {}),
-                            },
+                            event=_notification_event(msg, sender.name or UNNAMED_MEMBER_LABEL),
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
                             human_event_recorded_for=mention_evented,  # story #4519 — their bell item is the conversation:mention above
@@ -3539,12 +3628,17 @@ async def send_message_core(
         # PR 셀프게이트 뮤테이션 체크(테스트 파일 참조) 중 발견해 즉시 보강.
         async with db.begin_nested():
             participant_rows = (await db.execute(
-                select(ConversationParticipant.member_id)
+                select(ConversationParticipant.member_id, ConversationParticipant.muted_at)
                 .where(ConversationParticipant.conversation_id == conversation_id)
             )).all()
+            # story 4890 — whoever asked not to be told about this message is not pushed, noted or given a bell copy either: the people the channel router left out of this message's decisions
+            # (they muted the room by preference, or are on «mentions» and were not mentioned — `preference_excluded_ids`) and the people who muted the room with the toggle (participant `muted_at`,
+            # the one the bell's mute rule reads). Before, only the message's own Event honoured that; this notification (inbox row · bell copy · push / personal-webhook jobs) went to them per message.
+            room_muted_ids = {r[0] for r in participant_rows if r[1] is not None}
             candidate_targets = (
                 {r[0] for r in participant_rows}
                 - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
+                - preference_excluded_ids - room_muted_ids
             )
             if candidate_targets:
                 # story #3629(3627 클래스) — 위 mention 블록과 동형(filter_human_member_ids).
@@ -3558,14 +3652,11 @@ async def send_message_core(
                         # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
                         # 아님, 3903 실측 확認) — 그대로.
                         title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
-                        body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
+                        body=plain_text_preview(_preview_content(msg), NOTIFICATION_BODY_PREVIEW_MAX),
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
                         # story #3903(migration 0378) — 위 mention 블록과 동형.
-                        event={
-                            "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
-                            **(_event_payload(msg).get("event") or {}),
-                        },
+                        event=_notification_event(msg, sender.name or UNNAMED_MEMBER_LABEL),
                         # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                         via_outbox=True,
                     )
@@ -3757,7 +3848,7 @@ async def send_message_core(
             entity_id=conversation_id,
             context={
                 "message_id": str(msg.id),
-                "content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX),
+                "content_preview": plain_text_preview(_preview_content(msg), _SUMMARY_PREVIEW_MAX),
             },
         )
 

@@ -4,7 +4,7 @@
  * 왜: loading.tsx가 없는 목적지는 누른 뒤 서버 응답(RSC 450~670ms)을 다 받을 때까지 화면이 안 바뀐다(«전체» · «일감» 탭→주소 536~1000ms ·
  * 있는 «결재» · «대화»는 44~193ms).
  *
- * 목적지: nav-config(`resolveNavGroups` · `resolveChatCenterItem` · `LEGACY_NAV_ITEMS`)와 탭 목적지(`resolveNavV3Destinations`)를 **v3 플래그
+ * 목적지: nav-config(`resolveNavGroups` · `resolveChatCenterItem` · `OTHER_NAV_ITEMS`)와 탭 목적지(`resolveNavV3Destinations`)를 **v3 플래그
  * 전부 OFF · 전부 ON 두 판에서** 읽어 모은다(플래그를 켜면 «오늘» /today · «대화» /chat · «연결·규칙» /connect-rules · «일감» work-list로 바뀐다).
  * 모은 목록은 판마다 **따로** EXPECTED_OFF · EXPECTED_ON과 정확히 대조한다 — 늘거나 빠지거나 OFF/ON이 뒤바뀌면 RED(총량 하한 · 합집합 대조는
  * 하나 빠져도 · 방향이 바뀌어도 초록이었다 · 까디르 검수 P2).
@@ -25,10 +25,11 @@
  *
  * 못 잡는 것(선언): redirect를 다른 모듈에서 다시 내보내 부르는 경우(재수출 체인)는 못 본다 — 지금 app/ 안 0건.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LEGACY_NAV_ITEMS, resolveChatCenterItem, resolveNavGroups } from '@/lib/nav-config';
+import { CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { WORKSPACE_FRAME_TABS } from '@/components/workspace/workspace-frame-tabs';
 
@@ -43,10 +44,10 @@ function collectDestinationsFor(flags: NavV3Flags): Map<string, Dest> {
   {
     const dest = resolveNavV3Destinations(flags);
     const items: Dest[] = [
-      dest.work, dest.approvals, dest.chats, dest.more,
+      dest.today, dest.work, dest.approvals, dest.chats, dest.more,
       ...resolveNavGroups(flags).flatMap((g) => g.items),
-      resolveChatCenterItem(flags),
-      ...LEGACY_NAV_ITEMS,
+      CHAT_CENTER_ITEM,
+      ...OTHER_NAV_ITEMS,
     ];
     for (const item of items) {
       const path = item.path.split('?')[0]!;
@@ -126,12 +127,22 @@ function codeOnly(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** story 4892 — `<SkeletonGroup label={…}>` with a NON-empty expression (an empty literal name — `label={''}` · `label={""}` · ``label={``}`` — would leave an unnamed status; `label="x"` is not the form the guard knows). */
+const DS_SKELETON_GROUP_NAMED = /<SkeletonGroup\s+label=\{(?!\s*(?:''|""|``)\s*\})[^}]+\}/;
+/** …and that `SkeletonGroup` must BE the ds one — imported from `@/components/ds/skeleton`; a local / other-path component with the same name proves nothing about role="status". */
+const DS_SKELETON_GROUP_IMPORT = /import\s*\{[^}]*\bSkeletonGroup\b(?!\s+as\b)[^}]*\}\s*from\s*['"]@\/components\/ds\/skeleton['"]/;
+/** …and the file must not define its own `SkeletonGroup` beside it (an aliased ds import + a local one of the same name would otherwise pass). */
+const LOCAL_SKELETON_GROUP_DEF = /\b(?:function|const|let|var|class)\s+SkeletonGroup\b/;
+
 /** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나가 «불러오는 중»을 제대로 알리는지 — 같은 소스에 `role="status"` ·
  * `aria-busy="true"` · 화면 읽기 프로그램용 라벨(`sr-only`) 셋 다(까디르 검수 P3 · role만 보면 라벨 없는 상태도 통과했다). */
 function announcesStatus(loadingFile: string): boolean {
   const hasStatus = (f: string) => {
     const src = codeOnly(readFileSync(f, 'utf8'));
-    return /\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src);
+    // story 4892 — the ds SkeletonGroup (components/ds/skeleton.tsx) sets role="status" · aria-busy="true" · its name (`aria-label={label}`) ITSELF, so a placeholder built on it announces the state without
+    // repeating the three literals; its `label` is required by the type. The exemption rests on that source — pinned by the test «ds SkeletonGroup는 …» below.
+    const viaDsGroup = DS_SKELETON_GROUP_NAMED.test(src) && DS_SKELETON_GROUP_IMPORT.test(src) && !LOCAL_SKELETON_GROUP_DEF.test(src);
+    return viaDsGroup || (/\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src));
   };
   if (hasStatus(loadingFile)) return true;
   const SRC_ROOT = join(APP_ROOT, '..');
@@ -145,37 +156,30 @@ function announcesStatus(loadingFile: string): boolean {
 }
 
 // 판마다 따로 대조한다(까디르 검수 P2 — 합집합 하나로 대조하면 OFF/ON이 뒤바뀌어도 통과했다). 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인.
+// story #4885(UI-2 AC4 PR 1) — 새 사이드바는 플래그 없이 하나라 두 판의 차이는 탭바의 v3 목적지(/today · /chat · work-list)뿐이다(/connect-rules는 꺼진 시안으로 더는 메뉴 목적지가 아니다).
 const EXPECTED_OFF = [
-  '/activity', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:loops', 'resource:storage',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
+  '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
+  'resource:loops', 'resource:storage',
 ].sort();
 const EXPECTED_ON = [
-  '/activity', '/chat', '/connect-rules', '/content', '/content/channel-posts', '/inbox', '/more',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', '/today', 'resource:artifacts', 'resource:docs', 'resource:goals', 'resource:loops', 'resource:storage', 'resource:work-list',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
+  '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
+  'resource:loops', 'resource:storage', '/chat', '/today', 'resource:work-list',
 ].sort();
 
 // 목적지 전수의 «페이지 컨테이너» 표(유나 «스켈레톤 = 페이지 컨테이너» · 까디르 검수 P2 — 첫 className만 · 조상 loader 건너뜀 · 하한 8 대신 목록 대조).
 // source = 그 컨테이너 className이 실제로 선언된 파일(app/ 기준 상대 · `../`는 src/). 표에 없는 목적지는 NO_CONTAINER에 이유와 함께.
 const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }> = {
   '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/roles': { source: '(authenticated)/organization/roles/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/trust': { source: '(authenticated)/organization/trust/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/events': { source: '(authenticated)/organization/events/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/channels': { source: '(authenticated)/organization/channels/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/content-rules': { source: '(authenticated)/organization/content-rules/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/generation-connectors': { source: '(authenticated)/organization/generation-connectors/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/insights-board': { source: '(authenticated)/organization/insights-board/page.tsx', container: 'mx-auto w-full max-w-6xl space-y-6 p-6' },
-  '/content': { source: '(authenticated)/content/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
-  '/content/channel-posts': { source: '(authenticated)/content/channel-posts/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
-  '/settings': { source: '(authenticated)/settings/page.tsx', container: 'w-full max-w-3xl mx-auto p-6' },
+  '/settings': { source: '(authenticated)/settings/page.tsx', container: 'mx-auto w-full max-w-3xl p-4 lg:p-6' },
   '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
   '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]' },
-  '/connect-rules': { source: '../components/connect-rules-v3/connect-rules-v3-screen.tsx', container: 'mx-auto max-w-[720px] space-y-8' },
   '/chat': { source: '../components/chat-v3/chat-v3-screen.tsx', container: 'flex flex-1 flex-col gap-3 p-5' },
 };
 // 폭 · 여백 컨테이너가 없는(전폭 · 자체 레이아웃) 목적지 — 기본 PageSkeleton(`space-y-6 p-6`) 또는 전용 스켈레톤.
@@ -184,6 +188,19 @@ const NO_CONTAINER: Record<string, string> = {
   '/chats': '대화 목록 전폭 · 전용 스켈레톤(chats/loading.tsx)',
   '/inbox': '결재함 전폭 목록',
   '/organization/workforce': '에이전트 화면 전폭',
+  '/organization/channels': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/events': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/content': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/insights-board': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/content/channel-posts': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/content-rules': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/generation-connectors': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/roles': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/trust': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/workforce/runs': '에이전트 실행 기록 전폭 목록(story #4885 새 입구 — 화면 자체는 그대로)',
+  '/organization/workforce/api-keys': '에이전트 키 관리 화면(story #4885 새 입구 — 화면 자체는 그대로)',
+  '/rewards': '리워드 화면(story #4885 «그 밖» — 화면 자체는 그대로)',
+  '/channel': '채널 채팅 전폭(story #4885 «그 밖» — 화면 자체는 그대로)',
   'resource:artifacts': '산출물 갤러리 전폭',
   'resource:docs': '문서 트리 · 편집기 전폭',
   'resource:flow': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
@@ -216,6 +233,55 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       if (!announcesStatus(loading)) problems.push(`${k}: ${relative(APP_ROOT, loading)} 상태 알림 없음`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('⭐SkeletonGroup 면제는 «이름이 비지 않은» label={…}만 — 빈 문자열 이름 · 따옴표 문자열 꼴 · label 없음은 인정하지 않는다', () => {
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={t('loading')} className=\"x\">")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={tc('loading')}>")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={''} className=\"x\">")).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={""}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={``}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label="x">')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup className="x">')).toBe(false);
+  });
+
+  it('⭐SkeletonGroup 면제는 ds 부품(@/components/ds/skeleton)에서 가져온 것만 — 이름만 같은 다른 컴포넌트는 인정하지 않는다', () => {
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';")).toBe(true);
+    expect(DS_SKELETON_GROUP_IMPORT.test('import { SkeletonGroup } from "@/components/ds/skeleton";')).toBe(true);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup } from '@/components/ui/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton } from '@/components/ds/skeleton';\nfunction SkeletonGroup() { return null; }")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroupX } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';")).toBe(true);
+  });
+
+  it('⭐announcesStatus: 이름만 같은 로컬 SkeletonGroup는 인정 안 함 · ds 부품에서 가져온 것은 인정', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'loading-guard-'));
+    try {
+      const local = join(dir, 'local.tsx');
+      writeFileSync(local, "function SkeletonGroup({ children }: { label: string; children: unknown }) { return children; }\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const ds = join(dir, 'ds.tsx');
+      writeFileSync(ds, "import { SkeletonGroup } from '@/components/ds/skeleton';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const aliased = join(dir, 'aliased.tsx');   // the ds one imported under another name + a local one with the exempt name
+      writeFileSync(aliased, "import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const both = join(dir, 'both.tsx');   // the ds import (unaliased) + a local definition of the same name
+      writeFileSync(both, "import { SkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const other = join(dir, 'other.tsx');   // same name from somewhere else, no local definition
+      writeFileSync(other, "import { SkeletonGroup } from './not-the-ds';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      expect(announcesStatus(both)).toBe(false);
+      expect(announcesStatus(other)).toBe(false);
+      expect(announcesStatus(aliased)).toBe(false);
+      expect(announcesStatus(local)).toBe(false);
+      expect(announcesStatus(ds)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('⭐ds SkeletonGroup는 role="status" · aria-busy="true" · 이름(aria-label={label})을 부품 안에서 정한다 — 가드가 «SkeletonGroup + label»을 상태 알림으로 인정하는 근거', () => {
+    const ds = codeOnly(readFileSync(join(APP_ROOT, '../components/ds/skeleton.tsx'), 'utf8'));
+    expect(ds).toMatch(/role="status"/);
+    expect(ds).toMatch(/aria-busy="true"/);
+    expect(ds).toMatch(/aria-label=\{label\}/);
+    expect(ds).toMatch(/label: string;/);   // the name is required, not optional
   });
 
   it('⭐일감 프레임 여섯 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {
@@ -271,14 +337,14 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
-  it('⭐v3 목적지(/today · /chat · /connect-rules) loading은 v3 셸 뼈대(V3ShellLoading · v3-shell-root) 안에 그린다', () => {
+  it('⭐v3 목적지(/today · /chat) loading은 v3 셸 뼈대(V3ShellLoading · v3-shell-root) 안에 그린다', () => {
     // 까디르 델타 — 표의 컨테이너 토큰만 보면 셸 감싸개(V3ShellLoading)를 빼도 초록이었다. 감싸개 사용 + 그 감싸개가 v3 셸 뿌리 클래스를 쓰는지.
     const shell = codeOnly(readFileSync(join(APP_ROOT, '../components/nav/v3-shell-loading.tsx'), 'utf8'));
     expect(shell).toMatch(/className="v3-shell-root\b/);
     // 유나 판정(4643) — v3 화면은 하단 탭바를 스스로 그린다 → 셸 loading에도(없으면 390에서 탭바가 사라졌다 돌아온다).
     expect(shell).toMatch(/<MobileTabBar\b/);
     const problems: string[] = [];
-    for (const k of ['/today', '/chat', '/connect-rules']) {
+    for (const k of ['/today', '/chat']) {
       const dir = routeDirOf(destinations.get(k)!);
       const own = dir ? join(dir, 'loading.tsx') : null;
       if (!own || !existsSync(own)) { problems.push(`${k}: 자기 loading.tsx 없음`); continue; }

@@ -966,7 +966,6 @@ export function countViolations(violations: Violation[]): Map<string, number> {
 // 나머지는 이 스토리 스코프 밖(화면이 다르고 개별 triage 필요) 기존 채무를 그대로 얼린다.
 // 신규 재유입·증가만 막고, 늘어도 줄어도(stale) FAIL — PO 승인 없이 조용히 못 움직인다.
 export const GRANDFATHER_BASELINE = new Map<string, number>([
-  ['app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::muted-on-info-tint', 1],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::muted-on-destructive-tint', 1],
   // story #3865(AC1·조건①②, PO 확定 2026-09-14 11:04Z) — 같은 요소 tint+muted 공존 판정을
   // "합친 문자열 전체"에서 "그룹 단위"(같은 삼항/바인딩의 분기끼리만 상호배타, 독립 축은
@@ -994,14 +993,10 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // section류와 동형 오탐(그룹 정밀화로 해소). story #3869 — 남았던 1건(138-141행,
   // bg-destructive-tint literal div(withdraw==='confirming') 안 Cancel 버튼)을
   // text-foreground로 교정, baseline에서 완전히 제거(양성대조=원복 시 RED, 뮤테이션 확인 済).
-  ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
-  ['components/docs/doc-gate-section.tsx::muted-on-destructive-tint', 1],
   ['components/epics/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],
   ['components/epics/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
-  ['components/hypotheses/hypothesis-verdict-card.tsx::muted-on-success-tint', 5],
-  ['components/loops/context-pack-panel.tsx::muted-on-info-tint', 1],
   ['components/retro/sprint-close-cockpit.tsx::muted-on-info-tint', 3],
   // agent-project-access-section.tsx — 삼항/바인딩 두 분기가 각각 tint·muted를 가져 런타임
   // 공존 0(실 파일 대조). 제거만·색 변경 0(스코프 밖, 코드 무접촉).

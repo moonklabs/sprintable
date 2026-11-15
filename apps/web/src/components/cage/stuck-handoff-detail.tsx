@@ -31,7 +31,7 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
 
       {/* last_event 미니박스 */}
       {ev ? (
-        <div className="space-y-0.5 rounded-md bg-muted/30 px-2 py-1.5 text-micro text-muted-foreground">
+        <div className="space-y-0.5 rounded-md bg-ds-surface-sunk px-2 py-1.5 text-micro text-muted-foreground">
           <p className="font-medium text-foreground/80">{t('lastEventInfo')}</p>
           <p>{ev.event_type}</p>
           <p className="font-mono">#{ev.id.slice(0, 8)}{ev.recipient_seq != null ? ` · seq ${ev.recipient_seq}` : ''}</p>

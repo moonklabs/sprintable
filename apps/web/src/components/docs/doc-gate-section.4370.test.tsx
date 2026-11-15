@@ -38,7 +38,7 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
 const button = (label: string) => [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
-const reason = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[data-slot="textarea"][placeholder="${docs.docGateRejectReasonPlaceholder}"]`);
+const reason = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[data-slot="ds-textarea"][placeholder="${docs.docGateRejectReasonPlaceholder}"]`);
 
 async function visit() {
   await act(async () => {
@@ -78,7 +78,7 @@ describe('문서 게이트 반려 사유 초안(story #4370)', () => {
     await visit();
     await openReject();
     await type('반려 사유');
-    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;  // 섹션 버튼도 같은 «반려» — 창 안의 확정 버튼
+    const dialog = document.body.querySelector('[data-slot="ds-dialog-content"]')!;  // 섹션 버튼도 같은 «반려» — 창 안의 확정 버튼
     const confirm = [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === docs.docGateRejectConfirm)!;
     await act(async () => { confirm.click(); });
     await settle();

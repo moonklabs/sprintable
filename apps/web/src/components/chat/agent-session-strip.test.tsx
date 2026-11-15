@@ -453,11 +453,11 @@ describe('AgentSessionStrip — another agent\'s view is never shown (story 4684
 
 // story #4763 (AC4): a session that has not begun to run says what it waits on — the question at its computer — not «시작됨» for minutes
 describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC12)', () => {
-  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac 터미널에서 답 대기» (en too) — not «시작됨»', async (ask) => {
+  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac 터미널에서 답 기다림» (en too) — not «시작됨»', async (ask) => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
     await render();
     expect(chip()).toBe(koMessages.chats.agentSession.state.waiting_first_screen);
-    expect(chip()).toBe('Mac 터미널에서 답 대기');
+    expect(chip()).toBe('Mac 터미널에서 답 기다림');
     root.unmount(); root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
     await render('en');
@@ -469,7 +469,7 @@ describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC
       fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'mcp' } }));
       root.unmount(); root = createRoot(container);
       await render();
-      expect(chip(), state).toBe('Mac 터미널에서 답 대기');
+      expect(chip(), state).toBe('Mac 터미널에서 답 기다림');
     }
   });
 
@@ -564,5 +564,37 @@ describe('AgentSessionStrip — why work does not reach the agent (story 4779)',
       await render();
       expect(holdLine(), JSON.stringify(over)).toBeNull();
     }
+  });
+});
+
+describe('the «바뀐 파일» button (story 4951 ①c)', () => {
+  const button = () => container.querySelector('[data-testid="agent-changes-open"]');
+  it('is there only when the server says this person may read the list AND names the session — in a browser too (no phone app needed)', async () => {
+    fetchWithAuth.mockResolvedValue(view({ can_read_changes: true, session_key: 's-1', state: 'idle' }));
+    await render();
+    expect(button()?.textContent).toBe('바뀐 파일');
+  });
+  it.each([
+    ['the server says no', { can_read_changes: false, session_key: 's-1' }],
+    ['an older server sends neither', {}],
+    ['no session key', { can_read_changes: true, session_key: null }],
+    ['an empty session key', { can_read_changes: true, session_key: '' }],
+  ])('is not there when %s', async (_why, over) => {
+    fetchWithAuth.mockResolvedValue(view({ state: 'idle', ...over }));
+    await render();
+    expect(button()).toBeNull();
+  });
+  it('opens the sheet that asks for exactly this session', async () => {
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ command_id: '33333333-4444-4555-8666-777777777777' }), { status: 201 });
+      if (String(url).includes('desktop-changes')) return new Response(JSON.stringify({ state: 'done', files: [], more: false, total: 0 }), { status: 200 });
+      return view({ can_read_changes: true, session_key: 's-77', state: 'idle' });
+    });
+    await render();
+    await act(async () => { (button() as HTMLButtonElement).click(); });
+    for (let i = 0; i < 12; i++) await act(async () => { await Promise.resolve(); });
+    const post = fetchWithAuth.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'POST');
+    expect(post?.[0]).toBe('/api/agents/a-1/desktop-changes');
+    expect(JSON.parse(String((post![1] as RequestInit).body))).toEqual({ session_key: 's-77' });
   });
 });

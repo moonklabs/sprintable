@@ -96,6 +96,15 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     expect(retryLastMessage).toHaveBeenCalledTimes(1);
   });
 
+  it('story 4891 — 전송 실패 줄은 alert(나타나는 순간 읽힌다)이고, 다른 때는 alert 배너가 없다', async () => {
+    await mount(baseSession({ sendError: '전송하지 못했어요 — 다시 시도해 주세요.' }));
+    const banner = container.querySelector('[data-slot="ds-banner"][role="alert"]');
+    expect(banner?.textContent).toContain('전송하지 못했어요 — 다시 시도해 주세요.');
+    expect(banner?.getAttribute('data-tone')).toBe('failed');
+    await mount(baseSession({ sendError: null }));
+    expect(container.querySelector('[data-slot="ds-banner"][role="alert"]')).toBeNull();
+  });
+
   it('story #3263 AC4 — escalationStatus가 open이면 지속 배너가 뜬다(턴이 지나간 뒤·재오픈 후에도, 무신호 금지)', async () => {
     await mount(baseSession({ escalationStatus: 'open', messages: [] }));
     expect(container.textContent).toContain(koMessages.supportWidget.escalationOpenBanner);
@@ -204,16 +213,15 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
   });
 });
 
-// story 4831 부품 교체(공용 부품 ④) — 상담 입력 칸이 바탕 Input이 되어도 한 줄에서 남는 폭을 채우고(flex-1) 본문색을 가지며, 쓴 글(공백 제거)이 전송되고 칸이 비워진다.
-describe('SupportWidgetPanelBody — 바탕 부품(story 4831)', () => {
-  it('입력 칸은 바탕 Input(flex-1 · text-foreground)이고, 쓰고 보내면 공백이 제거된 글이 sendMessage로 가며 칸이 비워진다', async () => {
+// story 4831 부품 교체(공용 부품 ④) → story 4891(UI-8) ds 부품 — 상담 입력 칸이 ds Input이 되어도 한 줄에서 남는 폭을 채우고(flex-1) 이름이 있으며, 쓴 글(공백 제거)이 전송되고 칸이 비워진다.
+describe('SupportWidgetPanelBody — ds 부품(story 4891)', () => {
+  it('입력 칸은 ds Input(flex-1 · 이름 있음)이고, 쓰고 보내면 공백이 제거된 글이 sendMessage로 가며 칸이 비워진다', async () => {
     const session = baseSession();
     await mount(session);
     const input = container.querySelector('form input[type="text"]') as HTMLInputElement;
-    expect(input.dataset.slot).toBe('input');
-    const tokens = input.className.split(/\s+/);
-    expect(tokens).toContain('flex-1');
-    expect(tokens).toContain('text-foreground');
+    expect(input.dataset.slot).toBe('ds-input');
+    expect(input.className.split(/\s+/)).toContain('flex-1');
+    expect(input.getAttribute('aria-label')).toBe(koMessages.supportWidget.inputPlaceholder);
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '  안녕하세요  ');
       input.dispatchEvent(new Event('input', { bubbles: true }));

@@ -121,7 +121,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
         >
           <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-brand text-xs font-semibold text-brand-foreground" />
           <span className="flex min-w-0 flex-1 flex-col items-start justify-center gap-0.5">
-            <span className="w-full truncate text-micro font-semibold leading-tight text-muted-foreground">{s.displayOrg}</span>
+            <span className="w-full truncate text-ds-small font-semibold leading-tight text-muted-foreground">{s.displayOrg}</span>
             <span className="w-full truncate text-editorial-ui font-bold leading-tight text-foreground">{chipLabel}</span>
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />

@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { NAV_GROUPS, type NavGroupConfig } from '../src/lib/nav-config';
+import { NAV_GROUPS, OTHER_NAV_ITEMS, type NavGroupConfig } from '../src/lib/nav-config';
 
 const APP_DIR = path.join(__dirname, '..', 'src', 'app');
 // 정적 항목이 살 수 있는 route group 후보 — '' = group 없는 app 바로 아래(예: /dashboard).
@@ -48,7 +48,9 @@ export function findBrokenNavEntries(groups: NavGroupConfig[], checker: RouteChe
   const broken: BrokenNavEntry[] = [];
   for (const group of groups) {
     for (const item of group.items) {
-      const ok = item.kind === 'static' ? checker.staticExists(item.path) : checker.resourceExists(item.path);
+      // 쿼리(`?tab=gates` 등)는 라우트가 아니다 — 착지 탭을 정하는 값이라 떼고 본다.
+      const route = item.path.split('?')[0]!;
+      const ok = item.kind === 'static' ? checker.staticExists(route) : checker.resourceExists(route);
       if (!ok) broken.push({ groupId: group.id, itemId: item.id, kind: item.kind, path: item.path });
     }
   }
@@ -56,7 +58,7 @@ export function findBrokenNavEntries(groups: NavGroupConfig[], checker: RouteChe
 }
 
 if (require.main === module) {
-  const broken = findBrokenNavEntries(NAV_GROUPS, fsRouteChecker);
+  const broken = findBrokenNavEntries([...NAV_GROUPS, { id: 'other', items: OTHER_NAV_ITEMS }], fsRouteChecker);
   if (broken.length > 0) {
     console.error(`FAIL: nav-config ${broken.length}건이 실제 라우트와 정합 안 됨:`);
     for (const b of broken) console.error(`  - [${b.kind}] ${b.groupId}/${b.itemId} → ${b.path}`);

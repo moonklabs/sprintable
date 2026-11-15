@@ -36,7 +36,7 @@ export function WorkTabsFrame({ children }: { children: ReactNode }) {
     <div className="contents" style={{ '--work-tabs-h': `${tab ? bandHeight : 0}px` } as CSSProperties}>
       {tab ? (
         <>
-          <div ref={bandRef} className="sticky top-0 z-10 bg-background px-4 pt-3" data-testid="work-tabs-band">
+          <div ref={bandRef} className="sticky top-0 z-10 bg-ds-background px-4 pt-3" data-testid="work-tabs-band">
             <WorkspaceFrameTabs active={tab.key} />
           </div>
           <WorkTabTitleFallback tab={tab.key} />

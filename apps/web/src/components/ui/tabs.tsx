@@ -13,6 +13,8 @@ function Tabs({
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
+      // story 4956: the direction must reach Base UI — it only said it in `data-orientation` (a style hook) before, so a list drawn vertical (settings) still took ← → and ignored ↑ ↓
+      orientation={orientation}
       data-orientation={orientation}
       className={cn(
         "group/tabs flex gap-2 data-horizontal:flex-col",

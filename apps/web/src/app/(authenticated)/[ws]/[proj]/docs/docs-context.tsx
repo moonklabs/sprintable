@@ -58,6 +58,8 @@ interface DocsLayoutContextType {
   expandFolder: (id: string) => void;
   /** 박스1: 모바일 트리 드로어 열기(슬림 헤더 트리 아이콘이 consume·칩 띠 트리거 대체) */
   openTreeDrawer?: () => void;
+  /** story 4952 — the editor moved the ADDRESS to the doc's own slug without a navigation (history.replaceState): the route params the layout reads are then the old ones, so the editor tells the layout which doc is open now (tree highlight · title). Optional: a host without it keeps reading the params. */
+  reportLiveSlug?: (slug: string) => void;
 }
 
 export const DocsLayoutContext = createContext<DocsLayoutContextType | null>(null);

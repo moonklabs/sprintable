@@ -57,6 +57,11 @@ interface UseDocSyncOptions<TDoc = { updated_at: string }> {
   pollInterval?: number;
   onSaved?: (doc: TDoc) => void;
   onRemoteChange?: (serverUpdatedAt: string) => void;
+  /**
+   * 4910 — «첫 저장 때 만들기»: 문서가 없던(docId = null) 초안이 만들어져 docId가 생기는 순간의 «마지막 저장본». 기본은 «그 틱의 현재 값»인데, 만드는 요청을 보낸 뒤 응답이 오기 전에
+   * 친 글자가 «이미 저장됨»으로 보여 조용히 사라진다 — 요청에 실어 보낸 값의 스냅샷(`JSON.stringify(보낸 payload)`)을 넘기면 그 뒤 달라진 만큼이 dirty가 되어 자동저장이 보낸다. 문서가 바뀔 때만 읽는다.
+   */
+  adoptBaselineSnapshot?: string | null;
 }
 
 export function useDocSync<TDoc = { updated_at: string }>({
@@ -70,6 +75,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
   pollInterval = 30_000,
   onSaved,
   onRemoteChange,
+  adoptBaselineSnapshot,
 }: UseDocSyncOptions<TDoc>) {
   const currentSnapshot = useMemo(() => snapshotKey ?? JSON.stringify(savePayload), [savePayload, snapshotKey]);
   const [status, setStatus] = useState<SaveStatus>('idle');
@@ -94,6 +100,8 @@ export function useDocSync<TDoc = { updated_at: string }>({
   // content at all (story 2a72ebf4 baseline race).
   const currentSnapshotRef = useRef(currentSnapshot);
   useEffect(() => { currentSnapshotRef.current = currentSnapshot; }, [currentSnapshot]);
+  const adoptSnapshotRef = useRef(adoptBaselineSnapshot);
+  useEffect(() => { adoptSnapshotRef.current = adoptBaselineSnapshot; }, [adoptBaselineSnapshot]);
 
   const clearSyncAlerts = useCallback((nextStatus: SaveStatus = 'saved') => {
     conflictRef.current = false;
@@ -110,7 +118,8 @@ export function useDocSync<TDoc = { updated_at: string }>({
     remoteChangedRef.current = false;
 
     const timer = window.setTimeout(() => {
-      setLastSavedSnapshot(currentSnapshotRef.current);
+      // 4910 — 문서가 막 만들어졌고(docId가 생김) 만들 때 보낸 값이 알려져 있으면 그 값이 기준(그 뒤 달라진 만큼 dirty). 아니면 예전처럼 «그 틱의 현재 값».
+      setLastSavedSnapshot(adoptSnapshotRef.current ?? currentSnapshotRef.current);
       setBaselineUpdatedAt(serverUpdatedAt);
       setBaselineDocId(docId);
       setStatus('idle');

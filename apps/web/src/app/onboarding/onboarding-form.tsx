@@ -7,7 +7,9 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
-import { fetchWithAuth, refreshSessionAfterChange, refreshSessionOnce } from '@/lib/db/client';
+import { fetchWithAuth, logoutUser, refreshSessionAfterChange, refreshSessionOnce } from '@/lib/db/client';
+import { Button as DsButton } from '@/components/ds/button';
+import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
@@ -16,6 +18,7 @@ import { FirstScreen } from './first-screen';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
@@ -85,14 +88,20 @@ export function OnboardingForm({
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
   const tNewOrg = useTranslations('desktopOnboarding');
+  const tSettings = useTranslations('settings');
 
   const [step, setStep] = useState<Step>(initialStep ?? (afterOrgDelete ? 'deleted' : 'arrive'));
   const [arrival, setArrival] = useState<Arrival>('working');
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false); // story #4906: the way out of a person who has no organization any more
   const [invites, setInvites] = useState<MyInvite[]>([]);
   // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
   const [orgName, setOrgName] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
+  // story 4937 — the project step the server draws (`?step=project`): what was typed before the screen came alive is taken into the state once (nothing is there to take on any other way in: the step is reached by a press, after it is alive)
+  const projectNameRef = useRef<HTMLInputElement>(null);
+  const projectDescRef = useRef<HTMLTextAreaElement>(null);
+  useAdoptPrehydrationValues([{ ref: projectNameRef, initial: '', set: setProjectName }, { ref: projectDescRef, initial: '', set: setProjectDesc }]);
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   // story #3196 ⑥ — 하드코딩 영문 기본값 제거. 빈 값으로 두면 이미 로컬라이즈돼 있던
@@ -116,6 +125,8 @@ export function OnboardingForm({
   const arriving = useRef(false);
   // the person's choice «초대와 따로 내 조직 만들기» — kept across the arrival's retries (a retry never asks the invites again)
   const ownOrgChosen = useRef(false);
+  // story 4904: one «does the person already have an organization?» re-read at a time (the limit answer of createOrg)
+  const joiningExisting = useRef(false);
 
   const progress = onboardingProgress(step);
 
@@ -155,6 +166,19 @@ export function OnboardingForm({
         }
         // story #2470 — BE의 구조화 에러(code:PLAN_LIMIT_EXCEEDED·limit·upgrade_required)는 UpgradeModal로 안내한다.
         if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED' && json?.error?.upgrade_required) {
+          // story 4904: the limit can be the person's OWN organization, made a moment ago by another window of the same account (a sign-up on the web, the Mac app's login while the web
+          // arrival is still making it): the arrival's read (renew, ask again) came before that window's organization was committed, this POST after. «Free plan: 1 organization» is then wrong
+          // — they have exactly the one. Ask the database once more through a renewed token (as the arrival does) and, if the organization is there, go on with it. Only when the person
+          // chose «초대와 따로 내 조직 만들기» (a second one on purpose) is the limit the answer.
+          if (!ownOrgChosen.current && !joiningExisting.current) {
+            joiningExisting.current = true;
+            try {
+              const joined = await readExistingOrg();
+              if (joined) { setOrgId(joined); setStep('first'); return; }
+            } finally {
+              joiningExisting.current = false;
+            }
+          }
           setUpgradeReason(t('orgLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
           setArrival('failed');
@@ -178,6 +202,19 @@ export function OnboardingForm({
     } catch {
       setError(t('networkError'));
       setArrival('failed');
+    }
+  };
+
+  // story 4904: the person's organization as the DATABASE says it now — renew the token once (the same shared call as the arrival), ask who they are, take the organization only when its
+  // membership is live (`existingOrgIdFromMe`). Anything that cannot be read answers null («not known to exist»), so the limit stays the answer it was.
+  const readExistingOrg = async (): Promise<string | null> => {
+    if ((await renewSession()) === 'failed') return null;
+    try {
+      const res = await fetchWithAuth('/api/auth/me');
+      if (!res.ok) return null;
+      return existingOrgIdFromMe(await res.json());
+    } catch {
+      return null;
     }
   };
 
@@ -440,6 +477,13 @@ export function OnboardingForm({
           <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
           <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
           <Button onClick={() => { forgetOrgDeletedMarker(); setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
+          {/* story #4906 (PO 11-12): a person who deleted their only organization had ONE press here — «new organization» — and /settings sends them back to this page, so «delete account» was out of reach
+              (they had to make an organization again first). Two quiet ways out: sign out · delete the account (the same confirmation window as Settings › 계정 삭제). */}
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border pt-4">
+            <DsButton variant="quiet" onClick={() => { void logoutUser().catch(() => undefined).finally(() => window.location.assign('/login')); }} data-testid="onboarding-org-deleted-logout">{tc('logout')}</DsButton>
+            <DsButton variant="quiet" onClick={() => setShowDeleteAccount(true)} data-testid="onboarding-org-deleted-delete-account">{tSettings('deleteAccount')}</DsButton>
+          </div>
+          {showDeleteAccount ? <DeleteAccountDialog onClose={() => setShowDeleteAccount(false)} onDeleted={() => window.location.assign('/login')} /> : null}
         </Card>
       </div>
     );
@@ -555,6 +599,7 @@ export function OnboardingForm({
               <label className="text-sm font-medium text-foreground">{t('projectName')}</label>
               <OperatorInput
                 type="text"
+                ref={projectNameRef}
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder={t('projectNamePlaceholder')}
@@ -563,6 +608,7 @@ export function OnboardingForm({
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">{t('projectDesc')}</label>
               <OperatorTextarea
+                ref={projectDescRef}
                 value={projectDesc}
                 onChange={(e) => setProjectDesc(e.target.value)}
                 placeholder={t('projectDescPlaceholder')}

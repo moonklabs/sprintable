@@ -34,14 +34,14 @@ export function InsightsBoardCommentsCell({
   // 같은 data-testid를 써 유나의 실픽셀 프로브가 "해당 없음"과 "채널 미제공"을 한
   // 갈래로 세었다. 갈래별로 나눈다(문구는 이미 §21-2대로 달랐다 — testid만 못 갈렸다).
   if (row.kind === 'site_post') {
-    return <span className="text-muted-foreground" data-testid="insights-board-comments-not-applicable">{t('insightsBoardCommentsNotApplicable')}</span>;
+    return <span className="text-ds-ink-3" data-testid="insights-board-comments-not-applicable">{t('insightsBoardCommentsNotApplicable')}</span>;
   }
   if (!row.comments_supported) {
-    return <span className="text-muted-foreground" data-testid="insights-board-comments-channel-unsupported">{t('insightsBoardCommentsChannelUnsupported')}</span>;
+    return <span className="text-ds-ink-3" data-testid="insights-board-comments-channel-unsupported">{t('insightsBoardCommentsChannelUnsupported')}</span>;
   }
 
   if (row.comments_last_collected_at === null) {
-    return <span className="text-muted-foreground" data-testid="insights-board-comments-uncollected">{t('insightsBoardCommentsUncollected')}</span>;
+    return <span className="text-ds-ink-3" data-testid="insights-board-comments-uncollected">{t('insightsBoardCommentsUncollected')}</span>;
   }
 
   const label = t('commentsCountLink', { count: row.comments_count ?? 0 });

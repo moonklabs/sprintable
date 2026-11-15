@@ -19,6 +19,7 @@
  * oklch→sRGB · 대비 계산은 verify-accent-color-contrast.ts와 같은 유틸(실 Chromium 캡처 대조 완료)을 재사용한다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -236,7 +237,7 @@ export function scanRepoBrandOnText(srcRoot: string): BrandOnTextUse[] {
 
 function main(): number {
   let failed = false;
-  const contrasts = computeBrandTextContrasts(readFileSync(GLOBALS_CSS_PATH, 'utf8'));
+  const contrasts = computeBrandTextContrasts(readGlobalsCss(GLOBALS_CSS_PATH));
   console.log('[story #4315] 브랜드 글자(--brand-text) 대비 —');
   for (const c of contrasts) {
     console.log(`  ${c.theme}: 배경 ${c.onBackground.toFixed(2)} · 카드 ${c.onCard.toFixed(2)} · muted ${c.onMuted.toFixed(2)} · 카드 위 brand/${Math.round(CHIP_TINT_ALPHA * 100)} 틴트 ${c.onChipTint.toFixed(2)}`);

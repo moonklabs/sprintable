@@ -16,7 +16,7 @@ const BE_SEED_PRESET_VALUES = [
 function t(key: string): string {
   const map: Record<string, string> = {
     stageRoleLabelAgent: '에이전트', stageRoleLabelAny: '누구나', stageRoleLabelApprover: '승인자',
-    stageRoleLabelCompute: '연산', stageRoleLabelCreator: '크리에이터',
+    stageRoleLabelCompute: '생성', stageRoleLabelCreator: '크리에이터',
     stageRoleLabelDev: '개발자', stageRoleLabelDirector: '디렉터', stageRoleLabelExecutor: '실행자',
     stageRoleLabelHuman: '사람', stageRoleLabelLead: '리드', stageRoleLabelMaker: '제작자',
     stageRoleLabelMember: '구성원', stageRoleLabelPo: 'PO', stageRoleLabelPublisher: '발행자',
@@ -38,7 +38,7 @@ describe('stageRoleLabel — story #3773', () => {
       Agent: '에이전트', Any: '누구나', Approver: '승인자', Dev: '개발자', Executor: '실행자',
       Human: '사람', Lead: '리드', Maker: '제작자', Member: '구성원', PO: 'PO', QA: 'QA',
       Reviewer: '검토자', Worker: '작업자',
-      Director: '디렉터', Creator: '크리에이터', Compute: '연산', Publisher: '발행자',
+      Director: '디렉터', Creator: '크리에이터', Compute: '생성', Publisher: '발행자',
     };
     for (const [role, label] of Object.entries(expected)) {
       expect(stageRoleLabel(role, t)).toBe(label);

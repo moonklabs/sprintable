@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_WORK_LIST_FILTERS, filterWorkList, type WorkListFilters } from './filter-work-list';
 import type { WorkList } from './derive-work-list';
+import { storySelfRow } from './work-list-test-fixtures';
 
 function baseRow(overrides: Partial<WorkList['groups'][number]['stories'][number]['rows'][number]> = {}) {
   return {
@@ -18,13 +19,13 @@ function baseWorkList(): WorkList {
       {
         goalId: 'g1', title: '목표1', isActive: true, doneCount: 0, totalCount: 2, assignedCount: 1, delegatedCount: 1, hypothesisCount: 1,
         stories: [
-          { storyId: 's1', title: '스토리1', status: 'in-progress', hypothesisIds: ['h1'], rows: [baseRow({ id: 't1', isDelegated: false }), baseRow({ id: 't2', isDelegated: true })] },
+          { storyId: 's1', title: '스토리1', status: 'in-progress', hypothesisIds: ['h1'], selfRow: storySelfRow('s1', '스토리1'), rows: [baseRow({ id: 't1', isDelegated: false }), baseRow({ id: 't2', isDelegated: true })] },
         ],
       },
       {
         goalId: 'g2', title: '목표2', isActive: false, doneCount: 0, totalCount: 1, assignedCount: 1, delegatedCount: 0, hypothesisCount: 0,
         stories: [
-          { storyId: 's2', title: '스토리2', status: 'in-progress', hypothesisIds: [], rows: [baseRow({ id: 't3', isDelegated: false })] },
+          { storyId: 's2', title: '스토리2', status: 'in-progress', hypothesisIds: [], selfRow: storySelfRow('s2', '스토리2'), rows: [baseRow({ id: 't3', isDelegated: false })] },
         ],
       },
     ],
@@ -82,4 +83,24 @@ describe('filterWorkList', () => {
     expect(result.groups).toHaveLength(0);
     expect(result.totalStoryCount).toBe(2);
   });
+
+  // story #4888 — the list's unit is the story
+  describe('스토리 단위(story #4888)', () => {
+    function withEmptyStory(): WorkList {
+      const base = baseWorkList();
+      base.groups[0]!.stories.push({ storyId: 's-empty', title: '일 없는 스토리', status: 'backlog', hypothesisIds: [], selfRow: storySelfRow('s-empty', '일 없는 스토리'), rows: [] });
+      return base;
+    }
+    it('⭐소유 필터가 없으면 일이 없는 스토리도 남는다', () => {
+      const out = filterWorkList(withEmptyStory(), filters());
+      expect(out.groups[0]!.stories.map((s) => s.storyId)).toContain('s-empty');
+    });
+    it('⭐«내가 맡은 일» / «에이전트에 위임»이 켜지면 일이 없는 스토리는 빠진다(스토리 행 자신은 담당이 없다)', () => {
+      for (const f of [{ mineOnly: true }, { delegatedOnly: true }]) {
+        const out = filterWorkList(withEmptyStory(), filters(f));
+        expect(out.groups.flatMap((g) => g.stories.map((s) => s.storyId))).not.toContain('s-empty');
+      }
+    });
+  });
 });
+

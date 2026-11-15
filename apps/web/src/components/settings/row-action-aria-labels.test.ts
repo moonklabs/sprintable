@@ -31,7 +31,6 @@ function translatorsFor(namespace: string) {
 // 버튼의 두 상태)은 표본을 여러 개 준다.
 const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = [
   { namespace: 'settings', key: 'unblockUserAriaLabel', ko: ['차단 해제'], en: ['Unblock'] },
-  { namespace: 'settings', key: 'agentToggleAriaLabel', ko: ['비활성화', '활성화'], en: ['Deactivate', 'Activate'] },
   { namespace: 'settings', key: 'lineEditorEditAriaLabel', ko: ['편집'], en: ['Edit'] },
   // story #3606(잔여, 페드루 PO 確定 2026-09-07) — edit/delete/confirm/cancel/save
   // (tc(...) 공용 common 키)도 같은 workflowToggleAriaLabel 템플릿을 재사용해
@@ -47,7 +46,6 @@ const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = 
   // 만들지 않고 키 자체를 하나(rowActionAriaLabel)로 합쳐 겹칠 쌍을 구조적으로 없앤다
   // (접근 이름을 가르는 건 {label} 표본 자체).
   { namespace: 'insightsBoard', key: 'rowActionAriaLabel', ko: ['후속 조치', '원본과 대조'], en: ['Follow-up', 'Reconcile with source'] },
-  { namespace: 'agentRuns', key: 'openDetailAriaLabel', ko: ['상세 보기'], en: ['Open detail'] },
   // story #3606(잔여, 페드루 PO 確定 2026-09-07) — gateApprove(HITL 승인)·primaryLabel
   // (일반/서명 승인 둘 다)도 같은 map·같은 gateRowActionAriaLabel 재사용으로 마감.
   { namespace: 'cage', key: 'gateRowActionAriaLabel', ko: ['반려', '변경 요청', '보류(논의 필요)', '승인', '승인하고 서명'], en: ['Reject', 'Approve', 'Approve & sign'] },

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
@@ -10,8 +10,14 @@ import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
-import { Button } from '@/components/ui/button';
-import { Edit2 } from 'lucide-react';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
+import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
+import { DocShareDialog } from '@/components/docs/doc-share-dialog';
+import { useDocDelete } from '@/components/docs/use-doc-delete';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ds/menu';
+import { DocStatusChip } from '@/components/docs/doc-status-chip';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -29,6 +35,8 @@ interface DocDetail {
   // 이미 이 필드들을 slug-query 단건 경로에서 내려주고 있었다(doc-payload enrich) — 이
   // 옛 최소 타입엔 없었을 뿐(fetchTree/Doc 타입과 동형 갭).
   status?: string;
+  // story 4892 — a sprint report is read-only (the editor page opens it non-editable and hides «삭제»); the reading screen must not offer what the editor hides.
+  doc_type?: string;
   parent_id?: string | null;
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
@@ -52,11 +60,16 @@ export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
+  const ts = useTranslations('share');
+  const router = useRouter();
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const { wsSlug, projSlug, projectId, tree } = useDocsLayout();
+  const { wsSlug, projSlug, projectId, tree, setTree } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // story 4892 — the same delete as the editor page (confirm → DELETE → toast on failure / leave the page on success).
+  const handleDelete = useDocDelete({ docId: doc ? doc.id : undefined, projectId, wsSlug, projSlug, router, setTree });
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
@@ -105,7 +118,7 @@ export default function DocViewPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <h1 className="sr-only">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('loading')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('loading')}</p>
       </div>
     );
   }
@@ -114,65 +127,91 @@ export default function DocViewPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <h1 className="sr-only">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('notFound')}</p>
       </div>
     );
   }
 
   const readMinutes = estimateReadMinutes(doc.content);
+  const readOnlyDoc = doc.doc_type === 'sprint_report';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* breadcrumb 상단 바(§3) — 옛 인라인 타이틀+TOC+편집 바를 대체.
-          story #2967(선생님 실사용 판정) — font-mono가 한글에서 가늘고 흐리다(에디토리얼
-          mono 문법은 라틴 고정폭 전제라 한글엔 안 맞음). meta-caps는 라틴 전용으로 한정하고
-          한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground lg:px-8">
-        {/* [SID:4356] 좁은 폭(390/360)에서 이 줄이 nowrap flex라 «지식»이 한 글자 폭(10~12px)까지 줄어 «지 / 식»으로 꺾였다(한글 최소 폭 = 한 글자).
-            뿌리 «지식» · 구분 «/»는 줄지 않고 안 꺾임 · 분류 · 제목은 한 줄로 줄되 말줄임(낱말 중간에서 안 꺾임). 넓으면 예전과 같다.
-            유나 CR(PR 4747) — 분류 · 제목이 같은 규칙(바탕 = 글자 폭)이면 글자 폭 비례로 줄어 짧은 분류(«기획»)가 5.8~10.6px로 눌려
-            «기»만 남고 «…»도 안 보였다 → 제목은 남는 자리만(flex-1 · 바탕 0 · 바닥 3rem), 분류는 제 폭을 먼저 받고 모자랄 때만 말줄임. */}
-        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="shrink-0 text-muted-foreground">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
-        <span className="shrink-0 text-muted-foreground">/</span>
-        <span className="min-w-[3rem] flex-1 truncate text-foreground">{doc.title}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1">
-          <DocToc headings={headings} onHeadingClick={scrollToHeading} />
-          <Button asChild size="sm" variant="ghost">
-            <Link href={docUrl(wsSlug, projSlug, slug)}>
-              <Edit2 className="mr-1.5 h-3.5 w-3.5" />
-              {t('editDoc')}
-            </Link>
-          </Button>
-        </span>
+      {/* story 4892 (UI-9 문서 화면 배치 · 상세 열 읽기) — 시안(홈 · 보드 · 대화)의 B 뼈대 «머리줄»: 1행 = 제목(h1) + 상태 · 오른쪽에 동작(목차 · 읽기|고치기 · 공유 · ⋯),
+          2행 = 경로(지식 / 분류)와 메타(담당 · 갱신 · 읽기 N분 · 버전)를 한 줄로. 예전엔 경로 바 + 본문 안 분류 글 · 큰 제목 · 메타 줄이 따로 있어 같은 정보가 두 번 서고 본문이 세로로 밀렸다 —
+          이제 머리에 한 번만, 본문은 바로 내용으로 시작한다. 동작 · 링크 · 메뉴 규칙은 그대로(공유 lg+ 단추 / lg 미만 메뉴 안 · 읽기 전용 문서엔 «고치기» · «삭제» 없음). */}
+      {/* [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류는 한 줄 말줄임. 머리는 감싼다: 제목 칸(바닥 11rem)과 동작이 한 줄에 못 들어가면(320 / 360 / 390)
+          동작이 오른쪽 정렬로 둘째 줄로 내려가 제목을 밀어내지 못한다. */}
+      <div data-testid="docs-reader-head" className="shrink-0 border-b border-ds-line bg-ds-background px-4 py-2 lg:px-8 lg:group-data-[collapsed=true]/docs:pl-14">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-2">
+            <h1 className="m-0 min-w-[3rem] truncate text-ds-card-title font-semibold text-ds-ink">{doc.title}</h1>
+            <DocStatusChip status={doc.status} data-testid="docs-reader-status" className="shrink-0" />
+          </div>
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            <DocToc headings={headings} onHeadingClick={scrollToHeading} />
+            {readOnlyDoc ? null : (
+              <DocModeSwitch
+                mode="read"
+                readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
+                editHref={docUrl(wsSlug, projSlug, slug)}
+                readLabel={t('modeRead')}
+                editLabel={t('editDoc')}
+                groupLabel={t('modeSwitchLabel')}
+              />
+            )}
+            {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
+            <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
+            {/* story 4892 — ⋯ 메뉴 = ds Menu(Base UI: 열고 닫기 · 화살표 · Esc · 초점 복원). 항목 · 이름 · 규칙(공유 lg 미만 전용 · 읽기 전용 문서엔 삭제 없음 · 삭제는 사람만)은 그대로. */}
+            <Menu>
+              <MenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors outline-none hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action touch:size-11">
+                <Icon name="more_horiz" size={16} />
+              </MenuTrigger>
+              <MenuContent align="end" className="w-48">
+                <MenuItem className="lg:hidden" icon="share" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">
+                  {ts('share')}
+                </MenuItem>
+                {/* story 4892 — a sprint report is read-only: no «고치기» above and no «삭제» here (the editor page hides it too; the server only lets humans delete). */}
+                {readOnlyDoc ? null : (
+                  <HumanOnlyAction>
+                    {/* the divider belongs with «삭제»: an agent (who gets no delete) must not see a divider with nothing under it */}
+                    <MenuSeparator className="lg:hidden" />
+                    <MenuItem variant="danger" icon="delete" onClick={handleDelete} data-testid="docs-reader-menu-delete">
+                      {t('deleteDoc')}
+                    </MenuItem>
+                  </HumanOnlyAction>
+                )}
+              </MenuContent>
+            </Menu>
+          </span>
+        </div>
+        <div data-testid="docs-reader-subline" className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-ds-small text-ds-ink-3">
+          <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
+          <span aria-hidden="true" className="shrink-0">/</span>
+          <span className="min-w-0 truncate">{categoryLabel ?? t('indexCategoryUncategorized')}</span>
+          {doc.assignee ? (<><span aria-hidden="true" className="shrink-0 text-ds-line-strong">·</span><span className="shrink-0">{doc.assignee.name}</span></>) : null}
+          <span aria-hidden="true" className="shrink-0 text-ds-line-strong">·</span>
+          <span className="shrink-0">{doc.updated_at ? formatViewerRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
+          <span aria-hidden="true" className="shrink-0 text-ds-line-strong">·</span>
+          <span className="shrink-0">{t('readMinutes', { minutes: readMinutes })}</span>
+          {doc.revisions?.count ? (<><span aria-hidden="true" className="shrink-0 text-ds-line-strong">·</span><span className="shrink-0 font-mono text-ds-mono-md">v{doc.revisions.count}</span></>) : null}
+        </div>
       </div>
 
-      <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
-        <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
+      <div ref={scrollRootRef} className="@container focus-inset flex-1 overflow-y-auto">
+        {/* story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번만 두고 자리는 CSS 격자가 정한다:
+            읽기 칸이 넉넉할 때(@min-[50rem] = 800px 이상)는 오른쪽 열 맨 위(2열 1행), 좁으면 DOM 순서대로 본문 맨 위 · 목차 · 이력은 본문 아래. 미디어 쿼리 상태로 옮기면 첫 그림이 «좁은 쪽»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다.
+            2단의 기준은 «뷰포트 lg»가 아니라 «읽기 칸 자체 폭»(CSS 컨테이너 쿼리): 칸 폭은 목록 열이 열렸는지 · 사이드바 폭에 따라 달라 뷰포트로는 못 안다 — dev 실측(맥 앱 기본 창 폭 1100, 목록 열 열림): 칸 552 → 본문 132px(한 줄 약 10자)이었다.
+            2단은 본문 ≥ 384 + 오른쪽 열 316 + 틈 32 + 가장자리 64 = 796 ≤ 800일 때만, 그 아래는 1단(본문이 칸 − 32).
+            행은 «상태 머리 = 내용 높이 · 목차 · 이력 = 나머지 전부»(grid-rows-[auto_1fr]) — 본문(article)이 두 행에 걸쳐 남는 높이가 생기면 auto 행이 그 높이를 나눠 받아 상태 행이 수천 px로 늘고 목차 · 이력이 본문 한참 아래에서 시작했다(dev 실측: aside y=2400, 전 197). */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 @min-[50rem]:grid-cols-[minmax(0,1fr)_316px] @min-[50rem]:grid-rows-[auto_1fr] @min-[50rem]:gap-y-0 @min-[50rem]:px-8">
+          <div data-testid="docs-reader-status-block" className="@min-[50rem]:col-start-2 @min-[50rem]:row-start-1 @min-[50rem]:border-l @min-[50rem]:border-ds-line @min-[50rem]:pb-6 @min-[50rem]:pl-6">
+            <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
+          </div>
+
           {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
-          <article className="mx-auto w-full max-w-[68ch]">
-            {/* story #2967 — kicker/byline은 한글 콘텐츠(카테고리명·작성자명)라 mono+uppercase+
-                wide tracking을 걷는다(«처방도 언어 축을 탄다» — 라틴 전용 문법을 한글에
-                강제하지 않는다). 위계는 색(citron 라인 계열 blue)+굵기로만 유지. */}
-            <div className="text-editorial-ui font-semibold text-proof-blue">
-              {categoryLabel ?? t('indexCategoryUncategorized')}
-            </div>
-            {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
-                --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
-            <h1 className="mt-2 font-display font-editorial-heading text-display leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-editorial-ui text-muted-foreground">
-              {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
-              <span>{doc.updated_at ? formatViewerRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
-              <span className="text-border">|</span>
-              <span>{t('readMinutes', { minutes: readMinutes })}</span>
-              {doc.revisions?.count ? (<><span className="text-border">|</span><span>v{doc.revisions.count}</span></>) : null}
-            </div>
-
-            <div className="mt-6">
-              <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
-            </div>
-
-            <div className="mt-8">
+          <article className="mx-auto w-full max-w-[68ch] @min-[50rem]:col-start-1 @min-[50rem]:row-span-2 @min-[50rem]:row-start-1">
+            <div>
               <DocContentRenderer
                 content={doc.content}
                 contentFormat={doc.content_format ?? 'markdown'}
@@ -199,7 +238,7 @@ export default function DocViewPage() {
           </article>
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
-          <aside className="lg:border-l lg:border-border lg:pl-6">
+          <aside data-testid="docs-reader-rail" className="@min-[50rem]:col-start-2 @min-[50rem]:row-start-2 @min-[50rem]:border-l @min-[50rem]:border-ds-line @min-[50rem]:pl-6">
             {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
                 (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
             <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />
@@ -207,6 +246,21 @@ export default function DocViewPage() {
           </aside>
         </div>
       </div>
+      <DocShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        docId={doc.id}
+        labels={{
+          share: ts('share'),
+          shareToWeb: ts('shareToWeb'),
+          shareToWebDesc: ts('shareToWebDesc'),
+          copyLink: ts('copyLink'),
+          linkCopied: ts('linkCopied'),
+          stopSharing: ts('stopSharing'),
+          regenerateLink: ts('regenerateLink'),
+          shareSingleDocNote: ts('shareSingleDocNote'),
+        }}
+      />
     </div>
   );
 }

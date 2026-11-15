@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { InsightsBoardMetricCell } from './insights-board-metric-cell';
 import { FollowUpDialog } from './follow-up-dialog';
 import { declaredMetricsForChannel } from './channel-declared-metrics';
@@ -66,7 +66,7 @@ function PublicationCard({
   const sourceLabelKey = isBlogRow(row) ? 'storyCompareSourceSiteBeacon' : 'storyCompareSourceChannelApi';
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2" data-testid="story-compare-publication-card">
+    <div className="rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3 space-y-2" data-testid="story-compare-publication-card">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           {row.external_url ? (
@@ -78,7 +78,7 @@ function PublicationCard({
           )}
           <p className="text-xs text-muted-foreground">{channelLabel(row.channel)}</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => setFollowUpOpen(true)} data-testid="story-compare-follow-up-button">
+        <Button type="button" variant="secondary" className="hover:bg-ds-surface-highest" onClick={() => setFollowUpOpen(true)} data-testid="story-compare-follow-up-button">
           {tBoard('followUpAction')}
         </Button>
       </div>
@@ -96,7 +96,7 @@ function PublicationCard({
           </thead>
           <tbody>
             {orderedMetrics.map((metric) => (
-              <tr key={metric} className="border-t border-border/60">
+              <tr key={metric} className="border-t border-ds-line">
                 <td className="py-1 pr-2 text-foreground">
                   {tContent(METRIC_LABEL_KEYS[metric])}
                   {metric === 'views' ? (

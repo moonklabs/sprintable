@@ -92,23 +92,45 @@ describe('AgentRunsList — project_id 배선(story #3680 근본원인)', () => 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('statusFilter=all이면 status 쿼리 자체를 안 보낸다(normalizeRunStatusFilter 적용 — 옛 결함은 raw statusFilter를 그대로 보내 status=all이 새 BE Literal 422에 걸렸을 것)', async () => {
-    let capturedUrl: URL | null = null;
+  it('statusFilter=all(story 4911: 이제 기본값)이면 «전체» 호출엔 status 쿼리 자체를 안 보낸다(normalizeRunStatusFilter 적용 — 옛 결함은 raw statusFilter를 그대로 보내 status=all이 새 BE Literal 422에 걸렸을 것) · status=all은 어떤 호출에도 없다', async () => {
+    const urls: URL[] = [];
     stubFetch((url) => {
-      capturedUrl = url;
+      urls.push(url);
       return { status: 200, body: { data: [], meta: null } };
     });
     await act(async () => { root.render(wrap(<AgentRunsList />)); });
     await flush();
 
-    const allButton = Array.from(container.querySelectorAll('button'))
-      .find((b) => b.textContent === koMessages.agentRuns.filterAll);
-    expect(allButton).toBeDefined();
-    await act(async () => { allButton!.click(); });
-    await flush();
+    // 기본 = 전체: 호출 셋(전체 · 실패 · 사람 확인 대기) — status 없는 것은 정확히 하나, status=all은 0
+    expect(urls).toHaveLength(3);
+    expect(urls.filter((u) => !u.searchParams.has('status'))).toHaveLength(1);
+    expect(urls.map((u) => u.searchParams.get('status')).filter(Boolean).sort()).toEqual(['failed', 'hitl_pending']);
+    expect(urls.some((u) => u.searchParams.get('status') === 'all')).toBe(false);
+  });
 
-    expect(capturedUrl).not.toBeNull();
-    expect(capturedUrl!.searchParams.has('status')).toBe(false);
+  it('상태를 골랐다가 «전체»로 돌아와도 status=all은 안 나간다(고른 상태 = 한 호출, 전체 = 다시 셋)', async () => {
+    const urls: URL[] = [];
+    stubFetch((url) => {
+      urls.push(url);
+      return { status: 200, body: { data: [], meta: null } };
+    });
+    await act(async () => { root.render(wrap(<AgentRunsList />)); });
+    await flush();
+    const select = container.querySelector(`select[aria-label="${koMessages.agentRuns.statusFilterLabel}"]`) as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    const pick = async (v: string) => {
+      await act(async () => { setter.call(select, v); select.dispatchEvent(new Event('change', { bubbles: true })); });
+      await flush();
+    };
+    urls.length = 0;
+    await pick('failed');
+    expect(urls).toHaveLength(1);
+    expect(urls[0].searchParams.get('status')).toBe('failed');
+    urls.length = 0;
+    await pick('all');
+    expect(urls).toHaveLength(3);
+    expect(urls.some((u) => u.searchParams.get('status') === 'all')).toBe(false);
   });
 });
 
@@ -164,7 +186,7 @@ describe('AgentRunsList — 빈 상태 문구가 기본 창과 넓힌 창을 가
     await act(async () => { root.render(wrap(<AgentRunsList />)); });
     await flush();
 
-    const fromInput = container.querySelector('input[type="date"][data-slot="input"]') as HTMLInputElement;
+    const fromInput = container.querySelector('input[type="date"][data-slot="ds-input"]') as HTMLInputElement;
     expect(fromInput).toBeTruthy();
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {

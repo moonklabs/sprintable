@@ -138,7 +138,8 @@ describe('ChatInput — 대화별 임시저장(story #2032 AC2/AC3/AC6)', () => 
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={onSend} />));
     });
-    const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.querySelector('svg') && !b.hasAttribute('aria-haspopup'));
+    // the send button by its NAME (it used to be «the first button with an icon that is no menu» — the attach clip is such a button now, story 4887 P5-a)
+    const sendButton = container.querySelector(`button[aria-label="${koMessages.chats.sendAction}"]`) as HTMLElement | null;
     await act(async () => {
       sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
@@ -383,7 +384,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     expect(select.textContent).toContain('동료1');
   });
 
-  it('대상·작업·지시 셋 다 없으면 전송 버튼이 비활성 — 셋 다 채워야 활성화된다', async () => {
+  it('대상 + 지시 글이면 전송 버튼이 켜진다 — 일감(작업)은 붙이는 맥락일 뿐 필수가 아니다(story 4920)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/entities/search')) {
         return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
@@ -396,27 +397,26 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
       ));
     });
     await act(async () => { toggleBtn()!.click(); });
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     expect(sendBtn.disabled).toBe(true);
 
-    // 지시 텍스트만 채움 — 여전히 비활성(대상·작업 미선택).
+    // 지시 텍스트만 채움 — 여전히 비활성(대상 미선택).
     await act(async () => { setValue(textarea(), '이제 A로 가자'); });
     expect(sendBtn.disabled).toBe(true);
 
-    // 대상 선택.
+    // 대상 선택 → 켜진다(작업은 안 골라도).
     const select = container.querySelector('select') as HTMLSelectElement;
     await act(async () => { setValue(select, 'u1'); });
-    expect(sendBtn.disabled).toBe(true); // 작업 아직 미선택.
+    expect(sendBtn.disabled).toBe(false);
 
-    // 작업 검색 → 후보 클릭.
+    // 작업을 골라도 켜진 채(맥락을 붙이는 것).
     const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
     await act(async () => { setValue(workItemInput, '대상'); });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
     const candidate = [...container.querySelectorAll('[role="listbox"] button')].find((b) => b.textContent?.includes('대상 스토리')) as HTMLButtonElement;
     expect(candidate, '작업 후보를 못 찾음').toBeDefined();
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
-
-    expect(sendBtn.disabled).toBe(false); // 셋 다 채워짐.
+    expect(sendBtn.disabled).toBe(false);
   });
 
   it('전송 성공 — POST /api/events/publish를 정확한 body로 호출하고, 성공 後 STEER 패널이 닫힌다', async () => {
@@ -446,7 +446,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -487,7 +487,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -527,7 +527,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -587,6 +587,40 @@ describe('ChatInput — 로드맵 PR-B L1(floating elev-overlay)', () => {
 // story #92f00dc4(Chat ②층 FE, doc exec-command-final-spec-92f00dc4 §①) — 서버 집행
 // 카탈로그(done/assign/priority) 자동완성 회귀가드.
 describe('ChatInput — 서버 집행 커맨드 자동완성(story #92f00dc4 §①)', () => {
+  // story 4887 (UI-4 P1) — a long argument hint (`/priority ‹스토리#› ‹critical|high|medium|low›`) ran past the 320 px list and was cut mid-word on dev. The hint must be the part that
+  // gives way (min-w-0 + truncate, the whole hint on the title), the list must not scroll sideways, and the name and the description must keep their room (shrink-0).
+  it('4887 ⭐ a long argument hint truncates (title = the whole hint); the list does not scroll sideways; name and description keep their room', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '/');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const listbox = container.querySelector('[role="listbox"][aria-label="커맨드 후보"]') as HTMLElement;
+    expect(listbox.className).toContain('overflow-x-hidden');
+    const rows = [...listbox.querySelectorAll('button[role="option"]')] as HTMLElement[];
+    const withHint = rows.filter((r) => r.querySelector('span[title]'));
+    expect(withHint.length).toBeGreaterThanOrEqual(3); // done · assign · priority carry a hint
+    for (const row of withHint) {
+      const spans = [...row.querySelectorAll('span')] as HTMLElement[];
+      const name = spans.find((s) => s.textContent?.startsWith('/'))!;
+      const hint = row.querySelector('span[title]') as HTMLElement;
+      const desc = spans[spans.length - 1]!;
+      expect(hint.className).toContain('min-w-0');
+      expect(hint.className).toContain('truncate');
+      expect(hint.className).not.toContain('shrink-0');
+      expect(hint.getAttribute('title')).toBe(hint.textContent);
+      expect(name.className).toContain('shrink-0');
+      expect(desc.className).toContain('shrink-0');
+    }
+    const priority = rows.find((r) => r.textContent?.includes('/priority'))!;
+    expect((priority.querySelector('span[title]') as HTMLElement).getAttribute('title')).toContain('critical|high|medium|low');
+  });
+
   it('"/" 입력 시 done/assign/priority가 인자 힌트와 함께 뜬다', async () => {
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));

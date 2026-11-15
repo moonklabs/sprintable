@@ -1,17 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
 import { useTranslations } from 'next-intl';
-import { CircleDot, Inbox, MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
+import { MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CornerCountBadge } from '@/components/ui/corner-count-badge';
-import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
-import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { CountBadge } from '@/components/ds/count-badge';
+import { useHomeModel } from '@/components/home/home-model-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -55,8 +53,7 @@ export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 // story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 「채팅」
 // 탭과 데스크톱 사이드바 「대화」는 같은 화면(/chats)을 가리키는데 각자 다른 i18n 키
 // (mobileTabBar.chat vs nav.chats)를 써서 문구가 갈라져 있었다 — 값이 아니라 **labelKey
-// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」는
-// 모바일 IA 통합이 후속 카드 스코프라 자기 키(mobileTabBar.approvals) 그대로 둔다.
+// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」 탭은 story #4885(폰 탭 넷)에서 없어졌다 — 그 키(mobileTabBar.approvals)도 걷혔다.
 //
 // story #4020(페드루 PO 확定 2026-09-17, 유나 PR 4399 design 관찰) — "now" 탭의 labelKey는
 // 원래(3824) `zoneNow`(「오늘」)였으나, 그 판정은 "탭 바 「지금」과 사이드바 「오늘」은 같은
@@ -80,61 +77,39 @@ export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 // 매 렌더 다시 구한다.
 const DEFAULT_DEST = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
 
-export const TABS = [
-  { key: 'now', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: CircleDot, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
-  // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
-  // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
-  // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
-  // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
-  { key: 'approvals', destKey: 'approvals' as const, href: destHref(DEFAULT_DEST.approvals, {}, keepHref), icon: Inbox, labelKey: 'approvals' as const, namespace: 'mobileTabBar' as const },
-  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
-  // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
-  // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
-  // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
-  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
-] as const;
-
-// story #4006(critical, 5pt) AC8(§2, doc 5bc82986) — v3 플래그 중 하나라도 ON이면
-// (nav-v3-destinations.ts의 anyV3Enabled와 동일 신호, resolveNavV3Destinations.work
-// 참고) 하단 탭이 이 4탭으로 바뀐다: 오늘·대화·일감·더보기. 「승인」은 별 탭 없이
-// 「오늘」의 결정 큐로 흡수(PO 確定 — today_service의 `_needs_me_from_gate_inbox`가
-// ApprovalsQueue와 같은 `list_gate_inbox(status=pending, sort=urgency,
-// assigned_to_me=True)`·limit 없음이라 누락 0 — 그래서 badge도 아래 렌더에서 기존
-// pendingCount를 그대로 「오늘」 탭에 옮겨 붙인다, 새 API 0). 「결과·연결·규칙」은 이
-// 4탭엔 없고 `/more` 목록에서 진입(AC8, 이 모듈 스코프 밖).
-export const V3_TABS = [
+// story #4885 (UI-2 AC4 ② · 폰 하단 탭 넷) — 새 셸은 플래그 없이 하나: 홈 · 대화 · 일감 · 전체. 「결재」 탭은 없다 — 서명 대기 수는 「홈」 탭 배지로 옮겨 붙고(새 fetch 0 · 아래 pendingCount),
+// 결재 화면은 홈 본문의 결재 카드 · 상단 알림 종 · 「전체」 목록에서 열린다(결재 열기 손 수 3 → 2: 홈 탭 → 카드). 「팀 · 지식」은 「전체」 맨 위 두 구역(MOBILE_HUB_GROUP_ORDER).
+// 목적지(href)는 여전히 플래그가 정한다(destKey → resolveNavV3Destinations: 꺼진 v3 화면은 안 켜고 지금 서 있는 /org-briefing · /chats · /flow) — 바뀐 것은 «탭 세트가 플래그로 갈리던 것»뿐이다.
+// 이름은 사이드바와 같은 labelKey(같은 사실 = 같은 낱말): 홈(nav.zoneNow) · 대화(nav.chats) · 일감(nav.zoneDev) · 전체(mobileTabBar.more). 「일감」 탭 목적지(destKey work)가 사이드바 board 항목(labelKey zoneDev)과 이름이 같다(story #4020).
+// href 필드는 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 미리 구운 값(기존 단위테스트 계약) — 실제 렌더 href는 MobileTabBar가 resolveTabHref(tab, dest, scope)로 매 렌더 다시 구한다.
+export const PHONE_TABS = [
   { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today, {}, keepHref), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
   { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
   { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
+  // "전체" = 정식 목록(/more). 기존 모바일 GNB Sheet(햄버거) 재사용은 blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다.
   { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
 ] as const;
 
-export type TabConfig = typeof TABS | typeof V3_TABS;
-export type TabDef = (typeof TABS)[number] | (typeof V3_TABS)[number];
-
-/** flags 중 v3 하나라도 ON이면 V3_TABS, 전부 OFF면 기존 TABS(AC8 "플래그 OFF 탭 4칸 바이트 무변"). */
-export function resolveTabsForFlags(navV3Flags: NavV3Flags): TabConfig {
-  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
-  return anyV3Enabled ? V3_TABS : TABS;
-}
+export type TabConfig = typeof PHONE_TABS;
+export type TabDef = (typeof PHONE_TABS)[number];
 
 // story #4278(유나 결정 ①) — 탭 목적지(destKey) → 메뉴 항목 id. «전체» 메뉴는 «지금 그려진 탭»이 가는 곳만 뺀다(같은 출처 —
 // 예전 MOBILE_HUB_EXCLUDE_IDS는 플래그와 무관해 ON에서 결재함이 어디에도 없었다). «전체»(more)는 자기 자신이라 대응 없음.
 const TAB_DEST_NAV_ITEM_ID: Record<TabDef['destKey'], string | null> = {
-  work: 'board', approvals: 'inbox', chats: 'chats', today: 'org-briefing', more: null,
+  work: 'board', chats: 'chats', today: 'org-briefing', more: null,
 };
 
-export function tabDestinationNavIds(navV3Flags: NavV3Flags): Set<string> {
+export function tabDestinationNavIds(_navV3Flags?: NavV3Flags): Set<string> {
   return new Set(
-    resolveTabsForFlags(navV3Flags)
+    PHONE_TABS
       .map((tab) => TAB_DEST_NAV_ITEM_ID[tab.destKey])
       .filter((id): id is string => id !== null),
   );
 }
 
 /** story #4278 — 탭바가 지금 그리는 탭(«전체» 빼고 · 탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
-export function visibleTabLabels(navV3Flags: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
-  return resolveTabsForFlags(navV3Flags)
+export function visibleTabLabels(_navV3Flags?: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
+  return PHONE_TABS
     .filter((tab) => tab.key !== 'more')
     .map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));
 }
@@ -211,18 +186,12 @@ export function getActiveTabKey(
   pathname: string,
   navV3Flags: NavV3Flags = DEFAULT_NAV_V3_FLAGS,
 ): TabDef['key'] {
+  // story #4885 (폰 탭 넷) — 탭 세트는 플래그로 갈리지 않는다(목적지만 플래그가 정한다). 「홈」은 자기 목적지뿐 아니라 옛 「결재」 경로(/gates/* · /inbox?tab=gates)까지 품는다(결재 탭 폐지 · 결재는 홈 입구 안).
   const dest = resolveNavV3Destinations(navV3Flags);
-  const anyV3Enabled = navV3Flags.todayV3Enabled || navV3Flags.chatV3Enabled || navV3Flags.connectRulesV3Enabled;
-  if (anyV3Enabled) {
-    if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
-    if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
-    if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
-    if (isWorkPath(pathname, dest.work.path)) return 'work';
-    return 'more';
-  }
-  if (isWorkPath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
-  if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'approvals';
+  if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
+  if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
   if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
+  if (isWorkPath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'work';
   return 'more';
 }
 
@@ -254,74 +223,16 @@ export function MobileTabBar({
   // 채팅 항목(app-sidebar.tsx)과 동일 소스. story #2007(perf·서버부하): 여기서 직접
   // useChatUnreadTotal()을 호출하면 AppSidebar와 각자 SSE(EventSource) 연결을 열어 동일
   // 유저 event-stream 연결이 중복된다 — dashboard-shell.tsx가 단일 호출한 값을 prop으로 받는다.
-  // 결재함 배지 = 서명 대기 수(유나 §3.1 정합) — GateInbox가 이미 쓰는 것과 동일한
-  // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
-  // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외
-  // — 별도 필터 불요(백엔드 확認 완료).
-  //
-  // ⚠️fix(story #1974, 선생님 실사용 지적, prod 승격 예정): 이 fetch가 caller 스코프 필터 없이
-  // org 전체 pending을 반환해 "남의 게이트도 내 배지로 세는" 구조적 오배지였다(코드로 확定).
-  // `assigned_to_me=true`(디디 BE 계약, #1974)로 "내가 승인 가능한 것만" 스코프. BE 배포 전엔
-  // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
-  // 자동으로 개인화 적용.
-  const [pendingCount, setPendingCount] = useState(0);
-  const mux = useSseMultiplexerContext();
-  const muxRef = useRef(mux);
-  useEffect(() => { muxRef.current = mux; }, [mux]);
-
-  // story #4263 AC2 — 사이드바와 같은 라이브 갱신(게이트 SSE 이벤트 · #4245 워터마크 판정 공유). 이 구독이 있으니 SSE가 살아 있는 동안엔
-  // 창 포커스 재조회가 필요 없다(아래 loadPendingCount가 생략). 데스크톱(탭바 숨김)에선 구독도 안 한다(아래 effect와 같은 폭 판정).
-  useEffect(() => {
-    if (!mux || typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
-    return subscribeDesignatedPendingCount(mux, setPendingCount);
-  }, [mux]);
-
-  useEffect(() => {
-    // 유나 가디언 지적(#2249 병합 처리) — 탭바 자체는 `lg:hidden`(CSS 시각 게이팅)이지만
-    // CSS hidden은 DOM 마운트/effect 실행을 막지 않는다. 배지 fetch는 <1024에서만 필요하니
-    // 데스크톱에서도 매번 나가던 것을 막는다. useIsMobile()의 mount-시 undefined→effect
-    // 확定 타이밍 레이스(유나 지적)를 피하려 여기서도 use-synthetic-parent-tab-history.ts와
-    // 동일하게 window.innerWidth를 effect 내부에서 동기 판정한다(첫 렌더 즉시 정확한 값).
-    if (typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
-
-    let cancelled = false;
-    // ⚠️fix(story #1974, 선생님 실사용 지적): 마운트 1회 fetch뿐이라 게이트를 다른 탭/기기에서
-    // 처리해도 배지가 안 줄어드는 stale 문제 — DB 실측(2026-07-17)으로 확認(dev pending=0인데
-    // 사용자 배지는 그대로 남아있었음). window focus 복귀 시 재조회해 완화(전형적인 "다른 곳에서
-    // 처리하고 이 탭으로 돌아옴" 시나리오를 커버 — 실시간 push는 아니지만 이 스토리 스코프에선
-    // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
-    async function loadPendingCount() {
-      try {
-        // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(넓은 project-access 질문)를
-        // designated-pending-count(순수 "내가 지정 결재자인 미해소 건", room 추론 0)로 교체
-        // — app-sidebar.tsx와 동일 SSOT 전환(그 파일 주석 참고).
-        // story #4171 — 사이드바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
-        const count = await fetchDesignatedPendingCount();
-        if (count !== null && !cancelled) setPendingCount(count);
-      } catch {
-        // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
-      }
-    }
-
-    void loadPendingCount();
-    // story #4263 AC2 — SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정) 위 구독이 수를 따라가고 있어 포커스 재조회를 생략한다.
-    // 죽었거나 끊겼던 뒤엔 재조회(정확성 우선).
-    const handleFocus = () => {
-      if (muxRef.current?.isAlive()) return;
-      void loadPendingCount();
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, []);
+  // story #4885 — 「홈」 탭 배지 = 웹 막대 「홈」 배지와 **같은 수**(홈 화면 «내 손이 필요해요»의 줄 수): 둘 다 홈 모델(useHomeModel) 하나를 읽는다 — 이 탭바가 따로 세던 결재 대기 fetch · SSE 구독은 걷었다.
+  // 읽기가 불완전하면(partial) 수는 «이상»이라 «N+»로 그린다(웹 막대 ds CountBadge atLeast와 같은 규칙 · 같은 상한 99).
+  // ⚠️홈 모델 공급자(HomeModelProvider)는 대시보드 셸(dashboard-shell.tsx) 안에만 있다. 셸 밖 별도 라우트(/today · /chat · /connect-rules = v3 시안 · 환경 플래그 TODAY_V3_ENABLED 등이 꺼진 기본에선 안 서는 화면)가 이 탭바를 직접 얹으면
+  // 공급자가 없어 모델이 비어 있고 «홈» 배지는 안 그려진다(0으로 읽힌다) — 그 화면들엔 공유 공급자 · 완전한 DashboardContext가 배선돼 있지 않다(각 layout.tsx 주석 — 일부 값만 자기가 읽는다). 시험이 이 «공급자 없음 = 배지 없음 · 오류 없음»을 고정한다.
+  const { model: homeModel, partial: homePartial } = useHomeModel();
+  const homeCount = homeModel?.badge ?? 0;
 
   // story #4217 — 못 푼 프로젝트 경로(오류 상태)에선 어느 탭도 활성 아님(링크는 bare라 그 경로를 가리키지 않는다).
   const activeKey = projectPathUnresolved ? null : getActiveTabKey(pathname, navV3Flags);
-  // story #4006 AC8 — v3(anyV3Enabled)면 4탭이 V3_TABS로 바뀐다(플래그 OFF는 기존 TABS
-  // 그대로, 바이트 무변).
-  const tabs = resolveTabsForFlags(navV3Flags);
+  const tabs = PHONE_TABS;
 
   return (
     <nav
@@ -340,30 +251,25 @@ export function MobileTabBar({
         // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —
         // 채팅 탭은 대화 상세(/chats/{id})에서도 활성이지만 거기선 /chats 프리패치가 목록 복귀를 빠르게 한다.
         const isCurrentPage = staticPathOnly(href) === pathname;
-        // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
-        // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
-        // story #4006 AC8 — v3 4탭엔 「승인」이 없다. 같은 pendingCount를 「오늘」 탭
-        // 배지로 그대로 옮겨 붙인다(승인 큐가 「오늘」의 결정 큐로 흡수됐다는 뜻 —
-        // PO 確定, 위 V3_TABS 주석 참고. 새 fetch 0).
-        const badge = (key === 'approvals' || key === 'today') && pendingCount > 0
-          ? pendingCount
+        // story #1977: "채팅" 탭 배지 = GNB unread 총합. story #4885 — 「홈」 탭 배지 = 홈 모델의 «내 손이 필요한 일» 수(웹 막대와 같은 수 · 같은 상한 99 · partial이면 N+).
+        const badge = key === 'today' && homeCount > 0
+          ? homeCount
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
             : null;
-        // story #3518(유나 사전 스티어, 2026-09-05) — CornerCountBadge는 aria-hidden이라
-        // 그 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 corner-count-badge.tsx
+        // story #3518(유나 사전 스티어, 2026-09-05) — 숨긴 배지(aria-hidden)의
+        // 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 ds/count-badge-hidden-a11y.guard.test.ts
         // 주석 참고). ⚠️여기 aria-label을 쓰지 않는다 — 이 탭은 벨/프레즌스와 달리
-        // 보이는 텍스트 라벨("채팅"·"결재")이 이미 있어서, aria-label로 접근성 이름을
+        // 보이는 텍스트 라벨("대화"·"홈")이 이미 있어서, aria-label로 접근성 이름을
         // 통째로 갈아치우면 그 보이는 라벨이 이름에서 사라진다(WCAG 2.5.3 Label in
         // Name 위반 — 음성 입력 사용자가 화면에 보이는 말("채팅")로 이 링크를 못
         // 부른다). 대신 시각 라벨 뒤에 sr-only 텍스트를 덧붙인다 — 보이는 라벨은
-        // 그대로 두고 수만 "더한다". 상한(9+/99+)도 이름에 반영한다(캡 값이 아니라
-        // "그 이상"이라는 사실을 문장으로 — 시각 배지의 캡과 같은 뜻).
+        // 그대로 두고 수만 "더한다". 상한(99+)·불완전(N+)도 이름에 반영한다("그 이상"이라는 사실을 문장으로).
         const srCountText = badge === null
           ? null
           : key === 'chat'
             ? (badge > 99 ? t('chatUnreadSrCapped') : t('chatUnreadSr', { count: badge }))
-            : (badge > 9 ? t('approvalsPendingSrCapped') : t('approvalsPendingSr', { count: badge }));
+            : (badge > 99 || homePartial ? t('homeNeedsHandSrAtLeast', { count: Math.min(badge, 99) }) : t('homeNeedsHandSr', { count: badge }));
         return (
           <Link
             key={key}
@@ -378,14 +284,14 @@ export function MobileTabBar({
             <span className="relative">
               <Icon className="size-[22px]" strokeWidth={1.8} />
               {badge !== null ? (
-                // story #3431 — 공용 CornerCountBadge로 통합(bell·presence와 동일 정의,
+                // story #3431 — 공용 배지로 통합(bell·presence와 동일 정의, 4890부터 ds CountBadge,
                 // 색/크기 무변경). 위치만 이 소비처 고유(아이콘 오른쪽 옆, 코너 아님).
-                <CornerCountBadge
-                  variant="primary"
-                  className="absolute -top-1 left-full ml-0.5"
-                  // story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지
-                  value={key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
-                />
+                // story 4890 (UI-7 겸사): the ds CountBadge (11px mono · the one badge definition) — before, a 10px corner badge. Home = «내 손이 필요한 일» (amber · named), chat = unread. The count is told by the link's own name (srCountText), so the badge stays aria-hidden.
+                key === 'today' ? (
+                  <CountBadge kind="needs-hand" label={srCountText ?? ''} count={badge} atLeast={homePartial} aria-hidden className="absolute -top-1 left-full ml-0.5" />
+                ) : (
+                  <CountBadge count={badge} aria-hidden className="absolute -top-1 left-full ml-0.5" />
+                )
               ) : null}
             </span>
             {namespace === 'nav' ? tNav(labelKey) : t(labelKey)}

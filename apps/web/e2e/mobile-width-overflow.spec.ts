@@ -13,10 +13,11 @@
  */
 import { expect, request as playwrightRequest, test, type APIRequestContext } from '@playwright/test';
 import { findHorizontalOverflow } from './helpers/horizontal-overflow';
+import { storageAssetList } from './helpers/storage-list';
 
 // 민 기기와 같은 조건: 402×874 · 한국어(글자 버튼 폭이 로케일마다 달라 en만 재면 «새 실행 시작하기» 같은 긴 한국어 라벨을 놓친다).
 test.use({ storageState: 'playwright/.auth/owner.json', viewport: { width: 402, height: 874 }, locale: 'ko-KR' });
-// 두 테스트가 같은 dev 서버 · 같은 시드 데이터를 쓴다 — 병렬로 돌면 서로의 이동이 섞인다(CI는 workers=1이지만 로컬 기본은 병렬).
+// 이 spec의 테스트들이 같은 서버(CI는 프로덕션 `next start`) · 같은 시드 데이터를 쓴다 — 병렬로 돌면 서로의 이동이 섞인다(CI는 workers=1이지만 로컬 기본은 병렬).
 test.describe.configure({ mode: 'serial' });
 
 const FASTAPI = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
@@ -156,6 +157,24 @@ test('⭐402폭 — 전체 메뉴 · 탭바 모든 목적지에서 가로 넘침
   }
 });
 
+// story 4889 — API 키 화면의 에이전트 키 카드는 목록이 그려져야 넘치는 자리다(고정 대기로는 목록이 그려지기 전에 재서 흔들렸다). story 4912 (B1): 이 화면은 «에이전트 한 줄씩 + 키 관리 패널»이다 —
+// 줄이 그려질 때까지 기다려 재고, 패널(폰에선 아래에서 오르는 시트)을 연 채 키 관리 카드가 그려진 뒤 다시 잰다(결정적).
+test('402폭 — API 키 화면: 에이전트 줄 · «키 관리» 패널이 그려진 뒤 가로 넘침 0', async ({ page }) => {
+  test.setTimeout(3 * 60_000);
+  await page.goto(withProject('/organization/workforce/api-keys'), { waitUntil: 'domcontentloaded' });
+  const firstRow = page.locator('[data-testid^="api-key-row-"]').first();
+  await firstRow.waitFor({ timeout: 60_000 });
+  // 줄 안에 «키 관리» 단추가 그려졌는지 — 껍데기만 그려진 줄을 재서 거짓 PASS가 나지 않게.
+  await expect(firstRow.locator('button')).not.toHaveCount(0);
+  const rowOffenders = await findHorizontalOverflow(page);
+  expect(rowOffenders, `/organization/workforce/api-keys @402 (줄) — 가로 넘침(스크롤러 scrollWidth > clientWidth): ${JSON.stringify(rowOffenders)}`).toEqual([]);
+  await firstRow.locator('button:not([data-slot="ds-row-actions-trigger"])').first().click();
+  await page.locator('[data-testid="api-key-panel"] [data-testid="agent-api-key-manager"]').waitFor({ timeout: 60_000 });
+  await expect(page.locator('[data-testid="api-key-panel"] [data-testid="agent-api-key-manager"]').first().locator('button')).not.toHaveCount(0);
+  const panelOffenders = await findHorizontalOverflow(page);
+  expect(panelOffenders, `/organization/workforce/api-keys @402 (패널) — 가로 넘침(스크롤러 scrollWidth > clientWidth): ${JSON.stringify(panelOffenders)}`).toEqual([]);
+});
+
 // 가로 넘침 자로는 안 잡히는 402폭 자리(찌그러짐 · 여백) — 4277 2번 · 5번 · 6번 · 20번. 실 브라우저에서 모양을 잰다.
 test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바닥 여백', async ({ page }) => {
   test.setTimeout(5 * 60_000);
@@ -195,22 +214,23 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   const storage = pick('/storage');
   expect(storage, '스토리지 메뉴 링크').toBeTruthy();
   await page.goto(withProject(storage!), { waitUntil: 'domcontentloaded' });
-  await page.locator('[data-testid="storage-asset-list"]').waitFor({ timeout: 60_000 });
+  // the list is looked up inside `main` (see helpers/storage-list.ts): the bare testid also matched a hidden streaming holder outside `main` in a CI run (strict-mode violation)
+  await storageAssetList(page).waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await expect.soft(page.locator('[data-testid="storage-folder-drawer-trigger"]')).toBeVisible();
-  const listWidth = await page.locator('[data-testid="storage-asset-list"]').evaluate((e) => e.getBoundingClientRect().width);
+  const listWidth = await storageAssetList(page).evaluate((e) => e.getBoundingClientRect().width);
   expect.soft(listWidth, '스토리지 목록 폭(402폭)').toBeGreaterThan(300);
   // story #4277(PO 라이브 반려) — 목록 폭만 보면 이름 칸이 0px여도 초록이었다(행 고정 칸 합 462 > 402). 행이 있으면 첫 행의 이름 블록 실제 폭을 잰다.
   // 시드: 로컬 저장소 공급자는 업로드(PUT)를 아직 못 받아(story dc3d62f4) 이 스펙이 자산을 만들 수 없다 — 칸 예산은 단위 테스트
   // (storage-asset-row.grid-budget.test.tsx)가 결정적으로 잡고, 여기선 자산이 있는 환경에서만 실측한다.
   // CI 36138526074 — 예전엔 `.first().evaluate()`가 행 **출현을 기다려** 자산 0이면 테스트 제한시간까지 걸린 뒤(~6분) 실패 · 재시도했다.
   // 행을 기다리지 않는다: 목록 몸통이 «불러오는 중»을 벗어나길 짧게 기다려 상태를 **한 번** 읽고, 행이 있을 때만 잰다.
-  const listBody = page.locator('[data-testid="storage-asset-list-body"]:not([data-state="loading"])');
+  const listBody = storageAssetList(page).locator('[data-testid="storage-asset-list-body"]:not([data-state="loading"])');
   await listBody.waitFor({ timeout: 30_000 });
   const listState = await listBody.getAttribute('data-state');
   expect.soft(listState, '스토리지 목록 불러오기 실패').not.toBe('error');
   const firstNameWidth = listState === 'rows'
-    ? await page.locator('[data-testid="storage-asset-list"] [role="button"][aria-pressed] > div.min-w-0').first()
+    ? await storageAssetList(page).locator('[role="button"][aria-pressed] > div.min-w-0').first()
       .evaluate((e) => e.getBoundingClientRect().width, undefined, { timeout: 10_000 }).catch(() => null)
     : null;
   if (firstNameWidth !== null) {
@@ -220,27 +240,32 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
     test.info().annotations.push({ type: 'skipped-check', description: `스토리지 이름 칸 폭: 자산 행 0(목록 상태 ${listState} · 로컬 업로드 불가 · story dc3d62f4) — 칸 예산 단위 테스트가 가드` });
     console.log(`[mobile-width-overflow] SKIPPED storage name-width check: no asset rows (list state ${listState} · seed upload unsupported · story dc3d62f4)`);
   }
-  // 4277(PO 402 라이브) — 상단 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘리던 것: 화면 이름(h1)은 온전 · 알약은 화면 안에서
-  // 끝나거나(다 보임) 말줄임으로 줄어든다(잘린 채 숨지 않음).
+  // 4277(PO 402 라이브) → 4910: «N개 자산 · 용량»은 위 막대 알약이 아니라 본문 머리 줄로 내려왔다. 화면 이름(h1)은 온전 · 개수 글은 화면 안에서
+  // 끝나거나 말줄임으로 줄어든다(잘린 채 숨지 않음 · 업로드 단추를 밀어내지 않음).
   expect.soft(await topBarInsideViewport(true), '/storage 상단바 — 화면 밖으로 밀린 버튼 · 제목 잘림').toBe('ok');
-  // CI 시드는 자산 0이라 알약 글자가 짧다(«0개 자산 · 0 B» — 늘 들어맞음). 글자 길이와 무관하게 재도록 **구조**를 단언한다:
-  // 브레드크럼이 폰에서 빠짐 · 알약이 줄어들 수 있음(flex-shrink ≠ 0) · 넘치면 말줄임(text-overflow) · 화면 안에서 끝남.
-  const pill = await page.locator('[data-testid="storage-summary-badge"]').evaluate((b) => {
-    const inner = b.querySelector('span') as HTMLElement;
-    const row = b.parentElement as HTMLElement;
+  // CI 시드는 자산 0이라 글자가 짧다(«0개 자산 · 0 B» — 늘 들어맞음). 글자 길이와 무관하게 재도록 **구조**를 단언한다:
+  // 브레드크럼이 폰에서 빠짐 · 개수 글이 줄어들 수 있음(min-width 0) · 넘치면 말줄임(text-overflow) · 화면 안에서 끝남 · 위 막대에 알약 없음.
+  const summary = await page.locator('[data-testid="storage-summary"]').evaluate((p) => {
+    const head = p.parentElement as HTMLElement;
+    const h1 = document.querySelector('h1') as HTMLElement;
+    const row = h1.parentElement as HTMLElement;
     return {
-      inside: b.getBoundingClientRect().right <= window.innerWidth + 1,
-      shrinks: getComputedStyle(b).flexShrink !== '0',
-      ellipsis: getComputedStyle(inner).textOverflow === 'ellipsis' && getComputedStyle(inner).overflow === 'hidden',
-      // 브레드크럼 = 제목 줄의 알약 아닌 span들(알약 자신도 span이라 뺀다).
-      breadcrumbHidden: [...row.children].filter((c) => c.tagName === 'SPAN' && c !== b).every((c) => getComputedStyle(c).display === 'none'),
-      text: inner.textContent ?? '',
+      inside: p.getBoundingClientRect().right <= window.innerWidth + 1,
+      ellipsis: getComputedStyle(p).textOverflow === 'ellipsis' && getComputedStyle(p).overflow === 'hidden',
+      shrinks: getComputedStyle(p).minWidth === '0px',
+      headInside: head.scrollWidth <= head.clientWidth + 1,
+      // 브레드크럼 = 제목(h1) 줄의 h1 아닌 span들.
+      breadcrumbHidden: [...row.children].filter((c) => c.tagName === 'SPAN').every((c) => getComputedStyle(c).display === 'none'),
+      pillInTopBar: document.querySelector('[data-testid="storage-summary-badge"]') !== null,
+      text: p.textContent ?? '',
     };
   });
-  expect.soft(pill.inside, `스토리지 요약 알약이 화면 안에서 끝난다(${pill.text})`).toBe(true);
-  expect.soft(pill.shrinks, '스토리지 요약 알약이 줄어들 수 있다(flex-shrink ≠ 0)').toBe(true);
-  expect.soft(pill.ellipsis, '스토리지 요약 알약 — 넘치면 말줄임').toBe(true);
-  expect.soft(pill.breadcrumbHidden, '폰에서 브레드크럼(«작업 공간 /») 숨김').toBe(true);
+  expect.soft(summary.inside, `스토리지 개수 글이 화면 안에서 끝난다(${summary.text})`).toBe(true);
+  expect.soft(summary.headInside, '스토리지 머리 줄이 옆으로 넘치지 않는다').toBe(true);
+  expect.soft(summary.shrinks, '스토리지 개수 글이 줄어들 수 있다(min-width 0)').toBe(true);
+  expect.soft(summary.ellipsis, '스토리지 개수 글 — 넘치면 말줄임').toBe(true);
+  expect.soft(summary.breadcrumbHidden, '폰에서 브레드크럼(«작업 공간 /») 숨김').toBe(true);
+  expect.soft(summary.pillInTopBar, '위 막대에 개수 알약 없음(제목은 위 막대 한 곳)').toBe(false);
 
   // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
   // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).
@@ -316,19 +341,21 @@ test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정�
 test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통째로 · 긴 분류는 말줄임 · «지식» 한 줄(story #4356)', async ({ page }) => {
   test.setTimeout(5 * 60_000);
   expect(crumbShortSlug && crumbLongSlug, '빵부스러기 문서 시드').toBeTruthy();
+  // story 4892 — 머리줄이 둘째 줄(경로 · 메타)과 첫 줄(제목 h1)로 갈렸다: «지식» · 분류는 둘째 줄 `docs-reader-subline`, 제목은 머리 첫 줄 h1.
   const measure = (category: string) => page.evaluate((cat) => {
-    const root = [...document.querySelectorAll('a')].find((a) => a.textContent === '지식' && (a.parentElement?.textContent ?? '').includes(cat));
-    const row = root?.parentElement;
-    const kids = row ? ([...row.children] as HTMLElement[]) : [];
+    const sub = document.querySelector('[data-testid="docs-reader-subline"]');
+    const root = sub ? [...sub.querySelectorAll('a')].find((a) => a.textContent === '지식') : undefined;
+    const kids = sub ? ([...sub.children] as HTMLElement[]) : [];
     const catEl = kids.find((el) => el.textContent === cat);
     if (!root || !catEl) return null;
-    const title = kids[kids.indexOf(catEl) + 2];
+    const title = document.querySelector('[data-testid="docs-reader-head"] h1') as HTMLElement | null;
     const range = (el: Element) => { const r = document.createRange(); r.selectNodeContents(el); return r; };
     // 줄 수 = 글자 조각 사각형의 서로 다른 윗변 수(블록이 된 flex 항목도 글자 줄은 따로 센다).
     const lines = (el: Element) => new Set([...range(el).getClientRects()].map((q) => Math.round(q.top))).size;
     return {
       rootLines: lines(root),
       catW: catEl.clientWidth, catScroll: catEl.scrollWidth, catText: range(catEl).getBoundingClientRect().width, catOverflow: getComputedStyle(catEl).textOverflow,
+      catRight: catEl.getBoundingClientRect().right, subRight: sub!.getBoundingClientRect().right,
       titleW: title?.clientWidth ?? 0, titleScroll: title?.scrollWidth ?? 0,
     };
   }, category);
@@ -342,8 +369,10 @@ test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통�
       const at = `${width} · ${isLong ? '긴' : '짧은'} 분류`;
       expect(m.rootLines, `${at} — «지식» 한 줄`).toBe(1);
       if (isLong) {
-        expect(m.catOverflow, `${at} — 말줄임(…)`).toBe('ellipsis');
-        expect(m.catScroll, `${at} — 줄어서 말줄임`).toBeGreaterThan(m.catW);
+        // story 4892 — 분류는 이제 둘째 줄(경로 · 메타)에서 제 줄을 가진다(제목과 한 줄을 나누지 않음): 줄보다 넓을 때만 줄어든다. 의도(긴 분류가 줄 밖으로 삐져나오지 않고 말줄임 규칙을 쥔다)는 그대로 —
+        // 말줄임 규칙(text-overflow: ellipsis)이 걸려 있고, 어떤 폭에서도 분류의 오른쪽 끝이 둘째 줄 안에 있다. 넓이 넘침이 생기면(scroll > client) 그때 말줄임이 실제로 보인다.
+        expect(m.catOverflow, `${at} — 말줄임(…) 규칙`).toBe('ellipsis');
+        expect(m.catRight, `${at} — 분류가 줄 밖으로 안 나감`).toBeLessThanOrEqual(m.subRight + 1);
       } else {
         expect(m.catScroll, `${at} — 통째로(잘림 0)`).toBeLessThanOrEqual(m.catW + 1);
         expect(m.catW, `${at} — 폭 ≥ 글자 폭`).toBeGreaterThanOrEqual(Math.floor(m.catText));

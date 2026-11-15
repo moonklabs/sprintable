@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from app.services.agent_onboarding_config import SUPPORTED_LOCALES, resolve_locale
 
-__all__ = ["MessageCatalog", "TIMEZONE_DISPLAY_NAMES", "UnknownMessageKeyError", "t"]
+__all__ = ["LEGACY_SYSTEM_TEXTS", "MessageCatalog", "TIMEZONE_DISPLAY_NAMES", "UnknownMessageKeyError", "t"]
 
 
 class UnknownMessageKeyError(KeyError):
@@ -47,12 +47,22 @@ TIMEZONE_DISPLAY_NAMES: dict[str, dict[str, str]] = {
 }
 
 
+# story #4888 — a system text this catalog CHANGED: the OLD text a database row may still carry, by catalog key. Migration 0473 corrects the rows that exist; the repository
+# that owns the rows corrects (exact match, never a pattern) what the old release seeded after the migration ran. Kept here — the one file the scanner exempts — so the old
+# and the new wording of a system text are read from one place and no other file holds a user sentence for them.
+LEGACY_SYSTEM_TEXTS: dict[str, str] = {
+    "workflow_trigger.kickoff.description": "스프린트 또는 에픽 킥오프",
+}
+
+
 # key → {locale: template}. `.format(**params)`로 렌더 — 지금 슬라이스 1의 모든 문자열은
 # 파라미터가 없는 plain literal이라 params 없이도 그대로 반환된다(향후 슬라이스가 f-string
 # 동적 값이 섞인 문장을 옮길 때 이 메커니즘을 그대로 재사용).
 ## en 문장 = 유나 定(2026-09-10, 카드 코멘트 착지) — 이 레포 404/409/422 detail 관례
 ## (`<Noun> not found`·`<Noun> already exists`·거절 문장형) 실측 대조 근거로 확定됨.
 _CATALOG: dict[str, dict[str, str]] = {
+    # story #4888 — the system workflow trigger «kickoff»: its description (seeded into `workflow_trigger_types`; «goal», not «epic» — the one name a person sees)
+    "workflow_trigger.kickoff.description": {"ko": "스프린트 또는 목표 킥오프", "en": "Sprint or goal kickoff"},
     # story #4533 — an agent's permission request notice (명세 모음 B-2 «폰 알림»: the agent and the tool only — no command,
     # no path; a lock screen and a notice history keep them)
     "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
@@ -660,6 +670,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "[이벤트] {event_key}",
         "en": "[Event] {event_key}",
     },
+    # story 4921 — the line a PERSON sees for an event message (the summary the bell carries, a notification body, the activity log's preview): the machine text of the message (what an agent reads)
+    # is never shown to a person. Same words as the web's `eventCard.steerHeader / genericEventHeader / memberMissing`.
+    "events.preview_generic": {
+        "ko": "이벤트",
+        "en": "Event",
+    },
+    "events.preview_steer": {
+        "ko": "방향 전환 · {instruction}",
+        "en": "Direction change · {instruction}",
+    },
+    "events.preview_steer_target": {
+        "ko": "{line} → {name}",
+        "en": "{line} → {name}",
+    },
+    "events.preview_member_missing": {
+        "ko": "(알 수 없는 구성원)",
+        "en": "(unknown member)",
+    },
+    "events.preview_with_words": {
+        "ko": "{head} · {words}",
+        "en": "{head} · {words}",
+    },
     "events.stage_action_label": {
         "ko": "할 일: {action}",
         "en": "To do: {action}",
@@ -799,13 +831,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 서버가 발송하고, 발송에 성공하면 워크플로우가 다음 단계로 넘어가요. 이 단계에서는 publish_event를 부르지 마세요.",
         "en": "Next action: nothing — the server sends it, and the workflow moves to the next stage once the send succeeds. Don't call publish_event at this stage.",
     },
-    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
+    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 생성(옛 «연산») 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
     # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야
     # 하는지"와 "무엇으로 실행하는지"는 다른 축) · 새 문장을 그 뒤에 붙인다.
     "events.capability_hint_master_cut_evidence": {
         "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요."
-        " 연산 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
+        " 생성 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
         "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created."
         " For the generation stage, call get_generation_connector to get the org connector's"
         " config and credentials, then run it yourself.",
@@ -843,7 +875,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "events.stage_role.Agent": {"ko": "에이전트", "en": "Agent"},
     "events.stage_role.Any": {"ko": "누구나", "en": "Any"},
     "events.stage_role.Approver": {"ko": "승인자", "en": "Approver"},
-    "events.stage_role.Compute": {"ko": "연산", "en": "Compute"},
+    "events.stage_role.Compute": {"ko": "생성", "en": "Compute"},
     "events.stage_role.Creator": {"ko": "크리에이터", "en": "Creator"},
     "events.stage_role.Dev": {"ko": "개발자", "en": "Dev"},
     "events.stage_role.Director": {"ko": "디렉터", "en": "Director"},

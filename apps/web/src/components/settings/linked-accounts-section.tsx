@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { ListRow } from '@/components/ds/list-row';
+import { SettingsSection } from './settings-section';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 
@@ -114,62 +116,60 @@ export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProp
   const loginMethodCount = (hasPassword ? 1 : 0) + linkedProviders.length;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('linkedAccountsTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('linkedAccountsDescription')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {message && (
-          // 유나 design:changes(2026-08-26, PR#3532) — 라이트 테마 text-success on 배경이
-          // 3.49:1로 AA(4.5) 미달 실측(StateHeader §654a74ba 선례 동형). 처방: 성공 텍스트는
-          // text-foreground(중립, 양테마 AA 보장)로 두고 상태 신호는 그래픽(체크 아이콘,
-          // 장식용 aria-hidden)으로만 준다 — "색은 그래픽·텍스트는 중립".
-          <p
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-            className={`flex items-center gap-1.5 text-sm ${message.type === 'success' ? 'text-foreground' : 'text-destructive'}`}
-          >
-            {message.type === 'success' && <Check className="size-3.5 shrink-0 text-success" aria-hidden="true" />}
-            {message.text}
-          </p>
-        )}
+    <SettingsSection title={t('linkedAccountsTitle')} description={t('linkedAccountsDescription')}>
+      {message && (
+        // 유나 design:changes(2026-08-26, PR#3532) — 성공 텍스트는 중립 색(양 테마 AA 보장)으로 두고 상태 신호는 그래픽(체크 아이콘, 장식용 aria-hidden)으로만 준다 — «색은 그래픽 · 텍스트는 중립».
+        <p
+          role={message.type === 'success' ? 'status' : 'alert'}
+          aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+          className={`flex items-center gap-1.5 text-ds-body ${message.type === 'success' ? 'text-ds-ink' : 'text-ds-failed'}`}
+        >
+          {message.type === 'success' && <Check className="size-3.5 shrink-0 text-ds-done" aria-hidden="true" />}
+          {message.text}
+        </p>
+      )}
 
-        <ul className="divide-y divide-border max-w-sm">
-          {PROVIDERS.map(({ id, label }) => {
-            const connected = linkedProviders.includes(id);
-            const canUnlink = connected && loginMethodCount > 1;
-            return (
-              <li key={id} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{label}</p>
-                  <p className="text-xs text-muted-foreground">{connected ? t('linkedAccountsConnected') : t('linkedAccountsNotConnected')}</p>
-                </div>
-                {connected ? (
-                  <button
-                    onClick={() => void handleUnlink(id)}
-                    disabled={!canUnlink || unlinking === id}
-                    title={canUnlink ? undefined : t('linkedAccountsOnlyMethodTitle')}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50 disabled:opacity-50"
-                  >
-                    {unlinking === id ? t('linkedAccountsDisconnecting') : t('linkedAccountsDisconnect')}
-                  </button>
-                ) : (
-                  <a
-                    href={`/auth/link?provider=${id}`}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50"
-                  >
-                    {t('linkedAccountsConnect')}
-                  </a>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </SectionCardBody>
-    </SectionCard>
+      {/* story 4891 (settings › profile ①): one ds ListRow per provider — the name + the state on the left, the one action (disconnect / connect) on the right; the same links and the same guard (the only login method cannot be disconnected) */}
+      <ul className="max-w-sm divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line">
+        {PROVIDERS.map(({ id, label }) => {
+          const connected = linkedProviders.includes(id);
+          const canUnlink = connected && loginMethodCount > 1;
+          return (
+            <li key={id}>
+              <ListRow
+                className="border-b-0"
+                title={
+                  <span className="block">
+                    <span className="block text-ds-body font-semibold text-ds-ink">{label}</span>
+                    <span className="block text-ds-small font-normal text-ds-ink-3">{connected ? t('linkedAccountsConnected') : t('linkedAccountsNotConnected')}</span>
+                    {/* the REASON the disconnect is off is a visible line (not a hover title) and the button points at it (aria-describedby) */}
+                    {connected && !canUnlink ? <span id={`linked-only-method-${id}`} className="mt-0.5 block whitespace-normal text-ds-small font-normal text-ds-ink-3">{t('linkedAccountsOnlyMethodTitle')}</span> : null}
+                  </span>
+                }
+                trailing={
+                  connected ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => void handleUnlink(id)}
+                      disabled={!canUnlink || unlinking === id}
+                      // the name keeps the VISIBLE words (label-in-name): the idle name is «연결 해제 · provider», while it runs it follows the button's «해제 중…»
+                      aria-label={unlinking === id ? `${t('linkedAccountsDisconnecting')} — ${label}` : t('linkedAccountsDisconnectAria', { provider: label })}
+                      aria-describedby={canUnlink ? undefined : `linked-only-method-${id}`}
+                    >
+                      {unlinking === id ? t('linkedAccountsDisconnecting') : t('linkedAccountsDisconnect')}
+                    </Button>
+                  ) : (
+                    <Button asChild variant="secondary" aria-label={t('linkedAccountsConnectAria', { provider: label })}>
+                      <a href={`/auth/link?provider=${id}`}>{t('linkedAccountsConnect')}</a>
+                    </Button>
+                  )
+                }
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </SettingsSection>
   );
 }

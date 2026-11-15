@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { AlertCircle } from 'lucide-react';
 import { findBrokenNavEntries, fsRouteChecker, type RouteChecker } from './verify-nav-config-routes';
-import { NAV_GROUPS } from '../src/lib/nav-config';
+import { NAV_GROUPS, OTHER_NAV_ITEMS } from '../src/lib/nav-config';
 
 describe('verify-nav-config-routes — story #2681 AC3', () => {
-  it('실 NAV_GROUPS 전 항목이 실 라우트와 정합한다(회귀 0)', () => {
-    expect(findBrokenNavEntries(NAV_GROUPS, fsRouteChecker)).toEqual([]);
+  it('실 NAV_GROUPS 전 항목 + 그 밖(OTHER_NAV_ITEMS)이 실 라우트와 정합한다(회귀 0)', () => {
+    expect(findBrokenNavEntries([...NAV_GROUPS, { id: 'other', items: OTHER_NAV_ITEMS }], fsRouteChecker)).toEqual([]);
   });
 
   // AC3 「RED 실증」 — 진짜 파일시스템을 건드리지 않고(fsRouteChecker를 가짜 checker로

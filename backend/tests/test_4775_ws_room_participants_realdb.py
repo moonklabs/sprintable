@@ -150,6 +150,27 @@ def _say(ws, content: str, **extra) -> None:
     ws.send_text(json.dumps({"content": content, **extra}))
 
 
+def _room_sockets(agent_id: uuid.UUID | None = None) -> set:
+    """the sockets that are in the agent's room right now (the server's own registry — the test runs in the same process)"""
+    from app.routers.ws_chat import _rooms
+
+    return set(_rooms.get(str(agent_id or AGENT), ()))
+
+
+def _wait_in_room(before: set, how_many: int, timeout: float = 8.0, agent_id: uuid.UUID | None = None) -> None:
+    """Wait until `how_many` NEW sockets (not in `before`) are in the room. The client's `websocket_connect` returns when the server has
+    *accepted* the socket; the server puts it into the room only after its lookups (agent · project reach · key · conversation · name) —
+    a line published in between is never heard by it. A test that sends over REST right after connecting raced that gap (it failed on a
+    loaded CI machine: «nothing arrived on the socket within 8.0 s»). The condition is waited for, not a longer time."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while len(_room_sockets(agent_id) - before) < how_many:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{how_many} new socket(s) did not enter the room within {timeout} s")
+        time.sleep(0.01)
+
+
 def _recv_until(ws, content: str) -> list[dict]:
     """everything this socket hears up to and including its own `content` line (it is sent by this socket, so it comes back)"""
     got: list[dict] = []
@@ -201,7 +222,9 @@ def test_a_line_of_one_persons_dm_does_not_reach_another_person_on_the_same_agen
 
 def test_the_agents_own_socket_hears_the_dm_lines_it_is_a_participant_of(world, client):
     """the agent X is a participant of both DMs: it hears A's line and B's line (and nobody else's)"""
+    before = _room_sockets()
     with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_agent()) as wx:
+        _wait_in_room(before, 3)  # X must be in the room when A's line is published, or it never hears it
         _say(wa, "A-to-X")
         _recv_until(wa, "A-to-X")
         _say(wb, "B-to-X")
@@ -219,7 +242,9 @@ def test_the_agents_answer_is_saved_in_the_conversation_it_names_and_heard_by_it
     _make_dm(client, UA)  # A's DM with X now exists (it is the OLDEST DM of the agent)
     _make_dm(client, UB)  # B's DM exists second
     dm_a, dm_b = _dm_of(MA), _dm_of(MB)
+    before = _room_sockets()
     with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_agent()) as wx:
+        _wait_in_room(before, 3)  # B must be in the room when X's answer is published, or it never hears it
         _say(wx, "X-REPLY-TO-B", conversation_id=str(dm_b))
         b_heard = _recv_until(wb, "X-REPLY-TO-B")
         assert b_heard[-1]["conversation_id"] == str(dm_b)
@@ -331,7 +356,9 @@ def test_a_line_sent_over_rest_reaches_the_people_of_that_conversation_only(worl
     override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth_a
     try:
+        before = _room_sockets()
         with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_agent()) as wx:
+            _wait_in_room(before, 3)  # all three are IN the room before the line is sent over REST
             resp = client.post(f"/api/v2/conversations/{dm_a}/messages", json={"content": "rest-line"})
             assert resp.status_code == 201, resp.text
             assert _recv_until(wx, "rest-line")[-1]["conversation_id"] == str(dm_a)  # the agent (a participant) hears it
@@ -485,7 +512,9 @@ def test_a_group_conversation_line_over_rest_reaches_its_participants_only(world
     override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth_a
     try:
+        before = _room_sockets()
         with client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_human(UO)) as wo:
+            _wait_in_room(before, 2)  # both are IN the room before the line is sent over REST
             resp = client.post(f"/api/v2/conversations/{group}/messages", json={"content": "group-line"})
             assert resp.status_code == 201, resp.text
             assert _recv_until(wb, "group-line")[-1]["conversation_id"] == str(group)  # B is in the group

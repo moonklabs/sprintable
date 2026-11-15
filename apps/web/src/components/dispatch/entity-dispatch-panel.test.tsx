@@ -50,6 +50,23 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe('EntityDispatchPanel — 4908 좁은 칸(속성 칸 16rem)에서 고르기 칸이 안 잘린다', () => {
+  it('⭐고르기 칸은 11rem(min-w-44) 밑으로 줄지 않고 flex-wrap 줄이라 모자라면 단추가 아래 줄로 내려간다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: MEMBERS }) })));
+    await act(async () => {
+      root.render(wrap(<EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId="m1" />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    // ds NativeSelect: className은 «바깥 틀»(data-slot=ds-select)에 걸린다 — 틀이 11rem 밑으로 안 줄고 줄에서 남는 폭을 채운다.
+    const frame = container.querySelector('select')!.parentElement!;
+    expect(frame.getAttribute('data-slot')).toBe('ds-select');
+    const c = frame.className.split(/\s+/);
+    expect(c).toEqual(expect.arrayContaining(['min-w-44', 'flex-1']));
+    expect(c).not.toContain('min-w-0');
+    expect(frame.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap']));
+  });
+});
+
 describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => {
   it('/api/dispatch가 {data:{dispatched:true}}로 응답하면 성공 토스트가 뜬다(담당자 미지정 오탐 아님)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -220,8 +237,10 @@ describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 e
     await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4349 — 드롭다운은 body로 포털된다(스크롤 면 밖) → container가 아니라 document에서 찾는다(뜻 그대로).
-    const dropdown = document.querySelector('.shadow-\\[var\\(--elev-overlay\\)\\]');
+    // 4908 — 더보기 팝오버 면은 ds 메뉴 상자와 같은 말(surface-raised · line-control · shadow-ds-overlay)이다.
+    const dropdown = document.querySelector('[data-dropdown-panel="dispatch-more"]');
     expect(dropdown).not.toBeNull();
+    expect(dropdown!.className.split(/\s+/)).toEqual(expect.arrayContaining(['shadow-ds-overlay', 'bg-ds-surface-raised', 'border-ds-line-control']));
     expect(document.querySelector('.shadow-md')).toBeNull();
   });
 });
@@ -247,8 +266,8 @@ describe('EntityDispatchPanel — 바탕 부품(story 4831)', () => {
     });
     await act(async () => { await Promise.resolve(); });
     const select = container.querySelector('select') as HTMLSelectElement;
-    expect(select.dataset.slot).toBe('select');
-    expect(select.className).toContain('flex-1');
+    expect(select.parentElement!.dataset.slot).toBe('ds-select');
+    expect(select.parentElement!.className).toContain('flex-1');
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'm1');
       select.dispatchEvent(new Event('change', { bubbles: true }));

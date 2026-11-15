@@ -1,0 +1,199 @@
+/*
+ * UI-3 design system tokens (story a9d56577 · doc ui3-token-names-and-component-list-v0, 11-10 PO 결정).
+ *
+ * 새 뜻 이름 토큰을 «따로» 세운다 — 옛 변수(--background · --foreground · --proof-* …)와 이름이 겹치지 않게 `--ds-` 접두를 두고, 새 부품(`components/ds/`) · 새 화면은 이 값을 바로 쓴다.
+ * story 4919(UI-R6, PO 판정 2026-11-13): 처음엔 «옛 이름을 이 값의 별칭으로 잇지 않는다(잇는 순간 아직 안 다시 지은 화면의 색이 흔들린다)»였지만, 지금은 다시 지은 화면이 대부분이고
+ * 남은 «흔들림»이 곧 걷어야 할 옛 미색이다. 그래서 `app/globals.css`의 옛 값 SSOT(`--proof-*`)와 몇 별칭(`--primary` · `--ring` · `--input` · `--popover`)이 이 파일의 토큰을 가리킨다 —
+ * **색 값을 정하는 곳은 이 파일 하나**이고, 옛 이름은 그 값을 부르는 별칭일 뿐이다(대응표 = 4919 AC2 문서, 시험 = `styles/old-palette-alias.4919.test.ts`).
+ *
+ * 값은 어둠 / 밝음. 앱의 테마 스위치는 `.dark` 클래스(globals.css `@custom-variant dark`)라 밝음이 :root · 어둠이 .dark.
+ * 대비는 design-system.test.ts가 이 파일의 값을 읽어 계산한다(글자 조합 4.5:1 · 누를 수 있는 경계 3:1 아래로 내려가면 빨개진다).
+ */
+/* `.ds-theme-light`: 어두운 화면 안에서 «밝음»을 강제로 보여야 할 때(견본 화면의 밝음 틀) 같은 밝음 값을 그 가지에 다시 건다 — 값은 한 벌(이 규칙)뿐. */
+:root,
+.ds-theme-light {
+  --ds-surface-sunk: #e6eaf1;
+  --ds-background: #f3f5f9;
+  --ds-surface: #ffffff;
+  --ds-surface-raised: #f7f8fb;
+  --ds-surface-high: #e0e4ea;
+  --ds-surface-highest: #cfd6e1;
+  --ds-line: #d8dee8;
+  --ds-line-strong: #b7bfcc;
+  --ds-line-control: #757e8f;
+  --ds-ink: #0f1420;
+  --ds-ink-2: #3f4859;
+  --ds-ink-3: #586274;
+  --ds-action: #5b4be0;
+  --ds-on-action: #ffffff;
+  --ds-action-text: #4a3bc8;
+  --ds-action-soft: #efedfc;
+  --ds-mine: #cdc6f5;
+  --ds-needs-hand: #9a4b00;
+  --ds-needs-hand-bar: #d6791c;
+  --ds-on-needs-hand: #1a0f00;
+  --ds-needs-hand-soft: #ffefe0;
+  --ds-done: #0b7a5e;
+  --ds-done-soft: #e7f2ef;
+  --ds-failed: #c42b45;
+  --ds-failed-soft: #faeef0;
+  --ds-info: #1f5fbf;
+  --ds-info-soft: #edf2fa;
+  --ds-scrim: #000000;
+}
+
+.dark {
+  --ds-surface-sunk: #080c12;
+  --ds-background: #0f141a;
+  --ds-surface: #181c23;
+  --ds-surface-raised: #1c2027;
+  --ds-surface-high: #262a32;
+  --ds-surface-highest: #31353d;
+  --ds-line: #343541;
+  --ds-line-strong: #474554;
+  --ds-line-control: #7a7788;
+  --ds-ink: #dfe2ec;
+  --ds-ink-2: #c8c4d6;
+  --ds-ink-3: #928f9f;
+  --ds-action: #8e7fff;
+  --ds-on-action: #24008c;
+  --ds-action-text: #c7bfff;
+  --ds-action-soft: #2b2c46;
+  --ds-mine: #34365c;
+  --ds-needs-hand: #ffb77d;
+  --ds-needs-hand-bar: #d6791c;
+  --ds-on-needs-hand: #1a0f00;
+  --ds-needs-hand-soft: #342f2e;
+  --ds-done: #46deb2;
+  --ds-done-soft: #1e3334;
+  --ds-failed: #ffb4ab;
+  --ds-failed-soft: #342e33;
+  --ds-info: #7db4ff;
+  --ds-info-soft: #242e3d;
+  --ds-scrim: #000000;
+}
+
+/*
+ * 밀도 · 그림자 · 움직임 토큰 (UI-3 4886 AC1 · PO 11-11). 값은 부품 안에 흩어져 있던 그대로다(화면 변화 0) — 이름만 붙였다.
+ * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다):
+ *   control-sm 28(작은 단추) · compact 32(탭 · 메뉴 항목 · 달력 칸) · control 36(큰 단추 · 입력칸) · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄).
+ * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널).
+ * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`)
+ *   · 토스트 들어오기 0.3초(`--ds-duration-enter`, `animate-ds-slide-in` — 옛 `slide-in`과 같은 값: 오른쪽에서 밀려 들어오며 투명 → 불투명).
+ */
+@theme {
+  --spacing-ds-control-sm: 1.75rem;
+  --spacing-ds-compact: 2rem;
+  --spacing-ds-control: 2.25rem;
+  --spacing-ds-touch: 2.75rem;
+  --spacing-ds-control-xl: 3rem;
+  --spacing-ds-row: 3.5rem;
+  --shadow-ds-popup: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-ds-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --animate-ds-pulse: ds-pulse var(--ds-duration-pulse) cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-ds-slide-in: ds-slide-in var(--ds-duration-enter) ease-out;
+  @keyframes ds-pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+  @keyframes ds-slide-in {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+}
+
+:root {
+  --ds-duration-fast: 100ms;
+  --ds-duration-instant: 0ms;
+  --ds-duration-pulse: 2s;
+  --ds-duration-enter: 300ms;
+}
+
+/*
+ * `touch:` 변형 — «손가락으로 누르는 기기»의 44 바닥(UI-3 4886 · PO 결정 11-11). `pointer-coarse:` 하나는 안드로이드 에뮬 웹뷰(pointer fine · hover none)와
+ * 스타일러스 소스가 붙은 폰(S펜 등)에서 44가 통째로 빠졌다 → `(pointer: coarse)` 또는 `(hover: none)`이면 건다.
+ * 데스크톱 마우스(pointer fine · hover)는 그대로 36. ds 부품의 44는 `pointer-coarse:`가 아니라 이 변형만 쓴다(touch-variant.test.tsx가 컴파일된 CSS로 지킨다).
+ * 셋째 조건 = 앱 셸(iOS · Android) 안: <html data-sprintable-shell="ios|android">(루트 layout head 인라인 스크립트 · lib/shell-attribute.ts)이면 기기 분류와 상관없이 건다.
+ * 맥 데스크톱 앱(macos)에는 속성이 안 달려 마우스 36 그대로.
+ */
+@custom-variant touch {
+  @media (pointer: coarse), (hover: none) {
+    @slot;
+  }
+  &:where(:root[data-sprintable-shell="ios"] *, :root[data-sprintable-shell="android"] *) {
+    @slot;
+  }
+}
+
+/*
+ * `mouse:` 변형 — `touch:`의 «반대»: 정말 마우스 올림이 되는 곳(pointer fine 그리고 hover 가능, 앱 셸 밖)에서만 건다.
+ * 호버로만 드러나는 조작 요소(HOVER_REVEAL)의 «숨김»은 이 변형으로만 한다 — `pointer-fine:` 하나로 숨기면 에뮬 웹뷰 · 스타일러스 폰(pointer fine · hover none)과
+ * 앱 셸 안에서 올릴 마우스가 없는데도 숨은 채 영영 안 드러난다. 표지는 `:root`에 박힌 것만 읽는다(사용자 글 안의 요소가 같은 속성을 달아도 안 걸린다).
+ */
+@custom-variant mouse {
+  @media (pointer: fine) and (hover: hover) {
+    &:where(:not(:root[data-sprintable-shell="ios"] *, :root[data-sprintable-shell="android"] *)) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-ds-surface-sunk: var(--ds-surface-sunk);
+  --color-ds-background: var(--ds-background);
+  --color-ds-surface: var(--ds-surface);
+  --color-ds-surface-raised: var(--ds-surface-raised);
+  --color-ds-surface-high: var(--ds-surface-high);
+  --color-ds-surface-highest: var(--ds-surface-highest);
+  --color-ds-line: var(--ds-line);
+  --color-ds-line-strong: var(--ds-line-strong);
+  --color-ds-line-control: var(--ds-line-control);
+  --color-ds-ink: var(--ds-ink);
+  --color-ds-ink-2: var(--ds-ink-2);
+  --color-ds-ink-3: var(--ds-ink-3);
+  --color-ds-action: var(--ds-action);
+  --color-ds-on-action: var(--ds-on-action);
+  --color-ds-action-text: var(--ds-action-text);
+  --color-ds-action-soft: var(--ds-action-soft);
+  --color-ds-mine: var(--ds-mine);
+  --color-ds-needs-hand: var(--ds-needs-hand);
+  --color-ds-needs-hand-bar: var(--ds-needs-hand-bar);
+  --color-ds-on-needs-hand: var(--ds-on-needs-hand);
+  --color-ds-needs-hand-soft: var(--ds-needs-hand-soft);
+  --color-ds-done: var(--ds-done);
+  --color-ds-done-soft: var(--ds-done-soft);
+  --color-ds-failed: var(--ds-failed);
+  --color-ds-failed-soft: var(--ds-failed-soft);
+  --color-ds-info: var(--ds-info);
+  --color-ds-info-soft: var(--ds-info-soft);
+  --color-ds-scrim: var(--ds-scrim);
+
+  /* 글자 눈금(굵기는 400 · 600 두 가지만 — 호출부가 font-normal / font-semibold) */
+  --text-ds-title: 18px;
+  --text-ds-title--line-height: 24px;
+  --text-ds-card-title: 14px;
+  --text-ds-card-title--line-height: 20px;
+  --text-ds-body: 13px;
+  --text-ds-body--line-height: 20px;
+  --text-ds-small: 12px;
+  --text-ds-small--line-height: 16px;
+  --text-ds-mono-lg: 13px;
+  --text-ds-mono-lg--line-height: 18px;
+  --text-ds-mono-md: 11px;
+  --text-ds-mono-md--line-height: 16px;
+  --text-ds-mono-sm: 11px;
+  --text-ds-mono-sm--line-height: 14px;
+
+  /* 모서리 */
+  --radius-ds-tag: 2px;
+  --radius-ds-control: 4px;
+  --radius-ds-panel: 8px;
+  --radius-ds-pill: 12px;
+}

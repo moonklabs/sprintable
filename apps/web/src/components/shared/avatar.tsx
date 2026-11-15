@@ -123,6 +123,7 @@ export function Avatar({
     // story #3092(2단계, 표면2) — isAgent일 때 이 노드가 TooltipTrigger로 쓰인다. tabIndex=0
     // 없으면 키보드로 절대 포커스가 안 가 hover 전용(마우스만)이 되어버린다 — 접근성 필수.
     <div
+      data-avatar=""
       className={cn('relative shrink-0', className)}
       style={{ width: size, height: size }}
       tabIndex={isAgent ? 0 : undefined}

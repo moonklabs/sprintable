@@ -7,7 +7,7 @@ import { entityTypeLabel, getEntityQuery, type EntityResult } from '@/components
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { AnchoredPopover } from '@/components/shared/anchored-popover';
-import { Textarea } from '@/components/ui/textarea';
+import { Textarea } from '@/components/ds/input';
 
 interface EntityAwareTextareaProps {
   value: string;
@@ -93,7 +93,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
         // story #4349(전수 9번) — 스토리 상세 스크롤 면(`overflow-y-auto`) 안의 absolute라 면 아래 끝에서 잘린 채였다 → body로 포털
         // (AnchoredPopover · 입력칸 아래 4px · 모자라면 위로 · 가로는 4342 클램프). 화살표 · Enter는 입력칸에 머무는 그대로(초점 안 옮김).
         <AnchoredPopover anchorRef={textareaRef} gap={4} className="z-50 w-72 max-w-[calc(100vw-1rem)]">
-        <ul data-dropdown-panel="entity-candidates" role="listbox" aria-label={entityCandidatesLabel} className="focus-inset max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+        <ul data-dropdown-panel="entity-candidates" role="listbox" aria-label={entityCandidatesLabel} className="focus-inset max-h-48 overflow-y-auto rounded-ds-panel border border-ds-line-control bg-ds-surface-raised shadow-ds-overlay shadow-[var(--elev-overlay)]">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
@@ -103,11 +103,11 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
             return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
-                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="sticky top-0 bg-ds-surface-raised px-3 pb-1 pt-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                     {getEntityTypeLabel?.(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
-                {/* ⛔focus-outset을 일부러 안 붙인다(PO 확認, 2026-07-28) — 이 하이라이트(bg-accent)는
+                {/* ⛔focus-outset을 일부러 안 붙인다(PO 확認, 2026-07-28) — 이 하이라이트(bg-ds-surface-high)는
                     entityIndex state로 그려지는 것이지 실제 DOM :focus가 아니다(화살표nav가 textarea에
                     머물고 이 버튼으로 진짜 focus를 옮기지 않는다). 즉 여기엔 클리핑될 포커스 링 자체가
                     없다 — "형제(listbox)엔 focus-inset이 있는데 여긴 outset이 없네" 하고 넣지 말 것. */}
@@ -116,12 +116,12 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
                   role="option"
                   aria-selected={idx === entityPicker.entityIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-ds-surface-high text-foreground font-medium' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-foreground'}`}
                 >
                   <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
                   {statusLabel ? (
-                    <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{statusLabel}</span>
+                    <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-ds-surface-sunk text-muted-foreground">{statusLabel}</span>
                   ) : null}
                 </button>
               </li>

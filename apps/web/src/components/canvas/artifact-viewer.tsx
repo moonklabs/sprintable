@@ -19,6 +19,14 @@ import type { ArtifactNode } from '@/services/canvas-nodes';
 import type { CommentThread } from '@/services/canvas-comments';
 import type { SpecPin } from '@/services/canvas-spec-pins';
 import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
+import { Button as DsButton } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { Icon } from '@/components/ds/icon';
+import { NativeSelect } from '@/components/ds/select';
+import { PageHead } from '@/components/ds/page-head';
+import { LAYER } from '@/components/ds/layers';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem } from '@/components/ds/menu';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
@@ -55,6 +63,8 @@ interface ArtifactViewerProps {
   pendingCanonicalizeVersion?: number | null;
   onProposeCanonical?: (versionNumber: number) => void;
   className?: string;
+  /** 4910 — `embedded`(기본) = 스토리 패널 등 좁은 곳의 카드 한 장(예전 그대로) · `page` = 산출물 상세 화면의 한 쪽 틀(머리 + 보기 영역 + 오른쪽 열 하나, 칸이 좁으면 열이 아래로). */
+  layout?: 'embedded' | 'page';
 }
 
 /**
@@ -64,7 +74,7 @@ interface ArtifactViewerProps {
  */
 export function ArtifactViewer({
   artifact, versions, loadVersion, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
-  onCreateThread, pendingCanonicalizeVersion, onProposeCanonical, className,
+  onCreateThread, pendingCanonicalizeVersion, onProposeCanonical, className, layout = 'embedded',
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const tc = useTranslations('common');
@@ -161,6 +171,236 @@ export function ArtifactViewer({
   }
   function handleComposeCancel() {
     setDraftPin(null);
+  }
+
+  // 보기 영역 안 — «받는 중 · 못 받음 · 실물 스테이지 · html 안내». 끼움 위치(옛 카드 / 새 쪽)만 다르고 안은 한 벌.
+  const stageH = layout === 'page' ? 'h-[min(70vh,720px)] min-h-[320px]' : 'h-[320px]';
+  const stageBody = (
+    <>
+    {!activeVersion && needsContent ? (
+      // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
+      <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className={cn('flex w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground', stageH)}>
+        <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
+        {versionLoadFailed && loadVersion && listedVersion ? (
+          <Button ref={retryButtonRef} type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
+            {tc('retry')}
+          </Button>
+        ) : null}
+      </div>
+    ) : null}
+    {activeVersion ? (
+      <div className={cn('w-full', stageH)}>
+        <ArtifactStage
+          format={artifact.format}
+          content={activeVersion.content}
+          title={artifact.title}
+          canvasBounds={activeVersion.canvasBounds}
+          contentRef={captureTargetRef}
+          pinAddMode={pinAddMode}
+          onPickCoordinate={onCreateThread ? handlePickCoordinate : undefined}
+          overlay={
+            // C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속).
+            // story 1948d19d §2 — 이제 ArtifactStage의 캔버스 좌표계 안에서 pan/zoom을 그대로
+            // 물려받는다(v2.1 상시 캡처 오버레이가 삼켰던 핀 클릭이 여기서 복원된다).
+            <>
+              {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
+                <AnchorPin
+                  key={th.id}
+                  number={th.pin_number}
+                  state={th.rollup === 'resolved' ? 'resolved' : 'open'}
+                  active={th.id === selectedThreadId}
+                  onClick={() => selectThread(th.id)}
+                  className="absolute z-10"
+                  style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
+                />
+              ))}
+              {/* story 7fe16274 — 스펙 핀. latest 버전 볼 때만(BE가 항상 latest 대상이라
+               * 과거 버전엔 어긋난 좌표가 됨, 위 prop 주석 참고). 좌표는 %(코멘트)가
+               * 아니라 canvas_bounds px — 단위가 달라도 각자의 left/top는 서로 무간섭. */}
+              {isViewingLatest ? specPins?.map((pin) => (
+                <SpecPinMarker
+                  key={pin.id}
+                  active={pin.id === selectedSpecPinId}
+                  onClick={() => selectSpecPin(pin.id)}
+                  className="absolute z-10"
+                  style={{ left: pin.anchorX ?? 0, top: pin.anchorY ?? 0 }}
+                />
+              )) : null}
+              {/* story #2725 — draft 핀(저장 전) + compose 팝오버. isViewingLatest 무관하게
+               * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
+               * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
+              {draftPin ? (
+                <AnchorPin
+                  ref={draftPinRef}
+                  number={null}
+                  state="draft"
+                  className="absolute z-10"
+                  style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                />
+              ) : null}
+            </>
+          }
+        />
+        {/* story #4373 — 쓰기 칸은 무대(확대 변환 · 잘라내기 조상) 밖: body 포털 + fixed로 핀 사각형 아래(모자라면 위)에 붙고
+          * 창 안으로 민다 · pan/zoom으로 핀이 움직이면 따라간다. 예전엔 변환 안에 그려 무대 10%면 22×10px로 작아졌고,
+          * 무대 크기 층에 두면 좁은 곁 패널(무대 61px)에서 칸이 잘려 단추가 안 눌렸다. */}
+        {draftPin ? (
+          <CommentComposePopover
+            onSubmit={handleComposeSubmit}
+            onCancel={handleComposeCancel}
+            draftTargetId={artifact.id}
+            anchorRef={draftPinRef}
+          />
+        ) : null}
+      </div>
+    ) : null}
+    {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다
+     * (htmlInteractive 기본 false). html_blob이 실제로 상호작용(버튼 클릭 등)을
+     * 요구하는 산출물일 수 있어, 그 경로가 「크게 보기」임을 명시한다. */}
+    {artifact.format === 'html' ? (
+      <p onContextMenu={(e) => e.stopPropagation()} className="mt-1.5 text-editorial-meta text-muted-foreground">
+        {t('artifactStageInteractiveHint')}
+      </p>
+    ) : null}
+    </>
+  );
+  const threadCards = threads && threads.length > 0 ? threads.map((th) => (
+    <CommentThreadCard
+      key={th.id}
+      thread={th}
+      memberMap={memberMap}
+      active={th.id === selectedThreadId}
+      onSelectPin={selectThread}
+      onResolve={onResolveThread}
+      onReply={onReplyThread}
+    />
+  )) : null;
+  const embeddedThreads = threadCards ? (
+    <div className="space-y-2 border-t border-border bg-muted/10 p-3">{threadCards}</div>
+  ) : null;
+  const dialogs = (
+    <>
+  <ExportDialog
+    open={exportOpen}
+    onOpenChange={setExportOpen}
+    artifactId={artifact.id}
+    versionNumber={selectedVersion}
+    captureTargetRef={captureTargetRef}
+    artifactFormat={artifact.format}
+  />
+  {activeVersion && artifact.format === 'html' ? (
+    <ArtifactExpandDialog
+      open={expandOpen}
+      onOpenChange={setExpandOpen}
+      title={artifact.title}
+      format={artifact.format}
+      content={activeVersion.content}
+      canvasBounds={activeVersion.canvasBounds}
+    />
+  ) : null}
+    </>
+  );
+
+  if (layout === 'page') {
+    const sortedVersions = [...versions].sort((a, b) => b.version - a.version);
+    const canPropose = !isViewingAnchor && !!onProposeCanonical;
+    const proposePending = pendingCanonicalizeVersion === selectedVersion;
+    // 4910 — 머리 단추와 그림 위 우클릭 메뉴가 «같은 동작 객체»를 쓴다(두 길이 어긋나지 않게 — AC4). 새 동작 0.
+    const exportAction = { id: 'export', label: t('exportDialogTitle'), icon: 'download' as const, run: () => setExportOpen(true) };
+    const proposeAction = canPropose && !proposePending ? { id: 'propose', label: t('proposeCanonicalAction'), icon: 'auto_awesome' as const, run: () => onProposeCanonical?.(selectedVersion) } : null;
+    const pictureActions = [...(proposeAction ? [proposeAction] : []), exportAction];
+    return (
+      <div className={cn('flex flex-col gap-4', className)}>
+        {/* 4910 — 제목은 위 막대 한 곳(화면 `artifact-detail-view`의 TopBarSlot). 머리 칸에는 칩(형식 · 임포트됨 · 정본) + 동작만 선다. */}
+        <PageHead
+          meta={
+            <span className="inline-flex flex-wrap items-center gap-1.5 align-middle">
+              <Chip mono>{artifact.format}</Chip>
+              {artifact.source === 'imported' ? <Chip icon="upload">{t('provenanceImportedBadge')}</Chip> : null}
+              {artifact.anchor_version != null ? <Chip tone="done" icon="check">{t('anchorBadge', { version: artifact.anchor_version })}</Chip> : null}
+            </span>
+          }
+          actions={
+            <>
+              {/* 열람만(복원 아님 — story #2378 갭 기록 그대로). */}
+              <NativeSelect
+                aria-label={t('viewerVersionSelectLabel')}
+                value={selectedVersion}
+                onChange={(e) => setSelectedVersion(Number(e.target.value))}
+                className="w-auto min-w-24"
+              >
+                {sortedVersions.map((v) => (
+                  <option key={v.id} value={v.version}>v{v.version}</option>
+                ))}
+              </NativeSelect>
+              {artifact.format === 'html' ? (
+                <DsButton variant="quiet" iconStart={<Icon name="open_in_full" size={14} />} onClick={() => setExpandOpen(true)}>{t('viewerExpandAction')}</DsButton>
+              ) : null}
+              {canPropose && proposePending ? <Chip tone="needs-hand" icon="schedule">{t('canonicalizePendingBadge')}</Chip> : null}
+              {proposeAction ? <DsButton iconStart={<Icon name={proposeAction.icon} size={14} />} onClick={proposeAction.run}>{proposeAction.label}</DsButton> : null}
+              {artifact.format === 'tree' && onEnterEdit ? (
+                <DsButton iconStart={<Icon name="edit" size={14} />} onClick={onEnterEdit}>{isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}</DsButton>
+              ) : null}
+              <DsButton iconStart={<Icon name={exportAction.icon} size={14} />} onClick={exportAction.run}>{exportAction.label}</DsButton>
+              {onCreateThread ? (
+                <DsButton
+                  variant={pinAddMode ? 'primary' : 'quiet'}
+                  aria-pressed={pinAddMode}
+                  iconStart={<Icon name="chat_bubble" size={14} />}
+                  onClick={() => setPinAddMode((v) => !v)}
+                >
+                  {t('addThreadToggleAction')}{openThreadCount > 0 ? ` · ${openThreadCount}` : ''}
+                </DsButton>
+              ) : null}
+            </>
+          }
+        />
+        <section data-testid="artifact-detail-panel" className={cn('@container overflow-hidden rounded-ds-panel border border-ds-line', LAYER.panel)}>
+          {/* 칸 폭(컨테이너)이 넓으면 보기 영역 | 오른쪽 열 하나, 좁으면 열이 아래로 — 문서 읽기와 같은 컨테이너 쿼리. */}
+          <div className="grid grid-cols-1 @min-[860px]:grid-cols-[minmax(0,1fr)_340px]">
+            <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className={cn('relative min-w-0 p-4 outline-none', LAYER.well)}>
+              {/* 4910 — 데스크톱 손길: 그림 위 우클릭 = 머리 단추와 같은 동작(정본으로 제안 · 내보내기). 우클릭에만 있는 동작 0 — 폰(터치)에는 머리 단추가 그대로. */}
+              <ContextMenu>
+                <ContextMenuTrigger data-testid="artifact-picture-menu-trigger" className="block">
+                  {stageBody}
+                </ContextMenuTrigger>
+                <MenuContent>
+                  {pictureActions.map((action) => (
+                    <MenuItem key={action.id} icon={action.icon} onClick={action.run}>{action.label}</MenuItem>
+                  ))}
+                </MenuContent>
+              </ContextMenu>
+            </div>
+            <aside data-testid="artifact-detail-column" className="flex min-w-0 flex-col divide-y divide-ds-line border-t border-ds-line @min-[860px]:border-t-0 @min-[860px]:border-l">
+              <ArtifactVersionRail
+                layout="column"
+                artifact={artifact}
+                versions={versions}
+                selectedVersion={selectedVersion}
+                onSelectVersion={setSelectedVersion}
+                memberMap={memberMap}
+                descriptionSlot={threads || specPins ? (
+                  <DescriptionPane
+                    description={selectedSpecPin ? selectedSpecPin.description : selectedThreadDescription}
+                    elementLabel={selectedSpecPin ? undefined : selectedThread?.element_label}
+                    className="mt-1.5"
+                  />
+                ) : undefined}
+              />
+              {threadCards ? (
+                <section data-testid="artifact-detail-threads" aria-label={t('detailThreadsHeading')} className="space-y-3 p-4">
+                  <h2 className="m-0 text-ds-small font-semibold text-ds-ink-2">{t('detailThreadsHeading')}</h2>
+                  {threadCards}
+                </section>
+              ) : null}
+              {/* 열 구분선(divide-y)이 이미 위 선을 그으니 자기 윗선은 끈다 — 겹선 둘 → 하나. */}
+              <EntityBacklinksSection entityType="artifact" entityId={artifact.id} className="border-t-0" />
+            </aside>
+          </div>
+        </section>
+        {dialogs}
+      </div>
+    );
   }
 
   return (
@@ -282,91 +522,7 @@ export function ArtifactViewer({
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
           <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-muted/20 p-4 outline-none">
-            {!activeVersion && needsContent ? (
-              // story #4343 — 이전 버전 실물을 받는 중 · 못 받음(빈 캔버스로 «그 버전이 비었다»는 거짓을 그리지 않는다).
-              <div data-version-loading={versionLoadFailed ? 'failed' : 'loading'} className="flex h-[320px] w-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-                <p role={versionLoadFailed ? 'alert' : 'status'}>{versionLoadFailed ? t('versionLoadFailed') : tc('loading')}</p>
-                {versionLoadFailed && loadVersion && listedVersion ? (
-                  <Button ref={retryButtonRef} type="button" variant="outline" size="sm" onClick={() => retryVersion(listedVersion.version)}>
-                    {tc('retry')}
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {activeVersion ? (
-              <div className="h-[320px] w-full">
-                <ArtifactStage
-                  format={artifact.format}
-                  content={activeVersion.content}
-                  title={artifact.title}
-                  canvasBounds={activeVersion.canvasBounds}
-                  contentRef={captureTargetRef}
-                  pinAddMode={pinAddMode}
-                  onPickCoordinate={onCreateThread ? handlePickCoordinate : undefined}
-                  overlay={
-                    // C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속).
-                    // story 1948d19d §2 — 이제 ArtifactStage의 캔버스 좌표계 안에서 pan/zoom을 그대로
-                    // 물려받는다(v2.1 상시 캡처 오버레이가 삼켰던 핀 클릭이 여기서 복원된다).
-                    <>
-                      {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
-                        <AnchorPin
-                          key={th.id}
-                          number={th.pin_number}
-                          state={th.rollup === 'resolved' ? 'resolved' : 'open'}
-                          active={th.id === selectedThreadId}
-                          onClick={() => selectThread(th.id)}
-                          className="absolute z-10"
-                          style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
-                        />
-                      ))}
-                      {/* story 7fe16274 — 스펙 핀. latest 버전 볼 때만(BE가 항상 latest 대상이라
-                       * 과거 버전엔 어긋난 좌표가 됨, 위 prop 주석 참고). 좌표는 %(코멘트)가
-                       * 아니라 canvas_bounds px — 단위가 달라도 각자의 left/top는 서로 무간섭. */}
-                      {isViewingLatest ? specPins?.map((pin) => (
-                        <SpecPinMarker
-                          key={pin.id}
-                          active={pin.id === selectedSpecPinId}
-                          onClick={() => selectSpecPin(pin.id)}
-                          className="absolute z-10"
-                          style={{ left: pin.anchorX ?? 0, top: pin.anchorY ?? 0 }}
-                        />
-                      )) : null}
-                      {/* story #2725 — draft 핀(저장 전) + compose 팝오버. isViewingLatest 무관하게
-                       * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
-                       * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
-                      {draftPin ? (
-                        <AnchorPin
-                          ref={draftPinRef}
-                          number={null}
-                          state="draft"
-                          className="absolute z-10"
-                          style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
-                        />
-                      ) : null}
-                    </>
-                  }
-                />
-                {/* story #4373 — 쓰기 칸은 무대(확대 변환 · 잘라내기 조상) 밖: body 포털 + fixed로 핀 사각형 아래(모자라면 위)에 붙고
-                  * 창 안으로 민다 · pan/zoom으로 핀이 움직이면 따라간다. 예전엔 변환 안에 그려 무대 10%면 22×10px로 작아졌고,
-                  * 무대 크기 층에 두면 좁은 곁 패널(무대 61px)에서 칸이 잘려 단추가 안 눌렸다. */}
-                {draftPin ? (
-                  <CommentComposePopover
-                    onSubmit={handleComposeSubmit}
-                    onCancel={handleComposeCancel}
-                    draftTargetId={artifact.id}
-                    anchorRef={draftPinRef}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-            {/* story #3377 — 인라인 스테이지는 pan/드래그 설계 보존을 위해 클릭을 안 받는다
-             * (htmlInteractive 기본 false). html_blob이 실제로 상호작용(버튼 클릭 등)을
-             * 요구하는 산출물일 수 있어, 그 경로가 「크게 보기」임을 명시한다. */}
-            {artifact.format === 'html' ? (
-              <p className="mt-1.5 text-editorial-meta text-muted-foreground">
-                {t('artifactStageInteractiveHint')}
-              </p>
-            ) : null}
+            {stageBody}
           </div>
           <ArtifactVersionRail
             artifact={artifact}
@@ -384,44 +540,13 @@ export function ArtifactViewer({
           />
         </div>
 
-        {threads && threads.length > 0 ? (
-          <div className="space-y-2 border-t border-border bg-muted/10 p-3">
-            {threads.map((th) => (
-              <CommentThreadCard
-                key={th.id}
-                thread={th}
-                memberMap={memberMap}
-                active={th.id === selectedThreadId}
-                onSelectPin={selectThread}
-                onResolve={onResolveThread}
-                onReply={onReplyThread}
-              />
-            ))}
-          </div>
-        ) : null}
+        {embeddedThreads}
         {/* story #2721(아티팩트·원장 1급화 1단) — 「이것을 가리키는 것들」. 신규 뷰어 0(기존
          * EntityBacklinksSection 재사용, doc/story와 동형) — 뷰어가 곧 상세 표면이라 여기 마운트
          * (ArtifactExpandDialog는 순수 캔버스 프리뷰라 대상 아님). */}
         <EntityBacklinksSection entityType="artifact" entityId={artifact.id} />
       </div>
-      <ExportDialog
-        open={exportOpen}
-        onOpenChange={setExportOpen}
-        artifactId={artifact.id}
-        versionNumber={selectedVersion}
-        captureTargetRef={captureTargetRef}
-        artifactFormat={artifact.format}
-      />
-      {activeVersion && artifact.format === 'html' ? (
-        <ArtifactExpandDialog
-          open={expandOpen}
-          onOpenChange={setExpandOpen}
-          title={artifact.title}
-          format={artifact.format}
-          content={activeVersion.content}
-          canvasBounds={activeVersion.canvasBounds}
-        />
-      ) : null}
+      {dialogs}
     </div>
   );
 }

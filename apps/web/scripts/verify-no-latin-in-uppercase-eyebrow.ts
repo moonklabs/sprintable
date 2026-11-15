@@ -179,7 +179,6 @@ export function refKey(r: Pick<UppercaseEyebrowRef, 'key'>): string {
 export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'goals.taskCapsuleTitle',
   'goals.outcomeCapsuleTitle',
-  'goals.indexKicker',
   'goals.trustRailTitle',
   // canvas.exportPngUnavailableForHtml — PNG·HTML은 verify-no-ascii-token-in-ko-value.ts
   // TOKEN_ALLOWLIST에 이미 등재된 파일형식 이니셜리즘(같은 근거: 프로토콜/표준 고유명,

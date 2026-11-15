@@ -5,7 +5,7 @@ of `infra/cloud-scheduler/jobs.json`. The app's own (embedded) server has no clo
 bearer — the same auth, the same database session, the same answer as the cloud scheduler's call. Nothing about a job changes; only who knocks.
 
 Which jobs: the 15 in `LOCAL_JOBS` — the work that lets agent runs, approval requests, hand-offs and recurring recipes finish by themselves, the retention sweeps and the shared
-worker tick. The other 10 of the manifest are hosted-only (plan limits, payments, the onboarding funnel, GA4, hosted ops checks, the phone relay, account purge) and are
+worker tick. The other 11 of the manifest are hosted-only (plan limits, payments, the onboarding funnel, GA4, hosted ops checks, the phone relay, account purge) and are
 NOT removed from the cloud scheduler: `EXCLUDED` names each with the reason, and `tests/test_4826_embedded_timers.py` fails when a job of the manifest is in neither.
 
 How a job runs:
@@ -114,6 +114,7 @@ EXCLUDED: dict[str, str] = {
     "entity-references-orphan-check": "hosted operations check (read-only, log)",
     "zero-referenced-entities-check": "hosted operations check (read-only, log)",
     "clock-edit-scrub": "phone relay — off in local mode (story 4829)",
+    "changes-purge": "phone relay — off in local mode (story 4951)",
     "account-purge": "hosted account-deletion grace (a local install has one owner)",
 }
 

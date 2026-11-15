@@ -457,28 +457,31 @@ describe('story 4855 — the platform keeps the long press on the text; the «�
     expect(btn).not.toBeNull();
     expect(btn.getAttribute('aria-label')).toBe('메시지 메뉴');
     expect(btn.className).toContain('hidden');
-    expect(btn.className).toContain('pointer-coarse:inline-flex');
+    expect(btn.className).toContain('touch:inline-flex');
     await act(async () => { btn.click(); });
     expect(menu()).not.toBeNull();
     expect(menuLabels()).toContain('메시지 전체 복사');
   });
 
-  it('the «⋯» button is also shown where nothing can hover (a device whose primary pointer reads «fine» — a stylus source, a tablet with a mouse — must still get it), and the two classes generate the real media rules', async () => {
+  it('the «⋯» button is shown on a touch screen AND where nothing can hover (the ds `touch:` variant is both conditions), and the class generates the real media rule', async () => {
     await render('hello brave new world');
     const btn = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLButtonElement;
     const classes = btn.className.split(/\s+/);
     expect(classes).toContain('hidden');
-    expect(classes).toContain('pointer-coarse:inline-flex');
-    expect(classes).toContain('[@media(hover:none)]:inline-flex');
-    // the class names are only text until Tailwind turns them into CSS: compile the button's own classes and read the media rules back
+    expect(classes).toContain('touch:inline-flex');
+    // the class names are only text until Tailwind turns them into CSS: compile the button's own classes with the design system's own `touch` variant and read the media rule back
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    // relative to THIS file, not to the working directory (CI runs from the repository root, a developer from apps/web)
+    const ds = readFileSync(join(__dirname, '../../styles/design-system.css'), 'utf8');
+    const variant = /@custom-variant touch \{[\s\S]*?\n\}/.exec(ds)?.[0];
+    expect(variant, 'the touch variant is defined in design-system.css').toBeTruthy();
     const { compile } = await import('tailwindcss');
-    const css = (await compile('@tailwind utilities;')).build(classes);
-    expect(css).toMatch(/\.pointer-coarse\\:inline-flex\s*\{\s*@media \(pointer: coarse\)\s*\{\s*display: inline-flex;/);
-    expect(css).toMatch(/\.\\\[\\@media\\\(hover\\:none\\\)\\\]\\:inline-flex\s*\{\s*@media \(hover:\s*none\)\s*\{\s*display: inline-flex;/);
-    // and the plain «hidden» comes BEFORE both (a later rule wins), so the media rules can show the button
+    const css = (await compile(`@tailwind utilities;\n${variant}`)).build(classes);
+    expect(css).toMatch(/\.touch\\:inline-flex\s*\{\s*@media \(pointer: coarse\), \(hover: none\)\s*\{\s*display: inline-flex;/);
+    // and the plain «hidden» comes BEFORE it (a later rule wins), so the media rule can show the button
     expect(css.indexOf('.hidden')).toBeGreaterThan(-1);
-    expect(css.indexOf('.hidden')).toBeLessThan(css.indexOf('pointer-coarse'));
-    expect(css.indexOf('.hidden')).toBeLessThan(css.indexOf('hover\\:none'));
+    expect(css.indexOf('.hidden')).toBeLessThan(css.indexOf('touch'));
   });
 });
 

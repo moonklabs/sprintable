@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,12 +50,15 @@ async def _person(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, *, int
 
 @router.get("/agent-permission-requests")
 async def get_permission_requests(
+    response: Response,
     state: Literal["pending", "answered", "withdrawn", "expired", "rejected"] | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     member = await _person(db, auth, org_id, interactive=False)
+    # story 4949 (security lens): the list carries the lines of a file a person is asked about — a cache keeps none of it
+    response.headers["Cache-Control"] = "private, no-store"
     return {"requests": await agent_permissions.list_for_member(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, state=state)}
 
 

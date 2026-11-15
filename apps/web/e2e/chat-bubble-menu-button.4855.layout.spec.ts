@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
@@ -16,16 +17,24 @@ const APP = path.join(__dirname, '../src/app');
 /** the class strings of the column, the bubble text, the time and the «⋯» button (drift-proof: read from the source, not copied) */
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
+  const variants = bubbleVariants(src);
+  if (!variants) throw new Error('the bubble variants not found');
   const pick = (re: RegExp, what: string) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[1]!; };
   const button = pick(/data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`]+)`\}/, 'the menu button className');
   return {
-    column: pick(/<div (?:data-chat-content="" )?className=\{`(flex min-w-0 max-w-\[72%\] flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
+    // story 4887 (UI-4 P4-a): the column also carries `relative` now (it anchors the hover time beside a continuation bubble)
+    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
-    time: pick(/<time className="([^"]+)" dateTime/, 'the time'),
-    wrap: pick(/<span (?:data-chat-meta="" )?className="(relative inline-block)">\s*<time/, 'the time wrapper'),
+    // story 4887 (UI-4 P4-b): the fill · rounding · padding moved into per-sender variants — a person's bubble (mine / another's) is the geometry the «⋯» button must not cover; an agent's plain text has its own spec (chat-bubble-plain.4887)
+    textMine: variants.mine,
+    textPerson: variants.person,
+    // the time of the META line under the bubble (the head of a run has its own `<time … data-testid="bubble-head-time">` earlier in the file — not this one)
+    time: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the time'),
+    // the meta cell's base class: where a mouse can hover the first message of a run has no time line at all (its head carries the time), so this measures the cell as touch and as a continuation see it — the base class — in both modes
+    wrap: pick(/: '(relative inline-block) \[@media\(pointer:fine\)_and_\(hover:hover\)\]:hidden'\}[^<]*>\s*<time/, 'the time wrapper'),
     buttonBase: button.replace(/\$\{[^}]*\}/, '').trim(),
-    mine: pick(/\$\{isMine \? '([^']+)' : '[^']+'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (mine)'),
-    theirs: pick(/\$\{isMine \? '[^']+' : '([^']+)'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (others)'),
+    mine: pick(/\$\{isMine(?: && !plainRow)? \? '([^']+)' : '[^']+'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (mine)'),
+    theirs: pick(/\$\{isMine(?: && !plainRow)? \? '[^']+' : '([^']+)'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (others)'),
   };
 }
 
@@ -38,7 +47,8 @@ type Box = { x: number; y: number; width: number; height: number };
 
 async function measure(browser: Browser, width: number, touch: boolean, mine: boolean) {
   const c = classesFromSource();
-  const classes = [c.column, 'items-end', 'items-start', c.text, c.time, c.wrap, c.buttonBase, c.mine, c.theirs, 'flex gap-2 flex-row-reverse flex-row', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
+  const textCls = `${c.text} ${mine ? c.textMine : c.textPerson}`;
+  const classes = [c.column, 'items-end', 'items-start', textCls, c.time, c.wrap, c.buttonBase, c.mine, c.theirs, 'flex gap-2 flex-row-reverse flex-row', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
     .join(' ').split(/\s+/).filter(Boolean);
   const context = await browser.newContext(touch ? { viewport: { width, height: 800 }, hasTouch: true, isMobile: true } : { viewport: { width, height: 800 } });
   const page = await context.newPage();
@@ -48,7 +58,7 @@ async function measure(browser: Browser, width: number, touch: boolean, mine: bo
       <div id="row" class="flex gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}">
         <div id="avatar" class="h-7 w-7 flex-shrink-0 rounded-full bg-info/15"></div>
         <div id="col" class="${c.column}${mine ? 'items-end' : 'items-start'}">
-          <div id="text" class="${c.text}">짧은 글</div>
+          <div id="text" class="${textCls}">짧은 글</div>
           <span class="${c.wrap}"><time id="time" class="${c.time}">오전 07:32</time><button id="menu" type="button" class="${c.buttonBase} ${side}">⋯</button></span>
         </div>
       </div>

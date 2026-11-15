@@ -6,7 +6,6 @@
     "story #4312 — AST 전환(300자 글자 창 → 같은 함수 · 대입 구간): 예전 창이 `res?.ok` · `res.status` · 창 밖 `.ok`를 못 봐 올린 18건(전부 검사 있음)을 뺐다."
   ],
   "keys": [
-    "app/(authenticated)/channel/page.tsx::fetchWithAuth('/api/channel/token')",
     "app/(authenticated)/organization/channels/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${conn.id}/test`, { method: 'POST' });",
     "components/chat/new-conversation-modal.tsx::fetchWithAuth('/api/team-members?type=agent')",
     "ee/components/billing/billing-tab.tsx::fetchWithAuth('/api/billing/status', { credentials: 'include' })",

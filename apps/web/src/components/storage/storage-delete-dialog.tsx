@@ -101,7 +101,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
                   size="sm"
                   onClick={handleConfirm}
                   disabled={deleting}
-                  className="bg-destructive text-white hover:bg-destructive/90"
+                  className="bg-destructive text-background hover:brightness-95"
                 >
                   {t('delete')}
                 </Button>

@@ -2,6 +2,7 @@
 // `/login?next=<enc>&reason=session_expired` 로 통일 — login 이 reason 배너 + next 복귀(작업 손실
 // 최소화)에 사용. server(proxy·layout)·client(fetchWithAuth) 공용 순수 함수.
 import { resolveChatsHref, type NavV3Flags } from '@/lib/nav-v3-destinations';
+import { isSafeInternalPath, safeInternalPath } from '@/lib/auth/internal-path';
 
 export const SESSION_EXPIRED_REASON = 'session_expired';
 
@@ -17,20 +18,19 @@ export const SESSION_EXPIRED_REASON = 'session_expired';
 /** 현재 경로(pathname+search)를 next 로 보존한 /login redirect 경로. */
 export function buildLoginRedirect(currentPathAndSearch: string, navV3Flags?: NavV3Flags): string {
   const fallback = resolveChatsHref(navV3Flags);
-  const target = currentPathAndSearch && currentPathAndSearch.startsWith('/') ? currentPathAndSearch : fallback;
+  const target = isSafeInternalPath(currentPathAndSearch) ? currentPathAndSearch : fallback; // story 4936: the one internal-path test (it used to be `startsWith('/')` only)
   return `/login?next=${encodeURIComponent(target)}&reason=${SESSION_EXPIRED_REASON}`;
 }
 
 /**
- * 오픈 리다이렉트 가드 — next 가 **내부 절대경로**(`/` 시작·`//`(프로토콜-상대)·`/\` 아님)일 때만 허용,
- * 아니면 `/chats`(story #3179 S3c AC2 — 로그인 랜딩=chat, 「홈=chat」 확定 반영). login 성공/콜백
- * 복귀 시 외부 도메인 유도(`//evil.com`·`http://`)를 차단.
+ * 오픈 리다이렉트 가드 — next 가 **내부 경로**일 때만 허용, 아니면 `/chats`(story #3179 S3c AC2 — 로그인 랜딩=chat, 「홈=chat」 확定 반영).
+ * 한 번 풀어(decodeURIComponent) 그 값을 lib/auth/internal-path.ts 에 묻는다(story 4936) — 그 함수는 제어 문자 · 역슬래시 · `//` · 출처 재파싱 · 더 풀어 본 값까지 본다.
+ * (예전엔 `/` 시작 · `//` · `/\` 아님만 봐서 `/<TAB>/evil.com` 이 통과해 브라우저가 탭을 지운 `//evil.com` 으로 나갔다.)
  */
 export function safeNextPath(next: string | null | undefined, navV3Flags?: NavV3Flags): string {
   const fallback = resolveChatsHref(navV3Flags);
   if (!next) return fallback;
   let decoded: string;
   try { decoded = decodeURIComponent(next); } catch { return fallback; }
-  if (!decoded.startsWith('/') || decoded.startsWith('//') || decoded.startsWith('/\\')) return fallback;
-  return decoded;
+  return safeInternalPath(decoded, fallback);
 }

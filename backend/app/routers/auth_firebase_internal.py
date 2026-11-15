@@ -531,13 +531,23 @@ _OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT = 10
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    # story 4915 AC6: the user's real address (the shared rule · client_ip) — what the AUDIT line records (an investigation needs the exact address). The socket address was the front end's own container on the VM.
+    from app.core.client_ip import client_ip
+
+    return client_ip(request)
+
+
+def _handoff_rate_key(request: Request, scope: str) -> str:
+    """the count for one address, folded to a person-sized unit (IPv6 → its /64) like every other limit — not what the audit records"""
+    from app.core.client_ip import fold_ip
+
+    return f"oauth_handoff_custom_scheme_{scope}:{fold_ip(_client_ip(request))}"
 
 
 async def _enforce_custom_scheme_rate_limit(request: Request, callback_mode: str, *, scope: str, limit: int) -> None:
     if callback_mode != "custom_scheme":
         return
-    key = f"oauth_handoff_custom_scheme_{scope}:{_client_ip(request)}"
+    key = _handoff_rate_key(request, scope)
     allowed, _remaining, retry_after = await get_rate_limiter().check(key, limit)
     if not allowed:
         logger.warning("auth.oauth_handoff.%s rejected reason=custom_scheme_rate_limited", scope)

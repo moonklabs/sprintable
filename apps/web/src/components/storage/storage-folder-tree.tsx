@@ -44,7 +44,7 @@ function FolderNode({
   const expanded = isExpanded(folder.id);
   const selected = selectedFolderId === folder.id;
 
-  // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙, 이 파일 3곳 동형).
+  // story #2590(TIER3) — tint 위 계열색 글자는 text-ds-ink(#2420 규칙, 이 파일 3곳 동형).
   return (
     <div>
       <div
@@ -67,9 +67,9 @@ function FolderNode({
         }}
         className={cn(
           // [SID:4380 · 유나] 초점은 제품 링(안쪽으로 그려 사이드바 스크롤에 안 잘림) — 배경만 바꾸던 초점은 대비 1.05~1.15로 안 보였고
-          // 고른 행의 고름 색(bg-info/10)을 덮어 키보드로 서 있으면 고름이 사라졌다.
-          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-foreground focus-visible:-outline-offset-2',
-          selected ? 'bg-info/10 font-semibold text-foreground' : 'hover:bg-muted',
+          // 고른 행의 고름 색(bg-ds-action-soft)을 덮어 키보드로 서 있으면 고름이 사라졌다.
+          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-ds-ink focus-visible:-outline-offset-2',
+          selected ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'hover:bg-ds-surface-high',
         )}
       >
         <span
@@ -91,7 +91,7 @@ function FolderNode({
       </div>
 
       {hasChildren && expanded ? (
-        <div className="ml-[14px] border-l border-border pl-1">
+        <div className="ml-[14px] border-l border-ds-line pl-1">
           {children.map((child) => (
             <FolderNode
               key={child.id}
@@ -181,15 +181,15 @@ export function StorageFolderTree({
   );
 
   return (
-    <aside className="flex min-h-0 flex-col border-r border-border bg-background">
+    <aside className="flex min-h-0 w-full flex-col border-r border-ds-line bg-ds-surface">
       {/* 프로젝트 필터(어포던스 — 전환은 앱 레벨 switcher 담당) */}
       <div className="px-3 pb-2 pt-3">
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-[0.5rem] border border-border bg-card px-[10px] py-2 text-[12px] text-foreground"
+          className="flex w-full items-center gap-2 rounded-[0.5rem] border border-ds-line bg-ds-surface px-[10px] py-2 text-[12px] text-ds-ink"
         >
           {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}
-          <span className="size-2 shrink-0 rounded-full bg-info" />
+          <span className="size-2 shrink-0 rounded-full bg-ds-action" />
           <span className="truncate">{projectName ?? 'Sprintable'}</span>
           <ChevronDown className="ml-auto size-3.5 shrink-0 opacity-50" />
         </button>
@@ -198,13 +198,13 @@ export function StorageFolderTree({
       {/* 폴더 검색 + 새 폴더 */}
       <div className="mx-3 mb-1.5 flex items-center gap-1.5">
         {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
-        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-[0.5rem] bg-muted/60 px-[9px] py-[7px] text-[12px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
+        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-[9px] py-[7px] text-[12px] text-ds-ink-3 focus-within:border-ds-ink-2">
           <Search className="size-3.5 shrink-0 opacity-60" />
           <input
             value={folderSearch}
             onChange={(e) => onFolderSearchChange(e.target.value)}
             placeholder={t('folderSearchPlaceholder')}
-            className="w-full min-w-0 bg-transparent text-base lg:text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-full min-w-0 bg-transparent text-base lg:text-[12px] text-ds-ink outline-none placeholder:text-ds-ink-3"
           />
         </div>
         <button
@@ -212,7 +212,7 @@ export function StorageFolderTree({
           aria-label={t('newFolderAction')}
           title={t('newFolderAction')}
           onClick={startCreating}
-          className="grid size-[30px] shrink-0 place-items-center rounded-[0.5rem] text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="grid size-[30px] shrink-0 place-items-center rounded-[0.5rem] text-ds-ink-3 hover:bg-ds-surface-high hover:text-ds-ink"
         >
           <FolderPlus className="size-[15px]" />
         </button>
@@ -220,7 +220,7 @@ export function StorageFolderTree({
 
       {/* 새 폴더 인라인 폼 — 팝오버 아님(뷰포트 clamp 불요), 트리 패널 내부 고정폭에 그대로 렌더 */}
       {creating ? (
-        <div className="mx-3 mb-1.5 space-y-1.5 rounded-[0.5rem] border border-border bg-card p-2">
+        <div className="mx-3 mb-1.5 space-y-1.5 rounded-[0.5rem] border border-ds-line bg-ds-surface p-2">
           <input
             autoFocus
             value={newFolderName}
@@ -231,15 +231,15 @@ export function StorageFolderTree({
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={submitting}
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-[12px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+            className="w-full min-w-0 rounded-md border border-ds-line bg-ds-surface px-2 py-1.5 text-base lg:text-[12px] text-ds-ink outline-none focus-visible:ring-1 focus-visible:ring-ds-action disabled:opacity-60"
           />
-          {createError ? <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
+          {createError ? <p className="text-[11px] text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={cancelCreating}
               disabled={submitting}
-              className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-60"
+              className="rounded-md px-2 py-1 text-[11px] text-ds-ink-3 hover:bg-ds-surface-high disabled:opacity-60"
             >
               {t('newFolderCancel')}
             </button>
@@ -247,7 +247,7 @@ export function StorageFolderTree({
               type="button"
               onClick={() => void submitCreate()}
               disabled={submitting}
-              className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              className="rounded-ds-control bg-ds-action px-2 py-1 text-ds-small font-semibold text-ds-on-action hover:brightness-95 disabled:opacity-60"
             >
               {t('newFolderConfirm')}
             </button>
@@ -272,7 +272,7 @@ export function StorageFolderTree({
           // [SID:4380 · PO] 나무 행과 같은 초점 규칙(제품 링 안쪽 · 고름 색 유지) — 아래 평면 목록 행도 같다.
           className={cn(
             'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
-            selectedFolderId === null ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
+            selectedFolderId === null ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'text-ds-ink hover:bg-ds-surface-high',
           )}
         >
           <span className="w-[14px]" />
@@ -298,7 +298,7 @@ export function StorageFolderTree({
                 }}
                 className={cn(
                   'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
-                  selectedFolderId === f.id ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
+                  selectedFolderId === f.id ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'text-ds-ink hover:bg-ds-surface-high',
                 )}
               >
                 <span className="w-[14px]" />

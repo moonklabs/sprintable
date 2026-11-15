@@ -214,7 +214,10 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
-            "pending_permission_request_id": None}
+            "pending_permission_request_id": None,
+            # story #4951 (①c-0): may THIS person look at the changed-file list of this session — the computer's pairing person alone (`desktop_changes.may_read`), the computer heard, the session not ended,
+            # remote control on. The web shows the «바뀐 파일» button only when true (the ask itself is judged again by the server: 403 otherwise). False until a session is picked below.
+            "can_read_changes": False}
     # story 4675 (F2) — the computer the agent is bound to (its live key's setup), said even before any session was reported:
     # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
     bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
@@ -232,6 +235,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
     state = _shown_state(pick, reachable)
     view.update({**_picked_view(pick, setup, state), "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup)})
+    from app.services.desktop_changes import may_read
+
+    view["can_read_changes"] = bool(view["remote_control"] and reachable and pick.state != "stopped" and may_read(setup, user_id))
     if state == "waiting_permission":  # the inbox link — only a request sent to this person
         view["pending_permission_request_id"] = (await db.execute(
             select(AgentPermissionRequest.id).where(
@@ -344,11 +350,16 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             "conversation_id": str(dm_of[a.id][0]) if a.id in dm_of else None,
             "conversation_project_id": str(dm_of[a.id][1]) if a.id in dm_of and dm_of[a.id][1] is not None else None,  # story #4846: a room may have no project
             "setup_id": None, "device_name": None, "state": None, "activity": None, "state_at": None, "limit": None, "first_screen": None,
+            # story #4931: the computer that session runs on is the reader's own (`confirmed_by` = the reader) — the one rule `can_command` already uses for «whoever confirmed the device».
+            # A question that stands at a terminal can only be answered by the person at THAT Mac, so the home counts a wait only when this is true. No session → false; a setup nobody confirmed → false.
+            "device_is_mine": False,
         }
         pick = picks.get(a.id)
         if pick is not None:
-            full = _picked_view(pick, setup_by_id[pick.setup_id], _shown_state(pick, pick.setup_id in reachable))
+            picked_setup = setup_by_id[pick.setup_id]
+            full = _picked_view(pick, picked_setup, _shown_state(pick, pick.setup_id in reachable))
             row.update({k: full[k] for k in ("setup_id", "device_name", "state", "activity", "state_at", "limit", "first_screen")})
+            row["device_is_mine"] = picked_setup.confirmed_by is not None and picked_setup.confirmed_by == user_id
         out.append(row)
     return out, total
 

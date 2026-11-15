@@ -73,7 +73,7 @@ describe('스토리 상세 패널 — 날것 칸 4곳이 바탕 부품(story 483
     const toggle = sectionButton(board.labelsSectionTitle!);
     expect(toggle, '라벨 섹션의 + 추가').toBeDefined();
     await act(async () => { toggle!.click(); });
-    const name = container.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${board.newLabelNamePlaceholder}"]`)!;
+    const name = container.querySelector<HTMLInputElement>(`input[data-slot="ds-input"][placeholder="${board.newLabelNamePlaceholder}"]`)!;
     expect(name).toBeTruthy();
     await act(async () => { key(name, 'Enter'); }); // 빈 이름
     expect(calls.filter((c) => c.url === '/api/labels' && c.method === 'POST')).toHaveLength(0); // 라벨 목록을 읽는 GET은 별개
@@ -91,7 +91,7 @@ describe('스토리 상세 패널 — 날것 칸 4곳이 바탕 부품(story 483
     const toggle = [...container.querySelectorAll('button[aria-expanded]')].find((b) => b.parentElement?.textContent?.includes(board.dependenciesSectionTitle!)) as HTMLButtonElement;
     expect(toggle, '의존성 섹션의 추가').toBeTruthy();
     await act(async () => { toggle.click(); });
-    const search = container.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${(koMessages.board as { dep: Record<string, string> }).dep.searchPlaceholder}"]`)!;
+    const search = container.querySelector<HTMLInputElement>(`input[data-slot="ds-input"][placeholder="${(koMessages.board as { dep: Record<string, string> }).dep.searchPlaceholder}"]`)!;
     expect(search).toBeTruthy();
     // 폼을 열 때 나가는 «후보 불러오기»(질의 q 없음)는 빼고, 글자로 찾는 조회(q 있음)만 센다
     const queries = () => calls.filter((c) => c.url.startsWith('/api/stories?')).map((c) => new URL(c.url, 'http://x.test').searchParams.get('q')).filter((q): q is string => q !== null);
@@ -108,7 +108,7 @@ describe('스토리 상세 패널 — 날것 칸 4곳이 바탕 부품(story 483
     await mountPanel();
     const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent?.includes(board.commentsTab ?? '댓글'));
     if (tab) await act(async () => { (tab as HTMLElement).click(); (tab as HTMLElement).dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
-    const box = container.querySelector<HTMLTextAreaElement>(`textarea[data-slot="textarea"][placeholder="${board.commentInputPlaceholder}"]`);
+    const box = container.querySelector<HTMLTextAreaElement>(`textarea[data-slot="ds-textarea"][placeholder="${board.commentInputPlaceholder}"]`);
     expect(box, '댓글 입력칸').toBeTruthy();
     const cls = box!.className.split(/\s+/);
     expect(cls).toContain('field-sizing-content');

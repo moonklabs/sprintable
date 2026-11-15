@@ -15,11 +15,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { SectionCard, SectionCardBody } from '@/components/ui/section-card';
+import { cardVariants } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
+import { Stepper } from '@/components/ds/stepper'; // story 4889 (W3)
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
@@ -215,26 +217,25 @@ function downloadTextFile(filename: string, content: string) {
 
 // ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
 
-function StepperHeader({ step, stages }: { step: Step; stages: { n: Step; label: string }[] }) {
+/**
+ * story 4889 (W3 · AC3 §2 모집 화면째): «지금까지 고른 것» — the side column of the recruit screen. It only SHOWS what the person already chose in the steps (role · scope · runtime · the agent made);
+ * nothing in it can be pressed, nothing is new data. Wide: a sticky column at the right of the step panel; phone: a wrapping row of chips above the panel.
+ */
+function RecruitSummary({ title, empty, items }: { title: string; empty: string; items: { key: string; label: string; value: string | null }[] }) {
+  // PO 11-11 (5609 «후»): on a phone, four «not chosen yet» chips above the first question push it down — before anything is chosen the phone shows nothing here (a wide screen keeps its column: there it costs no height)
+  const nothingChosen = items.every((it) => !it.value);
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-1 pb-3">
-      {stages.map((s, i) => (
-        <div key={s.n} className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold',
-              s.n === step && 'border-transparent bg-foreground text-background',
-              s.n < step && 'border-success/40 text-success',
-              s.n > step && 'border-border text-muted-foreground',
-            )}
-          >
-            {s.n < step ? <Check className="h-3 w-3" aria-hidden /> : s.n}
-            {s.label}
-          </span>
-          {i < stages.length - 1 && <span className="text-muted-foreground">›</span>}
-        </div>
-      ))}
-    </div>
+    <aside aria-label={title} data-testid="recruit-summary" className={cn(cardVariants({ surface: 'solid', radius: 'card' }), 'px-3 py-3 lg:sticky lg:top-4 lg:order-2', nothingChosen && 'max-lg:hidden')}>
+      <p className="mb-2 text-xs font-semibold text-muted-foreground">{title}</p>
+      <ul className="m-0 flex list-none flex-wrap gap-2 p-0 lg:flex-col lg:gap-3">
+        {items.map((it) => (
+          <li key={it.key} data-summary-key={it.key} data-filled={it.value ? 'true' : 'false'} className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-1.5 lg:bg-transparent lg:p-0">
+            <span className="block text-xs text-muted-foreground">{it.label}</span>
+            <span className={cn('block break-keep text-sm wrap-anywhere', it.value ? 'font-medium text-foreground' : 'text-muted-foreground')}>{it.value ?? empty}</span>
+          </li>
+        ))}
+      </ul>
+    </aside>
   );
 }
 
@@ -354,6 +355,9 @@ interface RecruiterClientProps {
   /** 임베드 컨텍스트에서 "목록으로" 나가기 — 지정 시 상단에 노출. */
   onExit?: () => void;
 }
+
+/** story 4906 (customer lap ②) — the step's progress row (the right 56px stay free below `lg`: the round support button is fixed at the bottom right of a phone, as in the Today instruction row, story 4762) («다음» · «채용하기») sticks to the bottom of the viewport so it is on the first screen and stays in view while the step scrolls (one scroll: the page) */
+const STEP_ACTIONS_STICKY = 'sticky bottom-0 z-10 border-t border-border bg-card py-3 pe-14 lg:pe-0'; // bg-card = the step card's own surface (no band when it sticks)
 
 export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }: RecruiterClientProps) {
   const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
@@ -1151,8 +1155,16 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       </div>
   );
 
+  // story 4889 (W3): what the person has chosen so far — read from the state the steps already hold (nothing new is asked or saved)
+  const summaryItems: { key: string; label: string; value: string | null }[] = [
+    { key: 'role', label: t('stepRole'), value: equipSkip ? t('summaryNoRole') : selectedRole?.name ?? null },
+    { key: 'scope', label: t('stepScope'), value: step >= 3 ? (scopeMode === 'org' ? t('summaryScopeOrg') : t('summaryScopeProjects', { count: scopeProjectIds.length })) : null },
+    ...(equipSkip ? [] : [{ key: 'runtime', label: t('stepRuntime'), value: step >= 4 ? currentRuntimeDisplayName : null }]),
+    { key: 'agent', label: t('summaryAgent'), value: recruitResult ? (activeAgentName || t('deployedAgentFallback')) : equipResult ? equipResult.name || null : null },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
+    <div className={cn('mx-auto flex w-full flex-1 flex-col gap-4 p-4', oneScreen ? 'max-w-2xl' : 'max-w-5xl')}>
       {showTopBar ? (
         <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} showContextChip />
       ) : null}
@@ -1167,13 +1179,25 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
         </button>
       ) : null}
 
-      <SectionCard>
-        {oneScreen ? null : (
-          <SectionCardHeader>
-            <StepperHeader step={step} stages={stages} />
-          </SectionCardHeader>
-        )}
-        <SectionCardBody className="space-y-4">
+      {/* story 4889 (W3 · AC3 §2 모집 화면째 · UI-1 «한 번에 한 장»): the progress is the PAGE's strip (the ds Stepper), the step is ONE panel, and what was chosen so far stands beside it —
+          before this the Stepper header, the step and everything were one long card in a 672px column. The equip-skip way has three steps; the app's one-screen start has no strip and no side column. */}
+      {oneScreen ? null : (
+        <SectionCard className="px-3 py-3" data-testid="recruit-progress">
+          <Stepper
+            aria-label={t('stepperLabel')}
+            steps={stages.map((st) => ({ id: st.n, label: st.label }))}
+            current={Math.max(0, stages.findIndex((st) => st.n === step))}
+            stateLabels={{ done: t('stepStateDone'), current: t('stepStateCurrent'), upcoming: t('stepStateUpcoming') }}
+          />
+        </SectionCard>
+      )}
+      <div className={cn('grid items-start gap-4', oneScreen ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_16rem]')}>
+      {oneScreen ? null : <RecruitSummary title={t('summaryTitle')} empty={t('summaryEmpty')} items={summaryItems} />}
+      <SectionCard className="min-w-0">
+        {/* story 4906 (5659 follow-up · PO): the sticky progress row is opaque — a field focused with Tab near the bottom must stop ABOVE it, not under it (WCAG 2.2 «focus not obscured»). The browser keeps a
+            scroll-into-view target clear of its scroll-margin, so every control inside the step gets a bottom margin taller than the tallest sticky row (the hero rows carry a line or two of text). Scoped to this panel:
+            no shell-wide scroll-padding (that would change the scroll of every other screen). */}
+        <SectionCardBody className="space-y-4 [&_:is(input,select,textarea,button,a[href],[tabindex])]:scroll-mb-32" data-testid="recruiter-step-panel">
 
           {/* ── STEP 1 : 직무 선택 ── */}
           {step === 1 && (
@@ -1211,9 +1235,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       className="bg-card pl-8 dark:bg-card"
                     />
                   </div>
-                  {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
-                      버튼은 이 영역 밖(항상 보임)에 위치. */}
-                  <div className="focus-inset max-h-[55vh] space-y-4 overflow-y-auto pr-0.5">
+                  {/* story 4906 (customer lap ②) — the list used to be its own bounded scroller so the «다음» button under it stayed in view; on a 1440×900 screen that left TWO scrolls (the page, and the list: 495px of 6850)
+                      and the button still sat below the first screen (y 987). The button row is now sticky at the bottom of the viewport (STEP_ACTIONS_STICKY): ONE scroll — the page — and the button is always in view. */}
+                  <div className="space-y-4" data-testid="recruiter-role-list">
                     {roleGroups.length === 0 ? (
                       <p className="py-6 text-center text-sm text-muted-foreground">{t('roleSearchEmpty')}</p>
                     ) : roleGroups.map((group) => (
@@ -1283,8 +1307,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {oneScreen ? (
                 // story 4710 (Yuna 4710-copy §1 · PO 03:3xZ): inside the app the recruiter is this one screen — the role, the access as a default
                 // line with [바꾸기], the hero that hires and starts (no key drawn), and the way to the screens as before for anything else
-                <div className="space-y-3 border-t border-border pt-3" data-testid="recruiter-one-screen">
-                  <div className="space-y-2">
+                // story 4906 (codex 2): `contents` — a sticky box cannot leave its parent, and this wrapper starts AFTER the role list; without it the hero would sit below the first screen. Its children join the step panel's flow.
+                <div className="contents space-y-3" data-testid="recruiter-one-screen">
+                  <div className="space-y-2 border-t border-border pt-3">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       {scopeLine ? <p className="break-keep text-sm text-foreground" data-testid="recruiter-scope-line">{scopeLine}</p> : null}
                       <Button variant="ghost" size="sm" onClick={() => setScopeOpen((v) => !v)} aria-expanded={scopeOpen} data-testid="recruiter-scope-change">
@@ -1295,7 +1320,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                   {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
                     : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive" data-testid="recruiter-hire-failed">{recruitError}</p>}
-                  <div className="space-y-2">
+                  <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                     <Button
                       variant="hero"
                       onClick={pressHero}
@@ -1324,7 +1349,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                 </div>
               ) : (
-              <div className="flex justify-end border-t border-border pt-3">
+              <div className={`flex justify-end ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button
                   variant="hero"
                   disabled={!selectedRoleSlug && !equipSkip}
@@ -1374,7 +1399,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 </div>
               ) : null}
 
-              <div className="flex justify-between gap-2 pt-2">
+              <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 {equipSkip ? (
                   <Button
@@ -1489,8 +1514,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {heroStart === 'link' ? (
                 // story 4710 (AC2 · Yuna §3): a browser whose account has a Mac app connected — [이 컴퓨터에서 시작] (hire, then the app link
                 // with `?agent=`) is the primary; the key and settings screens are the secondary text link, as before
-                <div className="space-y-3 border-t border-border pt-3" data-testid="recruiter-browser-hero">
-                  <div className="space-y-2">
+                // story 4906 (codex 2): `contents` for the same reason as the one-screen wrapper (a sticky hero must have the step panel as its containing block)
+                <div className="contents space-y-3" data-testid="recruiter-browser-hero">
+                  <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                     <Button variant="hero" onClick={pressHero} disabled={recruiting || startHere.kind === 'busy' || scopeEmpty} data-testid="recruiter-start-here-link-button">
                       {recruiting ? t('hiringShort') : t('startHere')}
                     </Button>
@@ -1501,8 +1527,8 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     {startHere.kind === 'failed' ? (
                       <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
                     ) : null}
-                    <DesktopDownloadCard ctaVariant="outline" />
                   </div>
+                  <DesktopDownloadCard ctaVariant="outline" />
                   <div className="space-y-1">
                     <Button
                       variant="link"
@@ -1520,7 +1546,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                 </div>
               ) : (
-              <div className="flex justify-between gap-2 pt-2">
+              <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
                   {recruiting ? t('recruiting') : t('recruitCta')}
@@ -1976,6 +2002,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           )}
         </SectionCardBody>
       </SectionCard>
+      </div>
     </div>
   );
 }

@@ -34,8 +34,10 @@
 ## (B) axe 런타임 가드 — 계약
 
 - 실행: `pnpm --filter web e2e:contrast`(= `playwright test contrast-guard.spec.ts`).
-  CI 에서는 authed DB 잡(postgres + alembic + owner 시드 → FastAPI + Next 서빙 → chromium)에서
-  돈다. 인증은 `e2e/global-setup.ts` 가 `owner@sprintable.dev` 로그인 후 `playwright/.auth/owner.json`
+  CI 에서는 authed DB 잡(postgres + alembic + owner 시드 → FastAPI + Next **프로덕션 빌드 + `next start`** → chromium)에서
+  돈다(story #4927 — 고객이 받는 빌드를 잰다. `pnpm dev`는 라우트를 처음 방문할 때 컴파일해 «page marker not seen»이 흔들렸다).
+  CI 는 `PLAYWRIGHT_BASE_URL=http://localhost:3108` 로 띄워 둔 서버를 쓰고, 로컬에서 그 값이 없으면 예전처럼
+  `playwright.config.ts` 의 webServer(`pnpm dev`)가 뜬다(`reuseExistingServer`). 인증은 `e2e/global-setup.ts` 가 `owner@sprintable.dev` 로그인 후 `playwright/.auth/owner.json`
   storageState 를 만든다(파일은 `.gitignore`, 생성 로직만 커밋).
 - v1 스코프: **데이터-경량 표면** × 두 테마 × **rest 상태**.
   - 페이지: `/settings`, `/onboarding`, `/dashboard`, `/inbox`.

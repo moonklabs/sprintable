@@ -568,7 +568,7 @@ describe('ApplyRecipeDialog', () => {
     expect(selects.some((s) => s.textContent?.includes('메인'))).toBe(true);
   });
 
-  it('연산 커넥터 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도', async () => {
+  it('생성 연결 목록 fetch 실패 — «없어요» 대신 로드 실패 문구+재시도', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };
@@ -627,9 +627,9 @@ describe('ApplyRecipeDialog', () => {
     expect(document.body.querySelector('[data-testid="apply-recipe-generation-connectors-load-error"]')).toBeNull();
   });
 
-  // story #4116(#4112 시안 §6) — 연산 커넥터 빈 상태 문장 끝에 /organization/
+  // story #4116(#4112 시안 §6) — 생성 연결(옛 «연산 커넥터») 빈 상태 문장 끝에 /organization/
   // generation-connectors로 가는 목적지 링크가 있다(#4479 비차단① 닫기).
-  it('연산 커넥터 빈 상태 문장에 /organization/generation-connectors 목적지 링크가 있다', async () => {
+  it('생성 연결 빈 상태 문장에 /organization/generation-connectors 목적지 링크가 있다', async () => {
     useDashboardContextMock.mockReturnValue({ orgId: 'org-1' });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1', name: 'Proj One' }] }) };

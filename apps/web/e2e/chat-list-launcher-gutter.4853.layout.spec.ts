@@ -24,7 +24,9 @@ function classesFromSource() {
     row: pick(list, /className="([^"]*data-support-launcher[^"]*)"/, 'the ConversationRow className with the launcher variant'),
     title: pick(list, /<span className="([^"]+)">\{displayName\}<\/span>/, 'the row title'),
     time: pick(list, /<span className="([^"]+)">\{formatTime\(time, locale, displayTimezone\)\}<\/span>/, 'the row time'),
-    badge: pick(list, /\{unread > 0 && \(\s*<span className="([^"]+)">/, 'the unread badge'),
+    // story 4887 (UI-4 P2-b) — the unread count sits on the TITLE line, in one right-hand cluster with the time (the badge span carries a data-testid after its className)
+    cluster: pick(list, /<span className="([^"]+)">\s*<span className="[^"]+">\{formatTime\(time, locale, displayTimezone\)\}<\/span>/, 'the right-hand cluster of the title line'),
+    badge: pick(list, /\{unread > 0 && \(\s*<span className="([^"]+)"[^>]*>/, 'the unread badge'),
     preview: pick(list, /<p className="([^"]+)">\{preview\}<\/p>/, 'the preview'),
     button: pick(launcher, /className="(pointer-events-auto flex h-12 w-12[^"]*)"/, 'the launcher button'),
     attr: pick(launcher, /SUPPORT_LAUNCHER_ATTR = '([^']+)'/, 'the launcher attribute'),
@@ -41,7 +43,7 @@ type Box = { x: number; y: number; width: number; height: number };
 /** one row under the round button (the button is put over the row's middle, as on the phone: right edge ~14px from the screen, 48px) */
 async function measure(page: import('@playwright/test').Page, width: number, withAttr: boolean) {
   const c = classesFromSource();
-  const all = [c.row, c.title, c.time, c.badge, c.preview, c.button, 'h-9 w-9 flex-shrink-0 rounded-full bg-info/15', 'min-w-0 flex-1', 'flex items-center justify-between gap-1', 'truncate text-xs text-muted-foreground']
+  const all = [c.row, c.title, c.time, c.cluster, c.badge, c.preview, c.button, 'h-9 w-9 flex-shrink-0 rounded-full bg-info/15', 'min-w-0 flex-1', 'flex items-center justify-between gap-1', 'truncate text-xs text-muted-foreground']
     .join(' ').split(/\s+/).filter(Boolean);
   await page.setViewportSize({ width, height: 800 });
   await page.setContent(`<!doctype html><html><head><style>${await css(all)}</style></head><body style="margin:0">
@@ -49,8 +51,8 @@ async function measure(page: import('@playwright/test').Page, width: number, wit
       <button id="row" type="button" class="${c.row}" style="display:flex">
         <div class="h-9 w-9 flex-shrink-0 rounded-full bg-info/15"></div>
         <div class="min-w-0 flex-1">
-          <div class="flex items-center justify-between gap-1"><span id="title" class="${c.title}">긴 방 이름이 들어가는 한 줄 — 프로젝트 이름과 함께 길어지는 경우</span><span id="time" class="${c.time}">17 minutes ago</span></div>
-          <div class="flex items-center justify-between gap-1"><p class="${c.preview}">No messages</p><span id="badge" class="${c.badge}">3</span></div>
+          <div class="flex items-center justify-between gap-1"><span id="title" class="${c.title}">긴 방 이름이 들어가는 한 줄 — 프로젝트 이름과 함께 길어지는 경우</span><span class="${c.cluster}"><span id="time" class="${c.time}">17 minutes ago</span><span id="badge" class="${c.badge}">3</span></span></div>
+          <p class="${c.preview}">No messages</p>
         </div>
       </button>
     </div>

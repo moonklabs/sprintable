@@ -43,6 +43,30 @@ async function render(storyId: string) {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
+const originRow = (message: Record<string, unknown>) => ({
+  data: [{ id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: true, doc: null, message: { id: 'm1', conversation_id: 'c1', sender: null, ...message } }],
+});
+
+describe('StoryOriginSection — the origin that is an event message (story 4925)', () => {
+  it('⭐an old event message (snippet = the machine text, no `event`): the one word «이벤트» — never «[이벤트] preset.x» or «- key: value»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(originRow({ content_snippet: '[이벤트] preset.work.assigned - work_item_type: story - work_item_id: 626e421c-6264-40e9-b51a-0ec57bddebfb', event: null })))));
+    await render('s1');
+    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.|work_item_type|626e421c/);
+  });
+  it('⭐an event message with its structured event: the definition name · stage (the same line the backlinks list gives); a deleted definition → «이벤트», never the key', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(originRow({ content_snippet: '[이벤트] org.acme.flow', event: { definition_key: 'org.acme.flow', name: null, stage: 'draft', role: null, gate_type: null, approver: null } })))));
+    await render('s1');
+    expect(container.textContent).toContain('이벤트 · ' + koMessages.organization.recipeStageLabelDraft);
+    expect(container.textContent).not.toContain('org.acme.flow');
+  });
+  it('an ordinary message origin keeps its snippet as plain text', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(originRow({ content_snippet: '이 스토리는 대화에서 나왔어요', event: null })))));
+    await render('s1');
+    expect(container.textContent).toContain('이 스토리는 대화에서 나왔어요');
+  });
+});
+
 describe('StoryOriginSection', () => {
   it('relation==="created_from" 항목이 있으면 출처 카드를 그린다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({

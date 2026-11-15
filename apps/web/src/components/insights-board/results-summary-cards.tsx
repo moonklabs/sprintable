@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ds/card';
+import { Skeleton } from '@/components/ds/skeleton';
+import { Button } from '@/components/ds/button';
 import { formatMinorCurrency, formatCount, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import type { OrgCostSummaryLoadState } from './org-cost-summary-card';
 import type { Ga4ConnectionStatus, PublishedInWindow, ViewsInWindow } from './types';
@@ -78,9 +78,9 @@ export function ResultsSummaryCards({
     if (costSummaryState.status === 'failed') {
       return (
         <>
-          <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-failed`}>{t('orgCostLoadFailed')}</p>
+          <p className="text-ds-ink-3" data-testid={`results-summary-ads-${kind}-failed`}>{t('orgCostLoadFailed')}</p>
           {kind === 'spend' ? (
-            <Button size="sm" variant="outline" onClick={onRetryCostSummary} data-testid={`results-summary-ads-${kind}-retry`}>
+            <Button variant="secondary" onClick={onRetryCostSummary} data-testid={`results-summary-ads-${kind}-retry`}>
               {tCommon('retry')}
             </Button>
           ) : null}
@@ -89,30 +89,30 @@ export function ResultsSummaryCards({
     }
     if (adsMeasured && ads) {
       if (adsCurrencyMixed) {
-        return <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-mixed`}>{t('orgCostAdsCurrencyMixed')}</p>;
+        return <p className="text-ds-ink-3" data-testid={`results-summary-ads-${kind}-mixed`}>{t('orgCostAdsCurrencyMixed')}</p>;
       }
       const amount = kind === 'spend' ? ads.captured_spend_minor ?? 0 : ads.remaining_minor ?? 0;
       return (
-        <p className="text-lg font-medium text-foreground" data-testid={`results-summary-ads-${kind}-value`}>
+        <p className="text-ds-title font-semibold tabular-nums text-ds-ink" data-testid={`results-summary-ads-${kind}-value`}>
           {formatMinorCurrency(amount, adsCurrency as GenerationBudgetCurrency, locale, tContent)}
         </p>
       );
     }
     if (ads?.connection_status === 'connected') {
       return (
-        <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-no-approved-boosts`}>
+        <p className="text-ds-ink-3" data-testid={`results-summary-ads-${kind}-no-approved-boosts`}>
           {t('orgCostAdsNoApprovedBoosts')}
         </p>
       );
     }
     return (
       <>
-        <p className="text-muted-foreground" data-testid={`results-summary-ads-${kind}-unmeasured`}>
+        <p className="text-ds-ink-3" data-testid={`results-summary-ads-${kind}-unmeasured`}>
           {t('reconcileVerdictUnmeasured')}
         </p>
         <Link
           href={flatHref('/organization/channels')}
-          className={ads?.connection_status === 'needs_reauth' ? 'font-medium text-warning-strong underline' : 'text-primary underline'}
+          className={ads?.connection_status === 'needs_reauth' ? 'font-medium text-ds-needs-hand underline' : 'text-ds-action-text underline'}
           data-testid={`results-summary-ads-${kind}-cta`}
         >
           {ads?.connection_status === 'needs_reauth' ? tChannelConnect('channelReauthAction') : t('resultsSummaryConnectCta')}
@@ -125,48 +125,48 @@ export function ResultsSummaryCards({
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="results-summary-cards">
       {/* 나간 글 — story #3978 의존, 연결 CTA 없음(응답 필드 유무 문제일 뿐 "연결"
           개념이 없다). */}
-      <Card className="p-3 text-xs" data-testid="results-summary-published">
-        <p className="mb-1 text-muted-foreground">{t('resultsSummaryPublishedLabel')}</p>
+      <Card className="p-3 text-ds-small" data-testid="results-summary-published">
+        <p className="mb-1 text-ds-ink-3">{t('resultsSummaryPublishedLabel')}</p>
         {boardLoading ? (
           <Skeleton className="h-6 w-16" data-testid="results-summary-published-loading" />
         ) : boardLoadFailed ? (
-          <p className="text-muted-foreground" data-testid="results-summary-published-failed">{t('loadError')}</p>
+          <p className="text-ds-ink-3" data-testid="results-summary-published-failed">{t('loadError')}</p>
         ) : publishedInWindow ? (
-          <p className="text-lg font-medium text-foreground" data-testid="results-summary-published-value">
+          <p className="text-ds-title font-semibold tabular-nums text-ds-ink" data-testid="results-summary-published-value">
             {formatCount(publishedInWindow.count, locale)}
           </p>
         ) : (
-          <p className="text-muted-foreground" data-testid="results-summary-published-unmeasured">
+          <p className="text-ds-ink-3" data-testid="results-summary-published-unmeasured">
             {t('reconcileVerdictUnmeasured')}
           </p>
         )}
       </Card>
 
       {/* 자연 조회 — views_in_window.sum(자연 D+7만, 페드루 정정 2026-09-17 00:57Z). */}
-      <Card className="p-3 text-xs" data-testid="results-summary-organic-views">
-        <p className="mb-1 text-muted-foreground">{t('resultsSummaryOrganicViewsLabel')}</p>
+      <Card className="p-3 text-ds-small" data-testid="results-summary-organic-views">
+        <p className="mb-1 text-ds-ink-3">{t('resultsSummaryOrganicViewsLabel')}</p>
         {boardLoading ? (
           <Skeleton className="h-6 w-16" data-testid="results-summary-organic-views-loading" />
         ) : boardLoadFailed ? (
-          <p className="text-muted-foreground" data-testid="results-summary-organic-views-failed">{t('loadError')}</p>
+          <p className="text-ds-ink-3" data-testid="results-summary-organic-views-failed">{t('loadError')}</p>
         ) : viewsInWindow ? (
           <>
-            <p className="text-lg font-medium text-foreground" data-testid="results-summary-organic-views-value">
+            <p className="text-ds-title font-semibold tabular-nums text-ds-ink" data-testid="results-summary-organic-views-value">
               {formatCount(viewsInWindow.sum, locale)}
             </p>
             {viewsInWindow.captured_rows < viewsInWindow.total_rows ? (
-              <p className="text-muted-foreground" data-testid="results-summary-organic-views-partial">
+              <p className="text-ds-ink-3" data-testid="results-summary-organic-views-partial">
                 {t('resultsSummaryPartialCaptureNote', { captured: viewsInWindow.captured_rows, total: viewsInWindow.total_rows })}
               </p>
             ) : null}
           </>
         ) : (
           <>
-            <p className="text-muted-foreground" data-testid="results-summary-organic-views-unmeasured">
+            <p className="text-ds-ink-3" data-testid="results-summary-organic-views-unmeasured">
               {t('reconcileVerdictUnmeasured')}
             </p>
             {ga4Disconnected ? (
-              <Link href={flatHref('/organization/channels')} className="text-primary underline" data-testid="results-summary-organic-views-cta">
+              <Link href={flatHref('/organization/channels')} className="text-ds-action-text underline" data-testid="results-summary-organic-views-cta">
                 {t('resultsSummaryConnectCta')}
               </Link>
             ) : null}
@@ -177,13 +177,13 @@ export function ResultsSummaryCards({
       {/* 쓴 광고비 / 남은 한도 — cost-summary ads.*(org-cost-summary-card.tsx와 같은
           통화 안전 계약). 로딩/실패는 별 분기(위 renderAdsCardBody) — 「미측정」은
           ok 응답+0건일 때만 뜬다(로딩·실패 중 번쩍이지 않는다). */}
-      <Card className="p-3 text-xs" data-testid="results-summary-ads-spend">
-        <p className="mb-1 text-muted-foreground">{t('resultsSummarySpendLabel')}</p>
+      <Card className="p-3 text-ds-small" data-testid="results-summary-ads-spend">
+        <p className="mb-1 text-ds-ink-3">{t('resultsSummarySpendLabel')}</p>
         {renderAdsCardBody('spend')}
       </Card>
 
-      <Card className="p-3 text-xs" data-testid="results-summary-ads-remaining">
-        <p className="mb-1 text-muted-foreground">{t('resultsSummaryRemainingLabel')}</p>
+      <Card className="p-3 text-ds-small" data-testid="results-summary-ads-remaining">
+        <p className="mb-1 text-ds-ink-3">{t('resultsSummaryRemainingLabel')}</p>
         {renderAdsCardBody('remaining')}
       </Card>
     </div>

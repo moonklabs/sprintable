@@ -12,6 +12,9 @@ Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §11 (02d2cf71 v1.9 �
   each says it has a folder for — ids and names, never a path
 - POST /api/v2/agents/{agent_member_id}/desktop-start                    — story #4714: a phone's signed start of the agent on one computer for one
   project (a person's own session; the computer reads its own folder and refuses what it cannot do)
+- POST /api/v2/agents/{agent_member_id}/desktop-changes                  — story #4951: the person who paired the computer asks for the LIST of changed files of
+  one session's folder ({session_key} only) → 201 {command_id, expires_at}
+- GET  /api/v2/agents/{agent_member_id}/desktop-changes/{command_id}     — the list, once (names · a status word · line counts; never content), for that person only
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
-from app.services import desktop_commands
+from app.services import desktop_changes, desktop_commands
 from app.services.desktop_relay import DesktopRelayError
 from app.services.member_resolver import resolve_member
 
@@ -161,3 +164,45 @@ async def get_desktop_command(
         )
     except DesktopRelayError as exc:
         return _error(exc)
+
+
+@router.post("/{agent_member_id}/desktop-changes")
+async def post_desktop_changes(
+    agent_member_id: uuid.UUID,
+    body: desktop_changes.ReadRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4951 (①a): a person's own session only (an API key or an agent key 403). Who may read — the computer's pairing person alone — is judged in the service."""
+    member = await _person(db, auth, org_id, interactive=True)
+    user_id = uuid.UUID(str(auth.user_id))
+    try:
+        command_id, expires_at = await desktop_changes.create_read(
+            db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id, agent_id=agent_member_id, body=body,
+        )
+    except DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return JSONResponse(status_code=201, content={"command_id": str(command_id), "expires_at": expires_at.isoformat()}, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{agent_member_id}/desktop-changes/{command_id}")
+async def get_desktop_changes(
+    agent_member_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """The list, once: reading deletes it. 404 `changes_read_not_found` for every reason (not yours · not this agent's · expired · already read)."""
+    await _person(db, auth, org_id, interactive=True)
+    user_id = uuid.UUID(str(auth.user_id))
+    try:
+        out = await desktop_changes.read_result(db, user_id=user_id, org_id=org_id, agent_id=agent_member_id, command_id=command_id)
+    except DesktopRelayError as exc:
+        await db.commit()  # what the refusal deleted (an expired or no-longer-allowed row) stays deleted
+        return _error(exc)
+    await db.commit()
+    return JSONResponse(status_code=200, content=out, headers={"Cache-Control": "no-store"})

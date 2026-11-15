@@ -69,7 +69,7 @@ describe('TodayV3Screen — 렌더 3', () => {
   it('⭐빈 상태 — 결정 0·진행 0·오늘 결과는 미측정(3959 미착지)', async () => {
     stubToday(EMPTY_TODAY);
     await mount();
-    expect(container.querySelector('h1')?.textContent).toBe('오늘');
+    expect(container.querySelector('h1')?.textContent).toBe('홈');
     const summary = container.querySelector('[data-testid="today-v3-results-summary"]');
     expect(summary?.textContent).toBe('착지 미측정건 · 검수 통과 미측정건 · 열린 결함 미측정건 · 나간 글 0건.');
   });

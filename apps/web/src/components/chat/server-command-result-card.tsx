@@ -7,7 +7,11 @@
 // 이 카드의 실제 회신 문구는 대부분 그보다 훨씬 짧아(예: "'/done' 완료 — ...") 그 레일을
 // 그대로 태우면 카드 자체가 안 뜬다(폴딩 대상이 아니라 «항상 뜨는» 카드가 맞다).
 import { useTranslations } from 'next-intl';
-import { Zap } from 'lucide-react';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import type { IconName } from '@/components/ds/icon';
 import { extractLeadSentence, extractNextAction } from '@/lib/chat-report-density';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 
@@ -21,13 +25,14 @@ interface ServerCommandResultCardProps {
   onFillComposer?: (text: string) => void;
 }
 
-const DOT_CLASS_BY_OUTCOME: Record<ServerCommand['outcome'], string> = {
-  executed: 'bg-success',
-  denied: 'bg-destructive',
-  not_found: 'bg-muted-foreground',
-  ambiguous: 'bg-warning',
-  // invalid_args — 사용법 오류. 권한/존재 여부와 다른 축이라 성공도 실패-확定도 아닌 중립.
-  invalid_args: 'bg-muted-foreground',
+// story 4887 (UI-4 P4-c) — the outcome used to be a colour dot alone; it is now a ds chip: icon + WORDS (colour never carries the meaning by itself — WCAG 1.4.1).
+// `ambiguous` is the one that asks for a hand (a candidate must be picked); a wrong usage / nothing found is neutral — neither a success nor a confirmed failure.
+const OUTCOME: Record<ServerCommand['outcome'], { icon: IconName; tone: 'done' | 'failed' | 'needs-hand' | 'neutral' }> = {
+  executed: { icon: 'check_circle', tone: 'done' },
+  denied: { icon: 'block', tone: 'failed' },
+  not_found: { icon: 'help', tone: 'neutral' },
+  ambiguous: { icon: 'warning', tone: 'needs-hand' },
+  invalid_args: { icon: 'edit_note', tone: 'neutral' },
 };
 
 /** story 4847 (AC-명령) — the one machine reason this card knows (the server's `server_command.code`); any other value draws the card as before */
@@ -49,36 +54,42 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
   const targetStoryNumber = serverCommand.outcome === 'ambiguous' ? serverCommand.target_story_number : undefined;
   const canFillCandidate = Boolean(onFillComposer) && targetStoryNumber != null;
 
+  const outcome = OUTCOME[serverCommand.outcome];
+  const outcomeWords: Record<ServerCommand['outcome'], string> = {
+    executed: t('serverCommandOutcomeExecuted'),
+    denied: t('serverCommandOutcomeDenied'),
+    not_found: t('serverCommandOutcomeNotFound'),
+    ambiguous: t('serverCommandOutcomeAmbiguous'),
+    invalid_args: t('serverCommandOutcomeInvalidArgs'),
+  };
+
   return (
-    <div className="min-w-0 max-w-full rounded-xl bg-proof-panel px-3.5 py-2 text-sm text-foreground [overflow-wrap:anywhere]">
-      {/* ⚡ 서버 집행 배지 — 기존 「런타임 커맨드」 버블(chat-bubble.tsx isCmd 분기, 사람이
-          입력한 /명령을 에이전트가 처리)과 구분: 이 카드는 발화자가 «서버»다. */}
-      <div className="mb-1.5 flex items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-micro font-bold text-proof-ink-2">
-          <Zap className="size-2.5 text-warning-strong" aria-hidden />
-          {t('serverCommandBadge')}
-        </span>
-        <span className={`size-1.5 shrink-0 rounded-full ${DOT_CLASS_BY_OUTCOME[serverCommand.outcome]}`} aria-hidden />
+    <Card data-testid="server-command-card" data-outcome={serverCommand.outcome} className="min-w-0 max-w-full px-3 py-2 text-ds-body [overflow-wrap:anywhere]">
+      {/* ⚡ 서버 집행 배지 — 기존 「런타임 커맨드」 버블(chat-bubble.tsx isCmd 분기, 사람이 입력한 /명령을 에이전트가 처리)과 구분: 이 카드는 발화자가 «서버»다.
+          결과는 점 하나(색만)이던 것을 아이콘 + 글 칩으로. */}
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <Chip icon="bolt">{t('serverCommandBadge')}</Chip>
+        <Chip tone={outcome.tone} icon={outcome.icon} data-testid="server-command-outcome">{outcomeWords[serverCommand.outcome]}</Chip>
       </div>
 
-      <p className="mb-1 text-sm font-medium leading-relaxed">{lead}</p>
+      <p className="mb-1 text-ds-body font-medium leading-relaxed">{lead}</p>
 
       {candidates && candidates.length > 0 ? (
         <>
-          <p className="mb-1 mt-2 text-micro font-bold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 mt-2 text-ds-small font-semibold text-ds-ink-2">
             {t('serverCommandCandidatesLabel')}
           </p>
           <ul className="flex flex-col gap-0.5">
             {candidates.map((name) => (
               <li key={name}>
-                <button
-                  type="button"
+                <Button
+                  variant="quiet"
                   onClick={() => canFillCandidate && onFillComposer?.(`/${serverCommand.command} #${targetStoryNumber} ${name}`)}
                   disabled={!canFillCandidate}
-                  className="w-full rounded px-1.5 py-1 text-left text-sm leading-relaxed hover:bg-brand/10 disabled:cursor-default disabled:hover:bg-transparent"
+                  className="h-auto w-full justify-start whitespace-normal px-1.5 py-1 text-left font-normal"
                 >
                   {name}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -86,24 +97,22 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
       ) : null}
 
       {roomHasNoProject ? (
-        <div className="mt-2.5 flex gap-2 rounded-lg border border-brand/15 bg-brand/10 px-2.5 py-2" data-testid="server-command-way">
-          <span className="font-bold text-brand" aria-hidden>→</span>
-          <p className="[overflow-wrap:anywhere]">
-            <span className="font-semibold text-primary">{t('serverCommandWayLabel')}</span>
-            <span className="text-xs text-foreground"> {t('serverCommandRoomHasNoProjectWay')}</span>
-          </p>
+        <div className="mt-2.5" data-testid="server-command-way">
+          <Banner tone="info">
+            <span className="font-semibold">{t('serverCommandWayLabel')}</span>
+            <span className="text-ds-small"> {t('serverCommandRoomHasNoProjectWay')}</span>
+          </Banner>
         </div>
       ) : null}
 
       {nextAction ? (
-        <div className="mt-2.5 flex gap-2 rounded-lg border border-brand/15 bg-brand/10 px-2.5 py-2">
-          <span className="font-bold text-brand" aria-hidden>→</span>
-          <p className="[overflow-wrap:anywhere]">
-            <span className="font-semibold text-primary">{t('reportNextActionLabel')}</span>
-            <span className="text-xs text-foreground"> {nextAction}</span>
-          </p>
+        <div className="mt-2.5">
+          <Banner tone="info">
+            <span className="font-semibold">{t('reportNextActionLabel')}</span>
+            <span className="text-ds-small"> {nextAction}</span>
+          </Banner>
         </div>
       ) : null}
-    </div>
+    </Card>
   );
 }

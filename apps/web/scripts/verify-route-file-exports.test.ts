@@ -208,7 +208,7 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #4291 — `[ws]/[proj]/layout.tsx`(일감 탭 띠 WorkTabsFrame) 하나로 125→126(default export만).
   // story #4326(까디르 4688) — `organization/workforce/runs/loading.tsx`(실행 목록 상단바 폴백) 하나로 126→127(default export만).
   // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
-  it('실 트리(apps/web/src/app) — 라우트 파일 136개·위반 0건', () => {
+  it('실 트리(apps/web/src/app) — 라우트 파일 147개·위반 0건', () => {
     const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(APP_ROOT));
     const { violations, fileCount } = __scan;
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
@@ -220,7 +220,13 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story 4712 — `native/continue/page.tsx`(«브라우저 이어받기» 확인 한 장) 하나로 132→133(default export만).
     // story 4714 — `phone-landing/page.tsx`(폰 앱을 열 때의 착지 가름) · `phone-start/page.tsx`(폰 앱의 «맥에서 시작» 화면) 둘로 133→135(default export · dynamic만).
     // story 4763 — `login/layout.tsx`(서버 레이아웃: 받기 스위치를 로그인 화면으로 내림 · default export만)로 135→136.
-    expect(fileCount).toBe(136);
+    // story #4885(«팀» 탭줄) — `organization/workforce/layout.tsx` · `organization/members/layout.tsx`(서버 레이아웃: 탭줄 + children · default export만) 둘로 136→138.
+    // story 4886 — `design-system/page.tsx`(ds 견본 화면: default · generateMetadata) 하나로 138→139.
+    // story 4910 — `[ws]/[proj]/artifacts/loading.tsx`(상단바 폴백 · default export만) 하나로 139→140.
+    // story 4915 — `session-unconfirmed/page.tsx`(세션 확인 실패 때의 공개 «다시 시도» 화면 · default export만) 하나로 140→141.
+    // story 4912 (B1) — `organization/workforce/api-keys/loading.tsx`(상단바 폴백 경계 · default export만) 하나로 141→142.
+    // 4913 D물결 — `content/channel-posts/loading.tsx`(채널 포스트가 옛 스켈레톤을 따로 쥔다) · `content/[draftId]/loading.tsx`(상세가 옛 스켈레톤을 따로 쥔다) 둘 — default export만 — 로 142→144, 채널 포스트 D물결이 `content/channel-posts/{[draftId],calendar,engagement}/loading.tsx` 셋(옛 스켈레톤을 따로 쥔다)을 더해 144→147.
+    expect(fileCount).toBe(147);
     expect(violations).toEqual([]);
   });
 });

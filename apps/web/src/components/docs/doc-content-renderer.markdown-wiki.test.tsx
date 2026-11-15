@@ -59,7 +59,7 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
   it('⭐«[[slug]]» · «[[slug|글]]» — 실재 문서면 진짜 링크(주소 · 탭 순서 · 이름 = 보이는 글)', async () => {
     await renderDoc('앞 [[onboarding]] 가운데 [[design-doc|설계 문서]] 뒤');
     const links = docLinks();
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/onboarding', '/ws-1/proj-b/docs/design-doc']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/onboarding/view', '/ws-1/proj-b/docs/design-doc/view']);
     expect(links.map((a) => a.textContent)).toEqual(['onboarding', '설계 문서']);
     expect(links.every((a) => a.tabIndex === 0)).toBe(true);
     expect(container.textContent).toBe('앞 onboarding 가운데 설계 문서 뒤');
@@ -73,12 +73,12 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     }
     expect(nav.push).not.toHaveBeenCalled();
     expect(click(link)).toBe(false);
-    expect(nav.push).toHaveBeenCalledWith('/ws-1/proj-b/docs/design-doc');
+    expect(nav.push).toHaveBeenCalledWith('/ws-1/proj-b/docs/design-doc/view');
   });
 
   it('⭐없는 문서(에이전트 기억 파일 이름 등)는 원문 글자 그대로 — 깨진 링크 0', async () => {
     await renderDoc('[[feedback_memory_file]] 과 [[missing|안 보임]] 그리고 [[onboarding]]');
-    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/onboarding']);
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/onboarding/view']);
     expect(container.textContent).toContain('[[feedback_memory_file]]');
     expect(container.textContent).toContain('[[missing|안 보임]]');
   });
@@ -97,7 +97,7 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     );
     const links = docLinks();
     expect(links).toHaveLength(1);
-    expect(links[0]!.getAttribute('href')).toBe('/ws-1/proj-b/docs/design-doc');
+    expect(links[0]!.getAttribute('href')).toBe('/ws-1/proj-b/docs/design-doc/view');
     expect(links[0]!.textContent).toBe('설계 문서');
     expect(links[0]!.title).toBe('설계 문서');
     expect(container.textContent).toContain('없는 것');
@@ -117,14 +117,14 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
   // AC4 «Doc 요청 1»). 모든 경로(«[[…]]» · 마크다운 span · HTML span · 임베드 둘)가 같다.
   it('⭐옛 이름(alias)으로 적힌 위키 링크 · span · 임베드 — 링크이고 주소는 지금 slug', async () => {
     await renderDoc('[[old-design]] · [[old-design|설계]] · <span data-type="wikiLink" data-slug="old-design" data-title="설계">설계</span>\n\n<div data-page-embed data-title="설계" data-slug="old-design"></div>\n');
-    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(Array(4).fill('/ws-1/proj-b/docs/design-doc'));
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(Array(4).fill('/ws-1/proj-b/docs/design-doc/view'));
     expect(docLinks().map((a) => a.getAttribute('data-doc-internal-link'))).toEqual(Array(4).fill('design-doc'));
     expect(docLinks().slice(0, 2).map((a) => a.textContent)).toEqual(['old-design', '설계']);
     await renderDoc('<p><span data-type="wikiLink" data-title="설계" data-slug="old-design">설계</span></p><div data-page-embed data-title="설계" data-slug="old-design"></div>', { format: 'html' });
-    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc', '/ws-1/proj-b/docs/design-doc']);
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc/view', '/ws-1/proj-b/docs/design-doc/view']);
     const link = docLinks()[0]!;
     expect(click(link)).toBe(false);
-    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc');
+    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc/view');
   });
 
   // story #4316 — alias로 옮겨 간 문서의 임베드 카드: 경로 줄도 href와 같은 지금 slug(옛 `/old-design`을 보이면 링크와 다른 말).
@@ -132,7 +132,7 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     for (const format of ['markdown', 'html'] as const) {
       await renderDoc('<div data-page-embed data-title="설계" data-slug="old-design"></div>\n', { format });
       const link = container.querySelector('[data-page-embed] a')!;
-      expect(link.getAttribute('href'), format).toBe('/ws-1/proj-b/docs/design-doc');
+      expect(link.getAttribute('href'), format).toBe('/ws-1/proj-b/docs/design-doc/view');
       expect(link.textContent, format).toContain('/design-doc');
       expect(link.textContent, format).not.toContain('old-design');
     }
@@ -144,7 +144,7 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
       + '<div data-page-embed data-title="회의록" data-slug="onboarding"></div><div data-page-embed data-title="지운 문서" data-slug="gone-doc"></div>',
       { format: 'html' },
     );
-    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc', '/ws-1/proj-b/docs/onboarding']);
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc/view', '/ws-1/proj-b/docs/onboarding/view']);
     expect(container.textContent).toContain('없음');
     expect(container.textContent).toContain('지운 문서');
   });
@@ -222,6 +222,6 @@ describe('DocContentRenderer — 마크다운 위키 링크(story #4313)', () =>
     const forged = container.querySelector('a[href="https://evil.test/x"]');
     expect(forged, '보통 링크로 그려짐').not.toBeNull();
     expect(forged!.hasAttribute('data-doc-internal-link')).toBe(false);
-    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc']);
+    expect(docLinks().map((a) => a.getAttribute('href'))).toEqual(['/ws-1/proj-b/docs/design-doc/view']);
   });
 });

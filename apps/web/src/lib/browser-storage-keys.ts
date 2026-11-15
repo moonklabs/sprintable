@@ -52,6 +52,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // dismissed banners carry no organization in the key — kept, they would hide the next account's banner
   { key: 'storage-capacity-toast-shown', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-toast-provider.tsx'] },
   { key: 'storage-capacity-warn-dismissed', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/storage/storage-capacity-banner.tsx'] },
+  // story 4906: «the note above the composer (the home line was moved to this room, not sent) is done» — per room + the hand-over's own id (never the words); a sign-out or a switch clears it with the rest
+  { key: 'sprintable:compose-note-done:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/chat-view.tsx'] },
   { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx', 'lib/tab-owner.ts'] },
   { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
   { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
@@ -72,6 +74,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'done_collapsed_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'wip_limit_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'epic_swimlane_axis_mode_', prefix: true, area: 'local', scope: 'kept', where: ['components/epics/epic-swimlane-board.tsx'] },
+  // story #4888: the 목표 screen's «보기: 목록 | 스윔레인» choice, per project — a view setting like the swimlane's axis mode above (kept with the device)
+  { key: 'goals-view:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx'] },
   { key: 'docs-sort-mode:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },
   { key: 'docs-view-mode:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },
   { key: 'docs-sidebar-collapsed', area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },

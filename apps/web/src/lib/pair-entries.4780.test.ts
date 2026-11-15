@@ -61,7 +61,8 @@ describe('[SID:4780] every screen that hosts a pairing entry is a way back', () 
   const HOSTS: Array<{ entry: string; drawnBy: Array<[string, string]>; route: string }> = [
     // [file that draws it, tag it draws] → the route of the screen
     { entry: 'Today card', drawnBy: [['components/org-briefing/org-briefing-shell.tsx', '<TodayPairCard'], ['app/(authenticated)/org-briefing/page.tsx', '<OrgBriefingShell']], route: todayOff },
-    { entry: 'inbox', drawnBy: [['app/(authenticated)/inbox/page.tsx', '<AgentPermissionRequests']], route: '/inbox' },
+    // 4909 2d-2: the permission requests are a section of the approvals list — the page draws the list, the list draws the card that holds the pairing entry
+    { entry: 'inbox', drawnBy: [['app/(authenticated)/inbox/page.tsx', '<ApprovalsQueue'], ['components/inbox/approvals-queue.tsx', '<PermissionCard']], route: '/inbox' },
     { entry: 'chat head', drawnBy: [['app/(authenticated)/chats/[conversation_id]/page.tsx', '<AgentSessionStrip']], route: '/chats/0f3c2a1e-1111-4222-8333-944455556666' },
     { entry: '원격 기기', drawnBy: [['components/desktop/desktop-remote-devices.tsx', '<PhonePairEntry'], ['app/(authenticated)/desktop/page.tsx', '<DesktopRemoteDevices']], route: '/desktop' },
     { entry: 'phone start screen', drawnBy: [['components/desktop/phone-start-page.tsx', '<PhoneFirstScreen'], ['app/phone-start/page.tsx', 'PhoneStartPage']], route: '/phone-start' },

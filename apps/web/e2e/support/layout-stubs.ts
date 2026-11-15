@@ -12,7 +12,7 @@ import type { Plugin } from 'esbuild';
  * called and needs a real value still fails, and says so on the page (the harness names the module it did not start on).
  */
 export const STUBS: Record<string, string> = {
-  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i);',
+  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const switchOrg = async () => ({}); export const switchProject = async () => ({}); export const logoutUser = async () => {}; export const refreshSessionAfterChange = async () => {};',
   '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
   '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
   '@/lib/phone-bridge': `export const isPhoneApp = () => !!window.__phone;
@@ -25,7 +25,8 @@ export const STUBS: Record<string, string> = {
     };`,
   '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
   // story #4583: the inbox reads the org's remote control — the dashboard context comes with it. No remote-control answer → no «off» line.
-  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
+  // a spec that needs more of the context (story 4891: the human-only gate reads `currentMemberType`) sets `window.__dashboardCtx` before it mounts
+  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1', ...(window.__dashboardCtx || {}) }; } export function useChatsHref() { return '/chats'; } export function useConnectRulesHref(fallback) { return fallback; }",
   // story 4715: the onboarding draws the setup's invited card (InvisibleSample holds a row's place before the zone is known — here it is known)
   // story 4761: the connect step's banner draws the first call's time (ViewerDate — the zone is known here too)
   '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; } export function InvisibleSample({ children }) { return children; } export function ViewerDate({ value }) { return new Date(value).toLocaleTimeString('ko', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Seoul' }); }",

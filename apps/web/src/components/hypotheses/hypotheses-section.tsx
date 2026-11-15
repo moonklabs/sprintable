@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Plus, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { cn } from '@/lib/utils';
+import { HYPOTHESES_FACE } from './hypotheses-face';
 import type { Hypothesis, HypothesisDraft } from '@sprintable/core-storage';
 import { HypothesisRow, type HypothesisRowActions } from './hypothesis-row';
 import { HypothesisVerdictCard } from './hypothesis-verdict-card';
 import { HypothesisForm, type HypothesisFormValue } from './hypothesis-form';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothesis-resolve-dialog';
+import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
@@ -50,42 +54,33 @@ function HypothesisDraftPreview({
   const dir = md.direction === 'up' ? t('dirUp') : t('dirDown');
 
   return (
-    <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+    // 4909 AC3 (가설 칸 1단계) — the preview is the AI-marked face of the ds (info tone) inside the card; the two buttons are ds Buttons (the same texts, the same handlers).
+    <div className="space-y-3 rounded-ds-control border border-ds-line bg-ds-info-soft p-3">
+      <div className="flex items-center gap-1.5 text-ds-small font-semibold text-ds-info">
         <Sparkles className="size-3.5" aria-hidden />
         {t('draftReviewTitle')}
       </div>
 
       <div className="space-y-2">
         <div className="space-y-0.5">
-          <p className="text-editorial-meta font-medium text-muted-foreground">{t('statementField')}</p>
-          <p className="text-sm text-foreground">{draft.statement}</p>
+          <p className="text-ds-small font-medium text-ds-ink-3">{t('statementField')}</p>
+          <p className="text-ds-body text-ds-ink">{draft.statement}</p>
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-ds-small text-ds-ink-2">
           <span><span className="font-medium">{t('metricField')}:</span> {md.metric} {dir} {md.target}</span>
           <span><span className="font-medium">{t('measureAfterField')}:</span> {draft.measure_after.slice(0, 10)}</span>
         </div>
       </div>
 
-      <p className="text-editorial-meta text-muted-foreground">{t('draftNote')}</p>
+      <p className="text-ds-small text-ds-ink-3">{t('draftNote')}</p>
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={confirming}
-          className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-        >
+        <Button type="button" variant="quiet" onClick={onCancel} disabled={confirming}>
           {t('cancel')}
-        </button>
-        <button
-          type="button"
-          onClick={onAccept}
-          disabled={confirming}
-          className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-        >
+        </Button>
+        <Button type="button" variant="primary" onClick={onAccept} disabled={confirming}>
           {confirming ? tc('saving') : t('draftAccept')}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -101,6 +96,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const [draft, setDraft] = useState<HypothesisDraft | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // 4909 (마) — 행 메뉴 «스토리 연결»: 어느 가설에 스토리를 이을지(대화상자 열림) · 연결 요청 중 · 실패 표시.
+  const [linkTarget, setLinkTarget] = useState<Hypothesis | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [linkFailed, setLinkFailed] = useState(false);
   // S24: gate approval 축 — hypGatesMap(per-hyp gate·work_item_type=hypothesis) + 멤버 이름맵.
   const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -190,21 +189,53 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
     }
   }, [epicId, projectId]);
 
-  // 휴먼 확인(AC②): persist=true → status='proposed' row 생성(drafted_by_member_id 기록·AC④).
-  // active로 만들지 않는다 — 활성화는 별도 onActivate(휴먼 1스텝).
+  // 휴먼 확인(AC②): status='proposed' row 생성 — active로 만들지 않는다(활성화는 별도 onActivate, 휴먼 1스텝).
+  // 4909 (나) — 저장하는 것은 «지금 화면에 미리 보인 그 초안»이다. 예전엔 여기서 /draft를 persist:true로 «다시» 불러 서버가 새 초안을 만들었다
+  // (문장은 LLM이라 매번 다르고 측정일도 그 시각 기준) — 사람이 읽고 «확인»한 것과 저장된 것이 달랐다. 이제 미리본 값을 그대로 기존 생성 API로 보낸다.
   const handleAcceptDraft = useCallback(async () => {
+    if (!draft) return;
     setConfirming(true);
     try {
-      const res = await fetch('/api/hypotheses/draft', {
+      const res = await fetch('/api/hypotheses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, source_type: 'epic', source_id: epicId, persist: true }),
+        body: JSON.stringify({
+          project_id: projectId,
+          epic_ids: [epicId],
+          statement: draft.statement,
+          metric_definition: draft.metric_definition,
+          measure_after: new Date(draft.measure_after).toISOString(),
+          status: 'proposed',
+          source_type: 'epic',
+          source_id: epicId,
+          draft_metadata: { source_snapshot: draft.source_snapshot },
+        }),
       });
       if (res.ok) { setDraft(null); await load(); }
     } finally {
       setConfirming(false);
     }
-  }, [epicId, projectId, load]);
+  }, [draft, epicId, projectId, load]);
+
+  // 4909 (마) — 고른 스토리를 그 가설에 잇는다: 스토리 쪽 «연결된 가설» 패널과 같은 요청(POST /api/hypotheses/{id}/links · link_type=supports).
+  const handleLinkStory = useCallback(async (storyId: string | null) => {
+    const target = linkTarget;
+    if (!target || !storyId || linking) return;
+    setLinking(true);
+    try {
+      const res = await fetch(`/api/hypotheses/${target.id}/links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ story_ids: [storyId], link_type: 'supports' }),
+      });
+      if (res.ok) { setLinkTarget(null); await load(); } else { setLinkTarget(null); setLinkFailed(true); }
+    } catch {
+      setLinkTarget(null);
+      setLinkFailed(true);
+    } finally {
+      setLinking(false);
+    }
+  }, [linkTarget, linking, load]);
 
   const actions: HypothesisRowActions = {
     // 초안 확인 = 상태 전이 아님 (PO §12.2): PATCH로 draft_metadata.confirmed=true 기록.
@@ -247,10 +278,8 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       });
       await load();
     },
-    onLinkStory: (h) => {
-      // Story picker는 별도 affordance(§6.5 story 패널 picker와 공유) — 후속 배선.
-      void h;
-    },
+    // 4909 (마) — 죽어 있던 항목(눌러도 아무 일 없음)을 이미 있는 스토리 고르기 대화상자 + 이미 있는 연결 API에 배선한다(새 부품 · 새 API 0).
+    onLinkStory: (h) => { setLinkFailed(false); setLinkTarget(h); },
     // story #2036 — 다이얼로그를 여는 것까지만. 실제 transition은 handleResolveSubmit.
     onResolve: (h, target) => setResolving({ hypothesis: h, target }),
   };
@@ -299,28 +328,23 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const sorted = items ? [...items] : [];
 
   return (
-    <section aria-label={t('sectionTitle')} className="rounded-xl border border-border bg-muted/20 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-foreground">{t('sectionTitle')}</h2>
+    // 4909 AC3 (가설 칸 1단계) — the card's face is the content layer (HYPOTHESES_FACE = LAYER.panel: one step above the page, +.030 light / +.036 dark — the old `bg-muted/20` card measured −.018 / −.004 and did not separate at all).
+    <section aria-label={t('sectionTitle')} data-testid="hypotheses-section" className={cn('rounded-ds-control border border-ds-line p-3', HYPOTHESES_FACE)}>
+      {/* story 4906 (customer lap ⑨) — the title + two buttons did not fit the 360px goal-detail card in English («Hypotheses» · «Review draft» · «Add hypothesis»): the buttons group was shrink-0 on a
+          no-wrap row and ran past the card's right edge (button right 1091 · card 1059 at a 1100 window). The row and the group now WRAP — beside the title when they fit, under it when they do not. */}
+      <div className="flex flex-wrap items-center justify-between gap-2" data-testid="hypotheses-head">
+        <h2 className="flex items-center gap-2 text-ds-card-title font-semibold text-ds-ink">
+          {t('sectionTitle')}
+          {items !== null && items.length > 0 ? <span className="font-mono text-ds-mono-md font-normal text-ds-ink-3" data-testid="hypotheses-count">{items.length}</span> : null}
+        </h2>
         {!formOpen && !draft ? (
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => void handleDraft()}
-              disabled={drafting}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
-            >
-              <Sparkles className="size-3.5" />
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="hypotheses-head-actions">
+            <Button type="button" variant="secondary" onClick={() => void handleDraft()} disabled={drafting} iconStart={<Sparkles className="size-3.5" aria-hidden />}>
               {drafting ? t('drafting') : t('draftCta')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormOpen(true)}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
-            >
-              <Plus className="size-3.5" />
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setFormOpen(true)} iconStart={<Plus className="size-3.5" aria-hidden />}>
               {t('add')}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -342,11 +366,17 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
         </div>
       ) : null}
 
+      {linkFailed ? (
+        <p role="alert" data-testid="hypothesis-link-failed" className="mt-3 rounded-ds-control border border-ds-failed bg-ds-failed-soft px-3 py-2 text-ds-small text-ds-ink">
+          {t('linkStoryFailed')}
+        </p>
+      ) : null}
+
       <div className="mt-3 space-y-2">
         {items === null ? (
-          <p className="text-xs text-muted-foreground">…</p>
+          <p className="text-ds-small text-ds-ink-3">…</p>
         ) : sorted.length === 0 ? (
-          !formOpen ? <p className="py-4 text-center text-sm text-muted-foreground">{t('empty')}</p> : null
+          !formOpen ? <p className="py-4 text-center text-ds-small text-ds-ink-3">{t('empty')}</p> : null
         ) : (
           sorted.map((h) => (
             <div key={h.id} className="space-y-2">
@@ -367,6 +397,13 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
           ))
         )}
       </div>
+
+      <StoryPickerDialog
+        open={linkTarget !== null}
+        onOpenChange={(next) => { if (!next) setLinkTarget(null); }}
+        projectId={projectId}
+        onSelect={(storyId) => void handleLinkStory(storyId)}
+      />
 
       {resolving ? (
         <HypothesisResolveDialog

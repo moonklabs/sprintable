@@ -14,6 +14,7 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ds/layers';
 import { clearReopenMarker, reopenCurrentUrlOnce, retryReopenCurrentUrl } from '@/lib/hard-reload';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { RealtimeProvider } from '@/components/realtime-provider';
@@ -21,12 +22,13 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { CommandPaletteProvider } from '@/components/command-palette/command-palette-context';
+import { screenOwnsListColumn } from '@/lib/nav-active';
+import { CommandPaletteProvider, useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
-import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset, useSidebar } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
@@ -35,7 +37,10 @@ import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
+import { useShellBandsHeight } from '@/components/nav/shell-bands-height';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { HomeModelProvider } from '@/components/home/home-model-provider';
+import { NavRailWithHomeBadge } from '@/components/home/home-nav-rail';
 import { useShellListScrollMemory } from '@/hooks/use-shell-list-scroll-memory';
 import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
@@ -73,6 +78,9 @@ interface DashboardContext {
   // 별도 override가 필요 없다 — 항상 서버 me.type 그대로.
   currentMemberType?: 'human' | 'agent';
   projectMemberships: DashboardProjectOption[];
+  // story 4891 — the server's request for the person's projects FAILED (network · 5xx): `projectMemberships` is `[]` then, and that must not read as «no project» (the Add-agent pane would tell a person
+  // who has projects that they have none). Optional like the other layout-only values.
+  projectMembershipsFailed?: boolean;
   orgMemberships: OrgSwitcherItem[];
   // story #2587 AC3 — 「진짜 권한없음 403」을 정직하게 끝내려면 소비 화면이 "org-sync가
   // 아직 이 경로에 대해 성립할 여지가 있는가"를 알아야 한다(있으면 403이 stale일 수 있어
@@ -202,8 +210,24 @@ function ShellBody({
   children: React.ReactNode;
 }) {
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  // story #4885 (B 셸) — 막대 · 목록 · 상세: 막대(NavRail)는 목록 칸(AppSidebar) 왼쪽에 서고, 둘 다 같은 nav-config를 읽는다.
+  // 막대의 slug · 팔레트는 AppSidebar와 같은 출처. 「홈」 배지 숫자는 홈 모델(components/home)의 한 숫자 — 홈 본문이 그리는 것과 같은 모델에서 읽는다(story #4888).
+  const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  const { setOpen: setPaletteOpen } = useCommandPalette();
+  const { open: listColumnOpen, toggleSidebar } = useSidebar();
+  const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
-    <>
+    // story #4888 — the navigation bar's «홈» badge and the home screen read ONE model (the number of rows in «내 손이 필요해요»)
+    <HomeModelProvider viewerMemberId={currentTeamMemberId ?? null} projectId={projectId} orgId={orgId}>
+      <NavRailWithHomeBadge
+        orgSlug={railOrgSlug}
+        projectSlug={currentProjectSlug}
+        account={{ orgId, orgMemberships, projectId, projectMemberships, userName }}
+        navV3Flags={navV3Flags}
+        chatUnreadTotal={chatUnreadTotal}
+        onOpenPalette={openPalette}
+        listColumn={{ open: listColumnOpen, onToggle: toggleSidebar }}
+      />
       <AppSidebar
         projectId={projectId}
         currentProjectSlug={currentProjectSlug}
@@ -226,7 +250,7 @@ function ShellBody({
       >
         {children}
       </ScrollShell>
-    </>
+    </HomeModelProvider>
   );
 }
 
@@ -244,6 +268,8 @@ function ScrollShell({
   children: React.ReactNode;
 }) {
   const { setScrollContainer, scrollContainer } = useTopBar();
+  const bandsRef = useRef<HTMLDivElement>(null);
+  useShellBandsHeight(bandsRef);
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
   }, [setScrollContainer]);
@@ -266,8 +292,8 @@ function ScrollShell({
   return (
     <ReleaseNotesProvider userId={currentTeamMemberId}>
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panelVisible }}>
-    <SidebarInset className="relative flex flex-col overflow-hidden">
-      <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+    <SidebarInset className={cn('relative flex flex-col overflow-hidden', LAYER.page)}>
+      <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[var(--shell-launcher-clear,0px)]">
         {showTopBar && (
           <TopBar
             orgId={orgId}
@@ -277,6 +303,8 @@ function ScrollShell({
             userName={userName}
           />
         )}
+        {/* 4913 셸 — 띠 셋을 한 칸에 담아 높이를 잰다(useShellBandsHeight → --shell-bands-h → --shell-chrome-h). 칸 자체는 모양이 없다: 띠마다 `empty:hidden`이라 다 비면 높이 0. */}
+        <div ref={bandsRef} data-shell-bands>
         <div className="px-3 pt-3 empty:hidden">
           <ActivationChecklistBanner />
         </div>
@@ -287,6 +315,7 @@ function ScrollShell({
         {/* story 4725 decision 2 — once: what was cut when this account's mailbox was proved (the server holds the mark; it is gone after [닫기]) */}
         <div className="px-3 pt-3 empty:hidden">
           <ReclaimNoticeAlert />
+        </div>
         </div>
         {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
             바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면
@@ -415,6 +444,7 @@ export function DashboardShell({
   role,
   currentMemberType,
   projectMemberships,
+  projectMembershipsFailed,
   orgMemberships,
   pathOrgId,
   pathProjectId,
@@ -496,6 +526,15 @@ export function DashboardShell({
   }, [pathOrgId, actualTokenOrgId, router]);
   // story #4217 — 경로 프로젝트는 서버 prop이 아니라 **현재 pathname**에서(클라이언트 이동 뒤에도 최신 · lib 주석 참고).
   const shellPathname = usePathname();
+  // story #4885 (B 셸) — 목록 칸(왼쪽 길잡이) 열림: 자기 목록 칸을 가진 화면(/chats)에 들어오면 접고, 나가면 들어오기 전 상태로 되돌린다. 그 화면 안에서 사람이 다시 펴는 건 막지 않는다.
+  const ownsListColumn = screenOwnsListColumn(shellPathname);
+  const [listColumnOpen, setListColumnOpen] = useState(() => !ownsListColumn);
+  // 렌더 중 «이전 값과 비교해 상태를 맞추는» 꼴(React 권장 — effect 안 setState 아님): 들어올 때 지금 상태를 적어 두고 접고, 나갈 때 적어 둔 상태로 되돌린다.
+  const [listColumnSeen, setListColumnSeen] = useState({ owns: ownsListColumn, before: true });
+  if (listColumnSeen.owns !== ownsListColumn) {
+    setListColumnSeen({ owns: ownsListColumn, before: ownsListColumn ? listColumnOpen : listColumnSeen.before });
+    setListColumnOpen(ownsListColumn ? false : listColumnSeen.before);
+  }
   const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
   const livePath = livePathProject({
     pathname: shellPathname, currentOrgSlug, currentOrgId: effectiveOrgId, memberships: projectMemberships,
@@ -554,7 +593,7 @@ export function DashboardShell({
     <ToastProvider>
     <CommandPaletteProvider>
     <EmbeddedServerProvider embedded={embedded}>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, projectMembershipsFailed, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -565,7 +604,8 @@ export function DashboardShell({
               불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — data 속성으로 다리를
               놓는다(globals.css가 `[data-topbar-hidden]`로 분기, JS 측정 없이 CSS만으로
               --shell-chrome-h를 계산하기 위한 유일한 JS 개입). */}
-          <SidebarProvider className="h-svh dashboard-shell-root" data-topbar-hidden={showTopBar ? undefined : ''}>
+          {/* e2e/shell-chrome-overflow.4534.layout.spec.ts가 이 className을 소스에서 정규식으로 읽는다 — `className`이 `<SidebarProvider ` 바로 뒤여야 한다(다른 prop은 그 뒤). */}
+          <SidebarProvider className="h-svh dashboard-shell-root" open={listColumnOpen} onOpenChange={setListColumnOpen} data-topbar-hidden={showTopBar ? undefined : ''}>
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}

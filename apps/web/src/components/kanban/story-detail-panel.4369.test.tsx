@@ -67,7 +67,7 @@ async function render(story: KanbanStory | null, onClose: () => void = () => {})
     );
   });
 }
-const commentBox = () => container.querySelector(`textarea[data-slot="textarea"][placeholder="${koMessages.board.commentInputPlaceholder}"]`) as HTMLTextAreaElement | null;
+const commentBox = () => container.querySelector(`textarea[data-slot="ds-textarea"][placeholder="${koMessages.board.commentInputPlaceholder}"]`) as HTMLTextAreaElement | null;
 const panelRoot = () => container.querySelector('[role="dialog"][tabindex="-1"]') as HTMLElement | null;
 async function openCommentsTab() {
   const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => (t.textContent ?? '').startsWith(koMessages.board.comments));

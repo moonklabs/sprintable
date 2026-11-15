@@ -29,7 +29,7 @@
  * 배치되므로 둘 다 명시로 받는다(하나가 없으면 그 형태엔 아무것도 안 붙임).
  */
 import { Fragment, type ReactNode } from 'react';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
 
 export interface ResponsiveDataTableColumn<T> {
   key: string;
@@ -42,6 +42,8 @@ export interface ResponsiveDataTableColumn<T> {
   headerProps?: Record<string, unknown>;
   /** 표 `<td>` className 추가분. */
   cellClassName?: string;
+  /** 표 `<td>`가 긴 글을 한 줄로 자른다(`max-w-xs truncate` — 4913 D1: 폭 클래스는 화면 파일이 직접 쓰지 않는다, 표 칸 자르기는 이 부품이 쥔다). */
+  clamp?: boolean;
   /** 카드(<1024) 모드에서 이 열이 어느 자리에 놓이는가. 'hidden'은 카드에서 아예 안 그림
    * (표 전용 열 — 예: 화면들의 액션 열은 title 슬롯과 별개로 카드 우상단에 직접 배치). */
   cardSlot: 'title' | 'meta' | 'metric' | 'action' | 'hidden';
@@ -90,7 +92,7 @@ export interface ResponsiveDataTableProps<T> {
   } & Record<string, unknown>;
 }
 
-const CARD_WRAPPER_CLASS = 'block space-y-1.5 rounded-md border border-border p-2 text-xs';
+const CARD_WRAPPER_CLASS = 'block space-y-1.5 rounded-ds-panel border border-ds-line bg-ds-surface p-3 text-ds-small';
 
 export function ResponsiveDataTable<T>({
   columns,
@@ -127,8 +129,8 @@ export function ResponsiveDataTable<T>({
     <>
       {/* ≥1024 — 현행 표 마크업(1440 스냅샷 무변). */}
       <Card className="hidden overflow-hidden p-0 lg:block">
-        <table className={`w-full text-sm${tableClassName ? ` ${tableClassName}` : ''}`}>
-          <thead className={theadClassName ?? 'bg-muted/50 text-xs text-muted-foreground'}>
+        <table className={`w-full text-ds-body${tableClassName ? ` ${tableClassName}` : ''}`}>
+          <thead className={theadClassName ?? 'bg-ds-surface-high text-ds-small text-ds-ink-3'}>
             <tr>
               {columns.map((col) => (
                 <th
@@ -141,7 +143,7 @@ export function ResponsiveDataTable<T>({
               ))}
             </tr>
           </thead>
-          <tbody className={tbodyClassName ?? 'divide-y divide-border'}>
+          <tbody className={tbodyClassName ?? 'divide-y divide-ds-line'}>
             {rows.map((row, index) => {
               const key = groupKey?.(row, index) ?? null;
               const isNewGroup = isNewGroupFlags[index];
@@ -153,7 +155,7 @@ export function ResponsiveDataTable<T>({
                   {groupHeaderPair ? groupHeaderPair.table : null}
                   <tr data-testid={rowTestId} {...rowProps}>
                     {columns.map((col) => (
-                      <td key={col.key} className={col.cellClassName ?? 'px-3 py-2.5'}>
+                      <td key={col.key} className={`${col.cellClassName ?? 'px-3 py-2.5'}${col.clamp ? ' max-w-xs truncate' : ''}`}>
                         {col.renderCell(row, index)}
                       </td>
                     ))}
@@ -180,18 +182,19 @@ export function ResponsiveDataTable<T>({
                 {groupHeaderPair ? <div>{groupHeaderPair.card}</div> : null}
                 <div
                   className={`${CARD_WRAPPER_CLASS}${extraClassName ? ` ${extraClassName}` : ''}`}
+                  data-slot="responsive-data-table-card"
                   data-testid={rowTestId}
                   {...restRowProps}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1 space-y-1">
                       {titleColumns.map((col) => (
-                        <div key={col.key} className="line-clamp-2 font-medium text-foreground">
+                        <div key={col.key} className="line-clamp-2 font-medium text-ds-ink">
                           {(col.renderCard ?? col.renderCell)(row, index)}
                         </div>
                       ))}
                       {metaColumns.length > 0 ? (
-                        <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-1.5 text-ds-ink-3">
                           {metaColumns.map((col) => (
                             <span key={col.key} className="inline-flex items-center gap-1">
                               {(col.renderCard ?? col.renderCell)(row, index)}
@@ -209,11 +212,11 @@ export function ResponsiveDataTable<T>({
                     ) : null}
                   </div>
                   {metricColumns.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-1.5">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-ds-line pt-1.5">
                       {metricColumns.map((col) => (
                         <div key={col.key} className="space-y-0.5">
-                          <p className="text-editorial-meta text-muted-foreground">{col.header}</p>
-                          <div className="font-medium text-foreground">{(col.renderCard ?? col.renderCell)(row, index)}</div>
+                          <p className="text-ds-small text-ds-ink-3">{col.header}</p>
+                          <div className="font-medium text-ds-ink">{(col.renderCard ?? col.renderCell)(row, index)}</div>
                         </div>
                       ))}
                     </div>

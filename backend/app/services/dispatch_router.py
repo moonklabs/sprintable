@@ -18,6 +18,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.log_safe import url_host
 from app.models.event import Event
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
@@ -59,7 +60,7 @@ async def _post_with_retry(
         if attempt < _WEBHOOK_MAX_RETRIES - 1:
             await asyncio.sleep(_WEBHOOK_BACKOFF_BASE * (2 ** attempt))
 
-    logger.warning("webhook POST all retries exhausted member=%s url=%s — SSE fallback", member_id, url)
+    logger.warning("webhook POST all retries exhausted member=%s url=%s — SSE fallback", member_id, url_host(url))  # story 4869: the host only
     return False
 
 _VALID_CHANNELS = {"sse", "discord", "telegram", "in_app"}

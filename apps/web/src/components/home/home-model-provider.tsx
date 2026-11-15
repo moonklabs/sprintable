@@ -1,0 +1,302 @@
+'use client';
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { fetchWithAuth } from '@/lib/db/client';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { subscribeApprovalEvents } from '@/lib/designated-pending-count-client';
+import { parseAgentStates } from '@/lib/agent-state-list';
+import { parseCursorMeta } from '@/lib/pagination';
+import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodayCompletedItem, type TodaySnapshot } from '@/components/org-briefing/derive-today';
+import {
+  deriveHome,
+  type HomeDoneInput,
+  type HomeModel,
+  type HomeNotificationInput,
+  type HomeStoryInput,
+} from './derive-home';
+import { toTerminalWaits, type HomeTerminalWait } from './terminal-waits';
+
+/**
+ * story #4888 (UI-5 AC4, home) — the ONE place the home's data is read and `deriveHome` is run. The navigation bar's «홈» badge and the home screen both read this model, so
+ * the number on the bar is the number of rows in «내 손이 필요해요» by construction (a test fails when they are given different sources).
+ *
+ * No new route: the snapshot is `GET /api/today` (the same single call the old screen made), unread notifications are `GET /api/notifications?unread=true` (the bell's list), and the
+ * person's in-progress stories are `GET /api/stories?status=in-progress` of the current project with `GET /api/members` for who is an agent.
+ * It re-reads every `POLL_MS` and when the tab comes back, so the bar does not keep a stale number.
+ *
+ * Honesty rules (each has a test):
+ *  - the newest load wins: an older answer that arrives late (a poll overlapping a «tab is back» read) is dropped;
+ *  - what is project-scoped (the stories) belongs to the project it was read for — after a project switch the OLD project's stories are not shown for the new one (the approvals · notifications
+ *    · today's results are the person's, not the project's, so they stay while the new project's stories are on their way);
+ *  - what was read belongs to the person AND organization it was read for: after an organization (or member) switch nothing of the old one is shown while the new answer is on its way;
+ *  - what is read is read to its end or said to be cut: unread notifications are read page by page (50 each, up to `NOTIFICATION_PAGES`), the stories in one page of 100 — when the server says there is
+ *    more than was read, the model is `partial` (its number is «at least»), never a silent cut;
+ *  - a load error belongs to the organization / member it happened for (a new identity starts clean);
+ *  - the snapshot decides success; when notifications · stories · members fail, the model is still built from what was read but is `partial` (the screen never calls an empty partial list «all caught up»).
+ */
+
+export const HOME_POLL_MS = 60_000;
+/** events that arrive together (a reconnect's backfill, a gate resolved + its notice) are ONE re-read: the first event starts this wait, the read happens when it ends */
+export const HOME_EVENT_COALESCE_MS = 300;
+/** any notice sent to me (chat messages are notices too) starts a read at most this often, counted from when the last read STARTED — an approval event does not wait for it */
+export const HOME_NOTICE_MIN_INTERVAL_MS = 10_000;
+/** a return to the tab fires `visibilitychange` and `focus` together: a second one within this is the same return */
+export const HOME_BACK_DEDUPE_MS = 1_000;
+/** unread notifications are read in pages of 50: the newest ones first, up to this many pages (250) — most unread ones are approvals and chat messages, so an actionable one can be far down */
+export const NOTIFICATION_PAGES = 5;
+
+export interface HomeSources {
+  /** what the rows were built from — the screen builds each row's link and action from these (it owns the project rules for links) */
+  snapshot: TodaySnapshot;
+  notificationHrefById: Record<string, string | null>;
+  runConversationById: Record<string, string | null>;
+  /** story #4931: the agents waiting at a terminal question of the reader's own Mac — a row's link (their conversation) is built from these */
+  terminalWaits?: HomeTerminalWait[];
+}
+
+export interface HomeModelState {
+  /** null until the first answer */
+  model: HomeModel | null;
+  sources: HomeSources | null;
+  /** the last read failed (the model, if any, is the last one that was read — the screen says so) */
+  loadError: boolean;
+  /** the model is built from an incomplete read (notifications · stories · members failed): its number is «at least», and an empty list must not be called «all caught up» */
+  partial: boolean;
+  retry: () => void;
+}
+
+const NONE: HomeModelState = { model: null, sources: null, loadError: false, partial: false, retry: () => {} };
+const HomeModelContext = createContext<HomeModelState>(NONE);
+
+/** the model the navigation bar and the home screen share (an empty state when no provider is mounted) */
+export function useHomeModel(): HomeModelState {
+  return useContext(HomeModelContext);
+}
+
+interface Page<T> { data?: T[]; meta?: unknown }
+interface RawNotification extends HomeNotificationInput { href?: string | null }
+interface RawStory { id: string; title: string; status: string; assignee_id?: string | null; assignee_ids?: string[] | null; updated_at?: string | null; project_id?: string | null }
+interface RawMember { id: string; name?: string | null; type?: string | null }
+
+async function readJson<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetchWithAuth(path);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** the page sizes the two routes use (the notification list route reads 50 · the stories read asks for 100): a page shorter than its size cannot have a next one */
+const NOTIFICATION_PAGE_SIZE = 50;
+const STORIES_PAGE_SIZE = 100;
+
+/**
+ * Is there nothing more after this page? The answer's own page meta is read by the codebase's one reader (`parseCursorMeta`). No meta at all → only a SHORT page is known to be the last; a meta in no known
+ * shape, or «more» without a cursor to ask with → not complete (never «complete» by default).
+ */
+function pageIsLast(meta: unknown, got: number, pageSize: number, source: string): { last: boolean; cursor: string | null } {
+  if (meta === undefined || meta === null) return { last: got < pageSize, cursor: null };
+  const pageInfo = parseCursorMeta(meta, source);
+  if (pageInfo.malformed) return { last: false, cursor: null };
+  if (!pageInfo.hasMore) return { last: true, cursor: null };
+  return { last: false, cursor: pageInfo.nextCursor };
+}
+
+/**
+ * The unread notifications, newest first, page by page. `complete` = the server has no more after the last page read. `failed` = a page after the first one failed to read (the items of the pages
+ * before it are kept, but the read is not trustworthy as a replacement of a complete earlier one); `null` = the first page failed.
+ */
+async function readUnreadNotifications(): Promise<{ items: RawNotification[]; complete: boolean; failed: boolean } | null> {
+  const items: RawNotification[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < NOTIFICATION_PAGES; page += 1) {
+    const params = new URLSearchParams({ unread: 'true' });
+    if (cursor) params.set('cursor', cursor);
+    const json: Page<RawNotification> | null = await readJson<Page<RawNotification>>(`/api/notifications?${params}`);
+    if (json === null) return page === 0 ? null : { items, complete: false, failed: true };
+    const got = json.data ?? [];
+    items.push(...got);
+    const next = pageIsLast(json.meta, got.length, NOTIFICATION_PAGE_SIZE, 'home/notifications');
+    if (next.last) return { items, complete: true, failed: false };
+    if (!next.cursor) return { items, complete: false, failed: false }; // «more», but nothing to ask for it with
+    cursor = next.cursor;
+  }
+  return { items, complete: false, failed: false }; // the page cap: there is more than was read
+}
+
+function toStoryInputs(stories: RawStory[], members: RawMember[]): HomeStoryInput[] {
+  const byId = new Map(members.map((m) => [m.id, m]));
+  return stories.map((s) => {
+    const ids = s.assignee_ids && s.assignee_ids.length > 0 ? s.assignee_ids : s.assignee_id ? [s.assignee_id] : [];
+    return {
+      id: s.id,
+      title: s.title,
+      status: s.status,
+      assignees: ids.flatMap((id) => {
+        const m = byId.get(id);
+        return m ? [{ id, type: m.type === 'agent' ? ('agent' as const) : ('human' as const), name: m.name ?? null }] : [];
+      }),
+      updatedAt: s.updated_at ?? '',
+      projectId: s.project_id ?? null,
+    };
+  });
+}
+
+function toDoneInputs(items: TodayCompletedItem[]): HomeDoneInput[] {
+  return items.map((d) => ({
+    id: d.runId,
+    title: d.workItemTitle ?? d.resultSummary ?? d.agentName,
+    actor: d.agentName ? { type: 'agent' as const, name: d.agentName } : null,
+    completedAt: d.finishedAt,
+  }));
+}
+
+interface Read {
+  snapshot: TodaySnapshot;
+  notifications: RawNotification[];
+  stories: HomeStoryInput[];
+  /** story #4931: the agent-state read (`null` = it failed → the model is `partial`: a wait may be missing) */
+  terminalWaits: HomeTerminalWait[] | null;
+  /** the project the stories were read for */
+  storiesFor: string | undefined;
+  /** whose read this is: the organization and the member (an organization switch must not show the old organization's approvals) */
+  forOrg: string | undefined;
+  forViewer: string | null;
+  partial: boolean;
+}
+
+export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }: { viewerMemberId: string | null; projectId: string | undefined; orgId?: string; children: ReactNode }) {
+  const [readAny, setRead] = useState<Read | null>(null);
+  // the identity a load error happened for (`org|member`): an error of the old identity is not the new one's
+  const [errorFor, setErrorFor] = useState<string | null>(null);
+  const identity = `${orgId ?? ''}|${viewerMemberId ?? ''}`;
+  const loadError = errorFor === identity;
+  const [nonce, setNonce] = useState(0);
+  // every load that starts takes the next number; only the newest one may commit (an older answer that arrives late — a poll overlapping a «tab is back» read, a project switch — is dropped)
+  const seq = useRef(0);
+  // a load is on its way: the 60-second tick does not start a second one beside it (the «tab is back» read and a retry still do — the newest wins)
+  const inFlight = useRef(false);
+  const lastRead = useRef<Read | null>(null);
+  // when the newest read was committed — with the live stream up, coming back to the tab does not re-read a read younger than the poll interval (the stream moves the approvals · notices; the poll bounds the rest)
+  const lastReadAt = useRef(0);
+  // when the newest load was STARTED (committed or not): the notice throttle counts from here, so a slow or failed read does not let continuous notices start a read every few hundred ms
+  const lastLoadStartedAt = useRef(0);
+  // when a read was last started by a return to the tab / window (visibility + focus fire together on a return: the second one is the same return)
+  const lastBackAt = useRef(0);
+  const mux = useSseMultiplexerContext();
+
+  useEffect(() => {
+    let alive = true;
+    // a new identity (org · member · project · retry) is a new read: the previous one's clocks do not apply to it
+    lastReadAt.current = 0;
+    lastLoadStartedAt.current = 0;
+    lastBackAt.current = 0;
+    const load = async (fromTick = false) => {
+      if (fromTick && inFlight.current) return;
+      const mySeq = ++seq.current;
+      inFlight.current = true;
+      lastLoadStartedAt.current = Date.now();
+      const [todayJson, notifRead, storiesJson, membersJson, sessionsJson] = await Promise.all([
+        readJson<unknown>('/api/today'),
+        readUnreadNotifications(),
+        projectId ? readJson<Page<RawStory>>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
+        projectId ? readJson<{ data?: RawMember[] }>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null),
+        readJson<{ data?: unknown }>('/api/agents/desktop-sessions'), // story #4931: the same read «에이전트 상태» makes — an agent standing at a terminal question of my own Mac needs my hand
+      ]);
+      if (mySeq === seq.current) inFlight.current = false;
+      if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
+      // a complete read of this very identity must not be replaced by one that broke off in the middle (the badge would drop and come back): the earlier one stays and the screen says the last read failed
+      const prev = lastRead.current;
+      const degraded = notifRead === null || notifRead.failed || sessionsJson === null || (projectId !== undefined && (storiesJson === null || membersJson === null));
+      if (todayJson !== null && degraded && prev && prev.forOrg === orgId && prev.forViewer === viewerMemberId && prev.storiesFor === projectId && !prev.partial) {
+        setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`);
+        return;
+      }
+      if (todayJson === null) { setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`); return; } // the snapshot decides success; the last model (if any) stays, and the screen says it is the last one
+      setErrorFor(null);
+      const next: Read = {
+        snapshot: parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT,
+        notifications: notifRead?.items ?? [],
+        stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
+        terminalWaits: sessionsJson === null ? null : toTerminalWaits(parseAgentStates(sessionsJson.data)),
+        storiesFor: projectId,
+        forOrg: orgId,
+        forViewer: viewerMemberId,
+        // the other reads only add rows: a failed one leaves the model honest but incomplete
+        partial: notifRead === null || !notifRead.complete || sessionsJson === null
+          || (projectId !== undefined && (storiesJson === null || membersJson === null || !pageIsLast(storiesJson.meta, (storiesJson.data ?? []).length, STORIES_PAGE_SIZE, 'home/stories').last)),
+      };
+      lastRead.current = next;
+      lastReadAt.current = Date.now();
+      setRead(next);
+    };
+    void load();
+    const timer = setInterval(() => { void load(true); }, HOME_POLL_MS);
+    // coming back to the tab (visibility) or the window (focus): with the live stream up and a read younger than the poll interval there is nothing to catch up on; otherwise read.
+    // Both events fire on a return, so a return that already started a read (< HOME_BACK_DEDUPE_MS ago) is not counted twice.
+    const onBack = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (mux?.isAlive() && Date.now() - lastReadAt.current < HOME_POLL_MS) return;
+      if (Date.now() - lastBackAt.current < HOME_BACK_DEDUPE_MS) return;
+      lastBackAt.current = Date.now();
+      void load();
+    };
+    document.addEventListener('visibilitychange', onBack);
+    window.addEventListener('focus', onBack);
+    // story #4885 — live: an approval event (gate created · resolved · delegated · tossed · a permission request or its change) or any notice sent to me moves what the home model counts, so it re-reads
+    // at once (one read for a burst of events) instead of waiting for the next poll. This is where the phone tab bar's own live count went when its badge became the home model's number (4263 AC2).
+    let coalesce: ReturnType<typeof setTimeout> | null = null;
+    // an approval event preempts a notice's longer wait (a person waiting on an approval must not wait out the notice throttle)
+    const schedule = (wait: number, preempt: boolean) => {
+      if (coalesce !== null) { if (!preempt) return; clearTimeout(coalesce); }
+      coalesce = setTimeout(() => { coalesce = null; void load(); }, wait);
+    };
+    const onApprovalEvent = () => schedule(HOME_EVENT_COALESCE_MS, true);
+    // story #4931: an agent's session changed (it came to stand at a question, or the question was answered) — the wait row appears / goes at once, not at the next poll
+    const onSessionChanged = () => schedule(HOME_EVENT_COALESCE_MS, false);
+    const onNotice = () => schedule(Math.max(HOME_EVENT_COALESCE_MS, lastLoadStartedAt.current + HOME_NOTICE_MIN_INTERVAL_MS - Date.now()), false);
+    const unsubs: Array<() => void> = [];
+    if (mux) {
+      unsubs.push(subscribeApprovalEvents(mux, onApprovalEvent));
+      unsubs.push(mux.subscribe('dispatched', onNotice));
+      unsubs.push(mux.subscribe('desktop.session_changed', onSessionChanged));
+    }
+    return () => {
+      alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onBack); window.removeEventListener('focus', onBack);
+      if (coalesce !== null) clearTimeout(coalesce);
+      for (const unsub of unsubs) unsub();
+    };
+  }, [projectId, viewerMemberId, orgId, nonce, mux]);
+
+  const retry = useCallback(() => setNonce((n) => n + 1), []);
+  const value = useMemo<HomeModelState>(() => {
+    // a read of another organization or member is not this one's: none of it is shown while the new answer is on its way
+    const read = readAny && readAny.forOrg === orgId && readAny.forViewer === viewerMemberId ? readAny : null;
+    if (!read) return { model: null, sources: null, loadError, partial: false, retry };
+    const model = deriveHome({
+      snapshot: read.snapshot,
+      notifications: read.notifications,
+      // the stories belong to the project they were read for
+      stories: read.storiesFor === projectId ? read.stories : [],
+      completedToday: toDoneInputs(read.snapshot.completedToday ?? []),
+      terminalWaits: read.terminalWaits ?? [],
+      viewerMemberId,
+    });
+    return {
+      model,
+      loadError,
+      // the stories of another project than the current one are as good as unread, until the new project's answer comes
+      partial: read.partial || read.storiesFor !== projectId,
+      retry,
+      sources: {
+        snapshot: read.snapshot,
+        notificationHrefById: Object.fromEntries(read.notifications.map((n) => [n.id, n.href ?? null])),
+        runConversationById: Object.fromEntries((read.snapshot.completedToday ?? []).map((d) => [d.runId, d.conversationId])),
+        terminalWaits: read.terminalWaits ?? [],
+      },
+    };
+  }, [readAny, loadError, projectId, viewerMemberId, orgId, retry]);
+  return <HomeModelContext.Provider value={value}>{children}</HomeModelContext.Provider>;
+}

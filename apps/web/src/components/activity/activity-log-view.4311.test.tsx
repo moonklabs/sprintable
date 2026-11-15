@@ -54,7 +54,8 @@ async function mount(items: unknown[]) {
   for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
 }
 
-const actorNames = () => [...container.querySelectorAll('[aria-label]')]
+// story 4892 — the row's own button (data-audit-row) is named with the whole row's words (actor · claim · time); this test reads the ACTOR labels of the avatars, so it leaves the buttons out
+const actorNames = () => [...container.querySelectorAll('[aria-label]:not([data-audit-row])')]
   .map((el) => el.getAttribute('aria-label') ?? '')
   .filter((label) => label.includes('송윤재') || label.includes('안나') || label.includes(koMessages.common.memberUnnamed));
 
@@ -70,7 +71,7 @@ describe('ActivityLogView — 행위자 동명이인([SID:4311 PR 2])', () => {
     ]);
     expect(actorNames()).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', '안나', '안나']);
     // 머리글자는 이름 그대로 — 꼬리 붙은 줄도 꼬리 없는 이름과 같은 머리글자(꼬리 글자가 아바타로 새지 않음).
-    const song = [...container.querySelectorAll('[aria-label^="송윤재"]')].map((el) => el.textContent);
+    const song = [...container.querySelectorAll('[aria-label^="송윤재"]:not([data-audit-row])')].map((el) => el.textContent);
     expect(song).toEqual([initials('송윤재'), initials('송윤재'), initials('송윤재')]);
   });
 
@@ -78,6 +79,6 @@ describe('ActivityLogView — 행위자 동명이인([SID:4311 PR 2])', () => {
     await mount([row('r1', 'aaaaaaaa-1', null), row('r2', 'bbbbbbbb-2', null), row('r3', 'e75ca548-1', '송윤재')]);
     const unnamed = koMessages.common.memberUnnamed;
     expect(actorNames()).toEqual([`${unnamed} · aaaaaaaa`, `${unnamed} · bbbbbbbb`, '송윤재']);
-    expect([...container.querySelectorAll(`[aria-label^="${unnamed}"]`)].map((el) => el.textContent)).toEqual(['', '']);
+    expect([...container.querySelectorAll(`[aria-label^="${unnamed}"]:not([data-audit-row])`)].map((el) => el.textContent)).toEqual(['', '']);
   });
 });

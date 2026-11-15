@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ds/card';
+import { Button } from '@/components/ds/button';
 import { PaidSpendDailySeriesCard } from './paid-spend-daily-series-card';
 import { OrgCostSummaryCard, type OrgCostSummaryLoadState } from './org-cost-summary-card';
 
@@ -33,24 +33,24 @@ export function AdsCapCard({ orgId, costSummaryState }: AdsCapCardProps) {
     : null;
 
   return (
-    <Card className="p-3 text-xs" data-testid="ads-cap-card">
+    <Card className="p-3 text-ds-small" data-testid="ads-cap-card">
       <Button
         type="button"
-        variant="ghost"
+        variant="quiet"
         onClick={() => setExpanded((v) => !v)}
-        className="h-auto min-h-0 w-full justify-between p-0 text-left text-xs font-medium text-foreground whitespace-normal hover:bg-transparent aria-expanded:bg-transparent"
+        className="h-auto min-h-0 w-full justify-between p-0 text-left text-ds-small font-medium text-ds-ink whitespace-normal"
         aria-expanded={expanded}
         data-testid="ads-cap-card-toggle"
       >
         <span>
           {t('adsCapCardTitle')}
           {capReachedCount !== null ? (
-            <span className="ml-1.5 font-normal text-muted-foreground" data-testid="ads-cap-card-reached-count">
+            <span className="ml-1.5 font-normal text-ds-ink-3" data-testid="ads-cap-card-reached-count">
               · {t('orgCostAdsCapReachedNonzero', { count: capReachedCount })}
             </span>
           ) : null}
         </span>
-        <span className="text-muted-foreground">{expanded ? t('sectionCollapse') : t('sectionExpand')}</span>
+        <span className="text-ds-ink-3">{expanded ? t('sectionCollapse') : t('sectionExpand')}</span>
       </Button>
       {expanded ? (
         <div className="mt-3 space-y-3" data-testid="ads-cap-card-body">

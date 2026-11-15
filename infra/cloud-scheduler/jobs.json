@@ -242,6 +242,14 @@
       "basis": "story #4733 S5·P2 (까디르군 렌즈 5182의 핀) — 폰에서 친 글이 시한(10분)을 넘기지 않게: 컴퓨터가 안 돌아오고 아무도 다시 누르지 않아도 서버가 스스로 지운다."
     },
     {
+      "name": "changes-purge",
+      "route": "changes-purge",
+      "method": "POST",
+      "schedule": "* * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "story #4951 ①a (까디르군 렌즈 A) — 폰·웹에서 «바뀐 파일» 목록을 요청해 놓고 읽으러 돌아오지 않아도, 120초가 지난 목록은 서버가 스스로 지운다(이름만 담긴 목록이지만 코드 쪽 자료는 DB에 남기지 않는 원칙)."
+    },
+    {
       "name": "account-purge",
       "route": "account-purge",
       "method": "POST",

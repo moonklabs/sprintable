@@ -6,7 +6,7 @@ side (Next 16.2.2, Node 22.23.3, 20 of 20 left open with `head sent`); about 36 
 
 Pinned here:
   - the Caddyfile text: the app site has `handle /api/v2/*` -> `reverse_proxy backend:8000` with `flush_interval -1` and NO `encode` (a compressor holds an event stream back), BEFORE the catch-all `handle` that keeps
-    `encode zstd gzip` -> `reverse_proxy frontend:3000`; the API site is untouched;
+    `encode zstd gzip` -> `reverse_proxy frontend:3000`; the API site's routing is untouched (story 4947 added only its retry lines, pinned in test_4947);
   - with a real Caddy (`SPRINTABLE_TEST_CADDY`, or `caddy` on the PATH; skipped without one, as in test_4796_forwarder): the REAL Caddyfile, with the two service names pointed at local stubs, sends `/api/v2/*` to the backend stub and
     everything else to the web stub; a stream the backend stub cuts with a reset ends the client's connection within seconds (the case the web server failed); an API response is not compressed, a page still is.
 """

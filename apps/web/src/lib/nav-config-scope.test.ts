@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
+import { OTHER_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 
 // story #9c5e82dc(IA·S3, PO 確定 2026-09-08) — 새 자: 「프로젝트 전환 시 내용이 바뀌는
 // 항목」 대 「화면이 그렇다고 말하는 항목」 8:0→8:8(3600 문서 원안)이었으나, activity가
@@ -12,7 +12,7 @@ import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 // 표식은 "화면 전체에 대한 약속"이라 혼합/부수적 project_id 사용은 project로도 org로도
 // 정직할 수 없어 애매(무표식)로 간다. 이 재감사로 애매가 2→4로 늘었다(9/11/4).
 // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §④ 2026-09-14) — retro·standup이
-// LEGACY_NAV_ITEMS에서 빠지며(각각 「일감」 회고 탭·스프린트 탭 하루 체크인 절로 흡수,
+// OTHER_NAV_ITEMS에서 빠지며(각각 「일감」 회고 탭·스프린트 탭 하루 체크인 절로 흡수,
 // nav-config.ts 주석 참고) 9→7.
 const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'docs', 'artifacts', 'storage', 'activity'];
 // 애매(표식 없음) — scope 필드를 아예 안 쓴다.
@@ -22,16 +22,18 @@ const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'docs', 'artifacts', 'sto
 //   스켈레톤) 패널이 한 화면에 섞임(loop-face.tsx·workforce-face.tsx)
 // - org-workforce: agents-page-tabs.tsx 4탭 중 stats·recruit는 project 걸리고
 //   manage(기본)·access는 project 무관 — 탭에 따라 갈리는 혼합 화면
-const AMBIGUOUS_IDS = ['inbox', 'settings', 'org-briefing', 'org-workforce'];
+// - story #4885: 새로 입구를 얻은 org-workforce-runs · org-workforce-api-keys와 «그 밖» 2쪽(rewards · channel-chat) — 화면의 데이터 성격을 아직 감사하지 않았다.
+//   감사 전엔 project라고도 org라고도 단정하지 않는다(표식 없음 = 말을 안 함. 감사하면 이 목록에서 빼고 scope를 단다).
+const AMBIGUOUS_IDS = ['inbox', 'settings', 'org-briefing', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys', 'rewards', 'channel-chat'];
 
 // story #3824(UX-v3·FE 1, 2026-09-13) — 5항목 축소는 사이드바 "1급 노출" 재편일 뿐,
 // scope 분류(project/org/애매) 자체는 화면의 실제 데이터 필터 성격을 서술하는 값이라
-// 어느 진입점(NAV_GROUPS 1급이냐 LEGACY_NAV_ITEMS 커맨드 팔레트냐)에 있든 안 바뀐다 —
-// 그래서 이 감사 축은 NAV_GROUPS만이 아니라 LEGACY_NAV_ITEMS까지 합쳐 23개 전부를 본다
+// 어느 진입점(NAV_GROUPS 1급이냐 OTHER_NAV_ITEMS 커맨드 팔레트냐)에 있든 안 바뀐다 —
+// 그래서 이 감사 축은 NAV_GROUPS만이 아니라 OTHER_NAV_ITEMS까지 합쳐 25개 전부를 본다
 // (item.scope는 app-sidebar.tsx의 ScopeMark 배지 렌더에만 쓰이지만, 분류 정확성 자체의
 // 회귀가드로서 자리 이동과 무관하게 유효).
 function allItems() {
-  return [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS];
+  return [...NAV_GROUPS.flatMap((g) => g.items), ...OTHER_NAV_ITEMS];
 }
 
 describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
@@ -41,8 +43,9 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙, 채널 연결의
   // 형제 화면)로 21→22.
   // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 nav에서 걷어 22→21.
-  it('항목 21개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
-    expect(allItems()).toHaveLength(21);
+  // story #4885 — 새 구조 25(NAV_GROUPS 23 + 그 밖 2).
+  it('항목 25개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
+    expect(allItems()).toHaveLength(25);
   });
 
   it('project 스코프 7항목이 정확히 이 집합이다(story #3845로 9→7, retro·standup 제외)', () => {
@@ -63,7 +66,7 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
     expect(orgIds).toHaveLength(10);
   });
 
-  it('애매 4항목(inbox·settings·org-briefing·org-workforce)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {
+  it('애매 8항목(inbox·settings·org-briefing·org-workforce + 감사 전 새 입구 4)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {
     for (const id of AMBIGUOUS_IDS) {
       const item = allItems().find((i) => i.id === id);
       expect(item?.scope, `${id}.scope`).toBeUndefined();

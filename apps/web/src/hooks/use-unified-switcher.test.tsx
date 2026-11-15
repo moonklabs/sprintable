@@ -237,6 +237,12 @@ describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', 
     ['//evil.com', 'protocol-relative'],
     ['https://evil.com', '절대 URL'],
     ['/\\evil.com', '백슬래시 트릭'],
+    ['/\t/evil.com', '탭 — 브라우저가 지워 //evil.com (story 4936)'],
+    ['/\n/evil.com', 'LF (story 4936)'],
+    ['/\r/evil.com', 'CR (story 4936)'],
+    ['/\t\\evil.com', '탭 + 백슬래시 (story 4936)'],
+    ['/%09/evil.com', '퍼센트 부호 탭 — 한 번 풀면 탭 (story 4936)'],
+    ['/%2509/evil.com', '두 겹 부호 탭 (story 4936)'],
   ])('?next=%s(%s)는 신뢰하지 않고 무시한다(open-redirect 방지, story #2212)', async (malicious) => {
     searchParamsValueRef.current = `next=${encodeURIComponent(malicious)}`;
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
@@ -475,7 +481,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (
     await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
     expect(calls.length).toBe(3);
     expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §G-3 (4680/4677): «팀에 넣기» · «개» · the tab's own name
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 구성원과 접근에서 다시 해 주세요.'); // Yuna §G-3 (4680/4677): «팀에 넣기» · «개» · the tab's own name
     expect(result!.createProjectError).toBeNull();
     // Yuna §F (non-blocking): the notice goes the next time the dialog opens
     await act(async () => { result!.setCreateProjectOpen(true); });
@@ -584,7 +590,7 @@ describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story
     expect(result!.createProjectOpen).toBe(false);
     expect(result!.createProjectError).toBeNull();
     expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
-    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 구성원과 접근에서 다시 해 주세요.');
     // a throw
     const t = stub();
     t.setProjectFolder.mockImplementationOnce(async () => { throw new Error('bridge gone'); });

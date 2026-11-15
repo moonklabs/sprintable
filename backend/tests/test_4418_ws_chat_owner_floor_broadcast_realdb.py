@@ -224,8 +224,12 @@ def test_an_owner_floor_person_delivering_through_the_channel_route_is_saved_and
         "app.routers.channel.async_session_factory",
         async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
     )
+    from tests.test_4775_ws_room_participants_realdb import _room_sockets, _wait_in_room
+
+    before = _room_sockets(AGENT)
     with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(OWNER_USER)}") as owner_ws, \
             client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(TM_USER)}") as other_ws:
+        _wait_in_room(before, 2, agent_id=AGENT)  # both are IN the room before the line is delivered over REST (a socket not yet in it never hears it)
         resp = client.post(
             f"/api/v2/channel/deliver?token={_token(OWNER_USER)}", json={"agent_id": str(AGENT), "content": "via route"},
         )

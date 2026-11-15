@@ -8,11 +8,12 @@ import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { usePairHref } from '@/hooks/use-pair-href';
-import { agentOnDevice, permissionLine, requestAge, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
+import { agentOnDevice, permissionLine, requestAge, shownSummary, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
+import { PermissionPreviewView } from '@/components/inbox/permission-preview';
 
 /**
  * story #4533 (E-DESKTOP-2 B-2 · 명세 모음 «B-2 폰 권한 요청 카드(웹은 읽기 전용)») — the approvals inbox's top group «에이전트 권한
@@ -75,7 +76,12 @@ async function readRequests(): Promise<PermissionRequest[] | null> {
   }
 }
 
-export function AgentPermissionRequests() {
+/**
+ * story 4909 (UI-R1 AC3, 2d-1) — everything the group KNOWS, in one hook: the read clocks (mount · a new request's notice · 15 s / 30 s · the page seen again), the two named SSE frames, the answers given on this page
+ * (and how long they stay), the phone bridge and how the phone confirms, and the «remote control is off» line. The group below and (next step) the approvals list's «에이전트 권한 요청» section both read it —
+ * one source, so the two never hold two lists. PURE MOVE: not a line of behavior changed (the three test files of this group run unchanged).
+ */
+export function useAgentPermissionRequests() {
   const t = useTranslations('agentPermissions');
   const remoteOff = useRemoteOff(); // story #4583: why none come — only while off and with a connected computer
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
@@ -96,7 +102,21 @@ export function AgentPermissionRequests() {
   const shown = [...listed, ...[...answers.values()].filter((a) => !listed.some((r) => r.id === a.row.id)).map((a) => a.row)];
   const waiting = shown.length > 0;
   const [notices, setNotices] = useState(0);
+  // story 4949 (codex): a card's clock must not wait for a read — a row with lines on screen is re-judged against its window every 5 s on its own (a read that hangs cannot keep an expired preview up)
+  const hasLines = shown.some((r) => r.preview);
+  useEffect(() => {
+    if (!hasLines) return;
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, [hasLines]);
+  // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
+  const [stale, setStale] = useState(false);
+  // story 4949 (codex round 5): a change frame for a request means its question is no longer what the lines were shown for — they go at once, before any read, even for a request answered HERE (whose read is held back)
+  const [linesGone, setLinesGone] = useState<ReadonlySet<string>>(new Set());
   const readFor = useRef(-1);
+  // story 4949 (codex): reads can overlap — an older answer that comes after a newer one is ignored (it must not undo what the newer one said: a failed read marks the rows stale)
+  const readSeq = useRef(0);
+  const appliedSeq = useRef(0);
   // story #4612: the requests answered on THIS page — their change frame is not read on (the card keeps its result line until the
   // next read, story #4596 D-1; a read at once would take it away the moment it was answered)
   const answeredHere = useRef<ReadonlySet<string>>(new Set());
@@ -116,6 +136,7 @@ export function AgentPermissionRequests() {
     onExtraEvent: (name, data) => {
       if (name === PERMISSION_CHANGED_EVENT) {
         const id = (data as { request_id?: unknown } | null)?.request_id;
+        if (typeof id === 'string') setLinesGone((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
         if (typeof id === 'string' && !answeredHere.current.has(id)) setNotices((k) => k + 1);
         return;
       }
@@ -132,10 +153,14 @@ export function AgentPermissionRequests() {
     const read = () => {
       pending = true;
       const started = Date.now();
+      const seq = ++readSeq.current;
       void readRequests().then((list) => {
         pending = false;
         if (off) return;
+        if (seq < appliedSeq.current) return;
+        appliedSeq.current = seq;
         setRequests((prev) => list ?? prev ?? []);
+        setStale(list === null);
         // story #4596 AC1: a card answered here leaves at the first read made after its answer that no longer lists it — a page kept
         // open through many answers never holds them (a failed read keeps what was shown)
         if (list) setAnswers((m) => afterRead(m, list, started));
@@ -170,6 +195,12 @@ export function AgentPermissionRequests() {
     </div>
   ) : null;
 
+  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
+}
+
+export function AgentPermissionRequests() {
+  const t = useTranslations('agentPermissions');
+  const { shown, now, phone, auth, offLine, stale, answerFor: answerOf, onAnswer } = useAgentPermissionRequests();
   if (shown.length === 0) return offLine; // nothing waiting: the inbox as it was (+ the off line)
 
   return (
@@ -180,8 +211,8 @@ export function AgentPermissionRequests() {
         {t('groupTitle')} · {shown.length}
       </h2>
       {shown.map((r) => (
-        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} answer={answerFor(answers, r)}
-          onAnswer={(decision) => void answer(r, decision)} />
+        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} stale={stale} answer={answerOf(r)}
+          onAnswer={(decision) => onAnswer(r, decision)} />
       ))}
     </section>
     </>
@@ -221,8 +252,10 @@ function answerFor(answers: ReadonlyMap<string, Kept>, r: PermissionRequest): An
   return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
 }
 
-function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
+export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer, stale = false }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
+  /** the last read of the list failed (the row is from before) — no lines of a file are shown on it */
+  stale?: boolean;
   onAnswer: (decision: 'allow' | 'deny') => void;
 }) {
   const t = useTranslations('agentPermissions');
@@ -269,10 +302,11 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
       ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
-          <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
+          <p className="break-all font-mono text-xs text-foreground">{shownSummary(r.summary, r.masked)}</p>
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
+      {net === null && asking && !stale && answer?.kind !== 'failed' && now < Date.parse(r.expires_at) && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
       {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
@@ -308,14 +342,14 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   const buttons = net === 'confirm' ? (
     // Yuna «4580 AC2» ②: the opening one filled · «허용하지 않기» outline and focused first (the person picks the opening side)
     <div className="flex gap-2" data-testid="agent-permission-buttons">
-      <Button size="sm" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
-      <Button size="sm" variant="outline" autoFocus onClick={() => onAnswer('deny')}>{t('net.dontAllow')}</Button>
+      <Button size="sm" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" autoFocus onClick={() => onAnswer('deny')}>{t('net.dontAllow')}</Button>
     </div>
   ) : (
     <div className="flex gap-2" data-testid="agent-permission-buttons">
       {/* the person's one judgement here: both the same weight, as the desktop band (Yuna 4951 · no default pushed) */}
-      <Button size="sm" variant="outline" onClick={() => onAnswer('allow')}>{net === 'ask' ? t('net.allowMore') : t('phone.allow')}</Button>
-      <Button size="sm" variant="outline" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('allow')}>{net === 'ask' ? t('net.allowMore') : t('phone.allow')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
     </div>
   );
   const settings = (

@@ -761,10 +761,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    // story #2926(P0-F F1) — 「결재 요청」 정적 라벨 행은 ProofCapsule 셸로 전환되며
-    // 빠졌다(카드 정체성은 이제 컷코너+레일 모양이 진다). 대신 stateLabel(pending=
-    // 「결재 대기」)이 그 자리를 잇는다 — 텍스트 내용은 더 구체적으로 유지.
-    expect(container.textContent).toContain('결재 대기');
+    // story 4887 (UI-4 P4-c) — the card is the ds ApprovalCard: its label is «결재 요청», and a card that needs MY hand carries the amber bar + the off-screen name
+    // «내 결재가 필요해요» (the ProofCapsule's visible «결재 대기» state word is not part of the new part).
+    expect(container.textContent).toContain('결재 요청');
+    expect(container.querySelector('[data-slot="ds-approval-card"][data-tone="needs-hand"]')?.textContent).toContain('내 결재가 필요해요');
     expect(container.textContent).toContain('제안서.md');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
@@ -1116,33 +1116,40 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).not.toContain('작업 상태 변경');
   });
 
-  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백 content 그대로(AC2 비회귀)', async () => {
+  // story 4921 — the «generic fallback» cases below used to pin the machine text (an agent's text) being SHOWN as the bubble text. The contract now (PO 11-13): a head (the definition's name · «이벤트» · a known preset's
+  // sentence) + the person's words + the other fields as a readable list — never the «[이벤트] preset.x» header line or raw key names; «이벤트» ALONE only when the event has no field at all. message.content is unchanged.
+  it('eventDefinitionsByKey 미제공(undefined) — 폴백은 머리 한 줄 + 읽을 수 있는 목록(story 4921 · PO 11-13)', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    const text = container.querySelector('[data-testid="chat-bubble-text"]')!.textContent;
+    // the four presets the app already knows say their one-line sentence even with no definition read — and the fields stay as a readable list (the content is not dropped)
+    expect(text).toContain('작업 상태 변경 · 스토리 진행 중 → 리뷰 중');
+    // the head already said the type and both statuses: the list does not say them again — only what the head did not (the target)
+    expect(Array.from(container.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['대상: S-42']);
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status|to_status/); // no machine header line · no raw key names
   });
 
-  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 기존 ChatMarkdown 경로를 그대로 탄다("- " 목록이 <li> 불릿으로 렌더, 하이픈 리터럴로 후퇴 안 함)', async () => {
+  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 말풍선 글 칸을 탄다(카드 아님) · 4921: «- key: value» 목록은 더는 그려지지 않는다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
+    expect(container.querySelector('[data-testid="chat-bubble-text"]')).not.toBeNull();
+    // the «- » list the PO decided on stays a real <li> list (not hyphen literals) — without the raw key names
     const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
-    expect(items).toEqual(expect.arrayContaining([
-      expect.stringContaining('work_item_type: story'),
-      expect.stringContaining('from_status: in-progress'),
-      expect.stringContaining('to_status: in-review'),
-    ]));
+    expect(items).toEqual(['대상: S-42']); // a real <li> list; the fields the head sentence used (type · from · to) are not repeated in it
+    expect(items.some((t) => /work_item_type|from_status|to_status/.test(t ?? ''))).toBe(false);
   });
 
   it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    expect(container.textContent).toContain('작업 상태 변경');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|from_status/);
   });
 
-  it('정의는 있으나 block_template이 null이면 제네릭 폴백', async () => {
+  it('정의는 있으나 block_template이 null이면 제네릭 폴백(사람 글, story 4921)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1151,7 +1158,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
         />,
       ));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status/); // 4921 — the definition's NAME (if it has one) or «이벤트»
   });
 
   it('block_template이 있으면 header/text/fields를 payload로 치환해 렌더한다(제네릭 텍스트 대신)', async () => {
@@ -2012,14 +2019,14 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     content: '안녕한 일반 텍스트 메시지인 — 참조 없음',
   };
 
-  it('버블=무채 panel(내 메시지=blue-soft) — isMine이면 bg-proof-blue-soft, 아니면 bg-proof-panel', async () => {
+  it('버블=층 규칙의 글 줄(4906) — isMine이면 bg-ds-mine, 아니면 bg-ds-surface-high', async () => {
     // ⛔bg-proof-blue-soft는 에이전트 아바타(ProofAvatar isAgent)에도 붙어 셀렉터가 겹친다 —
     // 버블 고유 모서리 클래스(rounded-tr-sm/rounded-tl-sm)와 함께 잡아 버블 자신만 특정한다.
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
     });
-    expect(container.querySelector('.rounded-tr-sm.bg-proof-blue-soft')).toBeTruthy();
-    expect(container.querySelector('.rounded-tr-sm.bg-proof-panel')).toBeNull();
+    expect(container.querySelector('.rounded-tr-sm.bg-ds-mine')).toBeTruthy();
+    expect(container.querySelector('.rounded-tr-sm.bg-ds-surface-high')).toBeNull();
     // 옛 solid 배경+흰 글자 조합이 안 남아있다(눈에 안 보이는 흰 글자 회귀 방지).
     expect(container.querySelector('.bg-primary.text-primary-foreground')).toBeNull();
 
@@ -2028,8 +2035,8 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
     });
-    expect(container.querySelector('.rounded-tl-sm.bg-proof-panel')).toBeTruthy();
-    expect(container.querySelector('.rounded-tl-sm.bg-proof-blue-soft')).toBeNull();
+    expect(container.querySelector('.rounded-tl-sm.bg-ds-surface-high')).toBeTruthy();
+    expect(container.querySelector('.rounded-tl-sm.bg-ds-mine')).toBeNull();
   });
 
   // story #2921 S4 후속(2026-08-22, 유나 합성 5규칙 확定·avatar-unification-design-memo-2921) —

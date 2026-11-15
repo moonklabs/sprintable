@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { notAMac } from '@/components/desktop/desktop-download-card';
@@ -22,7 +22,7 @@ export function DesktopOpenAppCard() {
   if (!onAMac) return null;
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-open-app-card">
-      <p className="text-sm font-medium text-foreground">{t('openAppTitle')}</p>
+      <p className="text-ds-card-title font-semibold text-ds-ink">{t('openAppTitle')}</p>
       <Button asChild size="sm" data-testid="desktop-open-app-button">
         <a href={appSetupLink(null)}>{t('openAppCta')}</a>
       </Button>

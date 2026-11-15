@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { slugifyDocTitle, isUntitledSlug, DOC_SLUG_MAX_LENGTH } from './doc-slug';
 
 /**
@@ -58,5 +58,35 @@ describe('isUntitledSlug', () => {
     expect(isUntitledSlug('untitled-roadmap')).toBe(false);
     expect(isUntitledSlug('my-untitled-123')).toBe(false);
     expect(isUntitledSlug('회의록')).toBe(false);
+  });
+});
+
+// 4910 ② — 임시 슬러그(서버에 아직 없는 초안의 주소): 같은 순간 두 사람이 «새 문서»를 눌러도 같은 주소가 되지 않는다.
+describe('newUntitledSlug (4910)', () => {
+  it('`untitled-<시각><여섯 자리 무작위 수>` — 숫자뿐이라 isUntitledSlug가 그대로 받는다(제목에서 슬러그 파생 · URL 안내가 계속 동작)', async () => {
+    const { newUntitledSlug, isUntitledSlug } = await import('./doc-slug');
+    const slug = newUntitledSlug(1_700_000_000_000);
+    expect(slug).toMatch(/^untitled-1700000000000\d{6}$/);
+    expect(isUntitledSlug(slug)).toBe(true);
+  });
+
+  it('⭐같은 시각(같은 밀리초)에 만들어도 꼬리는 무작위 수에서 온다 — 무작위 수가 다르면 슬러그가 다르다(꼬리를 떼면 200개가 전부 같아진다 · 결정적)', async () => {
+    const { newUntitledSlug } = await import('./doc-slug');
+    let n = 0;
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(((buf: Uint32Array) => { buf[0] = 1000 + n++; return buf; }) as typeof crypto.getRandomValues);
+    try {
+      const slugs = Array.from({ length: 200 }, () => newUntitledSlug(1_700_000_000_000));
+      expect(new Set(slugs).size).toBe(200);
+      expect(slugs[0]).toBe('untitled-1700000000000001000');
+    } finally { spy.mockRestore(); }
+  });
+
+  it('인자 없이 부르면 지금 시각을 쓴다', async () => {
+    const { newUntitledSlug } = await import('./doc-slug');
+    const before = Date.now();
+    const slug = newUntitledSlug();
+    const stamp = Number(slug.slice('untitled-'.length, 'untitled-'.length + 13));
+    expect(stamp).toBeGreaterThanOrEqual(before);
+    expect(stamp).toBeLessThanOrEqual(Date.now());
   });
 });

@@ -168,6 +168,12 @@ describe('[4714] landingHome — the home it goes to is only an address of THIS 
     expect(landingHome('/phone-start')).toBe('/phone-start'); // the start screen has its own way out: not a loop
   });
 
+  it('[4936] the landing itself is refused however it is written: dot segments · every encoding layer (`/%2570hone-landing` is `/phone-landing` two reads later) → the site root', () => {
+    for (const loop of ['/phone-landing', '/./phone-landing', '/a/../phone-landing', '/%70hone-landing', '/%2570hone-landing', '/%252570hone-landing', '/phone-landing/?x=1']) {
+      expect([loop, landingHome(loop)]).toEqual([loop, '/']);
+    }
+  });
+
   it('the landing itself (any spelling that reaches it: query · trailing slash · case · dot segments · percent-encoding) is the site root — it would send the person round and round', () => {
     for (const loop of ['/phone-landing', '/phone-landing?next=/phone-landing', '/phone-landing/', '/PHONE-LANDING', '/x/../phone-landing', '/phone%2Dlanding', '/phone-landing%2F', '/phone-landing#x']) {
       expect([loop, landingHome(loop)]).toEqual([loop, '/']);
@@ -206,11 +212,11 @@ describe('[4714] the landing door — an empty area, one go, once per launch', (
     });
     await flush();
   };
-  const HOME = '/moonklabs/sprintable/flow'; // what the proxy resolved the shell's home to
+  const HOME = '/moonklabs/sprintable/flow'; // any home the page hands the component (since story 4906 the page maps the proxy's `next=/` to «오늘»; the component just goes to what it is given)
   const door = (next: string | null = HOME) => mount(<PhoneLanding chatsHref="/chats" next={next} />);
   const again = async () => { window.sessionStorage.clear(); replace.mockClear(); await act(async () => { root.unmount(); }); root = createRoot(container); };
 
-  it('an agent that runs → the chat list · paired and none runs → /phone-start · not paired → the home the proxy resolved', async () => {
+  it('an agent that runs → the chat list · paired and none runs → /phone-start · not paired → the home it is given', async () => {
     startable(computer(SETUP_A, '윤재의 맥북', true));
     await door();
     expect(replace).toHaveBeenCalledTimes(1);
@@ -380,7 +386,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     await page();
     expect(byId('onboarding-phone-start')?.textContent).toContain('윤재의 맥북에서 에이전트를 시작할까요?');
     const out = byId('phone-start-finish');
-    expect(out?.textContent).toBe('오늘로 가기');
+    expect(out?.textContent).toBe('홈으로 가기');
     await act(async () => { out?.click(); });
     expect(assign).toHaveBeenCalledWith('/today'); // the onboarding's own finish address — never back to the landing
   });
@@ -399,7 +405,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
 
   it('where «today» is off the way out says what it goes to (the dashboard · the chat list), as the onboarding\'s own finish button does', async () => {
     await page(true, false);
-    expect(byId('phone-start-finish')?.textContent).toBe('대시보드로');
+    expect(byId('phone-start-finish')?.textContent).toBe('대화로 가기');
     await act(async () => { byId('phone-start-finish')?.click(); });
     expect(assign).toHaveBeenCalledWith('/chats');
   });

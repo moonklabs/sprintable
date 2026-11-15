@@ -306,11 +306,12 @@ describe('팀 활동 — 빈 날짜 칸 · 더 보기(story #4280)', () => {
     const held = stubWithHeldOld(() => ({ ok: true, status: 200, json: async () => ({ data: { items: [ITEM(10)], next_after_seq: null, next_before_seq: 10 } }) }));
     await startOldLoadMoreThenChangeRange();
     await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const loadingButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === enMessages.common.loading);
+    // the ds Button's loading state: the words stay and the button is aria-busy (the old «불러오는 중» text + disabled are gone)
+    const loadingButton = () => container.querySelector('button[data-slot="ds-button"][aria-busy="true"]') as HTMLButtonElement | null;
     expect(loadingButton(), '새 «더 보기» 진행 중').toBeTruthy();
     await act(async () => { held.release(); await vi.advanceTimersByTimeAsync(100); });
     expect(loadingButton(), '옛 요청이 끝나도 새 요청은 아직 진행 중').toBeTruthy();
-    expect(loadingButton()!.hasAttribute('disabled')).toBe(true);
+    expect(loadingButton()!.textContent!.trim()).toBe(enMessages.teamActivity.loadMore);
     await act(async () => { held.releaseNew(); await vi.advanceTimersByTimeAsync(100); });
     expect(container.textContent).toContain('item-50');
   });

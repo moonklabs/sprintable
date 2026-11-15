@@ -77,7 +77,7 @@ def test_the_uri_is_removed_whole_because_credentials_travel_in_the_path_too() -
         assert "request>uri delete" in kept, host
 
 
-def test_the_global_options_and_the_proxy_settings_were_not_touched() -> None:
+def test_the_global_options_and_the_proxy_routing_were_not_touched() -> None:  # story 4947 added retry lines inside the proxy blocks (pinned in test_4947)
     sites = _sites()
     assert "protocols h1 h2" in sites["<global>"] and "email {$ACME_EMAIL}" in sites["<global>"]
     assert "reverse_proxy backend:8000 {" in sites["{$API_HOST}, {$REALTIME_HOST}"] and "flush_interval -1" in sites["{$API_HOST}, {$REALTIME_HOST}"]
@@ -87,7 +87,7 @@ def test_the_global_options_and_the_proxy_settings_were_not_touched() -> None:
 
 def test_the_container_keeps_the_logs_under_the_limit_of_every_other_container() -> None:
     caddy = COMPOSE["services"]["caddy"]
-    assert caddy["logging"] == COMPOSE["x-logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "5"}}
+    assert caddy["logging"] == COMPOSE["x-logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "5", "labels": "sprintable_service"}}
 
 
 def test_the_runbook_says_how_to_count_the_requests_and_what_the_log_keeps() -> None:

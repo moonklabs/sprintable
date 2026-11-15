@@ -90,6 +90,41 @@ describe('LinkedAccountsSection — 최소 1개 로그인 수단 가드 (AC3)', 
     expect(btn?.disabled).toBe(true);
   });
 
+  it('⭐story 4891: the REASON the only login method cannot be disconnected is a visible line the button points at (aria-describedby) — not a hover title — and each row\'s buttons carry the provider in their name', async () => {
+    await mount({ linked_providers: ['apple'], has_password: false });
+    const appleItem = Array.from(container.querySelectorAll('li')).find((li) => li.textContent?.includes('Apple'))!;
+    const btn = appleItem.querySelector('button')!;
+    expect(btn.disabled).toBe(true);
+    expect(btn.hasAttribute('title')).toBe(false);
+    const reasonId = btn.getAttribute('aria-describedby');
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId!)?.textContent).toBe(koMessages.settings.linkedAccountsOnlyMethodTitle);
+    expect(btn.getAttribute('aria-label')).toBe(koMessages.settings.linkedAccountsDisconnectAria.replace('{provider}', 'Apple'));
+    const googleItem = Array.from(container.querySelectorAll('li')).find((li) => li.textContent?.includes('Google'))!;
+    expect(googleItem.querySelector('a')?.getAttribute('aria-label')).toBe(koMessages.settings.linkedAccountsConnectAria.replace('{provider}', 'Google'));
+  });
+
+  it('⭐story 4891 (label-in-name): while a disconnect is out, the button says «해제 중…» AND its accessible name follows it (not the idle «연결 해제» name)', async () => {
+    let release: (v: unknown) => void = () => {};
+    const pending = new Promise((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { linked_providers: ['google', 'apple'], has_password: false } }) };
+      if (url === '/api/auth/oauth/unlink' && init) { await pending; return { ok: true, json: async () => ({ data: { ok: true } }) }; }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    const { LinkedAccountsSection } = await import('./linked-accounts-section');
+    await act(async () => { root.render(wrap(<LinkedAccountsSection />)); });
+    await flush();
+    const googleBtn = Array.from(container.querySelectorAll('li')).find((li) => li.textContent?.includes('Google'))!.querySelector('button')!;
+    await act(async () => { googleBtn.click(); await Promise.resolve(); });
+    const running = Array.from(container.querySelectorAll('li')).find((li) => li.textContent?.includes('Google'))!.querySelector('button')!;
+    expect(running.textContent).toBe(koMessages.settings.linkedAccountsDisconnecting);
+    // reverted (the idle name kept while it runs) → the visible words are not in the name
+    expect(running.getAttribute('aria-label')).toContain(koMessages.settings.linkedAccountsDisconnecting);
+    expect(running.getAttribute('aria-label')).toContain('Google');
+    await act(async () => { release(undefined); await Promise.resolve(); await Promise.resolve(); });
+  });
+
   it('연결된 provider 2개면(비밀번호 없어도) 둘 다 Disconnect 활성', async () => {
     await mount({ linked_providers: ['google', 'apple'], has_password: false });
     const buttons = Array.from(container.querySelectorAll('button'));

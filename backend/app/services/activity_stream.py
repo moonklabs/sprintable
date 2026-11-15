@@ -275,9 +275,14 @@ async def query_activity_stream(
         query = query.where(ActivityEvent.project_id == project_id)
     # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 · 빈 집합이면 0건).
     if project_ids is not None:
-        if not project_ids:
-            return [], None
-        query = query.where(ActivityEvent.project_id.in_(list(project_ids)))
+        if room_read_clause is None:
+            if not project_ids:
+                return [], None
+            query = query.where(ActivityEvent.project_id.in_(list(project_ids)))
+        else:
+            # story #4870 AC4 — a row about a ROOM is decided by the room-read predicate alone (above): a PERSON in a room is not cut by the room's project (4846 AC2), and a room may have no project.
+            # (An agent's project is part of that predicate already.) Every other kind of row stays cut by the caller's projects; with no project at all only the rooms remain.
+            query = query.where(or_(ActivityEvent.project_id.in_(list(project_ids)), ActivityEvent.object_type.in_(("conversation_message", "conversation"))))
     if actor_id is not None:
         query = query.where(ActivityEvent.actor_id == actor_id)
     if verb is not None:

@@ -5,15 +5,17 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
-import { ChevronDown, Folder as FolderIcon, X } from 'lucide-react';
+import { ChevronDown, Folder as FolderIcon } from 'lucide-react';
 import { formatTotalSize } from '@/lib/storage/format';
 import { uploadStorageAsset } from '@/lib/storage/storage-upload';
+import { uploadFileAndReport } from './storage-upload-report';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
 import { StorageAssetList } from './storage-asset-list';
@@ -287,13 +289,23 @@ export function StorageView({ projectId }: { projectId: string }) {
     setOrder(s === 'name' ? 'asc' : 'desc');
   }, []);
 
+  // 5668의 결함(둘째) — 서랍을 «행을 눌러 막 연 직후»인가. 행 더블클릭의 둘째 클릭(detail ≥ 2)이 그 자리에 깔린 배경 막에 닿아도 서랍을 안 닫기 위한 표식(코덱스 1차:
+  // 클릭 횟수만 보면 서랍 안쪽을 빠르게 누른 뒤의 막 클릭이 닫히지 않을 수 있어, «행을 눌러 연 뒤 다른 곳을 안 누른 동안»으로 좁힌다 — 서랍 안쪽 누름 · 첫 클릭의 막 누름 · 서랍 닫힘이 표식을 지운다).
+  const openedByRowClickRef = useRef(false);
   const handleSelectAsset = useCallback(
     (asset: Asset) => {
       setSelectedAssetId(asset.id);
-      if (!detailPanel.supportsInlinePanel) detailPanel.setDrawerOpen(true);
+      if (!detailPanel.supportsInlinePanel) {
+        if (!detailPanel.drawerOpen) openedByRowClickRef.current = true;
+        detailPanel.setDrawerOpen(true);
+      }
     },
     [detailPanel],
   );
+  const detailDrawerIsOpen = detailPanel.drawerOpen;
+  useEffect(() => {
+    if (!detailDrawerIsOpen) openedByRowClickRef.current = false;
+  }, [detailDrawerIsOpen]);
 
   const handleRequestDelete = useCallback((asset: Asset) => {
     setAssetToDelete(asset);
@@ -338,15 +350,17 @@ export function StorageView({ projectId }: { projectId: string }) {
   // (Content-Type+required_put_headers)→confirm. 성공 시 신규 Asset을 목록 선두에(id 중복 가드 —
   // confirm이 on_conflict로 기존 row 반환 가능), 실패는 무신호 금지(toast). 현재 폴더 컨텍스트로 confirm.
   const handleUploadFile = useCallback(
-    async (file: File) => {
-      try {
-        const asset = await uploadStorageAsset({ file, projectId, folderId: selectedFolderId });
-        setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev]));
-        addToast({ title: t('uploadSuccessTitle'), body: file.name, type: 'success' });
-      } catch {
-        addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc'), type: 'error' });
-      }
-    },
+    (file: File) =>
+      uploadFileAndReport(
+        file,
+        (f) => uploadStorageAsset({ file: f, projectId, folderId: selectedFolderId }),
+        (asset) => setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev])),
+        {
+          success: (f) => addToast({ title: t('uploadSuccessTitle'), body: f.name, type: 'success' }),
+          // 4910 — 여러 파일 중 하나가 실패해도 어느 것인지 알도록 알림에 파일 이름(성공 알림과 같은 자리 · 문구 안에 이름).
+          failure: (f) => addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc', { name: f.name }), type: 'error' }),
+        },
+      ),
     [projectId, selectedFolderId, addToast, t],
   );
 
@@ -379,8 +393,8 @@ export function StorageView({ projectId }: { projectId: string }) {
   const totalBytes = useMemo(() => items.reduce((sum, a) => sum + (a.size_bytes || 0), 0), [items]);
 
   const summaryText = storageSummaryText(t, items.length, totalBytes, nextCursor !== null);
-  // story #4277 폭 관례 · #4326 폴백과 같은 모양은 StorageTopBarTitle 한 곳(알약만 화면이 넘긴다).
-  const topBarTitle = useMemo(() => <StorageTopBarTitle summaryText={summaryText} />, [summaryText]);
+  // 4910 — 위 막대는 제목 한 곳(폴백 `RouteTopBarFallback`과 글자까지 같다). «N개 자산 · 용량»은 본문 머리 줄(StorageAssetList)로 내려갔다.
+  const topBarTitle = useMemo(() => <StorageTopBarTitle />, []);
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
   // story #4277(민 기기 #2) — 402폭에서도 데스크톱 2단(폴더 칸 248px 고정)이라 목록이 약 150px로 찌그러져 «정렬: 최근 수정»이 한 자씩
@@ -407,74 +421,77 @@ export function StorageView({ projectId }: { projectId: string }) {
       <div className="px-4 pt-3 lg:hidden">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={openFolderDrawer}
-          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-foreground"
+          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
           data-testid="storage-folder-drawer-trigger"
         >
-          <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <FolderIcon className="size-4 shrink-0 text-ds-ink-3" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium">{currentFolderLabel}</span>
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown className="size-3.5 shrink-0 text-ds-ink-3" aria-hidden="true" />
         </Button>
       </div>
 
+      {/* 4910 — 층: 바탕(ds-background) 위에 «내용 칸» 한 장(머리 줄 → 필터 줄 → 폴더 나무 + 목록)과 오른쪽 상세 칸. 칸마다 둥근 틀 + 경계. */}
       <div
         className={cn(
-          'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)]',
-          supportsInlinePanel
-            ? 'lg:grid-cols-[248px_minmax(0,1fr)_372px]'
-            : 'lg:grid-cols-[248px_minmax(0,1fr)]',
+          'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] gap-2 p-2',
+          supportsInlinePanel && 'lg:grid-cols-[minmax(0,1fr)_372px]',
         )}
       >
-        <div className="hidden min-h-0 lg:contents" data-testid="storage-folder-tree-column">
-          <StorageFolderTree
-            folders={folders}
-            selectedFolderId={selectedFolderId}
-            onSelectFolder={setSelectedFolderId}
-            projectId={projectId}
-            projectName={projectName}
-            folderSearch={folderSearch}
-            onFolderSearchChange={setFolderSearch}
-            onCreateFolder={handleCreateFolder}
+        <div className="min-h-0 min-w-0 overflow-hidden rounded-ds-panel border border-ds-line" data-testid="storage-panel">
+          <StorageAssetList
+            assets={items}
+            summaryText={summaryText}
+            sidebar={
+              <StorageFolderTree
+                folders={folders}
+                selectedFolderId={selectedFolderId}
+                onSelectFolder={setSelectedFolderId}
+                projectId={projectId}
+                projectName={projectName}
+                folderSearch={folderSearch}
+                onFolderSearchChange={setFolderSearch}
+                onCreateFolder={handleCreateFolder}
+              />
+            }
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            search={search}
+            onSearchChange={setSearch}
+            sort={sort}
+            onSortChange={handleSortChange}
+            selectedAssetId={selectedAssetId}
+            onSelectAsset={handleSelectAsset}
+            onDeleteAsset={handleRequestDelete}
+            onDownloadAsset={handleDownloadAsset}
+            onUploadFile={handleUploadFile}
+            resolveFolderLabel={resolveFolderLabel}
+            loading={loading}
+            error={error}
+            onRetry={handleRetry}
+            isSearchActive={effectiveSearch.length > 0}
+            hasMore={nextCursor != null}
+            loadingMore={loadingMore}
+            onLoadMore={handleLoadMore}
           />
         </div>
 
-        <StorageAssetList
-          assets={items}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={handleSortChange}
-          selectedAssetId={selectedAssetId}
-          onSelectAsset={handleSelectAsset}
-          onDeleteAsset={handleRequestDelete}
-          onDownloadAsset={handleDownloadAsset}
-          onUploadFile={handleUploadFile}
-          resolveFolderLabel={resolveFolderLabel}
-          loading={loading}
-          error={error}
-          onRetry={handleRetry}
-          isSearchActive={effectiveSearch.length > 0}
-          hasMore={nextCursor != null}
-          loadingMore={loadingMore}
-          onLoadMore={handleLoadMore}
-        />
-
         {supportsInlinePanel ? (
-          <StorageDetailPanel
-            asset={selectedAsset}
-            folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
-            onDownload={handleDownloadAsset}
-            onRequestDelete={handleRequestDelete}
-          />
+          <div className="min-h-0 overflow-hidden rounded-ds-panel border border-ds-line">
+            <StorageDetailPanel
+              asset={selectedAsset}
+              folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
+              onDownload={handleDownloadAsset}
+              onRequestDelete={handleRequestDelete}
+            />
+          </div>
         ) : null}
       </div>
 
       {/* story #4277 — lg 미만 폴더 서랍(문서 화면 docs-client-layout의 모바일 스와이프 서랍과 같은 모양 · 같은 훅). */}
       <div
-        className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+        className="fixed inset-0 z-40 bg-ds-scrim lg:hidden"
         style={{
           opacity: folderDrawerProgress,
           pointerEvents: folderDrawerProgress > 0.05 ? 'auto' : 'none',
@@ -489,7 +506,7 @@ export function StorageView({ projectId }: { projectId: string }) {
         role="dialog"
         aria-modal="true"
         aria-label={t('metaFolder')}
-        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-surface shadow-ds-overlay outline-none lg:hidden"
         style={{
           transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
           transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
@@ -497,11 +514,9 @@ export function StorageView({ projectId }: { projectId: string }) {
         {...closedDrawerProps(folderDrawerProgress, folderDrawerOpen)}
         data-testid="storage-folder-drawer"
       >
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-          <span className="text-sm font-medium text-foreground">{t('metaFolder')}</span>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={closeFolderDrawer} className="text-muted-foreground hover:text-foreground" aria-label={tc('close')}>
-            <X className="size-4" />
-          </Button>
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-ds-line px-4 py-3">
+          <span className="text-sm font-medium text-ds-ink">{t('metaFolder')}</span>
+          <IconButton type="button" icon="close" label={tc('close')} onClick={closeFolderDrawer} />
         </div>
         <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
           <StorageFolderTree
@@ -530,10 +545,17 @@ export function StorageView({ projectId }: { projectId: string }) {
           <button
             type="button"
             aria-label={t('cancel')}
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
-            onClick={() => detailPanel.setDrawerOpen(false)}
+            className="absolute inset-0 bg-ds-scrim"
+            // 5668의 결함(둘째) — 행을 «더블클릭»하면 첫 클릭이 서랍을 열고 그 자리에 배경 막이 깔려, 같은 연속 누름의 둘째 클릭(`detail` ≥ 2)이 막을 눌러 서랍을 곧바로 닫았다
+            // (서랍 방식 = 1536 미만 · 맥 앱 1100 포함 — 더블클릭 = 열기가 안 됨, dev 실측 11-12). 시간(ms)이 아니라 브라우저가 세는 클릭 횟수를 쓴다.
+            // 단 «행을 눌러 연 뒤 서랍 안쪽을 안 누른 동안»의 둘째 이후 클릭만 무시한다(그 밖의 막 누름은 늘 닫는다).
+            onClick={(e) => {
+              if (e.detail > 1 && openedByRowClickRef.current) return;
+              openedByRowClickRef.current = false;
+              detailPanel.setDrawerOpen(false);
+            }}
           />
-          <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]">
+          <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]" onPointerDownCapture={() => { openedByRowClickRef.current = false; }}>
             <StorageDetailPanel
               asset={selectedAsset}
               folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}

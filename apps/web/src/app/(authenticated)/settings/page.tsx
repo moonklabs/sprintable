@@ -3,10 +3,9 @@
 import { ORG_DELETED_LANDING } from '@/lib/auth/org-deleted-landing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Smartphone, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { ThisPhoneCard } from '@/components/settings/this-phone-card';
@@ -14,6 +13,7 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
+import { MemberWebhooksSection } from '@/components/settings/member-webhooks-section';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
 import { MyProfileSection } from '@/components/settings/my-profile-section';
@@ -30,34 +30,42 @@ import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
+import { OrganizationSection, OrgDangerSection } from '@/components/settings/organization-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
-import { PushRegisterNotice } from '@/components/settings/push-register-notice';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { NotificationsPane } from './notifications-pane';
+import { SettingsSection } from '@/components/settings/settings-section';
 import { canSubmitOrgDelete } from './org-delete-gate';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settings-tab';
+import { settingsNavGroups } from './settings-nav';
+import { SettingsNav } from './settings-nav-list';
+import { IconButton } from '@/components/ds/icon-button';
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
-import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { ApiKeysMovedCard } from '@/components/settings/api-keys-moved-card';
+import { AccountDangerSection } from '@/components/settings/account-danger-section';
+import { ProjectsSection } from '@/components/settings/projects-section';
+import { ProjectDeleteDialog } from '@/components/settings/project-delete-dialog';
+import { OrgDeleteDialog } from '@/components/settings/org-delete-dialog';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
+import { returnHrefAfterProjectCreate } from '@/lib/return-after-project-create';
+import { resolveChatsHref } from '@/lib/nav-v3-destinations';
 import { memberRowLabels } from '@/lib/member-display';
-import { RowName } from '@/components/shared/row-name';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -115,14 +123,6 @@ type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 // "아직 모름"이다. null로 비우면 콜드 진입 시 레일이 통째로 짧아져 그 탭들이 애초에 없던
 // 것처럼 보인다(로딩≠권한없음 클래스 결함) — 판정 전엔 자리만 스켈레톤으로 지키고,
 // 판정 뒤에만 null(진짜 숨김)로 확정한다.
-function SettingsTabSkeleton() {
-  return (
-    <div className="flex h-8 items-center gap-2 px-3" data-testid="settings-tab-skeleton" aria-hidden="true">
-      <div className="size-4 animate-pulse rounded bg-muted" />
-      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
-    </div>
-  );
-}
 
 function isWebhookUrlAllowed(url: string): boolean {
   if (!url) return true;
@@ -146,14 +146,19 @@ export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const tc = useTranslations('common');
-  const tNav = useTranslations('nav');
   const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
   const tOnboarding = useTranslations('onboarding');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
-  const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
+  // story 4906 (PO 11-12): a project made from the chat list's empty state («프로젝트 만들기» there) sends the person BACK where they came from — the list, where «에이전트 추가» already stands. A whitelist of one
+  // word (not a free address: no open redirect); made from settings itself (no `return`) the person stays here as before.
+  const returnToChats = searchParamsHook.get('return') === 'chats';
+  // story #4935: a project made from the home's «프로젝트 만들기» (a person who pressed 일감 · 목표 · 문서 with no project yet) sends the person back to the screen they first pressed: `next` — read by the SAME check every other `?next=` reader uses
+  // (lib/auth/internal-path: internal paths only — story 4936), and put back together by the URL API with `?p=<new>` and without the retry mark. `return=chats` keeps its own meaning and wins when both are present.
+  const nextRaw = searchParamsHook.get('next');
+  const { orgId: ctxOrgId, orgMemberships, navV3Flags } = useDashboardContext();
   const { inPhoneApp } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab'), inPhoneApp));
   // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
@@ -168,7 +173,7 @@ export default function SettingsPage() {
     setProfileLoadFailed(false);
     setProfileRetryNonce((n) => n + 1);
   }, []);
-  const [lnbOpen, setLnbOpen] = useState(false);
+  const [lnbOpen, setLnbOpen] = useState(() => !searchParamsHook.get('tab')); // a phone arriving at /settings with no ?tab= sees the LIST first (≥md the list is always there)
   const { addToast } = useToast();
 
   const pickedTabByHand = useRef(false); // story 4762 — set once the person clicks a tab: a phone claim that comes later must not move them back to the link's tab
@@ -186,7 +191,12 @@ export default function SettingsPage() {
     lastSearchParams.current = searchParamsHook;
     if (!linkChanged && pickedTabByHand.current) return;
     const tab = searchParamsHook.get('tab');
-    if (tab) setActiveTab(resolveSettingsTab(tab, inPhoneApp));
+    if (tab) {
+      setActiveTab(resolveSettingsTab(tab, inPhoneApp));
+      if (linkChanged) setLnbOpen(false); // a link to a section while the phone's list is up opens that pane (the row would be selected behind a hidden pane otherwise)
+    } else if (linkChanged) {
+      setLnbOpen(true); // …and back to /settings with no `?tab=` is the list again
+    }
   }, [searchParamsHook, inPhoneApp]);
 
   // story 4762 — the «이 폰» tab only exists inside the phone app: if the bridge goes away while the person is on it, the tab list must not point at a pane that is gone
@@ -194,7 +204,11 @@ export default function SettingsPage() {
     if (!inPhoneApp) setActiveTab((current) => (current === 'this-phone' ? resolveSettingsTab('this-phone', false) : current)); // functional: a link change queued in the same pass keeps winning
   }, [inPhoneApp]);
 
-  const [orgId, setOrgId] = useState<string | null>(null);
+  // 4906 — ONE organization id for the whole screen: the dashboard's organization context first (it is there even when the account has no project yet),
+  // the organization of the current project only as the fallback. The id used to be filled ONLY from /api/current-project, so a fresh account
+  // (an organization but no project) had none: «프로젝트 만들기» said «조직 컨텍스트를 찾지 못했어요», and the organization panes (members · billing · …) never mounted.
+  const [projectOrgId, setProjectOrgId] = useState<string | null>(null);
+  const orgId = ctxOrgId ?? projectOrgId;
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [orgInfo, setOrgInfo] = useState<{ id: string; name: string; slug: string; plan?: string; role?: string } | null>(null);
   const [editOrgName, setEditOrgName] = useState('');
@@ -250,7 +264,7 @@ export default function SettingsPage() {
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
 
   // DashboardCtx에서 현재 org의 role을 derive — fetch 완료 전에도 올바른 role 반영
-  const ctxRole = orgMemberships.find(o => o.orgId === (orgId ?? ctxOrgId))?.role;
+  const ctxRole = orgMemberships.find(o => o.orgId === orgId)?.role;
   const currentOrgRole = (orgInfo?.role ?? ctxRole ?? 'member') as string;
 
   // story #2092(P0) — 삭제 다이얼로그를 열 때·재시도할 때 공통으로 쓰는 영향도 조회.
@@ -353,13 +367,17 @@ export default function SettingsPage() {
     }
   };
 
+  // codex 2라운드 — 조직을 바꾸면(router.refresh, 이 화면은 다시 안 뜬다) 옛 조직의 프로젝트 행이 남아 편집 · 삭제(프로젝트 id만 보낸다)가 옛 조직으로 갈 수 있고,
+  // 옛 조직 응답이 늦게 와 새 목록을 덮을 수도 있다 → 요청마다 번호를 달아 가장 최근 것만 반영하고, 조직이 바뀌면 목록을 비운다(아래 effect).
+  const projectsSeqRef = useRef(0);
   const refreshProjects = async () => {
+    const seq = ++projectsSeqRef.current;
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
     const res = await fetch(endpoint);
-    if (!res.ok) return;
+    if (!res.ok || seq !== projectsSeqRef.current) return;
 
     const json = await res.json();
-    if (!json?.data) return;
+    if (!json?.data || seq !== projectsSeqRef.current) return;
 
     const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
     setProjects(nextProjects);
@@ -376,6 +394,12 @@ export default function SettingsPage() {
       setProjectMembers((json.data ?? []) as ProjectMember[]);
     }
   };
+
+  useEffect(() => {
+    projectsSeqRef.current += 1; // anything still in flight for the previous organization is stale now
+    setProjects([]);
+    setMemberProjectId('');
+  }, [orgId]);
 
   // Fetch org and project context
   useEffect(() => {
@@ -400,22 +424,8 @@ export default function SettingsPage() {
         if (projectRes.ok) {
           const projectJson = await projectRes.json();
           const projectId = projectJson?.data?.project_id ?? null;
-          const orgId = projectJson?.data?.org_id ?? null;
           setCurrentProjectId(projectId);
-          setOrgId(orgId);
-
-          // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
-          if (orgId) {
-            const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
-            if (orgListRes?.ok) {
-              const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
-              const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
-              if (found) {
-                setOrgInfo(found);
-                setEditOrgName(found.name);
-              }
-            }
-          }
+          setProjectOrgId(projectJson?.data?.org_id ?? null);
 
           // Get notification settings
           const settingsRes = await fetchWithAuth('/api/notification-settings');
@@ -449,6 +459,28 @@ export default function SettingsPage() {
     void refreshProjects().catch((err) => { console.error('프로젝트 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
+
+  // 4906 — the organization's details (name · plan · role) load from the ONE organization id, not from the project: an account with no project has them too.
+  useEffect(() => {
+    // codex 1라운드 — orgInfo.id로 조직 삭제 · 이름 저장이 간다: 조직이 바뀌면 옛 조직의 상세를 먼저 비우고(새 응답이 올 때까지 빈 칸 > 옛 조직),
+    // 늦게 도착한 옛 응답(본문 읽기가 늦은 경우 포함)이 새 조직의 상세를 덮지 못하게 «읽은 뒤»에도 취소를 본다.
+    setOrgInfo((current) => (current && current.id !== orgId ? null : current));
+    if (!orgId) return;
+    let cancelled = false;
+    void (async () => {
+      // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
+      const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
+      if (cancelled || !orgListRes?.ok) return;
+      const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+      if (cancelled) return;
+      const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+      if (found) {
+        setOrgInfo(found);
+        setEditOrgName(found.name);
+      }
+    })().catch((err) => { console.error('조직 상세 로드 실패', err); });
+    return () => { cancelled = true; };
+  }, [orgId]);
 
   // S-GATE-4 RC: 현재 프로젝트의 내 role 을 **그 프로젝트의 team-members**에서 도출(/api/me 는 JWT
   // project_id 기준이라 탭≠JWT 면 부정확). team-members 는 project_id 쿼리 기준·user_id 로 매칭 가능·
@@ -666,6 +698,13 @@ export default function SettingsPage() {
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
+    // a WHOLE-PAGE load, not router.push: a client push would supersede the pending router.refresh() above and `/chats?p=<new>` could meet the old (stale) project memberships — and the v3 chat screen reads its
+    // project from /api/me, not from `p`. A fresh load re-reads both; this happens once (the first project of a new organization).
+    if (returnToChats) window.location.assign(withProjectParam(resolveChatsHref(navV3Flags), project.id));
+    else {
+      const back = returnHrefAfterProjectCreate(nextRaw, project.id, window.location.origin);
+      if (back) window.location.assign(back);
+    }
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -730,6 +769,9 @@ export default function SettingsPage() {
     }
   };
 
+  const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
+  const activeLabelKey = navGroups.flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === activeTab)?.labelKey;
+
   // suppress unused variable warning — createdProjectMembership used in future flows
   void createdProjectMembership;
   void projectMemberships;
@@ -743,173 +785,29 @@ export default function SettingsPage() {
           이 값이 0으로 떨어져 TopBar 몫을 안 뺀다 — #4130의 하드코딩 3rem이 여기서
           48px를 과다 차감하던 것도 같이 해소). */}
       <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
-        {/* Left nav: desktop/tablet(≥md)=always visible, mobile(<md)=toggle via lnbOpen */}
-        <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
-          <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
-          <TabsList variant="line" className="w-full flex-col items-stretch">
-            <span className="px-2 pb-1 pt-1 text-[10px] font-medium text-muted-foreground">{t('myAccount')}</span>
-            <TabsTrigger value="profile">
-              <User className="h-4 w-4" />
-              {t('tabProfile')}
-            </TabsTrigger>
-            <TabsTrigger value="appearance">
-              <Palette className="h-4 w-4" />
-              {/* story #4413 — 이 탭은 테마와 언어를 담는다(폰에서 언어를 바꾸는 유일한 자리) → 탭 이름은 «화면» · 사이드바 테마 토글 묶음은 tabAppearance(«테마») 그대로. */}
-              {t('tabDisplay')}
-            </TabsTrigger>
-            <TabsTrigger value="notifications">
-              <Bell className="h-4 w-4" />
-              {t('tabNotifications')}
-            </TabsTrigger>
-            {/* story 4668 (PO Q-b · Yuna A-4): where the onboarding's «데스크톱 앱 받기» screen is reopened — the card and the phone
-                card only, with no DESKTOP_DOWNLOAD_ENABLED gate (the onboarding card has none either; the gated «데스크톱 앱» menu
-                and /desktop page would be a lie to point at where the flag is off) */}
-            <TabsTrigger value="desktop">
-              <Monitor className="h-4 w-4" />
-              {t('desktopTab')}
-            </TabsTrigger>
-            {/* story 4762: the web «원격 기기» list says «if it matches the number in the phone app's settings › This phone» — this is that place (phone app only) */}
-            {inPhoneApp && (
-              <TabsTrigger value="this-phone">
-                <Smartphone className="h-4 w-4" />
-                {t('tabThisPhone')}
-              </TabsTrigger>
-            )}
-            {isSupportWidgetEnabled() && (
-              <TabsTrigger value="support">
-                <LifeBuoy className="h-4 w-4" />
-                {t('tabSupport')}
-              </TabsTrigger>
-            )}
-
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('projectSettings')}</span>
-            {!adminChecked ? <SettingsTabSkeleton /> : null}
-            {adminChecked ? (
-              <TabsTrigger value="members">
-                <Users className="h-4 w-4" />
-                {t('tabMembers')}
-              </TabsTrigger>
-            ) : null}
-            {!adminChecked && !HIDDEN_SETTINGS_TABS.has('workflow') ? <SettingsTabSkeleton /> : null}
-            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
-              <TabsTrigger value="workflow">
-                <GitBranch className="h-4 w-4" />
-                {t('tabWorkflow')}
-              </TabsTrigger>
-            ) : null}
-            {!adminChecked ? <SettingsTabSkeleton /> : null}
-            {adminChecked && isAdmin ? (
-              <TabsTrigger value="workflow-policies">
-                <ShieldCheck className="h-4 w-4" />
-                {t('tabWorkflowPolicies')}
-              </TabsTrigger>
-            ) : null}
-
-            {!adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
-                <SettingsTabSkeleton />
-                <SettingsTabSkeleton />
-                {!HIDDEN_SETTINGS_TABS.has('org-members') ? <SettingsTabSkeleton /> : null}
-              </>
-            ) : null}
-            {adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
-                <TabsTrigger value="organization">
-                  <FolderKanban className="h-4 w-4" />
-                  {t('tabOrganization')}
-                </TabsTrigger>
-                {/* story c4980e70: org-members = /organization/members로 승격(딥링크는 next.config.ts
-                    redirects()가 서버에서 걷어간다) — 트리거·콘텐츠 둘 다 HIDDEN_SETTINGS_TABS에서
-                    차단해야 하는데 트리거만 빠져 있었다(story #3762 발견·회귀 pin). */}
-                {!HIDDEN_SETTINGS_TABS.has('org-members') ? (
-                  <TabsTrigger value="org-members">
-                    <Users className="h-4 w-4" />
-                    {t('tabOrgMembers')}
-                  </TabsTrigger>
-                ) : null}
-                <TabsTrigger value="projects">
-                  <FolderKanban className="h-4 w-4" />
-                  {t('tabProjects')}
-                </TabsTrigger>
-                {/* 7519c3ea: flat webhooks 탭 폐기 — webhook은 멤버/에이전트 관리(members)에 inline 통합. */}
-              </>
-            ) : null}
-
-            {!adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
-                <SettingsTabSkeleton />
-                <SettingsTabSkeleton />
-              </>
-            ) : null}
-            {adminChecked && isAdmin ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
-                {isEEEnabled() && (
-                  <TabsTrigger value="billing">
-                    <CreditCard className="h-4 w-4" />
-                    {t('tabBilling')}
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value="usage">
-                  <BarChart2 className="h-4 w-4" />
-                  {t('tabUsage')}
-                </TabsTrigger>
-              </>
-            ) : null}
-
-            {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('tabIntegrations')}</span>
-            <Link
-              href={flatHref('/settings/integrations')}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
-            >
-              <Webhook className="h-4 w-4" />
-              {t('tabIntegrations')}
-            </Link>
-
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('dangerZone')}</span>
-            <TabsTrigger
-              value="danger"
-              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive-tint"
-            >
-              <Trash2 className="h-4 w-4" />
-              {t('deleteAccount')}
-            </TabsTrigger>
-          </TabsList>
+        {/* story 4891 (UI-8 AC4) — the section list drawn with the ds parts (settings-nav-list.tsx · which sections: settings-nav.ts). ≥lg (1024 — the breakpoint SSOT): always beside the pane. Below it (a phone · a tablet): the list FIRST — the whole screen
+            while `lnbOpen` (no `?tab=` on arrival) — and the pane with a back row after a section is picked (it used to be a hamburger over a 208px column squeezed next to the pane) */}
+        <div className={`focus-inset shrink-0 overflow-y-auto border-ds-line lg:w-56 lg:border-r ${lnbOpen ? 'flex w-full flex-col' : 'hidden'} lg:flex lg:flex-col`} data-testid="settings-nav-column">
+          <h1 className="px-4 pb-2 pt-4 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
+          <SettingsNav groups={navGroups} activeTab={activeTab} integrationsHref={flatHref('/settings/integrations')} />
         </div>
 
         {/* Right content */}
-        <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
-          {/* Mobile toggle button — story #2683(모바일 IA S3): 전역 GNB 유일문(SidebarTrigger)
-              폐기(AC1). 그 문은 top-bar.tsx로 옮겨(태블릿 전용) 두 토글 혼동을 없앴다 — 이
-              헤더에 남는 건 설정 내부 LNB 토글 하나뿐이다. */}
-          <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
-            <button
-              type="button"
-              onClick={() => setLnbOpen((v) => !v)} aria-expanded={lnbOpen}
-              className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label={tNav('toggleSidebar')}
-            >
-              {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-            <span className="text-sm font-medium">{t('title')}</span>
+        <div className={`focus-inset min-w-0 flex-1 overflow-y-auto ${lnbOpen ? 'hidden lg:block' : ''}`} data-testid="settings-pane">
+          {/* a phone, after a section is picked: back to the list (a 44px target) + where you are */}
+          <div className="flex items-center gap-2 border-b border-ds-line px-2 py-1 lg:hidden" data-testid="settings-back-row">
+            <IconButton label={t('backToList')} icon="arrow_back" size="lg" onClick={() => setLnbOpen(true)} />
+            <span className="min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{activeLabelKey ? t(activeLabelKey) : t('title')}</span>
           </div>
-          <div className="w-full max-w-3xl mx-auto p-6">
+          {/* the pane's gutter: a phone's 16 (the 24 left a 342 px column on a 390 screen), ≥lg the 24 it had */}
+          <div className="mx-auto w-full max-w-3xl p-4 lg:p-6">
 
             <TabsContent value="profile">
               <div className="space-y-6">
                 {profileLoadFailed && (
-                  <Alert variant="destructive">
-                    <AlertDescription className="flex items-center justify-between gap-3">
-                      <span>{t('accountInfoLoadError')}</span>
-                      <Button size="sm" variant="outline" onClick={handleProfileTabRetry}>
-                        {tc('retry')}
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
+                  <Banner tone="failed" action={<DsButton onClick={handleProfileTabRetry}>{tc('retry')}</DsButton>}>
+                    {t('accountInfoLoadError')}
+                  </Banner>
                 )}
                 {/* story #3772 — key=retryNonce로 넷을 통째 리마운트해 재-fetch(상세페이지
                     key-remount 정본). 섹션 각자의 onLoadError가 처음 하나만 배너를 올리면
@@ -962,141 +860,22 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="api-keys">
-              <SectionCard>
-                <SectionCardBody>
-                  <p className="text-sm text-muted-foreground">
-                    {t.rich('agentApiKeyMoved', { b: (chunks) => <strong>{chunks}</strong> })}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => router.push(flatHref('/organization/workforce'))}
-                    className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-                  >
-                    {t('agentManagementCta')}
-                  </button>
-                </SectionCardBody>
-              </SectionCard>
+              <ApiKeysMovedCard />
             </TabsContent>
 
             <TabsContent value="notifications">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('notifications')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('notificationDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  {/* story #4694 AC2 ② — the phone's «could not register for notifications» line (phone app only · nothing when fine) */}
-                  <PushRegisterNotice />
-                  {loading ? (
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-                      ))}
-                    </div>
-                  ) : (
-                    <div>
-                      {/* 채널 헤더 */}
-                      <div className="mb-3 flex items-center overflow-x-auto border-b pb-2">
-                        <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('notifications')}</span>
-                        <div className="ml-auto flex shrink-0 gap-6 pl-4 text-center text-xs font-medium text-muted-foreground">
-                          {/* [SID:4375] 행마다 «앱 내» 토글의 이름 = 행 이름(이벤트) + 이 열 머리(aria-labelledby) */}
-                          <span id="notif-col-in-app" className="w-14">{t('notification_channel_in_app')}</span>
-                          <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
-                          <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
-                        </div>
-                      </div>
-
-                      {/* story #2272 — 형제(notification-preferences)와 같은 자리: 기본 알림 레벨 */}
-                      <div className="mb-4 flex items-center justify-between rounded-md border border-border bg-muted/20 px-3 py-2.5">
-                        <span className="text-sm text-foreground">{t('notificationDefaultLevel')}</span>
-                        <div className="flex shrink-0 gap-1">
-                          {(['all', 'mentions', 'mute'] as const).map((level) => (
-                            <button
-                              key={level}
-                              type="button"
-                              disabled={savingPreferenceLevel}
-                              onClick={() => void handleSetGlobalPreferenceLevel(level)}
-                              aria-pressed={globalPreferenceLevel === level}
-                              className={`rounded px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${globalPreferenceLevel === level ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-                            >
-                              {t(`notificationLevel_${level}`)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 카테고리 그룹 */}
-                      <div className="space-y-4">
-                        {NOTIFICATION_CATEGORIES.map((category) => {
-                          const allEnabled = isCategoryAllEnabled(category.key);
-                          return (
-                            <div key={category.key}>
-                              {/* 카테고리 헤더 */}
-                              <div className="mb-1 flex items-center justify-between">
-                                <span className="text-xs font-semibold text-muted-foreground">
-                                  {t(`notification_category_${category.key}`)}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => void toggleCategory(category.key, !allEnabled)}
-                                  className="text-xs text-muted-foreground transition hover:text-foreground"
-                                >
-                                  {allEnabled ? tc('disable_all') : tc('enable_all')}
-                                </button>
-                              </div>
-
-                              {/* 이벤트 행 */}
-                              <div className="space-y-1 rounded-md border border-border bg-muted/20">
-                                {category.types.map((eventType) => {
-                                  const enabled = getEnabled(eventType);
-                                  return (
-                                    <div
-                                      key={eventType}
-                                      className="flex items-center px-3 py-2.5"
-                                    >
-                                      <span id={`notif-event-${eventType}`} className="min-w-0 flex-1 text-sm text-foreground">
-                                        {t(`event_${eventType}`)}
-                                      </span>
-                                      <div className="ml-auto flex shrink-0 items-center gap-6">
-                                        {/* in_app 토글 */}
-                                        <div className="flex w-14 justify-center">
-                                          {/* [SID:4379] 스위치 모양 켜고 끄기 — 화면 읽기가 «스위치 · 켬/끔»으로 읽게(예전엔 «단추»만 · 켜짐 모름). */}
-                                          <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={enabled}
-                                            onClick={() => void toggleSetting(eventType, enabled)}
-                                            aria-labelledby={`notif-event-${eventType} notif-col-in-app`}
-                                            className={`relative h-6 w-11 rounded-full transition ${enabled ? 'bg-primary' : 'bg-muted'}`}
-                                          >
-                                            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-                                          </button>
-                                        </div>
-                                        {isEEEnabled() && (
-                                          <div className="flex w-14 justify-center">
-                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                          </div>
-                                        )}
-                                        {isEEEnabled() && (
-                                          <div className="flex w-14 justify-center">
-                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </SectionCardBody>
-              </SectionCard>
+              <NotificationsPane
+                loading={loading}
+                categories={NOTIFICATION_CATEGORIES}
+                globalLevel={globalPreferenceLevel}
+                savingLevel={savingPreferenceLevel}
+                onSetLevel={(level) => void handleSetGlobalPreferenceLevel(level)}
+                getEnabled={getEnabled}
+                onToggle={(eventType, current) => void toggleSetting(eventType, current)}
+                isCategoryAllEnabled={(key) => isCategoryAllEnabled(key as NotificationCategoryKey)}
+                onToggleCategory={(key, enable) => void toggleCategory(key as NotificationCategoryKey, enable)}
+                showSoonColumns={isEEEnabled()}
+              />
               {currentProjectId ? (
                 <div className="mt-6">
                   <StandupDeadlineSection projectId={currentProjectId} />
@@ -1116,271 +895,90 @@ export default function SettingsPage() {
                 </div>
               ) : null}
               <div className="mt-6">
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('autoRefresh')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('autoRefreshDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody>
-                    <RefreshSettings />
-                  </SectionCardBody>
-                </SectionCard>
+                {/* story 4891: the same frame as every card of this tab (ds Card + SectionHeader) */}
+                <SettingsSection title={t('autoRefresh')} description={t('autoRefreshDescription')}>
+                  <RefreshSettings />
+                </SettingsSection>
               </div>
             </TabsContent>
 
             <TabsContent value="organization">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('orgSectionTitle')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('orgSectionDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-6">
-                  {orgInfo ? (
-                    <>
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          {/* story #3776(1층B) — "이름", settings ns의 기존 profileName 키 재사용. */}
-                          <label className="text-sm font-medium text-foreground">{t('profileName')}</label>
-                          {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                                value={editOrgName}
-                                onChange={(e) => setEditOrgName(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
-                              />
-                              <Button
-                                variant="hero"
-                                size="sm"
-                                disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
-                                onClick={() => void handleSaveOrgName()}
-                              >
-                                {/* story #3776(1층B) — "저장", common ns의 기존 save 키 재사용(유나 정정 — 폼 크롬은 common 소관). */}
-                                {savingOrgName ? tc('saving') : tc('save')}
-                              </Button>
-                            </div>
-                          ) : (
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
-                          )}
-                          {orgNameError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{orgNameError}</p>}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-medium text-foreground">{t('orgSlugLabel')}</label>
-                          <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
-                          <p className="text-xs text-muted-foreground">{t('orgSlugImmutable')}</p>
-                        </div>
-
-                        {orgInfo.plan && (
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">{t('orgPlanLabel')}</label>
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
-                          </div>
-                        )}
-
-                        {currentOrgRole && (
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">{t('orgMyRoleLabel')}</label>
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
-                      ))}
-                    </div>
-                  )}
-                </SectionCardBody>
-              </SectionCard>
-              {/* S-GATE-4: 조직 게이트 정책(기본값) surface. #1571 clean org-PUT(/organizations/{id})로
-                  org-scoped 설정 — 대표 project 경유 워크어라운드·project-0 엣지 제거. canEdit=org admin/owner. */}
-              {orgInfo ? (
-                <div className="mt-6">
+              <div className="space-y-6">
+                <OrganizationSection
+                  orgInfo={orgInfo}
+                  role={currentOrgRole}
+                  name={editOrgName}
+                  onNameChange={setEditOrgName}
+                  onSave={() => void handleSaveOrgName()}
+                  saving={savingOrgName}
+                  nameError={orgNameError}
+                />
+                {/* S-GATE-4: 조직 게이트 정책(기본값) surface. #1571 clean org-PUT(/organizations/{id})로
+                    org-scoped 설정 — 대표 project 경유 워크어라운드·project-0 엣지 제거. canEdit=org admin/owner. */}
+                {orgInfo ? (
                   <GateLevelMatrix
                     surface="org"
                     orgId={orgInfo.id}
                     canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
                   />
-                </div>
-              ) : null}
-              {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
-                  백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
-                  GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
-              {orgInfo ? (
-                <div className="mt-6">
-                  <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} />
-                </div>
-              ) : null}
-              {currentOrgRole === 'owner' && (
-                <SectionCard className="border-destructive/20 bg-destructive-tint mt-6">
-                  <SectionCardHeader className="border-b border-destructive/20">
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                      <p className="text-sm text-foreground">{t('orgDeleteWarning')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody>
-                    <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
-                      {t('orgDeleteTitle')}
-                    </Button>
-                  </SectionCardBody>
-                </SectionCard>
-              )}
+                ) : null}
+                {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
+                    백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
+                    GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
+                {orgInfo ? <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} /> : null}
+                {currentOrgRole === 'owner' && <OrgDangerSection onOpenDelete={() => void handleOpenDeleteOrg()} />}
+              </div>
             </TabsContent>
 
             <TabsContent value="org-members">
               {orgId && orgInfo ? (
                 <OrgMembersSection orgId={orgId} currentRole={currentOrgRole} />
               ) : (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-                </div>
+                <SkeletonGroup label={tc('loading')} className="space-y-3">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}
+                </SkeletonGroup>
               )}
             </TabsContent>
 
             <TabsContent value="projects">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('projectManagement')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('projectManagementDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-4">
-                  <div className="space-y-2">
-                    {projects.length > 0 ? (
-                      projects.map((project) => (
-                        <div key={project.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                          {editingProjectId === project.id ? (
-                            <div className="space-y-2">
-                              <OperatorInput
-                                value={editProjectName}
-                                onChange={(e) => setEditProjectName(e.target.value)}
-                                placeholder={t('projectNamePlaceholder')}
-                              />
-                              <OperatorInput
-                                value={editProjectDescription}
-                                onChange={(e) => setEditProjectDescription(e.target.value)}
-                                placeholder={t('projectDescriptionPlaceholder')}
-                              />
-                              <div className="flex gap-2">
-                                <Button variant="hero" size="sm" onClick={handleUpdateProject} disabled={!editProjectName.trim() || savingProject}>
-                                  {savingProject ? '...' : tc('save')}
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => setEditingProjectId(null)}>
-                                  {tc('cancel')}
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground">{project.name}</div>
-                                {project.description ? (
-                                  <div className="mt-1 text-sm text-muted-foreground">{project.description}</div>
-                                ) : null}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-2">
-                                {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
-                                {isAdmin ? (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setEditingProjectId(project.id);
-                                        setEditProjectName(project.name);
-                                        setEditProjectDescription(project.description ?? '');
-                                      }}
-                                    >
-                                      {tc('edit')}
-                                    </Button>
-                                    {/* story #2104 — BE projects.py:213이 human-only로 삭제를
-                                        403 거부한다(되돌릴 수 없는 조작). 이 버튼은 이미
-                                        isAdmin(org owner/admin)으로 감싸져 있으나, 에이전트도
-                                        구조상 owner/admin 권한을 가질 수 있어 human 여부는
-                                        별도 확認이 필요하다(#2091/#2103과 같은 결함). edit
-                                        버튼은 BE에 human-only 가드가 없어 그대로 둔다. */}
-                                    <HumanOnlyAction>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                                        onClick={() => setDeleteProjectConfirmId(project.id)}
-                                        disabled={deletingProjectId === project.id}
-                                      >
-                                        {deletingProjectId === project.id ? '...' : t('deleteProject')}
-                                      </Button>
-                                    </HumanOnlyAction>
-                                  </>
-                                ) : null}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                        {t('projectListEmpty')}
-                      </div>
-                    )}
-                  </div>
-
-                  {projectActionMessage ? (
-                    // story #2105 2차 — 성공/실패 결과 모두 아직 시각 전용이었다(#2096/#2105 1차와 동일
-                    // 결함클래스). 에러=alert/assertive, 성공=status/polite.
-                    <Alert
-                      variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}
-                      role={projectActionMessage.type === 'success' ? 'status' : 'alert'}
-                      aria-live={projectActionMessage.type === 'success' ? 'polite' : 'assertive'}
-                      aria-atomic="true"
-                    >
-                      <AlertDescription>{projectActionMessage.text}</AlertDescription>
-                    </Alert>
-                  ) : null}
-
-                  {isAdmin ? (
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                      <OperatorInput
-                        value={newProjectName}
-                        onChange={(event) => setNewProjectName(event.target.value)}
-                        placeholder={t('projectNamePlaceholder')}
-                      />
-                      <OperatorInput
-                        value={newProjectDescription}
-                        onChange={(event) => setNewProjectDescription(event.target.value)}
-                        placeholder={t('projectDescriptionPlaceholder')}
-                      />
-                      <Button variant="hero" size="lg" onClick={handleCreateProject} disabled={!newProjectName.trim() || creatingProject}>
-                        {creatingProject ? '...' : t('createProjectAction')}
-                      </Button>
-                    </div>
-                  ) : adminChecked ? (
-                    <Alert variant="warning">
-                      <AlertDescription>{t('projectAdminRequired')}</AlertDescription>
-                    </Alert>
-                  ) : null}
-                </SectionCardBody>
-              </SectionCard>
-
+              <ProjectsSection
+                projects={projects}
+                currentProjectId={currentProjectId}
+                isAdmin={isAdmin}
+                editingId={editingProjectId}
+                editName={editProjectName}
+                editDescription={editProjectDescription}
+                saving={savingProject}
+                onEditStart={(project) => {
+                  setEditingProjectId(project.id);
+                  setEditProjectName(project.name);
+                  setEditProjectDescription(project.description ?? '');
+                }}
+                onEditName={setEditProjectName}
+                onEditDescription={setEditProjectDescription}
+                onEditSave={() => void handleUpdateProject()}
+                onEditCancel={() => setEditingProjectId(null)}
+                deletingId={deletingProjectId}
+                onDeleteAsk={setDeleteProjectConfirmId}
+                message={projectActionMessage}
+                newName={newProjectName}
+                newDescription={newProjectDescription}
+                creating={creatingProject}
+                onNewName={setNewProjectName}
+                onNewDescription={setNewProjectDescription}
+                onCreate={() => void handleCreateProject()}
+              />
             </TabsContent>
 
             <TabsContent value="members">
               {/* 에이전트 관리 IA 통일(story d63d3f73) — Members는 People 전용, 서브탭 제거.
                   에이전트 목록·추가·상세는 `/agents`(관리 탭)로 흡수. */}
               <div className="mb-6 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-foreground">{t('membersTabPeople')}</h2>
+                <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('membersTabPeople')}</h2>
                 {isAdmin ? (
-                  <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
+                  <DsButton variant="primary" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
                     <Plus className="size-3.5" /> {t('addMember')}
-                  </Button>
+                  </DsButton>
                 ) : null}
               </div>
 
@@ -1391,57 +989,19 @@ export default function SettingsPage() {
                       projectId={currentProjectId}
                     />
                     {/* 7519c3ea: 팀원 webhook inline — flat 탭 폐기분을 멤버별 surface(handleSaveWebhookUrl 재사용·status 한눈에). */}
-                    <SectionCard>
-                      <SectionCardHeader>
-                        <div className="space-y-1">
-                          <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
-                          <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
-                        </div>
-                      </SectionCardHeader>
-                      <SectionCardBody className="space-y-2">
-                        {projectMembers.filter((m) => m.type === 'human').map((member) => {
-                          // 휴먼 webhook도 canonical webhook_configs(member_id) 기준 — 에이전트와 통일.
-                          const config = webhooks.find((w) => w.member_id === member.id);
-                          const draft = webhookEditing[member.id] ?? config?.url ?? '';
-                          const webhookStatus: 'active' | 'inactive' | 'empty' = !config?.url
-                            ? 'empty'
-                            : config.is_active ? 'active' : 'inactive';
-                          const err = webhookErrors[member.id];
-                          return (
-                            <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <RowName className="flex-1 text-sm font-medium text-foreground" label={webhookRowLabels.get(member.id)} id={member.id} />
-                                <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
-                                  <Webhook className="size-3" aria-hidden />
-                                  {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
-                                </Badge>
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <OperatorInput
-                                  type="url"
-                                  value={draft}
-                                  onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
-                                  placeholder={t('webhookUrlPlaceholder')}
-                                  className="min-w-0 flex-1 font-mono"
-                                />
-                                <Button
-                                  variant="hero"
-                                  size="sm"
-                                  onClick={() => void handleSaveWebhookUrl(member.id)}
-                                  disabled={webhookSaving === member.id}
-                                >
-                                  {webhookSaving === member.id ? '...' : tc('save')}
-                                </Button>
-                              </div>
-                              {err ? <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{err}</p> : null}
-                            </div>
-                          );
-                        })}
-                      </SectionCardBody>
-                    </SectionCard>
+                    <MemberWebhooksSection
+                      members={projectMembers.filter((m) => m.type === 'human')}
+                      webhooks={webhooks}
+                      editing={webhookEditing}
+                      errors={webhookErrors}
+                      savingId={webhookSaving}
+                      rowLabels={webhookRowLabels}
+                      onEdit={(memberId, value) => setWebhookEditing((prev) => ({ ...prev, [memberId]: value }))}
+                      onSave={(memberId) => void handleSaveWebhookUrl(memberId)}
+                    />
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">{t('noProject')}</p>
+                  <p className="text-ds-body text-ds-ink-3">{t('noProject')}</p>
                 )}
               </div>
             </TabsContent>
@@ -1461,18 +1021,10 @@ export default function SettingsPage() {
 
             {adminChecked && isAdmin ? (
             <TabsContent value="workflow-policies">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('tabWorkflowPolicies')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('workflowPoliciesDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
-                  <WorkflowLineEditorSection projectId={currentProjectId} />
-                </SectionCardBody>
-              </SectionCard>
+              <SettingsSection title={t('tabWorkflowPolicies')} description={t('workflowPoliciesDescription')} id="workflow-policies">
+                {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
+                <WorkflowLineEditorSection projectId={currentProjectId} />
+              </SettingsSection>
             </TabsContent>
             ) : null}
 
@@ -1494,29 +1046,16 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="danger">
-              <SectionCard className="border-destructive/20 bg-destructive-tint">
-                <SectionCardHeader className="border-b border-destructive/20">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                    <p className="text-sm text-foreground">{t('dangerDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  <p className="mb-4 text-sm text-foreground">{t('deleteAccountDesc')}</p>
-                  <Button variant="destructive" size="lg" onClick={() => setShowDeleteConfirm(true)}>
-                    {t('deleteAccount')}
-                  </Button>
-                </SectionCardBody>
-              </SectionCard>
+              <AccountDangerSection onOpenDelete={() => setShowDeleteConfirm(true)} />
             </TabsContent>
 
             {/* 설정 전역 법적 고지 푸터 — 활성 탭 무관 상시 노출 (story #2865) */}
-            <div className="mt-8 border-t border-border pt-6">
-              <h2 className="mb-3 text-sm font-medium text-foreground">{tLegal('policiesHeading')}</h2>
-              <LegalLinks className="justify-start text-sm text-muted-foreground" />
-              <div className="mt-4 border-t border-border pt-4">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
-                <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
+            <div className="mt-8 border-t border-ds-line pt-6" data-testid="settings-legal-footer">
+              <h2 className="mb-3 text-ds-small font-semibold text-ds-ink">{tLegal('policiesHeading')}</h2>
+              <LegalLinks className="justify-start text-ds-body text-ds-ink-3" />
+              <div className="mt-4 border-t border-ds-line pt-4">
+                <p className="mb-1.5 text-ds-small font-semibold text-ds-ink-3">{tLegal('businessInfoHeading')}</p>
+                <BusinessInfoBlock className="justify-start text-ds-small text-ds-ink-3" />
               </div>
             </div>
           </div>
@@ -1524,135 +1063,38 @@ export default function SettingsPage() {
       </Tabs>
 
       {showDeleteOrgConfirm && orgInfo ? (
-        <Dialog
-          open={showDeleteOrgConfirm}
-          onOpenChange={(open) => {
-            if (!open && !deletingOrg) { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }
-          }}
-        >
-          <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">{t('orgDeleteTitle')}</DialogTitle>
-
-            {/* 영향도 */}
-            {orgImpactLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => <div key={i} className="h-6 animate-pulse rounded bg-muted" />)}
-              </div>
-            ) : orgImpact ? (
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
-                <p className="text-muted-foreground">{t('orgDeleteImpactTitle')}</p>
-                <ul className="space-y-0.5 text-foreground">
-                  <li>{t('orgDeleteImpactProjects', { count: orgImpact.project_count })}</li>
-                  <li>{t('orgDeleteImpactMembers', { count: orgImpact.member_count })}</li>
-                  {/* story #2590(TIER1) — 조상(bg-muted/30)이 pale이라 text-warning도 대비 미달
-                      (교차-요소). tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-                  {orgImpact.has_active_subscription && (
-                    <li className="text-foreground">{t('orgDeleteImpactSubscription')}</li>
-                  )}
-                </ul>
-              </div>
-            ) : (
-              // story #2092(P0) — 예전엔 "계속 진행해도 됩니다"로 되돌릴 수 없는 삭제를
-              // 권했다(동작 결함, 문구만으로 안 닫힘). 이제 1차로 진행을 막고(버튼 disabled,
-              // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
-              <Alert variant="warning">
-                <AlertDescription className="space-y-3">
-                  <p>{t('orgDeleteImpactUnavailable')}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void fetchOrgImpact()}
-                    disabled={orgImpactLoading}
-                  >
-                    {/* story #3776(1층B) — "다시 시도", common ns의 기존 retry 키 재사용. */}
-                    {tc('retry')}
-                  </Button>
-                  <label className="flex items-start gap-2 pt-1">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={confirmWithoutImpact}
-                      onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
-                    />
-                    <span className="space-y-0.5">
-                      <span className="block">{t('orgDeleteWithoutImpact')}</span>
-                      <span className="block text-xs">{t('orgDeleteWithoutImpactAudit')}</span>
-                    </span>
-                  </label>
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
-                {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
-              </label>
-              <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                placeholder={orgInfo.name}
-                value={deleteOrgConfirmName}
-                onChange={(e) => setDeleteOrgConfirmName(e.target.value)}
-                autoFocus
-              />
-            </div>
-
-            <div className="flex gap-3 pt-1">
-              <Button
-                variant="glass"
-                className="flex-1"
-                onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
-                disabled={deletingOrg}
-              >
-                {/* story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용. */}
-                {tc('cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={() => void handleDeleteOrg()}
-                disabled={!canSubmitOrgDelete({
-                  orgName: orgInfo.name,
-                  confirmName: deleteOrgConfirmName,
-                  deletingOrg,
-                  orgImpactLoading,
-                  hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
-                  orgImpactFailed,
-                  confirmWithoutImpact,
-                })}
-              >
-                {deletingOrg ? tc('deleting') : t('orgDeleteConfirmCta')}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <OrgDeleteDialog
+          orgName={orgInfo.name}
+          impact={orgImpact}
+          impactLoading={orgImpactLoading}
+          confirmName={deleteOrgConfirmName}
+          onConfirmName={setDeleteOrgConfirmName}
+          confirmWithoutImpact={confirmWithoutImpact}
+          onConfirmWithoutImpact={setConfirmWithoutImpact}
+          deleting={deletingOrg}
+          canSubmit={canSubmitOrgDelete({
+            orgName: orgInfo.name,
+            confirmName: deleteOrgConfirmName,
+            deletingOrg,
+            orgImpactLoading,
+            hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
+            orgImpactFailed,
+            confirmWithoutImpact,
+          })}
+          onRetryImpact={() => void fetchOrgImpact()}
+          onClose={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
+          onConfirm={() => void handleDeleteOrg()}
+        />
       ) : null}
 
       {showDeleteConfirm ? <DeleteAccountDialog onClose={() => setShowDeleteConfirm(false)} onDeleted={() => router.push('/login')} /> : null}
 
       {deleteProjectConfirmId ? (
-        <Dialog
-          open={!!deleteProjectConfirmId}
-          onOpenChange={(open) => { if (!open && deletingProjectId !== deleteProjectConfirmId) setDeleteProjectConfirmId(null); }}
-        >
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</DialogTitle>
-            <p className="mt-2 text-sm text-muted-foreground">{t('projectDeleteConfirmDesc')}</p>
-            <div className="mt-6 flex gap-3">
-              <Button variant="glass" className="flex-1" onClick={() => setDeleteProjectConfirmId(null)}>
-                {tc('cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={() => handleDeleteProject(deleteProjectConfirmId)}
-                disabled={deletingProjectId === deleteProjectConfirmId}
-              >
-                {deletingProjectId === deleteProjectConfirmId ? '...' : t('deleteProject')}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ProjectDeleteDialog
+          deleting={deletingProjectId === deleteProjectConfirmId}
+          onClose={() => setDeleteProjectConfirmId(null)}
+          onConfirm={() => void handleDeleteProject(deleteProjectConfirmId)}
+        />
       ) : null}
       {orgId ? (
         <AddMemberModal

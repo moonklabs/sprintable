@@ -48,7 +48,7 @@ async function render(locale: 'ko' | 'en' = 'ko') {
 }
 const flush = async () => { for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
 const text = () => container.textContent ?? '';
-const sw = () => container.querySelector<HTMLElement>('[data-slot="switch"]');
+const sw = () => container.querySelector<HTMLElement>('[data-slot="ds-toggle"]');
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
 
 describe('DesktopRemoteControlCard (story #4535)', () => {

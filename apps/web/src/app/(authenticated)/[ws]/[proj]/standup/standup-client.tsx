@@ -7,11 +7,12 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DateNav } from '@/components/ds/date-nav';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
+import { OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { shiftDayKey, teamDayKey } from '@/lib/viewer-time-zone';
+import { teamDayKey } from '@/lib/viewer-time-zone';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
@@ -107,11 +108,6 @@ function buildStorySummary(
   };
 }
 
-// story #4443 PR3a — a day key moved by calendar days (no zone: was a runtime-zone Date then Seoul's zone)
-function shiftDate(dateStr: string, days: number): string {
-  return shiftDayKey(dateStr, days);
-}
-
 interface StandupClientProps {
   projectId: string;
   /** story #3845(§① 2026-09-14) — 「스프린트」 탭 안 「하루 체크인」 절로 마운트될 때 true.
@@ -173,6 +169,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   const [saveError, setSaveError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [storiesNextCursor, setStoriesNextCursor] = useState<string | null>(null);
+  // story #4888(PO 11-11 결정 ②) — 활성 스프린트의 번다운(stories_count)이 말하는 스토리 총수. 처음 40개만 읽어도 다음 쪽이 남은 때 스토리 수를 정확하게 보이려고 한 번 읽는다(못 읽으면 null → «N+»).
+  const [sprintStoryTotal, setSprintStoryTotal] = useState<number | null>(null);
   const [loadingMoreStories, setLoadingMoreStories] = useState(false);
   const [sprintExpanded, setSprintExpanded] = useState(false);
   const [editingSelf, setEditingSelf] = useState(false);
@@ -281,6 +279,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setLoading(true);
         setLoadError(null);
         setSaveError(null);
+        // story #4888(PO 결정 ②) — 다시 읽는 동안(날짜 이동 · 새로고침 · 프로젝트 이동) 이전 번다운 총수를 정확한 수로 남기지 않는다: 새 총수가 오기 전까지는 «N+» 하한이 정직하다.
+        setSprintStoryTotal(null);
       }
 
       try {
@@ -313,6 +313,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
+        let storyTotalRead: number | null = null;
 
         if (projectId) {
           // story #3519(§16-7 2부, PO 確定 2026-09-05) — missingRes는 주석("실패해도 본
@@ -337,8 +338,15 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
           if (sprint) {
-          const storiesRes = await fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
+          // story #4888(PO 11-11 결정 ②) — 번다운(집계 수 + 선 두 줄, 가벼운 응답)은 스토리와 **같이** 한 번 읽는다. 부수라 leg를 격리한다: 실패 · 모양 이상이면 null → 아래 «N+» 하한으로 내려가고 화면은 막히지 않는다.
+          const [storiesRes, burndownRes] = await Promise.all([
+            fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`),
+            fetchWithAuth(`/api/sprints/${sprint.id}/burndown`).catch(() => null),
+          ]);
           if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
+          const burndownJson = burndownRes?.ok ? await burndownRes.json().catch(() => null) as { data?: { stories_count?: unknown } } | null : null;
+          const burndownTotal = burndownJson?.data?.stories_count;
+          storyTotalRead = typeof burndownTotal === 'number' && Number.isInteger(burndownTotal) && burndownTotal >= 0 ? burndownTotal : null;
           const storiesJson = await storiesRes.json().catch(() => null);
           if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
           const storyRows = storiesJson.data as StandupStoryRow[];
@@ -379,6 +387,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
+        setSprintStoryTotal(storyTotalRead);
         setLoadError(null);
         setSaveError(null);
       } catch {
@@ -403,10 +412,18 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     ];
   }, [humanMembers, currentTeamMemberId]);
 
+  // story #4888(UI-5 스프린트 화면, PO 11-11) — 이 요약의 수는 «지금까지 불러온 스토리»(처음 40개 + 더 보기로 이어 붙인 쪽)만 센 부분 수다. 다음 쪽이 더 있는데(storiesNextCursor) 그 수를 정확한 총수처럼
+  // 보이면 «틀린 값을 정확한 것처럼»이라, 더 있을 때는 «N+»로 정직하게 보인다(스토리 수 · 태스크 완료/전체 둘 다 «이상»). 끝까지 불러오면(커서 없음) 예전처럼 정확한 수.
+  const storiesPartial = storiesNextCursor !== null;
+  // 다음 쪽이 남았어도 번다운이 총수를 알려 줬으면 그 정확한 수(PO 결정 ②). 다 불러왔으면 목록 길이(= 화면에 보이는 수). 번다운을 못 읽었으면 «N+».
+  const storyCountLabel = storiesPartial
+    ? (sprintStoryTotal !== null ? t('sprintStoryCount', { count: sprintStoryTotal }) : t('sprintStoryCountPartial', { count: stories.length }))
+    : t('sprintStoryCount', { count: stories.length });
+  const taskProgressLabel = storiesPartial ? t('taskProgressPartial', { done: doneTasks, total: totalTasks }) : t('taskProgress', { done: doneTasks, total: totalTasks });
   const summaryBadges = [
     activeSprint ? { label: activeSprint.title, variant: 'chip' as const } : { label: t('noActiveSprint'), variant: 'outline' as const },
-    { label: t('sprintStoryCount', { count: stories.length }), variant: 'outline' as const },
-    { label: t('taskProgress', { done: doneTasks, total: totalTasks }), variant: 'outline' as const },
+    { label: storyCountLabel, variant: 'outline' as const },
+    { label: taskProgressLabel, variant: 'outline' as const },
   ];
   const headerBadges = loadError
     ? []
@@ -494,26 +511,16 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   // full-width row below the header so the wide date input never crushes the fixed-height
   // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
   const dateNavControls = (
-    <>
-      {/* story #4443 PR3a (Kadir 4871 ④) — the day is not known yet (no zone): nothing to move from — locked, not «NaN-NaN-NaN».
-          The arrows' names are aria-label (was title: a hover-only name a locked button would not give touch · keyboard · readers) */}
-      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, -1))} aria-label={t('previousDay')} data-testid="standup-prev-day">
-        ←
-      </Button>
-      <OperatorInput
-        type="date"
-        value={date}
-        disabled={!date}
-        onChange={(event) => setDate(event.target.value)}
-        className="w-auto shrink-0"
-      />
-      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, 1))} aria-label={t('nextDay')} data-testid="standup-next-day">
-        →
-      </Button>
-      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(null)}>
-        {t('today')}
-      </Button>
-    </>
+    // story #4888(UI-5 스프린트 화면, 유나 ds DateNav 5566) — 손으로 만든 «← 날짜 → 오늘» 줄을 ds DateNav로 갈아 끼운다: 화살표는 이름 있는 IconButton(폰 44) · 날짜 칸은 이름(«날짜») 있는
+    // ds Input · 하루를 아직 모르면(시간대 모름: story #4443 PR3a) 칸 · 화살표를 잠근다(«NaN-NaN-NaN»을 만들지 않는다) · «오늘»은 고른 날을 지워 팀의 오늘로 돌아간다(null).
+    // 예전 줄은 날짜 칸에 이름이 없었고 화살표가 글자 ←/→ 단추였다.
+    <DateNav
+      value={date || null}
+      onChange={(next) => setDate(next)}
+      onToday={() => setDate(null)}
+      labels={{ date: t('dateLabel'), previousDay: t('previousDay'), nextDay: t('nextDay'), today: t('today') }}
+      className="shrink-0"
+    />
   );
 
   return (
@@ -528,7 +535,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
         // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
-        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-background px-6 py-3">
+        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
             <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
@@ -548,7 +555,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           />
 
           {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-background px-4 py-2 lg:hidden">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden">
             {dateNavControls}
           </div>
         </>
@@ -590,13 +597,13 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   <div className="space-y-0.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('currentSprint')}</h2>
                     {activeSprint ? (
-                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
+                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {storyCountLabel}</p>
                     ) : (
                       <p className="text-xs text-muted-foreground">{t('noActiveSprint')}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline">{t('taskProgress', { done: doneTasks, total: totalTasks })}</Badge>
+                    <Badge variant="outline">{taskProgressLabel}</Badge>
                     <span className="text-xs text-muted-foreground">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
                   </div>
                 </button>

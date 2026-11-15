@@ -33,6 +33,7 @@ vi.mock('next/navigation', () => ({
 
 import ContentPostListPage from './page';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,15 +51,20 @@ function TestToastRenderer() {
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <ToastProvider>
-        {node}
-        <TestToastRenderer />
-      </ToastProvider>
+      <TopBarProvider>
+        <ToastProvider>
+          {node}
+          <TestToastRenderer />
+        </ToastProvider>
+      </TopBarProvider>
     </NextIntlClientProvider>
   );
 }
 
 const ORG_ID = 'org-1';
+
+/** 열린 ⋯ 메뉴의 «보관 / 보관 해제» 항목(4913: 옛 data-testid="content-archive-action" 자리). */
+const archiveMenuItem = () => document.querySelector('[role="menuitem"]') as HTMLElement | null;
 
 beforeEach(() => {
   useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [], projectMemberships: [] });
@@ -83,11 +89,10 @@ async function flush() {
   });
 }
 
-// story #3744 — 행 액션이 이제 ⋯ DropdownMenu 안에 있다(base-ui가 content를
-// document.body에 portal — container 스코프 밖). n번째(0-based) 행의 트리거를 눌러
-// 메뉴를 연다. dropdown-menu.test.tsx의 document.querySelector 관례와 동형.
+// story #3744 — 행 액션이 ⋯ 메뉴 안에 있다(base-ui가 content를 document.body에 portal — container 스코프 밖). n번째(0-based) 행의 트리거를 눌러 메뉴를 연다.
+// 4913 — 트리거는 ds RowListItem의 «⋯»(data-slot="ds-row-actions-trigger") · 메뉴 항목은 role=menuitem(행 하나의 항목은 보관 / 보관 해제 하나뿐).
 async function openRowMenu(n = 0) {
-  const triggers = container.querySelectorAll('[data-testid="content-row-actions-trigger"]');
+  const triggers = container.querySelectorAll('[data-slot="ds-row-actions-trigger"]');
   await act(async () => {
     (triggers[n] as HTMLElement).click();
   });
@@ -365,10 +370,9 @@ describe('ContentPostListPage (story #3368)', () => {
     await flush();
 
     expect(container.querySelector('[data-status-chip]')).toBeNull();
-    // origin_author_kind 열도 같은 문구("—")를 쓰므로(별개 fail-closed 축, 위 테스트
-    // 참조) row 전체가 아니라 상태 칸(두 번째 td)으로 정확히 scope한다 — 아니면 그
-    // 열의 기존 "—"에 편승한 공허통과가 된다.
-    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    // origin_author_kind 자리도 같은 문구("—")를 쓰므로(별개 fail-closed 축, 위 테스트 참조) 행 전체가 아니라 오른쪽 칸(상태 칩 자리 = ds ListRow의 마지막 칸)으로
+    // 정확히 scope한다 — 아니면 그 자리의 기존 "—"에 편승한 공허통과가 된다. (이 행엔 다음 발 단추도 ⋯도 없어 그 칸은 상태 자리 하나뿐.)
+    const statusCell = container.querySelector('[data-testid="content-list-row"] [data-slot="ds-list-row"]')?.lastElementChild;
     expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
   });
 
@@ -386,7 +390,7 @@ describe('ContentPostListPage (story #3368)', () => {
     await flush();
 
     expect(container.querySelector('[data-status-chip]')).toBeNull();
-    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    const statusCell = container.querySelector('[data-testid="content-list-row"] [data-slot="ds-list-row"]')?.lastElementChild;
     expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
   });
 
@@ -399,7 +403,7 @@ describe('ContentPostListPage (story #3368)', () => {
     await flush();
 
     expect(container.querySelector('[data-status-chip]')).toBeNull();
-    const statusCell = container.querySelectorAll('[data-testid="content-list-row"] td')[1];
+    const statusCell = container.querySelector('[data-testid="content-list-row"] [data-slot="ds-list-row"]')?.lastElementChild;
     expect(statusCell?.textContent).toBe(koMessages.content.originAuthorUnknown);
   });
 
@@ -465,8 +469,8 @@ describe('ContentPostListPage (story #3368)', () => {
 
     const originCell = container.querySelector('[data-testid="content-origin-author"]');
     const latestCell = container.querySelector('[data-testid="content-latest-author"]');
-    expect(originCell?.querySelector('.proof-surface')).not.toBeNull();
-    expect(latestCell?.querySelector('.proof-surface')).not.toBeNull();
+    expect(originCell?.querySelector('[data-slot="ds-tag"]')).not.toBeNull();
+    expect(latestCell?.querySelector('[data-slot="ds-tag"]')).not.toBeNull();
   });
 
   // story #3368 자기점검(페드루 지적 2026-09-10) — #3744가 열을 줄이며 「현재 버전」 v{n}을
@@ -485,15 +489,19 @@ describe('ContentPostListPage (story #3368)', () => {
 
   // story #3734 — 「보관」 행 액션·「보관됨 보기」 토글.
   describe('보관(story #3734)', () => {
-    it('⭐can_archive=false — 「보관」 항목이 ⋯ 메뉴에 안 보인다(fail-closed, can_withdraw와 동형 정책)', async () => {
+    it('⭐can_archive=false — 「보관」 항목이 없다: 비어 있는 ⋯ 단추도 안 그린다(fail-closed, can_withdraw와 동형 정책 · 4913: 옛 화면은 빈 ⋯를 그렸다)', async () => {
       stubFetch([{ ...DRAFT_A, can_archive: false }]);
       await act(async () => {
         root.render(wrap(<ContentPostListPage />));
       });
       await flush();
-      await openRowMenu();
 
-      expect(document.querySelector('[data-testid="content-archive-action"]')).toBeNull();
+      expect(container.querySelector('[data-slot="ds-row-actions-trigger"]')).toBeNull();
+      // 우클릭도 같은 항목(없음) — 메뉴가 열리지 않는다.
+      const row = container.querySelector('[data-slot="ds-list-row"]') as HTMLElement;
+      await act(async () => { row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); });
+      await flush();
+      expect(archiveMenuItem()).toBeNull();
     });
 
     it('⭐can_archive=true — ⋯ 메뉴의 「보관」 클릭 시 POST .../archive를 호출하고, 기본 목록(보관됨 숨김)에서 그 행이 즉시 사라진다', async () => {
@@ -505,7 +513,7 @@ describe('ContentPostListPage (story #3368)', () => {
       await openRowMenu();
 
       expect(document.body.textContent).toContain(koMessages.content.archiveAction);
-      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const button = archiveMenuItem() as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -539,7 +547,7 @@ describe('ContentPostListPage (story #3368)', () => {
         koMessages.content.contentStatusArchived,
       );
       await openRowMenu();
-      const restoreButton = document.querySelector('[data-testid="content-archive-action"]');
+      const restoreButton = archiveMenuItem();
       expect(restoreButton?.textContent).toBe(koMessages.content.unarchiveAction);
     });
 
@@ -556,7 +564,7 @@ describe('ContentPostListPage (story #3368)', () => {
       await flush();
       await openRowMenu();
 
-      const restoreButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const restoreButton = archiveMenuItem() as HTMLElement;
       await act(async () => {
         restoreButton.click();
       });
@@ -567,7 +575,7 @@ describe('ContentPostListPage (story #3368)', () => {
       expect(container.querySelector('[data-testid="content-list-row"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="content-archived-badge"]')).toBeNull();
       await openRowMenu();
-      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      expect(archiveMenuItem()?.textContent).toBe(
         koMessages.content.archiveAction,
       );
     });
@@ -585,11 +593,11 @@ describe('ContentPostListPage (story #3368)', () => {
       await flush();
       await openRowMenu();
       // 토글 전환 직후엔 미보관 행이라 「보관」 항목.
-      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      expect(archiveMenuItem()?.textContent).toBe(
         koMessages.content.archiveAction,
       );
 
-      const archiveButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const archiveButton = archiveMenuItem() as HTMLElement;
       await act(async () => {
         archiveButton.click();
       });
@@ -602,7 +610,7 @@ describe('ContentPostListPage (story #3368)', () => {
         koMessages.content.contentStatusArchived,
       );
       await openRowMenu();
-      expect(document.querySelector('[data-testid="content-archive-action"]')?.textContent).toBe(
+      expect(archiveMenuItem()?.textContent).toBe(
         koMessages.content.unarchiveAction,
       );
     });
@@ -616,7 +624,7 @@ describe('ContentPostListPage (story #3368)', () => {
       const callsAfterInitialLoad = calls.length;
       await openRowMenu();
 
-      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const button = archiveMenuItem() as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -633,8 +641,7 @@ describe('ContentPostListPage (story #3368)', () => {
     // 품는 것으로 처방 — 여기서 그 값이 실제로 항목별로 갈리는지 직접 확認한다(가드
     // 자신은 "aria-label 있다/없다"만 보고 값의 «품음 여부»는 안 잰다는 것이 스크립트
     // 자체 ⚠️ 선언 — 이 assertion이 그 사각을 메운다).
-    // story #3744 — aria-label은 이제 ⋯ 트리거(data-testid="content-row-actions-trigger")에
-    // 있다(archive-action 자체는 메뉴 항목 텍스트, 접근 이름은 트리거가 갖는다).
+    // story #3744 — aria-label은 ⋯ 트리거에 있다(archive 항목 자체는 메뉴 항목 텍스트, 접근 이름은 트리거가 갖는다). 4913: 트리거 = RowListItem의 «⋯»(actionsLabel).
     it('⭐⋯ 메뉴 트리거의 aria-label이 행 순번을 품어 두 행이 서로 다른 값을 갖는다(§22-18 처방 검증)', async () => {
       stubFetch([
         { ...DRAFT_A, draft_id: 'd1', can_archive: true },
@@ -645,10 +652,8 @@ describe('ContentPostListPage (story #3368)', () => {
       });
       await flush();
 
-      // story #4014 — ResponsiveDataTable은 표(≥1024)·카드(<1024) DOM을 항상 둘 다
-      // 그리고(CSS class로만 토글, AC5/6) jsdom은 CSS를 계산 안 하므로 testid가 2배로
-      // 잡힌다 — 표 쪽(<table> 안)만 스코프해 기존 단언(행당 1개)을 그대로 유지한다.
-      const triggers = container.querySelectorAll('table [data-testid="content-row-actions-trigger"]');
+      // 4913 — 표 + 카드 이중 DOM(story #4014)이 사라져 행당 «⋯» 하나다.
+      const triggers = container.querySelectorAll('[data-slot="ds-row-actions-trigger"]');
       expect(triggers).toHaveLength(2);
       const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();
@@ -667,7 +672,7 @@ describe('ContentPostListPage (story #3368)', () => {
       await flush();
       await openRowMenu();
 
-      const button = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const button = archiveMenuItem() as HTMLElement;
       await act(async () => {
         button.click();
       });
@@ -707,7 +712,7 @@ describe('ContentPostListPage (story #3368)', () => {
       await flush();
       await openRowMenu();
 
-      const restoreButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const restoreButton = archiveMenuItem() as HTMLElement;
       await act(async () => {
         restoreButton.click();
       });
@@ -731,7 +736,7 @@ describe('ContentPostListPage (story #3368)', () => {
       await flush();
       await openRowMenu();
 
-      const archiveButton = document.querySelector('[data-testid="content-archive-action"]') as HTMLElement;
+      const archiveButton = archiveMenuItem() as HTMLElement;
       await act(async () => {
         archiveButton.click();
       });
@@ -820,7 +825,7 @@ describe('ContentPostListPage (story #3368)', () => {
       );
       expect(menuItem).toBeUndefined();
       // 보관은 여전히 메뉴 안에 남아 있어야 한다(사라지면 다른 결함).
-      expect(document.querySelector('[data-testid="content-archive-action"]')).not.toBeNull();
+      expect(archiveMenuItem()).not.toBeNull();
     });
 
     // §22-18 "유나의 자" — verify-no-new-repeated-row-action-names.ts가 aria-label
@@ -834,8 +839,8 @@ describe('ContentPostListPage (story #3368)', () => {
       await act(async () => { root.render(wrap(<ContentPostListPage />)); });
       await flush();
 
-      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
-      const buttons = [...container.querySelectorAll('table button')].filter(
+      // 4913 — 표 + 카드 이중 DOM이 사라져 행당 단추 하나다.
+      const buttons = [...container.querySelectorAll('button')].filter(
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(buttons).toHaveLength(2);

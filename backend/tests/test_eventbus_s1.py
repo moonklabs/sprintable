@@ -12,6 +12,17 @@ from httpx import ASGITransport, AsyncClient
 from app.models.event import Event
 
 
+
+@pytest.fixture(autouse=True)
+def _caller_and_seat_for_the_create_route():
+    """story #4895: POST /events looks the caller up (the sender is always the caller) and checks the caller's seat in the project; these mock-database tests are about the rest of the route"""
+    from types import SimpleNamespace
+
+    caller = SimpleNamespace(id=uuid.uuid4(), name="caller", type="agent")
+    with patch("app.routers.events.resolve_auth_member", new=AsyncMock(return_value=caller)), \
+            patch("app.services.project_auth.require_project_access", new=AsyncMock(return_value=None)):
+        yield
+
 def _resolved(member_id: uuid.UUID):
     """S19(events sender_id 검증): resolve_member() 반환 mock — caller가 sender_id 본인임을 가장."""
     from app.services.member_resolver import ResolvedMember
@@ -122,11 +133,7 @@ async def test_create_event_stores_in_db(client, mock_session):
 
     payload = {
         "project_id": str(uuid.uuid4()),
-        "org_id": str(uuid.uuid4()),
-        "event_type": "memo_created",
-        "source_entity_type": "memo",
-        "source_entity_id": str(uuid.uuid4()),
-        "sender_id": str(sender_id),
+        "event_type": "dispatched",
         "recipient_id": str(recipient_id),
         "recipient_type": "agent",
         "payload": {"title": "킥오프"},
@@ -137,14 +144,14 @@ async def test_create_event_stores_in_db(client, mock_session):
     assert resp.status_code == 201
     data = resp.json()
     assert data["status"] == "pending"
-    assert data["event_type"] == "memo_created"
+    assert data["event_type"] == "dispatched"
     mock_session.add.assert_called_once()
     mock_session.commit.assert_called_once()
 
 
 @pytest.mark.anyio
-async def test_create_event_403_when_sender_id_does_not_match_caller():
-    """S19(SHOULD): sender_id가 caller 본인과 다르면 403(임퍼스네이션 차단)."""
+async def test_create_event_422_when_the_body_names_a_sender_id():
+    """S19 → story #4895: sender_id was allowed when it equalled the caller; the body is now a closed list and the sender is always the caller's own, so naming one at all is a 422."""
     from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app
@@ -157,22 +164,23 @@ async def test_create_event_403_when_sender_id_does_not_match_caller():
     async def _db():
         yield session
 
-    app.dependency_overrides[get_db] = _db
+    from tests.conftest import override_db_and_read
+
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = lambda: ctx
     app.dependency_overrides[get_verified_org_id] = lambda: uuid.uuid4()
     try:
         payload = {
             "project_id": str(uuid.uuid4()),
-            "event_type": "memo_created",
-            "sender_id": str(uuid.uuid4()),  # resolve_member가 반환하는 caller와 다른 임의 sender
+            "event_type": "dispatched",
+            "sender_id": str(uuid.uuid4()),
             "recipient_id": str(uuid.uuid4()),
             "recipient_type": "agent",
         }
-        with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
-                   side_effect=HTTPException(status_code=403, detail="sender_id must match the caller's own identity")):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                resp = await c.post("/api/v2/events", json=payload)
-        assert resp.status_code == 403
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/api/v2/events", json=payload)
+        assert resp.status_code == 422
+        assert "sender_id" in resp.text
     finally:
         app.dependency_overrides.clear()
 
@@ -187,8 +195,7 @@ async def test_create_event_recipient_not_found_returns_404(client, mock_session
 
     payload = {
         "project_id": str(uuid.uuid4()),
-        "org_id": str(uuid.uuid4()),
-        "event_type": "memo_created",
+        "event_type": "dispatched",
         "recipient_id": str(uuid.uuid4()),
         "recipient_type": "agent",
     }
@@ -326,8 +333,7 @@ async def test_recipient_type_resolved_from_db(client, mock_session):
 
     payload = {
         "project_id": str(uuid.uuid4()),
-        "org_id": str(uuid.uuid4()),
-        "event_type": "memo_created",
+        "event_type": "dispatched",
         "recipient_id": str(recipient_id),
         "recipient_type": "agent",  # 요청값과 무관하게 DB 값 사용
     }
@@ -408,12 +414,13 @@ async def test_create_event_uses_verified_org(client, mock_session, org_id):
     forged_org = uuid.uuid4()  # 요청자가 임의로 보낸 org_id
     payload = {
         "project_id": str(uuid.uuid4()),
-        "org_id": str(forged_org),
-        "event_type": "memo_created",
+        "event_type": "dispatched",
         "recipient_id": str(uuid.uuid4()),
         "recipient_type": "agent",
     }
+    resp = await client.post("/api/v2/events", json={**payload, "org_id": str(forged_org)})
+    assert resp.status_code == 422, "story #4895: an org_id in the body is not a field of it (refused, not ignored)"
     resp = await client.post("/api/v2/events", json=payload)
     assert resp.status_code == 201
-    # body의 forged_org가 아닌 verified org_id가 사용됐는지
+    # the verified org_id is what the Event carries
     assert captured.get("org_id") == org_id

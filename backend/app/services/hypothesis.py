@@ -140,7 +140,7 @@ async def _assert_targets_same_project(
         )).all()
         if len(rows) != len(set(epic_ids)) or any(pid != project_id for _id, pid in rows):
             raise HypothesisServiceError(
-                "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 에픽에는 연결할 수 없습니다."
+                "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 목표에는 연결할 수 없습니다."
             )
     if story_ids:
         rows = (await session.execute(

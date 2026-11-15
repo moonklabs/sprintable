@@ -13,6 +13,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+// 4913 D1 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트로 감싼다.
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 
 const { useDashboardContextMock, useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -38,7 +40,7 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <TopBarProvider>{node}</TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -130,22 +132,42 @@ describe('InsightsBoardPage v3(story #3979) — 요약 4칸', () => {
   });
 });
 
-describe('InsightsBoardPage v3(story #3979) — 필터 접힘(자리 옮김 ④)', () => {
-  it('⭐기본 접힘(hidden 클래스) — 그래도 기존 필터 엘리먼트는 DOM에 그대로 있다', async () => {
+// 4913 D1 — 거르기 줄은 ds FilterBar: 넓은 화면은 늘 펼쳐 있고(`sm:flex`), 폰에서는 «필터» 단추 하나로 접힌다(`hidden sm:flex` → 펼치면 `flex`). 필터 일곱은 DOM에서 빠지지 않는다(접힘은 CSS뿐).
+describe('InsightsBoardPage v3(story #3979 · 4913 D1) — 거르기 줄(FilterBar)', () => {
+  const body = () => container.querySelector('[data-testid="insights-board-filters-panel"] [data-slot="ds-filter-bar-body"]') as HTMLElement;
+  const collapseButton = () => container.querySelector('[data-testid="insights-board-filters-panel"] button[aria-expanded]') as HTMLElement;
+
+  it('⭐폰에서는 기본 접힘(hidden sm:flex) — 그래도 필터 엘리먼트는 DOM에 그대로 있다(넓은 화면은 sm:flex로 늘 보인다)', async () => {
     stubFetch();
     await mount();
-    const panel = container.querySelector('[data-testid="insights-board-filters-panel"]');
-    expect(panel?.className).toContain('hidden');
+    expect(body().className).toContain('hidden');
+    expect(body().className).toContain('sm:flex');
+    expect(collapseButton().getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('[data-testid="insights-board-channel-filter"]')).not.toBeNull();
+    for (const id of ['status-trigger', 'metric-trigger', 'sort-trigger', 'sort-dir-toggle', 'group-by-trigger', 'show-archived-toggle']) {
+      expect(container.querySelector(`[data-testid="insights-board-${id}"]`), id).not.toBeNull();
+    }
   });
 
-  it('토글 클릭하면 hidden이 빠진다', async () => {
+  it('«필터» 단추를 누르면 펼쳐진다(폰) — hidden이 빠지고 aria-expanded가 true', async () => {
     stubFetch();
     await mount();
-    const toggle = container.querySelector('[data-testid="insights-board-filters-toggle"]') as HTMLElement;
-    await act(async () => { toggle.click(); });
-    const panel = container.querySelector('[data-testid="insights-board-filters-panel"]');
-    expect(panel?.className).not.toContain('hidden');
+    await act(async () => { collapseButton().click(); });
+    expect(body().className).not.toContain('hidden');
+    expect(collapseButton().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('⭐걸린 필터 개수가 단추에 «· n»으로 남는다(접힌 채로도 «걸러졌는데 흔적 0»이 아니다) — 기본값이면 개수 없음', async () => {
+    stubFetch();
+    await mount();
+    expect(collapseButton().textContent).toBe(koMessages.insightsBoard.filtersToggleLabel);
+  });
+
+  it('⭐필터가 걸린 URL로 들어오면 단추에 개수가 붙는다(«필터 · 2») — 채널 + 상태', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('channel=threads&status=failed'));
+    stubFetch();
+    await mount();
+    expect(collapseButton().textContent).toBe(`${koMessages.insightsBoard.filtersToggleLabel} · 2`);
   });
 });
 

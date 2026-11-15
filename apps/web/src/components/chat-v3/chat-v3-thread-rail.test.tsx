@@ -99,3 +99,20 @@ describe('ChatV3ThreadRail — 미리보기 평문화(story #4182)', () => {
     expect(row.textContent).toContain('공지 확인해요');
   });
 });
+
+describe('ChatV3ThreadRail — an event message preview in words (story 4921)', () => {
+  it('⭐the last message is machine text of an event: the line says «이벤트 · {the person\'s words}», never the slug or «- key: value»', async () => {
+    const thread: ChatV3Thread = {
+      ...AGENT_THREAD,
+      latest_message: { content: '[이벤트] org.acme.signup\n- message: 새 가입\n- user_id: 97470487-345a-4e85-9c45-cdf901737adb', created_at: '2026-11-13T06:41:00Z', event: { event_key: 'org.acme.signup', payload: { message: '새 가입' } } },
+    };
+    await act(async () => { root.render(wrap(<ChatV3ThreadRail threads={[thread]} meId="me-1" selectedId={null} onSelect={() => {}} />)); });
+    const desc = accessibleDescription(container.querySelector('[data-testid="chat-v3-thread-row"]')!);
+    expect(desc).toContain('이벤트 · 새 가입');
+    expect(desc).not.toMatch(/\[이벤트\]|org\.acme|user_id|97470487/);
+  });
+  it('a plain last message is shown as before', async () => {
+    await act(async () => { root.render(wrap(<ChatV3ThreadRail threads={[AGENT_THREAD]} meId="me-1" selectedId={null} onSelect={() => {}} />)); });
+    expect(accessibleDescription(container.querySelector('[data-testid="chat-v3-thread-row"]')!)).toContain('초안을 마쳤어요.');
+  });
+});

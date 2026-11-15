@@ -11,6 +11,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+
+@pytest.fixture(autouse=True)
+def _caller_and_seat_for_the_create_route():
+    """story #4895: POST /events looks the caller up (the sender is always the caller) and checks the caller's seat in the project; these mock-database tests are about the rest of the route"""
+    from types import SimpleNamespace
+
+    caller = SimpleNamespace(id=uuid.uuid4(), name="caller", type="agent")
+    with patch("app.routers.events.resolve_auth_member", new=AsyncMock(return_value=caller)), \
+            patch("app.services.project_auth.require_project_access", new=AsyncMock(return_value=None)):
+        yield
+
 @pytest.fixture(autouse=True)
 def _no_sender_org_lookup(monkeypatch):
     """story 4649: the stream's backfill looks its senders' orgs up in one query of its own. These tests script the
@@ -392,7 +403,7 @@ async def test_create_event_stays_pending_when_agent_not_connected(client, mock_
     # _agent_connections에 없음 → pending 유지
     payload = {
         "project_id": str(uuid.uuid4()),
-        "event_type": "memo_created",
+        "event_type": "dispatched",
         "recipient_id": str(recipient_id),
         "recipient_type": "agent",
     }
@@ -443,7 +454,7 @@ async def test_create_event_delivered_when_agent_connected(client, mock_session)
         with patch("app.routers.events._route_dispatch_bg", new=_mock_dispatch_bg):
             payload = {
                 "project_id": str(uuid.uuid4()),
-                "event_type": "memo_created",
+                "event_type": "dispatched",
                 "recipient_id": member_id_str,
                 "recipient_type": "agent",
             }

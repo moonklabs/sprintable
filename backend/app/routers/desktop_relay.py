@@ -25,7 +25,7 @@ from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
-from app.services import desktop_clock
+from app.services import desktop_changes, desktop_clock
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -127,26 +127,33 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 if now >= deadline:
                     yield "event: lifespan_reconnect\ndata: {}\n\n"
                     return
+                # story 4922 — a terminal frame is sent AFTER this block: yielded from inside it, the session (a connection + an open read transaction) stays checked out while
+                # the generator is parked at the yield. StreamingResponse never closes a generator whose send was interrupted by the client leaving — and these two frames are
+                # the moments a daemon goes away (a revoked device drops its line) — so the place would be held until the garbage collector finds it (pool 3 + 1; see events.py)
+                terminal: str | None = None
                 async with async_session_factory() as s:
                     if now - last_check >= _RECHECK_SEC:
                         last_check = now
                         if not await relay.device_still_valid(s, setup_id):
-                            yield f"event: access_revoked\ndata: {json.dumps({'reason': 'device_disconnected'})}\n\n"
-                            return
-                        from app.services import remote_control
+                            terminal = f"event: access_revoked\ndata: {json.dumps({'reason': 'device_disconnected'})}\n\n"
+                        else:
+                            from app.services import remote_control
 
-                        # story #4535 — turned off: its own frame, not access_revoked (a revocation drops the token · PO 13:49Z)
-                        if not await remote_control.is_enabled(s, org_id):
-                            yield f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
-                            return
-                    commands = await relay.commands_to_send(s, setup_id, last_seq)
-                    removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
-                    offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
-                    reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
-                    reactivated_marks.clear()
-                    if now - last_beat >= _HEARTBEAT_SEC:
-                        await relay.touch_device(s, setup_id)
-                    await s.commit()
+                            # story #4535 — turned off: its own frame, not access_revoked (a revocation drops the token · PO 13:49Z)
+                            if not await remote_control.is_enabled(s, org_id):
+                                terminal = f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
+                    if terminal is None:
+                        commands = await relay.commands_to_send(s, setup_id, last_seq)
+                        removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
+                        offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
+                        reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
+                        reactivated_marks.clear()
+                        if now - last_beat >= _HEARTBEAT_SEC:
+                            await relay.touch_device(s, setup_id)
+                        await s.commit()
+                if terminal is not None:  # the session is closed (rolled back, as before: nothing was written); the stream ends with its frame
+                    yield terminal
+                    return
                 for fp in removals:  # story #4533 — a removal only: no frame adds or changes a phone key on the device
                     removals_sent.add(fp)
                     yield f"event: pairing_removed\ndata: {json.dumps({'phone_key_fingerprint': fp})}\n\n"
@@ -532,6 +539,28 @@ async def put_clock_view(body: desktop_clock.ClockViewReport, setup: DesktopSetu
         return _error(exc)
     await db.commit()
     return {"applied": applied, "clock_view_seq": held, "dropped_rows": dropped}
+
+
+@router.put("/relay/changes/{command_id}")
+async def put_changes(command_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story #4951 (①a): the computer's changed-file LIST for one read it was told to do — names · a status word · line counts, written once into a row of this computer. The body is read
+    and judged here so that no refusal (and no log, no error report) ever carries what it held; the server cuts the list to its own limits whatever the computer sent."""
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_changes.BODY_MAX:
+            raise relay.DesktopRelayError(413, "changes_too_large", "the list is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_changes.BODY_MAX:
+                raise relay.DesktopRelayError(413, "changes_too_large", "the list is larger than the server takes")
+        count = await desktop_changes.write_result(db, setup, command_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer): that stays deleted
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"files": count}
 
 
 @router.put("/relay/pairings")

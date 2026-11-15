@@ -5,8 +5,9 @@
  * 자체가 없어짐으로써 구조적으로 소거**된다 — #2154 회복 가드(a78a2b7e)를 이 슬라이스가
  * 흡수한다(별도 fallback 로직 불요, path 자체가 유일한 project 컨텍스트 출처).
  */
-export function newDocUrl(wsSlug: string, projSlug: string, slug: string): string {
-  return `/${wsSlug}/${projSlug}/docs/${slug}?new=1`;
+export function newDocUrl(wsSlug: string, projSlug: string, slug: string, parentId?: string | null): string {
+  // 4910 — 서버에 아직 없는 초안의 주소(첫 저장 때 문서가 만들어진다). 하위 문서면 어느 문서 밑인지를 `parent`로 싣는다.
+  return `/${wsSlug}/${projSlug}/docs/${slug}?new=1${parentId ? `&parent=${encodeURIComponent(parentId)}` : ''}`;
 }
 
 /** 트리에서 기존 문서를 선택할 때 — newDocUrl과 달리 `new=1`(자동 포커스 트리거)을 안 싣는다. */

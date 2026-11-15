@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-from sqlalchemy import String, and_, cast, delete, func, literal_column, or_, select, text, update
+from sqlalchemy import String, and_, cast, delete, false, func, literal_column, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import aware_datetime_query
@@ -54,7 +54,9 @@ from app.services.member_resolver import (
     canonicalize_member_id,
     lookup_members_by_ids,
     org_recipient_ids,
+    resolve_auth_member,
     resolve_member_identity,
+    UNNAMED_MEMBER_LABEL,
 )
 
 
@@ -164,6 +166,12 @@ def _pending_or_recently_delivered_filter(now: "datetime"):
         Event.status == "pending",
         and_(Event.status == "delivered", Event.delivered_at >= cutoff),
     )
+
+
+def _outside_backfill_filter(now: "datetime"):
+    """story 4906 (D · PO 11-12) — EXACTLY what `_pending_or_recently_delivered_filter` leaves out (one definition, so the two never drift apart): an event after the cursor that the backfill
+    did NOT send — already delivered more than N seconds ago (or with no delivery time), or in any other state. NULL answers of the filter count as «left out»."""
+    return not_(func.coalesce(_pending_or_recently_delivered_filter(now), false()))
 
 
 async def _stamp_first_delivery(db: "AsyncSession", batch, now: "datetime") -> None:
@@ -423,21 +431,82 @@ def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = Non
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
 
+# story #4896 — the payload of `POST /api/v2/events` is free JSON chosen by the caller, stored once and then sent on to the recipient (bell, SSE, agent gateway). No size or depth bound meant one
+# request of a few MB was stored and read back from every list. Measured on production: the largest normal payloads are a few KB (p99 about 5.5 KB), so 64 KiB leaves room. This bounds the PUBLIC route's
+# body only — what the server's own publisher writes does not pass through here.
+EVENT_PAYLOAD_MAX_BYTES = 64 * 1024
+EVENT_PAYLOAD_MAX_DEPTH = 8
+
+
+def _json_depth(value: object) -> int:
+    """how many levels of dict/list the value nests (a flat dict is 1, a scalar 0) — counted with a stack, so a deep body cannot exhaust the recursion limit here"""
+    deepest = 0
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        node, level = stack.pop()
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            continue
+        level += 1
+        deepest = max(deepest, level)
+        stack.extend((child, level) for child in children)
+    return deepest
+
+
+# story #4895 — what a caller may put into `POST /api/v2/events`, as a closed list. The route used to take the whole body as sent, and each place that shows or acts on an event reads some other key as «who sent
+# it» (the bell: payload.sender_name; the agent connectors: payload.sender; the chat screen: payload.created_by; the activity feed: the event's sender, none = «system»), so removing the bad keys one at a time
+# left the next one. Now only these are accepted; any other field or payload key is a 422, and who sent it is always filled in by the server from the caller's authentication.
+PUBLIC_EVENT_TYPES = frozenset({"dispatched", "kickoff", "review_request", "qa_request", "deploy_request", "handoff"})
+PUBLIC_EVENT_PAYLOAD_KEYS = frozenset({"content", "title", "body", "summary"})
+
+
 class CreateEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a field this model does not name is a 422, not ignored
+
     project_id: uuid.UUID
     event_type: str
-    source_entity_type: str | None = None
-    source_entity_id: uuid.UUID | None = None
-    sender_id: uuid.UUID | None = None
     recipient_id: uuid.UUID
-    recipient_type: str
+    recipient_type: str | None = None  # read-only information for the caller: the server resolves the recipient's kind itself
     payload: dict = {}
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_is_bounded(cls, v: dict) -> dict:
+        depth = _json_depth(v)
+        if depth > EVENT_PAYLOAD_MAX_DEPTH:
+            raise ValueError(f"payload is nested {depth} levels deep; the limit is {EVENT_PAYLOAD_MAX_DEPTH}")
+        try:
+            # `allow_nan=False`: the request parser accepts the non-standard NaN / Infinity tokens, but the stored JSON column does not — they would pass here and end as a server error at the write
+            size = len(json.dumps(v, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str).encode("utf-8"))
+        except ValueError:
+            raise ValueError("payload must be plain JSON: NaN and Infinity are not allowed") from None
+        if size > EVENT_PAYLOAD_MAX_BYTES:
+            raise ValueError(f"payload is {size} bytes; the limit is {EVENT_PAYLOAD_MAX_BYTES} bytes")
+        return v
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_keys_and_values_are_the_allowed_ones(cls, v: dict) -> dict:
+        unknown = sorted(str(k) for k in v if k not in PUBLIC_EVENT_PAYLOAD_KEYS)
+        if unknown:
+            raise ValueError(f"payload key(s) not accepted: {', '.join(unknown)}; the accepted keys are {', '.join(sorted(PUBLIC_EVENT_PAYLOAD_KEYS))}")
+        # the agent connectors and the bell treat these as text (strip / trim / replace): an object or a number would pass the check and then break the reader after the 201
+        not_text = sorted(str(k) for k, val in v.items() if not isinstance(val, str))
+        if not_text:
+            raise ValueError(f"payload value(s) must be text: {', '.join(not_text)}")
+        return v
 
     @field_validator("event_type")
     @classmethod
     def _event_type_is_a_closed_shape(cls, v: str) -> str:
         # story #4692 [SEC]: the name is written into SSE `event:` lines — a newline in it would plant frames on an agent's stream
-        return validate_event_type(v)
+        v = validate_event_type(v)
+        if v not in PUBLIC_EVENT_TYPES:
+            raise ValueError(f"event_type '{v}' cannot be created through this endpoint; the accepted types are {', '.join(sorted(PUBLIC_EVENT_TYPES))}")
+        return v
 
 
 class EventResponse(BaseModel):
@@ -621,12 +690,6 @@ async def agent_event_stream(
                 # read로 실제로 잡히는 것까지 확認해야 완료다. no_cursor(진짜 최초접속)는 정상
                 # 트래픽이라 제외 — 재연결인데 못 따라잡은 두 경우(cursor_not_found·cursor_stale)
                 # 만 센다(강등 «빈도»가 이 신호의 목적이지 최초접속 빈도가 아니다).
-                if _backfill_reason in ("cursor_not_found", "cursor_stale"):
-                    import logging
-                    logging.getLogger(__name__).info(
-                        "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
-                        _backfill_reason, org_id, resolved_member_id,
-                    )
                 # story #2101: pending뿐 아니라 최근 delivered도 포함 — 동일 member의
                 # 다른 연결(탭)이 먼저 받아 delivered로 마킹한 이벤트를, 재연결한 이 연결도
                 # 다시 받게 한다(중복은 클라 dedup이 처리, 영구 유실 0이 목표).
@@ -681,34 +744,70 @@ async def agent_event_stream(
                     )
                     pending_events = result.scalars().all()
 
-                # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
-                # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
-                # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
-                # 않는다). 미등록 named event는 이 정확히 같은 엔드포인트에서 heartbeat이 매일
-                # 무해함을 실증 중이라 계약 안전은 이미 확認됨(FE·MCP 브리지 둘 다 조용히 무시).
-                yield (
-                    "event: sync_status\n"
-                    f"data: {json.dumps({'complete': _backfill_reason is None, 'reason': _backfill_reason, 'returned': len(pending_events)})}\n\n"
-                )
+                # story 4906 (D · PO 11-12): «the cursor is older than N seconds» says the backfill LOOKED BACK a long way, not that something is missing — a quiet person's reconnect is always
+                # that (the newest event they ever saw is old), and every such phone opening showed the bell's «older notifications may be missing» line (measured on dev: a fresh account,
+                # cursor 10 min old, `returned: 0` → `complete: false`). `cursor_stale` stays a warning only when this backfill could really have left something out: it hit the cap, OR an event
+                # after the cursor was not sent (delivered longer ago than the backfill's window — `_outside_backfill_filter`, the same definition counted, not guessed). Nothing left out → complete.
+                # `cursor_not_found` is untouched: with the cursor gone nothing after it can be proven (a GC'd event may have had followers that are gone too).
+                if _backfill_reason == "cursor_stale" and len(pending_events) < limit:
+                    # «After the cursor» here is STRICTLY later in time — not the backfill's `(created_at, id)` tiebreak. A chat message creates its events (`conversation.message_created` +
+                    # `dispatched`) in ONE transaction, so they share `created_at`, and UUID order says nothing about which one the client received last: counting the same-instant sibling with
+                    # the larger id made half of the quiet accounts keep the warning (measured on dev 11-12: cursor = the message, sibling `dispatched` delivered 0.09 s after creation).
+                    # `events.recipient_seq` would order them exactly, but it is filled only for agent recipients (dev: 32 of 7,096 human-recipient events), and the stream's cursor is an event id.
+                    # Limit (stated in the PR): a same-instant sibling this connection really never received is not reported — the backfill never re-sent it either once the cursor is stale.
+                    _after_cursor: list[Any] = []
+                    if _ref is not None:
+                        _after_cursor.append(Event.created_at > _ref)
+                    _left_out = (await db.execute(
+                        select(func.count()).select_from(Event).where(
+                            Event.org_id == org_id, Event.recipient_id == resolved_member_id, *_after_cursor, _outside_backfill_filter(now),
+                        )
+                    )).scalar_one()
+                    if _left_out == 0:
+                        _backfill_reason = None
+                if _backfill_reason in ("cursor_not_found", "cursor_stale"):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
+                        _backfill_reason, org_id, resolved_member_id,
+                    )
+            # story 4922 — the database is read in SHORT sessions that end before anything is sent: the session above closes here (its connection is back in the pool), the frames
+            # of a batch are built from memory, and the first-delivery stamp opens a session of its own after the batch went out. The old shape held ONE session — its connection and its
+            # open transaction — across every `yield` below. Starlette's StreamingResponse does not close the stream's generator when the client goes away (it only stops iterating
+            # it: `stream_response` is `async for chunk in body_iterator`), so a generator parked at a `yield` inside `async with … as db` keeps its connection until the garbage collector
+            # finds it («The garbage collector is trying to clean up non-checked-in connection … checked out at events.py:714 generate (task finished)» — CI runs 43344831907 · 43358060648).
+            # Playwright's `page.reload()` leaves the stream exactly there, and the request pool is 3 + 1: one lost place leaves 3, a few leave none (QueuePool 30 s timeout, an
+            # `activation/checklist` that does not answer in 5 s, an asyncpg `InterfaceError` when the collector terminates a connection another request is about to use).
+            # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
+            # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
+            # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
+            # 않는다). 미등록 named event는 이 정확히 같은 엔드포인트에서 heartbeat이 매일
+            # 무해함을 실증 중이라 계약 안전은 이미 확認됨(FE·MCP 브리지 둘 다 조용히 무시).
+            yield (
+                "event: sync_status\n"
+                f"data: {json.dumps({'complete': _backfill_reason is None, 'reason': _backfill_reason, 'returned': len(pending_events)})}\n\n"
+            )
 
-                for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
-                    if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
-                        yield _access_revoked_frame(_why)
-                        return
-                    batch = pending_events[i : i + _SSE_BATCH_SIZE]
+            for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                    yield _access_revoked_frame(_why)
+                    return
+                batch = pending_events[i : i + _SSE_BATCH_SIZE]
+                async with async_session_factory() as db:
                     sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
-                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of the frame otherwise
+                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of
                     _withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in batch])
-                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
-                    # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
-                    # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
-                    # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
-                    for data, evt in zip(batch_data, batch):
-                        yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
-                        # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
-                        # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
-                        # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
-                        _sent_event_ids.add(str(evt.id))
+                batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
+                # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
+                # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
+                # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
+                for data, evt in zip(batch_data, batch):
+                    yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                    # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
+                    # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
+                    # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
+                    _sent_event_ids.add(str(evt.id))
+                async with async_session_factory() as db:
                     await _stamp_first_delivery(db, batch, now)
                     await db.commit()
 
@@ -864,17 +963,15 @@ async def create_event(
     미연결이면 status=pending 유지.
     Channel Router(S-A6)로 preference 기반 채널 결정 후 전달.
 
-    S19(SHOULD, PO 포함 승인): sender_id가 검증 없이 body에서 그대로 신뢰돼 caller가 임의
-    sender로 이벤트를 위조(임퍼스네이션)할 수 있었다. sender_id가 명시되면 caller 본인과
-    일치해야만 허용(시스템 이벤트의 sender_id=None 케이스는 그대로 무변경).
-
-    S19(발견·회귀수정): axis-safe 비교(assert_caller_is_member) 사용 — resolve_member()/.id
-    직접비교는 휴먼 JWT caller에서 축이 어긋나 본인 sender_id 지정도 403날 수 있었다.
+    story #4895: the body is a closed list (see CreateEventRequest) and the sender is never taken from it. Who sent the event is the caller's own: the event's sender, and the name and kind shown in
+    `payload.sender_name` / `payload.sender`, are filled in here from the caller's authentication. The caller must have a seat in the project (the event becomes an entry in its activity stream).
     """
-    if body.sender_id is not None:
-        await assert_caller_is_member(
-            body.sender_id, auth, db, org_id, detail="sender_id must match the caller's own identity",
-        )
+    # story #4895 — the event lands in the project's activity stream: the caller must have a seat in that project (existence is not revealed: 404)
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+    caller = await resolve_auth_member(auth, org_id, db)
+    caller_name = caller.name or UNNAMED_MEMBER_LABEL
 
     # recipient가 동일 org 소속인지 + type 확정
     # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 수신자로 허용
@@ -887,12 +984,12 @@ async def create_event(
         project_id=body.project_id,
         org_id=org_id,
         event_type=body.event_type,
-        source_entity_type=body.source_entity_type,
-        source_entity_id=body.source_entity_id,
-        sender_id=body.sender_id,
+        source_entity_type=None,
+        source_entity_id=None,
+        sender_id=caller.id,
         recipient_id=body.recipient_id,
         recipient_type=member_type,
-        payload=body.payload,
+        payload={**body.payload, "sender_name": caller_name, "sender": {"id": str(caller.id), "name": caller_name, "type": caller.type}},
         status="pending",
     )
     db.add(event)
@@ -3228,9 +3325,13 @@ async def _publish_registry_event_core(
     # 여부만으로 트리거, definition_key 무관 — 신규 발행 갈래 0, #2633 AC2 단일 파이프
     # 유지)으로 발행 시점에 이름 해석한다. 두 필드 다 같은 리졸버(member_ref) 재사용 —
     # payload 키 이름만 다르다(담당자 vs 배정자, 유나 확定 2026-09-14 20:16Z).
+    # story 4921 — the direction instruction (`preset.steer.instruct`) names its target (`target_member_id`) and, when a person gave it,
+    # its issuer (`issued_by_member_id`) the same way: the card said the raw uuid (its template read `{{payload.target_member_id}}`)
     for _refs_member_payload_key, _refs_member_refs_key in (
         ("assignee_member_id", "assignee"),
         ("assigned_by_member_id", "assigned_by"),
+        ("target_member_id", "target"),
+        ("issued_by_member_id", "issued_by"),
     ):
         _refs_member_id_raw = payload.get(_refs_member_payload_key)
         if not _refs_member_id_raw:

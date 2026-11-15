@@ -187,11 +187,17 @@ function CanvasViewport({
   const [imageBounds, setImageBounds] = useState<{ w: number; h: number } | null>(null);
   const dragRef = useRef({ startX: 0, startY: 0, startTx: 0, startTy: 0, movedPast: false, pointerId: -1 });
   const firedFitRef = useRef(false);
+  // 4910 ④ — 이미지는 처음엔 선언 크기(없으면 기본 1280×800)로 «전체 보기»를 맞춘 뒤 불러지며 실제 크기가 알려진다. 실제 크기가 알려졌을 때 사용자가 아직 화면을 안 만졌으면(끌기 · 휠 · 핀치 · 더블클릭 · 실제 크기)
+  // 한 번 다시 맞춘다 — 안 그러면 큰 칸에 그림이 54%로 작게 구석에 놓인 채 남았다. 크기(`WxH`)마다 한 번만(같은 크기 load 이벤트가 또 와도 사용자가 맞춘 걸 되돌리지 않는다).
+  const userMovedRef = useRef(false);
+  const refitKeyRef = useRef<string | null>(null);
   // story 74d6047e — 2-finger 핀치 줌. 활성 터치 포인터 위치 추적 + 핀치 baseline(포인터 수가
   // 바뀔 때마다 재캡처 — crux: delta는 항상 "이 순간"의 baseline 대비라 점프가 없다).
   const touchPointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchBaselineRef = useRef<{ distance: number; midX: number; midY: number; scale: number; tx: number; ty: number } | null>(null);
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  // 4910 — 마지막 포인터가 터치였으면 더블클릭 이벤트(브라우저가 더블탭에서 덧붙이기도 함)는 무시한다: 터치는 위 더블탭 경로가 이미 같은 일을 해서, 둘 다 타면 한 번 더 뒤집힌다.
+  const lastPointerTypeRef = useRef<string>('mouse');
 
   // image=실측 우선(로드 후 자연 크기가 선언보다 정확) → 그 다음 선언된 canvas_bounds(§4,
   // BE #2135) → 마지막 포맷별 기본 아트보드(가짜 추정 아님·명시된 폴백 규약).
@@ -200,7 +206,7 @@ function CanvasViewport({
   // iframe 렌더 전부 이 하나의 bounds를 참조하므로 재계산 로직 추가 없이 재렌더가 성립한다.
   const bounds = previewWidth != null ? { w: previewWidth, h: authoredBounds.h } : authoredBounds;
 
-  useEffect(() => { setImageBounds(null); firedFitRef.current = false; }, [content]);
+  useEffect(() => { setImageBounds(null); firedFitRef.current = false; userMovedRef.current = false; refitKeyRef.current = null; }, [content]);
 
   // ResizeObserver 미지원 환경(구형 브라우저·이 프로젝트 vitest jsdom) — 정적 폴백, 크래시 방지.
   useEffect(() => {
@@ -237,6 +243,7 @@ function CanvasViewport({
   }, [viewportSize, bounds.w, bounds.h]);
 
   const actualSize = useCallback(() => {
+    userMovedRef.current = true;
     const { w: vw, h: vh } = viewportSize;
     const tx = (vw - bounds.w) / 2;
     const ty = (vh - bounds.h) / 2;
@@ -246,6 +253,7 @@ function CanvasViewport({
   // story 74d6047e §4 — 더블탭=fit↔100% 토글(탭 지점 중심, 지도/사진 앱 관례). ⌘/Ctrl+휠 커서중심
   // 줌과 동일한 수학(고정 화면점 아래 콘텐츠점을 유지) — 목표 scale만 연속값 대신 두 값 중 토글.
   const toggleZoomAtPoint = useCallback((screenX: number, screenY: number) => {
+    userMovedRef.current = true;
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
     const localX = screenX - rect.left;
@@ -286,7 +294,17 @@ function CanvasViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 최초 1회만(콘텐츠/뷰포트 변경 시 재-fit 강제 안 함, 사용자가 이미 조작했을 수 있음)
   }, [viewportSize.w, viewportSize.h]);
 
+  // 4910 ④ — 이미지 실제 크기가 알려지면(`imageBounds`) 사용자가 아직 안 만졌을 때 한 번 다시 «전체 보기». `fitToView`는 새 bounds를 이미 담은 상태로 이 효과에서 불린다.
+  useEffect(() => {
+    if (!imageBounds || viewportSize.w === 0 || viewportSize.h === 0) return;
+    const key = `${imageBounds.w}x${imageBounds.h}`;
+    if (refitKeyRef.current === key) return;
+    refitKeyRef.current = key;
+    if (!userMovedRef.current) fitToView();
+  }, [imageBounds, viewportSize.w, viewportSize.h, fitToView]);
+
   function handlePointerDown(e: React.PointerEvent) {
+    lastPointerTypeRef.current = e.pointerType;
     // story 74d6047e — 1-finger는 이미 pointer 이벤트 제네릭 pan 경로가 그대로 작동한다(터치
     // 전용 신규 로직 불필요, 아래 공유 코드로 진행). 2-finger째만 핀치로 분기.
     if (e.pointerType === 'touch') {
@@ -316,6 +334,22 @@ function CanvasViewport({
     if (typeof el.setPointerCapture === 'function') el.setPointerCapture(e.pointerId);
   }
 
+  // 4910 — 마우스 손길(AC2 §3): 그림 더블클릭 = 전체 보기 ↔ 실제 크기(터치 더블탭과 같은 `toggleZoomAtPoint`), 그림에 초점이 있을 때 키 0 = 전체 보기 · 1 = 실제 크기(아래 도구줄의 두 단추와 같은 `fitToView` · `actualSize`).
+  // 새 동작 0 — 이미 있는 두 동작을 부르는 길만. 편집 모드 · 핀 추가 모드(클릭 = 픽) · 핀 위에서는 쓰지 않는다.
+  function handleDoubleClick(e: React.MouseEvent) {
+    if (mode === 'edit' || pinAddMode) return;
+    if (lastPointerTypeRef.current === 'touch') return;
+    if ((e.target as HTMLElement).closest('[data-artifact-canvas-overlay] button, [data-artifact-canvas-overlay] a, [data-artifact-canvas-overlay] [role="button"]')) return;
+    toggleZoomAtPoint(e.clientX, e.clientY);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (mode === 'edit' || e.target !== e.currentTarget) return; // 그림 칸 자신에 초점이 있을 때만(안쪽 단추 · 입력의 글자는 건드리지 않는다)
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.key === '0') { e.preventDefault(); fitToView(); }
+    else if (e.key === '1') { e.preventDefault(); actualSize(); }
+  }
+
   function handlePointerMove(e: React.PointerEvent) {
     if (e.pointerType === 'touch' && touchPointersRef.current.has(e.pointerId)) {
       touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -333,6 +367,7 @@ function CanvasViewport({
         const contentX = (baseline.midX - baseline.tx) / baseline.scale;
         const contentY = (baseline.midY - baseline.ty) / baseline.scale;
         const next = clampPan(newMidX - contentX * nextScale, newMidY - contentY * nextScale, nextScale, viewportSize.w, viewportSize.h);
+        userMovedRef.current = true;
         setIsDragging(true); // 핀치 중엔 오버레이(핀 등) pointer-events:none — 기존 드래그 규약 재사용
         setTransform({ ...next, scale: nextScale });
         return;
@@ -345,6 +380,7 @@ function CanvasViewport({
     const dy = e.clientY - d.startY;
     if (!d.movedPast && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
       d.movedPast = true;
+      userMovedRef.current = true;
       setIsDragging(true);
     }
     if (d.movedPast) {
@@ -432,6 +468,7 @@ function CanvasViewport({
       if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) return;
     }
     e.preventDefault();
+    userMovedRef.current = true;
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
     if (e.ctrlKey || e.metaKey) {
@@ -467,8 +504,11 @@ function CanvasViewport({
       <div
         ref={viewportRef}
         data-artifact-canvas-viewport
-        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
+        // 4910 — 키(0 · 1)로 닿게 초점을 받는다(편집 모드는 안 받음). 이름 = 산출물 제목, 단축키는 aria-keyshortcuts로 알림.
+        {...(mode === 'edit' ? {} : { role: 'group', tabIndex: 0, 'aria-label': title, 'aria-keyshortcuts': '0 1', onKeyDown: handleKeyDown })}
+        className="relative min-h-0 w-full flex-1 touch-none select-none overflow-hidden rounded-lg border border-border bg-muted/20 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
+        onDoubleClick={handleDoubleClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -518,7 +558,8 @@ function CanvasViewport({
         </div>
       </div>
       {/* [SID:4362] 좁은 폭에서 안내 글과 도구 버튼이 한 줄에 다 안 들어가면 도구 줄을 넘긴다 — 예전엔 «전체 보기» · «실제 크기»가 낱말 중간에서 꺾였다. */}
-      <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      {/* 4910 — 도구줄은 «그림»이 아니다: 위에서 그림 우클릭 메뉴(상세 화면)가 감싸고 있어도 여기서는 열리지 않는다(브라우저 기본 메뉴로 — 그림 위에서만 우리 메뉴). */}
+      <div onContextMenu={(e) => e.stopPropagation()} className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <p className="min-w-0 text-editorial-meta text-muted-foreground">{t(isTouchDevice ? 'viewerCanvasHintTouch' : 'viewerCanvasHint')}</p>
         <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-editorial-meta font-medium text-muted-foreground">
           <span className="tabular-nums">{Math.round(transform.scale * 100)}%</span>

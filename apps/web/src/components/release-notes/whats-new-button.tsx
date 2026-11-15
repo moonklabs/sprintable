@@ -15,7 +15,7 @@ export function WhatsNewButton() {
       type="button"
       onClick={ctx.open}
       aria-label={t('openButtonAriaLabel')}
-      className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
+      className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground touch:size-11"
     >
       <Sparkles className="size-4" />
       {ctx.hasUnseen && (

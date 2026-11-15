@@ -8,7 +8,8 @@ import { HypothesisStatusBadge } from './hypothesis-status-badge';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ds/input';
+import { Button } from '@/components/ds/button';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -126,18 +127,13 @@ export function StoryHypothesesSection({
   );
 
   return (
-    <section aria-label={t('linkedTitle')} className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+    <section aria-label={t('linkedTitle')} className="space-y-2 rounded-xl border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{t('linkedTitle')}</h3>
         {!pickerOpen ? (
-          <button
-            type="button"
-            onClick={openPicker}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
-          >
-            <Plus className="size-3.5" />
+          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-3.5" />} className="h-auto px-2.5 py-1 text-xs font-medium hover:bg-ds-surface-highest">
             {t('linkHypothesis')}
-          </button>
+          </Button>
         ) : null}
       </div>
 
@@ -151,7 +147,7 @@ export function StoryHypothesesSection({
           {linked.map((h) => (
             <li
               key={h.id}
-              className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5"
+              className="flex items-center gap-2 rounded-lg border border-ds-line bg-ds-surface px-2.5 py-1.5"
             >
               <Link2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={h.statement}>
@@ -175,7 +171,7 @@ export function StoryHypothesesSection({
                 disabled={busyId === h.id}
                 aria-label={t('unlink')}
                 title={t('unlink')}
-                className="shrink-0 rounded p-0.5 text-muted-foreground transition hover:bg-accent hover:text-destructive disabled:opacity-50"
+                className="shrink-0 rounded p-0.5 text-muted-foreground transition hover:bg-ds-surface-high hover:text-destructive disabled:opacity-50"
               >
                 <X className="size-3.5" />
               </button>
@@ -186,14 +182,14 @@ export function StoryHypothesesSection({
 
       {/* 가설 연결 picker (기존 가설 link 전용 — 생성 affordance 없음·AC①) */}
       {pickerOpen ? (
-        <div className="space-y-2 rounded-lg border border-border bg-background p-2">
+        <div className="space-y-2 rounded-lg border border-ds-line bg-ds-surface p-2">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-muted-foreground">{t('pickerTitle')}</p>
             <button
               type="button"
               onClick={() => setPickerOpen(false)}
               aria-label={t('cancel')}
-              className="rounded p-0.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              className="rounded p-0.5 text-muted-foreground transition hover:bg-ds-surface-high hover:text-foreground"
             >
               <X className="size-3.5" />
             </button>
@@ -205,7 +201,7 @@ export function StoryHypothesesSection({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('pickerSearch')}
-              className="h-auto py-1.5 pl-7 lg:text-xs bg-background dark:bg-background"
+              className="h-auto py-1.5 pl-7 lg:text-xs"
             />
           </div>
           {/* story에선 가설을 생성하지 않는다 — 생성은 에픽 상세/MCP 경로(AC①). */}
@@ -222,7 +218,7 @@ export function StoryHypothesesSection({
                     type="button"
                     onClick={() => void linkHypothesis(h)}
                     disabled={busyId === h.id}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-muted disabled:opacity-50"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-ds-surface-high disabled:opacity-50"
                   >
                     <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={h.statement}>
                       {h.statement}

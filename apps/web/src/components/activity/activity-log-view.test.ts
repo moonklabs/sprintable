@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditActorProps, auditClaim, auditContextTooltip, type ActivityLogItem } from './activity-log-view';
+import { auditActorProps, auditClaim, type ActivityLogItem } from './activity-log-view';
 
 function item(overrides: Partial<ActivityLogItem> = {}): ActivityLogItem {
   return {
@@ -32,20 +32,8 @@ describe('auditClaim (no-fiction — entity_title/entity_type가 nullable인 실
   });
 });
 
-describe('auditContextTooltip (context 필드는 native title로 보존, 요약이 아니라 원문)', () => {
-  it('always includes the action even with no context', () => {
-    expect(auditContextTooltip(item({ action: 'story.claimed', context: null }))).toBe('action: story.claimed');
-  });
-
-  it('appends every context key/value on its own line', () => {
-    const tooltip = auditContextTooltip(item({ action: 'gate.rejected', context: { risk: '높음', reason: '충돌' } }));
-    expect(tooltip).toBe('action: gate.rejected\nrisk: 높음\nreason: 충돌');
-  });
-
-  it('handles an empty context object without leaking "undefined" or extra lines', () => {
-    expect(auditContextTooltip(item({ action: 'memo.viewed', context: {} }))).toBe('action: memo.viewed');
-  });
-});
+// story 4892 — `auditContextTooltip` (the hover-only `title` text) is gone: the action name and the context key/values are a visible details region now (audit-detail.tsx),
+// covered by activity-log-view.detail.4892.test.tsx.
 
 function tc(key: string): string {
   const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원' };

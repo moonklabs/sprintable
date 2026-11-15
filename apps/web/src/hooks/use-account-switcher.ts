@@ -8,6 +8,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { notifyAccountChanged } from '@/lib/native-shell-bridge';
 import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
 import { handOwnerTo, markIntendedSwitch } from '@/lib/tab-owner';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 
 export interface Account {
   account_id: string;
@@ -108,7 +109,8 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
       const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
       clearAccountScopedStorage('switch'); // story #4487 — the account being added signs in next in this tab (drafts stay)
       markIntendedSwitch(); // story #4490 — who signs in next is not known yet: the next owner change is intended (10 min)
-      window.location.assign(j?.data?.redirect ?? '/login');
+      const redirect = j?.data?.redirect; // story 4936: a server field is not an address to leave for unchecked — only an internal path, else the sign-in
+      window.location.assign(isSafeInternalPath(redirect) ? redirect : '/login');
     } catch {
       // story #3638(유나 §8 별건) — 계정 추가 실패 시 busy 스피너만 멈추고 조용했다.
       setError(t('addAccountFailed'));

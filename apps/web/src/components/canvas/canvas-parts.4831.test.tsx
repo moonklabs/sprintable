@@ -94,14 +94,16 @@ describe('핀 설명 창(story 4831)', () => {
 });
 
 describe('코멘트 스레드 카드 답글 칸(story 4831)', () => {
-  it('답글 칸은 바탕 Input(flex-1)이고, 쓰고 엔터하면 스레드 id와 글이 onReply로 가고 칸이 비워진다', async () => {
+  it('답글 칸은 ds Input(flex-1)이고, 쓰고 엔터하면 스레드 id와 글이 onReply로 가고 칸이 비워진다', async () => {
     const thread = MOCK_THREADS.find((t) => t.rollup === 'open')!;
     const onReply = vi.fn();
     await mount(<CommentThreadCard thread={thread} memberMap={MOCK_MEMBERS} onReply={onReply} />);
     const input = container.querySelector(`input[placeholder="${c.replyPlaceholder}"]`) as HTMLInputElement;
-    expect(input.dataset.slot).toBe('input');
+    // 4910 — ds Input(글자 · 바탕 색은 ds 칸이 정하고, 옛 text-foreground / bg-background 덧칠은 없다).
+    expect(input.dataset.slot).toBe('ds-input');
     expect(input.className).toContain('flex-1');
-    expect(hasClass(input, 'text-foreground')).toBe(true);
+    expect(input.className).toContain('min-w-0');
+    expect(hasClass(input, 'bg-background')).toBe(false);
     await act(async () => { setValue(input, '  확인했어요  '); });
     await act(async () => { key(input, 'Enter'); });
     expect(onReply).toHaveBeenCalledWith(thread.id, '확인했어요');

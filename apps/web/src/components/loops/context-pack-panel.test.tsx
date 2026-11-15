@@ -78,6 +78,27 @@ describe('ContextPackPanel — 캐시 미스 작업(#4336 PR2 ②)', () => {
     expect(container.textContent).not.toContain('창을 닫아도 계속 처리돼요');
   });
 
+  it('⭐사용자가 접어 둔 뒤 다시 불러오면(다른 실행으로) 불러오는 동안은 열려 스켈레톤이 보이고, 끝나면 접어 둔 뜻이 돌아온다', async () => {
+    respond(PACK);
+    mount();
+    await flush();
+    const pack = () => container.querySelector('[data-slot="context-pack"]')!;
+    expect(pack().getAttribute('data-collapsed')).toBe('false');
+    await act(async () => { (pack().querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
+    expect(pack().getAttribute('data-collapsed')).toBe('true');
+    fetchWithAuthMock.mockReturnValue(new Promise(() => {})); // 다음 불러오기는 끝나지 않는다
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ContextPackPanel loopId="loop-2" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    expect(pack().getAttribute('data-collapsed')).toBe('false');
+    expect(pack().querySelector('[data-slot="ds-skeleton"]')).not.toBeNull();
+  });
+
   it('작업이 실패로 끝나면 «이력 조회를 일시 생략했어요»(예전 오류 응답과 같은 자리)', async () => {
     waitForBackgroundJobMock.mockResolvedValue({ ...QUEUED, status: 'failed', error: { status_code: 404, detail: 'Loop not found' } });
     respond(QUEUED, 202);

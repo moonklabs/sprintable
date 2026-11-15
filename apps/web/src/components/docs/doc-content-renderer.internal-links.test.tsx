@@ -65,7 +65,7 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
     await renderDoc(WIKI);
     const link = container.querySelector('[data-type="wikiLink"] a');
     expect(link, '위키 링크가 <a>로').toBeInstanceOf(HTMLAnchorElement);
-    expect(link!.getAttribute('href')).toBe('/ws-1/proj-b/docs/design-doc');
+    expect(link!.getAttribute('href')).toBe('/ws-1/proj-b/docs/design-doc/view');
     expect((link as HTMLAnchorElement).tabIndex, 'Tab이 닿는다').toBe(0);
     expect(accessibleName(link!)).toBe('설계 문서');
   });
@@ -76,7 +76,7 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
       const links = container.querySelectorAll('[data-page-embed] a');
       expect(links, `${format}: 카드 안 링크 하나`).toHaveLength(1);
       const link = links[0] as HTMLAnchorElement;
-      expect(link.getAttribute('href')).toBe('/ws-1/proj-b/docs/meeting-notes');
+      expect(link.getAttribute('href')).toBe('/ws-1/proj-b/docs/meeting-notes/view');
       expect(link.tabIndex).toBe(0);
       expect(accessibleName(link)).toBe('회의록');
       expect(link.textContent, '카드 모양(제목 · 경로 줄)은 그대로').toContain('/meeting-notes');
@@ -121,10 +121,10 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
     const before = window.location.href;
     const wiki = container.querySelector('[data-type="wikiLink"] a')!;
     expect(click(wiki), '기본 이동(전체 새로고침) 막음').toBe(false);
-    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc');
+    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/design-doc/view');
     const embed = container.querySelector('[data-page-embed] a')!;
     expect(click(embed)).toBe(false);
-    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/meeting-notes');
+    expect(nav.push).toHaveBeenLastCalledWith('/ws-1/proj-b/docs/meeting-notes/view');
     expect(nav.push).toHaveBeenCalledTimes(2);
     expect(window.location.href, 'window.location 이동 0').toBe(before);
   });
@@ -163,7 +163,7 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
   it('경로에 ws/proj가 없는 자리만 flat + `?p=`(bare 아님)', async () => {
     nav.params = {};
     await renderDoc(WIKI);
-    expect(container.querySelector('[data-type="wikiLink"] a')!.getAttribute('href')).toBe('/docs/design-doc?p=P');
+    expect(container.querySelector('[data-type="wikiLink"] a')!.getAttribute('href')).toBe('/docs/design-doc/view?p=P');
   });
 
   // 부모가 다시 그려도(같은 본문) 링크 · 임베드 카드가 원문으로 지워지지 않는다 — React 19는 새 `{ __html }` 객체면 innerHTML을 다시 쓴다.
@@ -174,7 +174,7 @@ describe('DocContentRenderer — 본문 문서 링크(story #4309)', () => {
     await renderDoc(WIKI + EMBED);
     expect(container.querySelector('[data-type="wikiLink"] a'), '같은 노드(다시 조립 안 함)').toBe(wiki);
     expect([...container.querySelectorAll('a[data-doc-internal-link]')].map((a) => a.getAttribute('href')))
-      .toEqual(['/ws-1/proj-c/docs/design-doc', '/ws-1/proj-c/docs/meeting-notes']);
+      .toEqual(['/ws-1/proj-c/docs/design-doc/view', '/ws-1/proj-c/docs/meeting-notes/view']);
   });
 
   it('⭐publicMode(공개 공유 보기)는 지금처럼 비활성 평문 — 링크 0 · 이동 0', async () => {

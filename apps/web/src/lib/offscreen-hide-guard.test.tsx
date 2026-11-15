@@ -26,7 +26,13 @@ const CLASS_SHAPE = /(^|[\s'"`])-?translate-[xy]-(full|\[[^\]\s]*100%[^\]\s]*\])
 const STYLE_SHAPE = /translate[XY]\(.*100.*%/; // 인자 안에 괄호가 올 수 있어(`(p - 1) * 100`) 같은 줄 전체로 본다
 // [까디르 4653 P2] 폭만큼 음수 위치로 밀어 내는 모양(데스크톱 오프캔버스 사이드바 `left-[calc(var(--sidebar-width)*-1)]` 등). 몇 px짜리
 // 장식 오프셋(`-left-[19px]` 점 · 손잡이)은 부류 밖.
-const OFFSET_SHAPE = /(?:^|[\s'"`:])-(?:left|right|top|bottom)-(?:full|\[100%\])|(?:left|right|top|bottom)-\[calc\([^\]]*\*\s*-1\)\]/;
+const OFFSET_SHAPE = /(?:^|[\s'"`:])-(?:left|right|top|bottom)-(?:full|\[100%\])|(?:left|right|top|bottom)-\[calc\([^\]]*\*\s*-1\)\]|(?:left|right|top|bottom)-\[calc\(\s*-1\s*\*[^\]]*\)\]/; // (both spellings: `calc(W*-1)` and `calc(-1*W)` — story 4941 PO: a guard must read the MEANING, not one spelling)
+// [story 4941 · PO] The class is «pushed out by its OWN SIZE» (an off-canvas hide). A `sticky` element lowered by the shell scroller's own bottom padding — `sticky bottom-[calc(var(--shell-launcher-clear,0px)*-1)]` —
+// is not one: nothing is hidden, the element sticks `--shell-launcher-clear` LOWER so its ground reaches the scroller's edge (the shell scroller carries that much `pb`). Named by what it is, on the same line as
+// `sticky` and only for that variable — a width (`--sidebar-width`) or any other value, with or without `sticky`, is still caught.
+const STICKY_GROUND = /\bsticky\b/;
+const SHELL_CLEAR_OFFSET = /\bbottom-\[calc\((?:var\(--shell-launcher-clear(?:,\s*0px)?\)\s*\*\s*-1|\s*-1\s*\*\s*var\(--shell-launcher-clear(?:,\s*0px)?\))\)\]/;
+export const isStickyGroundOffset = (text: string): boolean => STICKY_GROUND.test(text) && SHELL_CLEAR_OFFSET.test(text);
 const REVEAL_ON_FOCUS = /focus-within:-?translate-[xy]-0/;
 const DRAWER_HELPER = /closedDrawerProps\(/;
 // 오프캔버스는 같은 요소의 명시 inert 식, 또는 내용 칸에 inert를 내려 주는 컨텍스트(사이드바 — 레일은 살려야 해서 컨테이너 통째 inert 금지).
@@ -44,6 +50,7 @@ export function findUnguardedOffscreen(file: string, src: string): OffscreenSite
   lines.forEach((text, i) => {
     const kind = CLASS_SHAPE.test(text) ? 'class' : STYLE_SHAPE.test(text) ? 'style' : OFFSET_SHAPE.test(text) ? 'offset' : null;
     if (!kind) return;
+    if (kind === 'offset' && isStickyGroundOffset(text)) return; // not an off-canvas hide (see STICKY_GROUND above)
     const windowText = lines.slice(Math.max(0, i - ELEMENT_WINDOW), i + ELEMENT_WINDOW + 1).join('\n');
     // 오프캔버스(offset)는 같은 요소의 명시 inert 식도 처방으로 인정한다(사이드바처럼 서랍 훅이 아닌 자리).
     const guarded = (kind === 'class' && REVEAL_ON_FOCUS.test(text)) || DRAWER_HELPER.test(windowText) || (kind === 'offset' && INERT_ATTR.test(windowText));
@@ -77,7 +84,7 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
   });
 
   it('지금 잡히는 자리 전수(새 자리가 생기면 이 목록이 늘어난다 — 확인용)', () => {
-    const sites = ALL.flatMap(({ file, src }) => src.split('\n').flatMap((t, i) => (CLASS_SHAPE.test(t) || STYLE_SHAPE.test(t) || OFFSET_SHAPE.test(t) ? [`${file}:${i + 1}`] : [])));
+    const sites = ALL.flatMap(({ file, src }) => src.split('\n').flatMap((t, i) => ((CLASS_SHAPE.test(t) || STYLE_SHAPE.test(t) || OFFSET_SHAPE.test(t)) && !isStickyGroundOffset(t) ? [`${file}:${i + 1}`] : [])));
     expect(sites.map((s) => s.replace(/:\d+$/, '')).sort()).toEqual([
       'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
       'app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx',
@@ -118,6 +125,27 @@ describe('화면 밖으로 밀어 숨기기 — 종류 가드([SID:4288])', () =
     expect(probe('className="-right-[22px] top-1/2"')).toBe(0);
     expect(probe('"data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"')).toBe(1);
     expect(probe("hidden && '-left-full'")).toBe(1);
+    // ① story 4941: the SECOND spelling of the same off-canvas push (`-1*` first) is caught too — a guard that reads one spelling is a hole
+    expect(probe('"left-[calc(-1*var(--sidebar-width))]"')).toBe(1);
+    expect(probe('"data-[side=left]:group-data-[collapsible=offcanvas]:right-[calc(-1*var(--sidebar-width))]"')).toBe(1);
+    expect(probe('"top-[calc( -1 * var(--drawer-h))]"')).toBe(1);
+  });
+
+  it('[SID:4941] a sticky element lowered by the shell scroller\'s own bottom padding is outside the class (named by what it is) — a width, or the same value without sticky, is still caught', () => {
+    const footer = ALL.find((f) => f.file === 'components/desktop/desktop-setup-quick.tsx')!;
+    const line = footer.src.split('\n').find((l) => l.includes('data-testid="quick-start-row"'))!;
+    expect(line).toContain('--shell-launcher-clear');
+    expect(OFFSET_SHAPE.test(line)).toBe(true); // (it HAS the shape — the rule below is what lets it through, by meaning)
+    expect(isStickyGroundOffset(line)).toBe(true);
+    expect(findUnguardedOffscreen(footer.file, footer.src)).toEqual([]);
+    const probe = (l: string) => findUnguardedOffscreen('x.tsx', l).length;
+    expect(probe('<footer className="sticky bottom-[calc(var(--shell-launcher-clear,0px)*-1)] -mx-6">')).toBe(0);
+    expect(probe('<footer className="sticky bottom-[calc(-1*var(--shell-launcher-clear,0px))] -mx-6">')).toBe(0); // (either spelling of the SAME meaning)
+    expect(probe('<aside className="sticky bottom-[calc(var(--sidebar-width)*-1)]">')).toBe(1); // another variable: caught
+    expect(probe('<aside className="sticky left-[calc(-1*var(--sidebar-width))]">')).toBe(1); // a width, even with sticky: caught
+    expect(probe('<div className="bottom-[calc(var(--shell-launcher-clear,0px)*-1)]">')).toBe(1); // the same value WITHOUT sticky: not the named class — caught
+    // the survey of places does not list the sticky ground (it is not a place of the class)
+    expect(findUnguardedOffscreen(footer.file, footer.src.split('--shell-launcher-clear').join('--sidebar-width')).length).toBeGreaterThan(0); // 되돌리면 RED: lose the variable and it is caught
   });
 });
 

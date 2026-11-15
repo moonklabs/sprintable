@@ -94,6 +94,15 @@ describe('AppSidebar — 결재 배지 수 재조회는 이미 반영된 백필 
     expect(countCalls()).toBe(2);
   });
 
+  // story #4885 — 결재가 새로 생길 때도(conversation.gate_created) 사이드바 «결재» 수는 폴을 안 기다리고 다시 묻는다(같은 목록을 쓰는 홈 모델 · 폰 탭과 한 소리).
+  it('⭐conversation.gate_created(실시간 · 백필 아님)가 오면 «결재» 수를 다시 묻는다', async () => {
+    await mountSidebar();
+    expect(countCalls()).toBe(1);
+    await act(async () => { fire('conversation.gate_created', { gate_id: 'g10', created_xid: '1500' }); });
+    await flush();
+    expect(countCalls()).toBe(2);
+  });
+
   it('⭐까디르 시나리오 — 수를 센 순간 아직 안 끝난 트랜잭션(이벤트는 그 전에 남김 · 커밋은 뒤)의 백필은 다시 묻는다', async () => {
     // 해소 트랜잭션 xid 995가 이벤트를 남기고 외부 호출을 기다리는 동안 수를 셈 → 워터마크 990(995가 아직 진행 중). 커밋 뒤 재연결 백필로 옴.
     xmin = '990';

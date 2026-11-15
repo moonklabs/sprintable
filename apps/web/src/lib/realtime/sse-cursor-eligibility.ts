@@ -22,7 +22,9 @@
  * notify_attention_changed → push_to_org_members(..., {})) 도 presence와 동일 모양의 B계열
  * (Event DB row 0, payload 없음)이라 여기 편입한다.
  */
-const TRANSIENT_EVENT_NAMES = new Set(['presence', 'conversation.working', 'attention.changed']);
+//
+// story 4903 AC3 — `conversation.message_deleted` (backend `_announce_message_deleted`: pushed with `_push_to_agent`, no DB Event row — ids and moments only) is the same kind.
+const TRANSIENT_EVENT_NAMES = new Set(['presence', 'conversation.working', 'attention.changed', 'conversation.message_deleted']);
 
 /**
  * true면 이 이벤트의 네이티브 SSE id를 재개 커서로 승격해도 안전(DB로 해소 가능하다고 알려짐

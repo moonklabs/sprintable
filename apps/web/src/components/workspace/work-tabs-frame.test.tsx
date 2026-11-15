@@ -41,7 +41,7 @@ async function render(children: React.ReactNode = <div data-testid="page">page</
   });
 }
 const band = () => container.querySelector('[data-testid="work-tabs-band"]');
-const selectedTab = () => container.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
+const selectedTab = () => container.querySelector('[data-slot="ds-tab-nav-link"][aria-current="page"]')?.textContent;
 const topTitle = () => container.querySelector('[data-testid="topbar-title"]')?.textContent;
 
 beforeEach(() => {
@@ -56,7 +56,7 @@ afterEach(async () => {
 
 describe('WorkTabsFrame — 일감 탭 줄 한 자리(story #4291)', () => {
   it.each([
-    ['work-list', '목록'], ['flow', '보드'], ['sprints', '스프린트'], ['epics', '에픽'], ['retro', '회고'], ['hypotheses', '가설'],
+    ['work-list', '목록'], ['flow', '보드'], ['sprints', '스프린트'], ['epics', '목표'], ['retro', '회고'], ['hypotheses', '가설'],
   ])('⭐/%s — sticky 띠(px-4 pt-3) · 켜진 탭 %s · 탭은 a[href]', async (segment, label) => {
     nav.segments = [segment];
     await render();
@@ -65,7 +65,7 @@ describe('WorkTabsFrame — 일감 탭 줄 한 자리(story #4291)', () => {
     expect(band()!.className).toContain('top-0');
     expect(band()!.className).toContain('px-4');
     expect(selectedTab()).toBe(label);
-    const selected = container.querySelector('[role="tab"][aria-selected="true"]')!;
+    const selected = container.querySelector('[data-slot="ds-tab-nav-link"][aria-current="page"]')!;
     expect(selected.tagName).toBe('A');
     expect(selected.getAttribute('href')).toBe(`/my-ws/my-proj/${segment}`);
     expect(container.querySelector('[data-testid="page"]')).not.toBeNull();
@@ -75,7 +75,7 @@ describe('WorkTabsFrame — 일감 탭 줄 한 자리(story #4291)', () => {
     nav.segments = segments as string[];
     await render();
     expect(band()).toBeNull();
-    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(container.querySelector('nav[data-slot="ds-tab-nav"]')).toBeNull();
   });
 
   it('⭐로딩 사이(화면 슬롯 없음) 상단바 제목 = 도착 탭 화면과 같은 글자 · 칩 표시 / 화면 슬롯이 붙으면 화면이 이긴다', async () => {
