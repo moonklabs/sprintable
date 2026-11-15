@@ -80,6 +80,8 @@ const where = (page: Page) => page.evaluate(() => {
     foldButton: !!document.querySelector('[data-testid="register-email-open"]'),
     // only what is DRAWN counts (a hidden form is not «on the screen»)
     inputs: [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"]')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; }).length,
+    afterSubmit: (() => { const f = document.querySelector('[data-testid="register-email-form"]'); const kids = [...(f?.children ?? [])]; const i = kids.findIndex((c) => (c as HTMLElement).dataset.testid === 'register-submit'); return i < 0 ? ['(no submit)'] : kids.slice(i + 1).map((c) => (c as HTMLElement).dataset.testid ?? c.tagName.toLowerCase()); })(),
+    lastInputBottom: (() => { const els = [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"]')]; const e = els[els.length - 1] as HTMLElement | undefined; return e ? Math.round(e.getBoundingClientRect().bottom + scrollY) : null; })(),
     submitDrawn: (() => { const e = document.querySelector('[data-testid="register-submit"]'); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })(),
     docH: document.documentElement.scrollHeight, vw: innerWidth, vh: innerHeight, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
   };
@@ -105,7 +107,8 @@ test.describe('on a phone (390 × 844)', () => {
     const m = await where(page);
     expect(m.terms!.top).toBeLessThan(m.google!.top);
     expect(m.google!.bottom).toBeLessThanOrEqual(m.form!.top);
-    expect(m.form!.bottom).toBeLessThanOrEqual(m.submit!.bottom);
+    expect(m.afterSubmit.filter((x) => x !== 'register-submit-reason'), 'nothing but its reason line follows [회원가입] inside the form — no fold, no extra block after the button').toEqual([]);
+    expect(m.lastInputBottom!, 'the fields end above [회원가입] (story 4960: the form also holds the reason line under it, so the form itself ends later)').toBeLessThanOrEqual(m.submit!.top);
   });
 });
 
@@ -181,3 +184,38 @@ test.describe('the same one screen in English (390 × 844)', () => {
     }
   });
 });
+
+// story 4960 (the 4959 lap · PO rule: a block says WHY, in place) — [회원가입] is off until the fields and the terms are done; the reason is one line under it. Measured in Chromium at a phone and a desktop width, both languages:
+// the line is drawn, wraps inside the card (nothing cut, no sideways scroll), sits under the button and does not touch the next thing; ticking the box takes it away.
+const REASON = '[data-testid="register-submit-reason"]';
+const fillAll = async (page: Page) => {
+  await page.locator('input[type="text"]').fill('Lap User'); await page.locator('input[type="email"]').fill('lap@example.com'); await page.locator('input[type="password"]').fill('Abc123!!');
+};
+const reasonBox = (page: Page) => page.evaluate((sel) => {
+  const e = document.querySelector(sel) as HTMLElement | null; const b = document.querySelector('[data-testid="register-submit"]') as HTMLElement;
+  if (!e) return null; const r = e.getBoundingClientRect(); const br = b.getBoundingClientRect(); const card = e.closest('.rounded-2xl') as HTMLElement; const cr = card.getBoundingClientRect();
+  const next = e.parentElement!.nextElementSibling as HTMLElement | null; const nr = next?.getBoundingClientRect();
+  return { text: e.textContent, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), btnBottom: Math.round(br.bottom), cardLeft: Math.round(cr.left), cardRight: Math.round(cr.right), cut: e.scrollWidth > e.clientWidth + 1, nextTop: nr ? Math.round(nr.top) : null, docOverflowX: document.documentElement.scrollWidth > innerWidth + 1, vh: innerHeight };
+}, REASON);
+
+for (const [w, h, touch] of [[390, 844, true], [1440, 900, false]] as const) {
+  for (const locale of ['ko', 'en'] as const) {
+    test.describe(`the reason line at ${w} (${locale})`, () => {
+      test.use({ hasTouch: touch, isMobile: touch });
+      test(`[SID:4960] fields filled, terms not ticked: one line under [회원가입], inside the card, nothing cut; the box takes it away`, async ({ page }) => {
+        await open(page, w, h, locale);
+        await fillAll(page);
+        const m = (await reasonBox(page))!;
+        expect(m, 'the reason is drawn (reverted → nothing under the button)').not.toBeNull();
+        expect(m.text).toBe(locale === 'ko' ? '먼저 이용약관과 개인정보처리방침에 동의해 주세요.' : 'Please agree to the Terms of Service and Privacy Policy first.');
+        expect(m.top, 'under the button').toBeGreaterThanOrEqual(m.btnBottom);
+        expect(m.left).toBeGreaterThanOrEqual(m.cardLeft); expect(m.right).toBeLessThanOrEqual(m.cardRight);
+        expect(m.cut, 'no word cut').toBe(false); expect(m.docOverflowX).toBe(false);
+        if (m.nextTop !== null) expect(m.bottom, 'it does not touch what follows').toBeLessThanOrEqual(m.nextTop);
+        await page.locator('[data-testid="register-consent"] label').click();
+        expect(await reasonBox(page), 'ticked: the reason is gone').toBeNull();
+        expect(await page.getByTestId('register-submit').isEnabled()).toBe(true);
+      });
+    });
+  }
+}

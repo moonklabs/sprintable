@@ -1603,6 +1603,7 @@
     "or": "또는",
     "continueWithGoogle": "Google로 계속",
     "tosRequiredError": "먼저 이용약관과 개인정보처리방침에 동의해 주세요.",
+    "fieldsRequiredHint": "이름 · 이메일 · 비밀번호를 모두 채우면 가입할 수 있어요.",
     "registrationFailed": "가입에 실패했어요. 다시 시도해 주세요.",
     "registerEmailTaken": "이미 가입된 이메일이에요.",
     "registerTosRequired": "서비스 이용약관에 동의해야 해요.",
