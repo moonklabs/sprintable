@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from collections.abc import Iterable
 from typing import Any, Literal
 
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import and_, case, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -829,6 +829,55 @@ async def resolve_gate_holder_draft_id(
     if not await _gate_publication_is_live(session, gate_id=existing_gate.id):
         return None
     return holding_id
+
+
+def is_stale_head_event(gate: Gate | None, event_head_sha: str | None) -> bool:
+    """story 4955 — «this CI / check webhook is about a commit that is not the PR's current head»: the gate knows the current head (`pr_head_observed_sha`, from the lifecycle webhooks)
+    and the event's commit is another one. Such an event is an old commit's late news (CI that finished after a newer push): it must not rebind a pending gate's check-run, set the
+    approval anchor or overwrite the CI result. Unknown on either side → False (the old behaviour: this rule never stops a gate it cannot judge)."""
+    if gate is None or not event_head_sha:
+        return False
+    observed = gate.pr_head_observed_sha
+    return bool(observed) and observed != event_head_sha
+
+
+class HeadUnconfirmedError(RuntimeError):
+    """story 4955 — a CI event whose commit differs from the PR's recorded head could not be judged because GitHub's own answer for the PR's head could not be had (two failed lookups). Raised from
+    the CI webhook path so the delivery is rolled back and answered 500 — visible in GitHub's delivery log and re-sendable — instead of a legitimate current-head CI event being dropped silently."""
+
+
+def parse_github_timestamp(value: object) -> datetime | None:
+    """GitHub's ISO-8601 `…Z` timestamp → an aware datetime; anything else → None (the ordering then simply has no new watermark)."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+async def set_observed_head(
+    session: AsyncSession, gate_id: uuid.UUID, head_sha: str, *, expected: str | None, observed_at: datetime | None = None, gate: Gate | None = None,
+) -> bool:
+    """story 4955 — correct the PR's recorded current head to GitHub's own answer (a lifecycle webhook was lost, or a manual re-evaluation just read the real head). Compare-and-set: it applies only
+    while the record is still `expected` (the value the caller judged against) — a lifecycle webhook that committed in between wins, never this older answer. The watermark moves up to GitHub's
+    own `updated_at` of the PR (`observed_at`), so a delayed lifecycle webhook of an older head cannot turn the corrected record back. Returns whether it applied; the ORM instance is set from the
+    row the statement returned. The caller's transaction commits."""
+    result = await session.execute(
+        text(
+            "UPDATE gate SET pr_head_observed_sha = CAST(:sha AS text), pr_head_observed_at = GREATEST(pr_head_observed_at, CAST(:at AS timestamptz)) "
+            "WHERE id = CAST(:gate_id AS uuid) AND pr_head_observed_sha IS NOT DISTINCT FROM CAST(:expected AS text) "
+            "RETURNING pr_head_observed_at, pr_head_observed_sha"
+        ),
+        {"sha": head_sha, "at": observed_at, "gate_id": gate_id, "expected": expected},
+    )
+    row = result.first()
+    if row is None:
+        return False
+    if gate is not None:
+        gate.pr_head_observed_at, gate.pr_head_observed_sha = row
+    return True
 
 
 async def find_pending_merge_gates_by_head_sha(

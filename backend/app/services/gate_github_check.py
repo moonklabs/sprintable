@@ -27,6 +27,7 @@ from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.pull_request_story_link import PullRequestStoryLink
 from app.services.github_app import create_check_run, list_check_runs_for_ref, update_check_run
+from app.services.gate_service import is_stale_head_event
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 
 logger = logging.getLogger(__name__)
@@ -170,6 +171,7 @@ async def publish_gate_check(
     head_sha: str | None = None,
     repo_full_name: str | None = None,
     pr_number: int | None = None,
+    head_is_final: bool = False,
 ) -> None:
     """gate 현재 상태를 GitHub check-run으로 반영 — **자기 세션**을 연다(background task 표준
     패턴, `conversation_webhook.py::deliver_injected_event_webhook` 선례). ``head_sha``/
@@ -241,6 +243,16 @@ async def publish_gate_check(
                 head_sha = (link.evidence or {}).get("head_sha") if link else None
             if not head_sha:
                 logger.info("gate=%s: head_sha 미상 — check 발행 skip", gate_id)
+                return
+            # story 4955 — a publish for a commit that is not the PR's current head (the lifecycle webhooks' last word, `pr_head_observed_sha`) would rebind this gate's check-run
+            # to the old commit and leave the real head without its gate check (the PR then freezes). Old commit's late news → nothing to publish; no link evidence write either.
+            # `head_is_final`: a merge event — the PR's final head, a fact about the PR (not a commit's late CI): never judged here.
+            # An approved / auto_passed gate publishes from its anchor (`approved_head_sha`, forced above): that is authoritative and not judged here (a human approval must always get its check).
+            if not head_is_final and gate.status not in ("approved", "auto_passed") and is_stale_head_event(gate, head_sha):
+                logger.info(
+                    "gate=%s: head_sha(%s)가 PR의 현재 head(%s)가 아님 — check 발행 skip(옛 커밋의 늦은 신호)",
+                    gate_id, head_sha, gate.pr_head_observed_sha,
+                )
                 return
             if link is not None and (link.evidence or {}).get("head_sha") != head_sha:
                 link.evidence = {**(link.evidence or {}), "head_sha": head_sha}
@@ -356,6 +368,46 @@ async def publish_label_unlabel(org_id: uuid.UUID, repo_full_name: str, pr_numbe
         logger.exception("repo=%s pr=%s: 라벨 제거 처리 중 예외(fail-closed)", repo_full_name, pr_number)
 
 
+async def observe_pr_head(
+    session: AsyncSession, gate_id: uuid.UUID, head_sha: str | None, pr_updated_at: datetime | None, *, gate: Gate | None = None,
+) -> bool:
+    """story 4955 — record the PR's current head and its watermark in ONE atomic statement (the lifecycle webhooks are the first authority for «the head»; GitHub's own answer, asked by
+    `_event_is_for_old_head`, is the second). The head is taken only when this delivery is STRICTLY newer than the watermark seen so far (or nothing is recorded yet), so a late old `synchronize`
+    cannot turn it back — GitHub does not promise delivery order. A tie (one-second resolution) and a delivery without `updated_at` cannot be ordered by time: such a delivery never overwrites a
+    recorded head here — the caller (`reopen_gate_if_new_sha`) sees the head it announces is not the recorded one and settles it through GitHub's own answer. The ORM instance, when the caller
+    holds one, is set from the row the statement returned — never from this call's own input (another session may have won). Returns True when this delivery is stale (a newer one was already
+    observed). The caller's transaction commits."""
+    if pr_updated_at is None:
+        result = await session.execute(
+            text(
+                "UPDATE gate SET pr_head_observed_sha = CASE WHEN CAST(:sha AS text) IS NOT NULL AND pr_head_observed_sha IS NULL AND pr_head_observed_at IS NULL "
+                "THEN CAST(:sha AS text) ELSE pr_head_observed_sha END "
+                "WHERE id = CAST(:gate_id AS uuid) RETURNING pr_head_observed_at, pr_head_observed_sha"
+            ),
+            {"sha": head_sha, "gate_id": gate_id},
+        )
+        new_watermark, new_sha = result.one()
+        if gate is not None:
+            gate.pr_head_observed_at = new_watermark
+            gate.pr_head_observed_sha = new_sha
+        return False
+    result = await session.execute(
+        text(
+            "UPDATE gate SET "
+            "pr_head_observed_sha = CASE WHEN CAST(:sha AS text) IS NOT NULL AND (pr_head_observed_at IS NULL OR CAST(:new_ts AS timestamptz) > pr_head_observed_at) "
+            "THEN CAST(:sha AS text) ELSE pr_head_observed_sha END, "
+            "pr_head_observed_at = GREATEST(pr_head_observed_at, CAST(:new_ts AS timestamptz)) "
+            "WHERE id = CAST(:gate_id AS uuid) RETURNING pr_head_observed_at, pr_head_observed_sha"
+        ),
+        {"new_ts": pr_updated_at, "sha": head_sha, "gate_id": gate_id},
+    )
+    new_watermark, new_sha = result.one()
+    if gate is not None:  # the ORM instance (when the caller holds one) in step with the DB value
+        gate.pr_head_observed_at = new_watermark
+        gate.pr_head_observed_sha = new_sha
+    return new_watermark != pr_updated_at
+
+
 async def reopen_gate_if_new_sha(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -462,19 +514,18 @@ async def reopen_gate_if_new_sha(
         return False
     # 관측(상태 무관, 항상) — DB 원자적 GREATEST 갱신(위 6라운드 설명 참조). 판정(승인된
     # 게이트에서만)보다 먼저 수행.
-    is_stale_delivery = False
-    if pr_updated_at is not None:
-        result = await session.execute(
-            text(
-                "UPDATE gate SET pr_head_observed_at = GREATEST(pr_head_observed_at, "
-                "CAST(:new_ts AS timestamptz)) WHERE id = CAST(:gate_id AS uuid) "
-                "RETURNING pr_head_observed_at"
-            ),
-            {"new_ts": pr_updated_at, "gate_id": gate.id},
-        )
-        new_watermark = result.scalar_one()
-        gate.pr_head_observed_at = new_watermark  # ORM 인스턴스를 실제 DB 값과 동기화.
-        is_stale_delivery = new_watermark != pr_updated_at
+    # story 4955 — the watermark and the PR's current head are written together (observe_pr_head: one atomic statement)
+    is_stale_delivery = await observe_pr_head(session, gate.id, new_head_sha, pr_updated_at, gate=gate)
+    if not is_stale_delivery and gate.pr_head_observed_sha != new_head_sha:
+        # The delivery could not be ordered by time (a tie · no `updated_at`) and announces a head other than the recorded one: it may be the real new head (a lifecycle webhook before it was lost,
+        # two pushes in the same second) or an old one arriving late. Ask GitHub — the same single lookup the CI path uses: the real head == this delivery's commit → the record is corrected and
+        # the delivery stands; otherwise it is an old delivery (no re-pending for it, and the publication of its commit is judged stale). A lookup that fails twice raises (the delivery is
+        # rolled back and answered 500 — visible and re-sendable): an old delivery is never mistaken for the head, and a legitimate one is never silently dropped.
+        # (a delivery WITHOUT `updated_at` meeting a gate with no recorded head — one from before migration 0478 — is settled through GitHub too: `observe_pr_head` does not let it seed the head,
+        # and a head left unknown would let a late old commit's CI through the stale rule. A tie on `updated_at` keeps the old behaviour for such a gate: see the PR body «남김».)
+        from app.services.merge_verdict_gate import _event_is_for_old_head
+
+        is_stale_delivery = await _event_is_for_old_head(session, org_id, gate, new_head_sha, repo=repo_full_name, pr_number=pr_number, resolve_unknown=pr_updated_at is None)
     if gate.status not in ("approved", "auto_passed"):
         return False  # pending 등 — 관측은 위에서 이미 기록됨(status 무관), 재-pending 판정 대상만 아님.
     if is_stale_delivery:

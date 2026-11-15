@@ -424,6 +424,18 @@ async def _handle_issue_comment_event(
     return result, "processed"
 
 
+def parse_pr_updated_at(raw: object) -> datetime | None:
+    """`pull_request.updated_at` of a webhook → an aware datetime (None when absent or unparsable: that delivery then simply has no ordering key). GitHub's times are UTC: an offset-less one is
+    read as UTC here, never in the database session's zone (the SQL casts it to timestamptz)."""
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
@@ -490,13 +502,7 @@ async def _process_webhook_event(
     # 재-pending시키는 것을 막는 워터마크. GitHub는 pull_request 이벤트마다 현재
     # pull_request.updated_at(실 갱신 단조증가)을 동봉한다 — 파싱 실패/부재는 None(그
     # 이벤트는 이 방지축 없이 기존 SHA-diff-only 동작으로 fail-open, 크래시 아님).
-    _pr_updated_at_raw = (payload.get("pull_request") or {}).get("updated_at")
-    pr_updated_at: datetime | None = None
-    if _pr_updated_at_raw:
-        try:
-            pr_updated_at = datetime.fromisoformat(str(_pr_updated_at_raw).replace("Z", "+00:00"))
-        except ValueError:
-            pr_updated_at = None
+    pr_updated_at: datetime | None = parse_pr_updated_at((payload.get("pull_request") or {}).get("updated_at"))
 
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
@@ -707,6 +713,11 @@ async def _process_webhook_event(
                 pr_number=pr_number, repo=repo, ci_result=None, pr_result=None, head_sha=head_sha,
             )
             if decision.gate_id is not None:
+                # story 4955 — the gate was just created on this lifecycle webhook: it learns the PR's current head right here (same atomic statement as the watermark), so a CI
+                # webhook of an older commit that arrives next is not mistaken for this gate's news.
+                from app.services.gate_github_check import observe_pr_head as _observe_pr_head
+
+                await _observe_pr_head(session, decision.gate_id, head_sha, pr_updated_at)
                 gate_check_publish.append({
                     "org_id": org_id, "gate_id": decision.gate_id,
                     "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
@@ -847,6 +858,7 @@ async def _process_webhook_event(
         gate_check_publish.append({
             "org_id": org_id, "gate_id": _reconcile_decision.gate_id,
             "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
+            **({"head_is_final": True} if merged else {}),  # story 4955 — a merge event announces the PR's final head: the publish never judges it stale
         })
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시

@@ -1,0 +1,1 @@
+{"file": "tests/test_4955_stale_head_gate_events_realdb.py", "sec": 25.0, "provisional": true, "source": "story 4955(2026-11-15) — 잠정 추정(실측 전): 로컬 15개 한 판 약 14s(throwaway PG · 파일 단독), CI 실측 전이라 3039 계열 값을 따라 여유를 둔 잠정값. CI shard-durations 산출물이 쌓이면 실측으로 교체."}
