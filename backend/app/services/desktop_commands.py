@@ -214,7 +214,10 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
-            "pending_permission_request_id": None}
+            "pending_permission_request_id": None,
+            # story #4951 (①c-0): may THIS person look at the changed-file list of this session — the computer's pairing person alone (`desktop_changes.may_read`), the computer heard, the session not ended,
+            # remote control on. The web shows the «바뀐 파일» button only when true (the ask itself is judged again by the server: 403 otherwise). False until a session is picked below.
+            "can_read_changes": False}
     # story 4675 (F2) — the computer the agent is bound to (its live key's setup), said even before any session was reported:
     # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
     bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
@@ -232,6 +235,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
     state = _shown_state(pick, reachable)
     view.update({**_picked_view(pick, setup, state), "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup)})
+    from app.services.desktop_changes import may_read
+
+    view["can_read_changes"] = bool(view["remote_control"] and reachable and pick.state != "stopped" and may_read(setup, user_id))
     if state == "waiting_permission":  # the inbox link — only a request sent to this person
         view["pending_permission_request_id"] = (await db.execute(
             select(AgentPermissionRequest.id).where(
