@@ -45,16 +45,57 @@ function endAll(): void {
   for (const [id, done] of [...waiting]) { waiting.delete(id); done({ id, ok: false, code: 'page_hidden' }); }
 }
 
-/** Claim the shell's handle once (idempotent · SSR-safe). Call as early as the app boots. */
-export function claimPhoneBridge(): void {
-  if (typeof window === 'undefined' || send) return;
+/**
+ * Story 4964 — the shell's handle can arrive AFTER the page's first render. React Native WebView on Android hands the «before content
+ * loaded» script over from onPageStarted with evaluateJavascript (not a document-start script), so under load the page can run first; a claim
+ * made once, at that render, then reads «not the phone app» and the pairing screen says «open this in the phone app». Inside a React Native
+ * WebView (`window.ReactNativeWebView` is there from the start) a missing handle is therefore looked for again — every
+ * LATE_CLAIM_EVERY_MS up to LATE_CLAIM_MAX_MS — until it is claimed. Outside the phone app nothing is scheduled. The handle is still taken
+ * the moment it exists, so the window in which a same-origin frame could reach it first is no wider than the poll step.
+ */
+export const LATE_CLAIM_EVERY_MS = 50;
+export const LATE_CLAIM_MAX_MS = 5_000;
+let lateWatch: ReturnType<typeof setInterval> | null = null;
+
+function inReactNativeWebView(): boolean {
+  return typeof window !== 'undefined' && typeof (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView === 'object' && (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView !== null;
+}
+
+function stopLateWatch(): void {
+  if (lateWatch !== null) { clearInterval(lateWatch); lateWatch = null; }
+}
+
+/** one look at the shell's handle: the function that sends once it is claimed, else null (no handle · refused). A claim() that throws is thrown. */
+function lookForHandle(): Send | null {
   const handle = window.__sprintablePhone;
-  if (!handle || typeof handle.claim !== 'function') return;
+  if (!handle || typeof handle.claim !== 'function') return null;
   const s = handle.claim(receive);
-  if (typeof s !== 'function') return;
+  return typeof s === 'function' ? s : null;
+}
+
+/** the claim stands: from here on the readers are told (an exception of theirs is theirs — it is not caught here) */
+function adopt(s: Send): void {
   send = s;
   window.addEventListener('pagehide', endAll);
   for (const listen of [...phoneAppListeners]) listen();
+}
+
+/** Claim the shell's handle once (idempotent · SSR-safe). Call as early as the app boots. */
+export function claimPhoneBridge(): void {
+  if (typeof window === 'undefined' || send) return;
+  const first = lookForHandle();
+  if (first) { stopLateWatch(); adopt(first); return; } // a re-render can find the handle before the look's next step: the look ends with it
+  if (lateWatch !== null || !inReactNativeWebView()) return;
+  const startedAt = Date.now();
+  lateWatch = setInterval(() => {
+    if (Date.now() - startedAt >= LATE_CLAIM_MAX_MS) { stopLateWatch(); return; } // a step the page was too busy to run on time does not take a handle that came after the cap
+    let s: Send | null = null;
+    let broke = false;
+    // only the shell's claim() is guarded: one that throws ends the look (it would throw again every step) — never an interval that outlives the cap
+    try { s = send === null ? lookForHandle() : null; } catch { broke = true; }
+    if (s || broke || send !== null) stopLateWatch();
+    if (s) adopt(s);
+  }, LATE_CLAIM_EVERY_MS);
 }
 
 /** True only inside the phone app, once the handle was claimed. */
@@ -83,6 +124,7 @@ export function phoneCall(type: string, args: Record<string, unknown> = {}): Pro
 /** tests only: forget the claim */
 export function __resetPhoneBridgeForTest(): void {
   send = null;
+  stopLateWatch();
   waiting.clear();
   if (typeof window !== 'undefined') window.removeEventListener('pagehide', endAll);
 }
