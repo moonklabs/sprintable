@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { Banner } from '@/components/ds/banner';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { CountBadge } from '@/components/ds/count-badge';
 import { Input } from '@/components/ds/input';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem } from '@/components/ds/menu';
 import { NativeSelect } from '@/components/ds/select';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { RemoveOrgMemberDialog } from '@/components/settings/remove-org-member-dialog';
@@ -46,6 +47,23 @@ interface OrgInvite {
 interface OrgMembersSectionProps {
   orgId: string;
   currentRole: string;
+}
+
+/**
+ * story 4956 — a member row's right-click menu: the ONE existing action of the row, «제거» (the same button's own handler → the same confirm dialog «되돌릴 수 없어요»; nothing is removed by the menu itself).
+ * Rows that cannot be removed (the owner · yourself — `canEdit` false: the invisible placeholder button) get no menu at all. The item reads like the board card's and the goal row's menu (5820): the normal text colour,
+ * the light warning tint only on hover / keyboard highlight — never a red label.
+ */
+function MemberRowShell({ className, onRemove, removeLabel, children }: { className: string; onRemove: (() => void) | null; removeLabel: string; children: ReactNode }) {
+  if (!onRemove) return <div className={className}>{children}</div>;
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div className={className} />}>{children}</ContextMenuTrigger>
+      <MenuContent align="start">
+        <MenuItem className="hover:bg-destructive-tint data-highlighted:bg-destructive-tint" onClick={onRemove} data-testid="org-member-row-remove">{removeLabel}</MenuItem>
+      </MenuContent>
+    </ContextMenu>
+  );
 }
 
 export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps) {
@@ -386,7 +404,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
               const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
               const label = memberDisplayLabel(member.name, tc);
               return (
-                <div key={member.id} className={rowClass}>
+                <MemberRowShell key={member.id} className={rowClass} removeLabel={t('removeFromProject')} onRemove={canEdit ? () => setRemoveDialogMemberId(member.id) : null}>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-ds-body font-medium text-ds-ink">{label}</div>
                     {member.email ? <div className="truncate text-ds-small text-ds-ink-3">{member.email}</div> : null}
@@ -435,7 +453,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       </Button>
                     )}
                   </div>
-                </div>
+                </MemberRowShell>
               );
             })}
           </div>
