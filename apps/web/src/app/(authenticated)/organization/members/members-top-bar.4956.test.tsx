@@ -8,7 +8,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 
-const nav = vi.hoisted(() => ({ pathname: '/organization/members' as string }));
+const nav = vi.hoisted(() => ({ pathname: '/organization/members' as string, orgId: 'org-1' as string | null }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(''),
   usePathname: () => nav.pathname,
@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ prefetch: () => {}, push: () => {}, replace: () => {} }),
 }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', role: 'owner' }] }),
+  useDashboardContext: () => ({ orgId: nav.orgId, orgMemberships: [{ orgId: 'org-1', role: 'owner' }] }),
 }));
 vi.mock('@/components/settings/org-members-section', () => ({ OrgMembersSection: () => <div data-testid="members-section" /> }));
 
@@ -25,7 +25,7 @@ vi.mock('@/components/settings/org-members-section', () => ({ OrgMembersSection:
 
 let container: HTMLDivElement;
 let root: Root;
-beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { nav.orgId = 'org-1'; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
 function Probe() {
@@ -54,6 +54,19 @@ describe('[SID:4956] 구성원 top bar title', () => {
     expect(container.querySelector('[data-testid="members-section"]')).toBeTruthy();
     expect(probe().innerHTML).toBe(fallbackHtml);
     expect(probe().textContent).toBe(koMessages.nav.orgMembers);
+    expect(probe().dataset.chip).toBe('true');
+  });
+
+  it('⭐while the org is not known yet (the skeleton branch) the bar already says «구성원» — the same title, never an empty bar', async () => {
+    const { default: Loading } = await import('./loading');
+    await render(<Loading />);
+    const fallbackHtml = probe().innerHTML;
+    nav.orgId = null;
+    const { default: Page } = await import('./page');
+    await render(<Page />);
+    expect(container.querySelector('[data-testid="members-section"]'), 'the skeleton, not the list').toBeNull();
+    expect(probe().innerHTML).toBe(fallbackHtml);
+    expect(probe().textContent).toBe(koMessages.nav.orgMembers); // the skeleton branch without its slot → '' → RED
     expect(probe().dataset.chip).toBe('true');
   });
 });
