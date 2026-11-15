@@ -14,7 +14,6 @@ vi.mock('@/lib/db/server', () => ({ getServerSession: async () => ({ access_toke
 vi.mock('../dashboard/dashboard-shell', () => ({ DashboardShell: () => null }));
 vi.mock('@/components/storage/storage-capacity-toast-provider', () => ({ StorageCapacityToastProvider: () => null }));
 vi.mock('@/components/chat/cross-project-toast-provider', () => ({ CrossProjectToastProvider: () => null }));
-vi.mock('@/ee/components/billing/au-usage-banner', () => ({ AuUsageBanner: () => null }));
 vi.mock('@/components/auth/tab-owner-gate', () => ({ TabOwnerGate: ({ children }: { children: React.ReactNode }) => children }));
 // an exact sentinel (identity, not a name): the layout's tree must contain THIS component to count as «the retry screen»
 const FailureScreen = vi.hoisted(() => function AccountContextFailureStandIn() { return null; });
