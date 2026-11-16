@@ -11,7 +11,7 @@ import { usePairHref } from '@/hooks/use-pair-href';
 import { agentOnDevice, permissionLine, requestAge, shownSummary, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
-import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
+import { answerOnPhone, openOnPhone, type AnswerOutcome, type OpenOutcome } from '@/lib/phone-answer';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { PermissionPreviewView } from '@/components/inbox/permission-preview';
 
@@ -179,8 +179,11 @@ export function useAgentPermissionRequests() {
   const answer = async (row: PermissionRequest, decision: 'allow' | 'deny') => {
     const put = (a: Answer) => setAnswers((m) => new Map(m).set(row.id, { row, answer: a, at: Date.now() }));
     put({ kind: 'sending', decision });
-    put(await answerOnPhone(row.id, decision, { phoneCall }));
+    // story 4972: a sealed card is answered on the shell's own sheet — what is posted is what the shell says it signed
+    put(await answerOnPhone(row.id, decision, { phoneCall }, { sealed: row.sealed === true }));
   };
+  // story 4972: «open it in the app» — a sealed card read on the shell's sheet with nothing to sign (a terminal-only question)
+  const open = (row: PermissionRequest): Promise<OpenOutcome> => openOnPhone(row.id, { phoneCall });
 
   // story #4583 (Yuna copy.md row 4): while remote control is off no request reaches the server, so the list is empty without a word —
   // one muted line says why, above the list (web and the phone's approvals list are this component). Only with a connected computer:
@@ -195,12 +198,12 @@ export function useAgentPermissionRequests() {
     </div>
   ) : null;
 
-  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
+  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision), onOpen: open };
 }
 
 export function AgentPermissionRequests() {
   const t = useTranslations('agentPermissions');
-  const { shown, now, phone, auth, offLine, stale, answerFor: answerOf, onAnswer } = useAgentPermissionRequests();
+  const { shown, now, phone, auth, offLine, stale, answerFor: answerOf, onAnswer, onOpen } = useAgentPermissionRequests();
   if (shown.length === 0) return offLine; // nothing waiting: the inbox as it was (+ the off line)
 
   return (
@@ -212,7 +215,7 @@ export function AgentPermissionRequests() {
       </h2>
       {shown.map((r) => (
         <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} stale={stale} answer={answerOf(r)}
-          onAnswer={(decision) => onAnswer(r, decision)} />
+          onAnswer={(decision) => onAnswer(r, decision)} onOpen={() => onOpen(r)} />
       ))}
     </section>
     </>
@@ -252,16 +255,25 @@ function answerFor(answers: ReadonlyMap<string, Kept>, r: PermissionRequest): An
   return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
 }
 
-export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer, stale = false }: {
+export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer, onOpen, stale = false }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
   /** the last read of the list failed (the row is from before) — no lines of a file are shown on it */
   stale?: boolean;
   onAnswer: (decision: 'allow' | 'deny') => void;
+  /** story 4972: read a sealed card on the phone app's own sheet (nothing to sign) */
+  onOpen?: () => Promise<OpenOutcome>;
 }) {
   const t = useTranslations('agentPermissions');
   const locale = useLocale();
+  const sealed = r.sealed === true; // story 4972: the words are in an envelope only the paired phone opens — the server holds none
   const tool = shownToolName(r, locale); // story 4542: the server's name by the one rule (never the machine value from a known table)
   const line = permissionLine(r);
+  const lineText = line === 'expired' ? t('line.expired')
+    : line === 'remoteControlOff' ? t('line.remoteControlOff') // story #4589: no link here — the off line above the list has it
+      : line === 'unknown' ? t('line.unknown')
+        : line === 'terminalOnly' ? t('line.terminalOnly')
+          : line === 'noPairedPhone' ? t('line.noPairedPhone')
+            : t('line.answerOnPhone');
   const notes = [r.masked ? t('maskedNote') : null, r.truncated ? t('truncatedNote') : null].filter(Boolean);
   // the phone app answers here; everything else keeps the one read-only line
   const answersHere = phone && (answer !== null || (line === 'answerOnPhone' && r.state === 'pending' && r.answerable));
@@ -291,7 +303,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
       {/* story #4590 (Yuna §1): a terminal-only question whose tool was not read — where to see it, never a made-up name */}
       {tool !== null ? <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
-        : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
+        : sealed ? null : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
       {net === 'confirm' ? (!asking ? null :
         <div className="space-y-1" data-testid="agent-permission-net-confirm">
           <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
@@ -300,6 +312,8 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
         </div>
       ) : net === 'ask' ? (!(asking && line === 'answerOnPhone') ? null : // Yuna 4987: no «press [허용…]» where no button can come (no word from the computer · no paired phone)
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
+      ) : sealed ? ( // story 4972: no word of it here — one locked line (the shell's sheet shows it)
+        <p className="break-keep text-pretty text-sm text-muted-foreground" data-testid="agent-permission-sealed">{t('sealed.locked')}</p>
       ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{shownSummary(r.summary, r.masked)}</p>
@@ -311,35 +325,41 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
       ) : answersHere ? (
-        <PhoneAnswerPlace tool={tool ?? ''} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
+        <PhoneAnswerPlace tool={tool ?? ''} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} sealed={sealed} />
+      ) : sealed && phone && r.terminal_only && r.state === 'pending' && onOpen ? (
+        // a sealed terminal-only card opens in the phone app whatever the computer's state says (gone quiet · remote control off): the envelope is the phone's to read — the line below stays the one that is true
+        <SealedOpenPlace onOpen={onOpen} lineText={lineText} />
+      ) : sealed && !phone && line === 'answerOnPhone' ? (
+        // story 4972: a browser · the desktop app cannot open it — only the phone app can
+        <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{t('sealed.openInApp')}</p>
       ) : (
-        <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
-          {line === 'expired' ? t('line.expired')
-            : line === 'remoteControlOff' ? t('line.remoteControlOff') // story #4589: no link here — the off line above the list has it
-              : line === 'unknown' ? t('line.unknown')
-                : line === 'terminalOnly' ? t('line.terminalOnly')
-                : line === 'noPairedPhone' ? t('line.noPairedPhone')
-                  : t('line.answerOnPhone')}
-        </p>
+        <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{lineText}</p>
       )}
     </Card>
   );
 }
 
 /** The button place inside the phone app (명세 «폰 서명 · 권한 창 문구» ③ · B-2 결과 줄). */
-function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '', hostUnread = false }: {
+function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '', hostUnread = false, sealed = false }: {
   tool: string; auth: PhoneAuth | null; answer: Answer | null; onAnswer: (decision: 'allow' | 'deny') => void;
   /** story #4580 AC2: the network question's stage (its own buttons and result lines) */
   net?: 'ask' | 'confirm' | null; host?: string;
   /** story #4580 AC2 F2 (Yuna 2-7): the host could not be read — the request ended with nothing allowed */
   hostUnread?: boolean;
+  /** story 4972: a sealed card — one button opens it on the shell's own sheet, where the person answers; the result lines name no tool (none is known here) */
+  sealed?: boolean;
 }) {
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('agentPermissions');
   const pairHref = usePairHref(); // story 4780: [Close] of the pairing screen comes back to the inbox
   const a = answer;
   const pressed = a !== null; // a result after a press takes the focus the buttons had
-  const buttons = net === 'confirm' ? (
+  // story 4972: the shell's sheet carries [허용하지 않기] · [허용] — the web's one button only opens it (`deny` is the call's stand-in shape; the posted decision is the one the shell signed)
+  const buttons = sealed ? (
+    <div className="flex gap-2" data-testid="agent-permission-buttons">
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('deny')}>{t('sealed.open')}</Button>
+    </div>
+  ) : net === 'confirm' ? (
     // Yuna «4580 AC2» ②: the opening one filled · «허용하지 않기» outline and focused first (the person picks the opening side)
     <div className="flex gap-2" data-testid="agent-permission-buttons">
       <Button size="sm" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
@@ -367,6 +387,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
     case 'answered':
       if (net === 'ask' && a.decision === 'allow') return <Line focus>{hostUnread ? t('net.hostUnread') : t('net.checking')}</Line>; // the second card comes with the host
       if (net === 'confirm') return <Line focus>{a.decision === 'allow' ? t('net.allowedGo', { host }) : t('net.notAllowed')}</Line>;
+      if (sealed) return <Line focus>{a.decision === 'allow' ? t('sealed.allowed') : t('sealed.denied')}</Line>;
       return <Line focus>{a.decision === 'allow' ? t('phone.allowed', { tool }) : t('phone.denied', { tool })}</Line>;
     case 'answered_by':
       return <Line focus>{a.name && a.decision ? t(a.decision === 'allow' ? 'phone.allowedBy' : 'phone.deniedBy', { name: a.name }) : t('phone.answeredElsewhere')}</Line>;
@@ -395,6 +416,22 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
     case 'cancelled': return <>{buttons}<Line focus={pressed}>{t('phone.cancelled')}</Line></>;
     default: return <>{buttons}<Line focus={pressed}>{t('phone.failed')}</Line></>;
   }
+}
+
+/** story 4972: a sealed terminal-only question inside the phone app — nothing to answer here, only to read: [앱에서 열기] shows it on the shell's sheet */
+function SealedOpenPlace({ onOpen, lineText }: { onOpen: () => Promise<OpenOutcome>; lineText: string }) {
+  const t = useTranslations('agentPermissions');
+  const [result, setResult] = useState<OpenOutcome['kind'] | 'opening' | null>(null);
+  return (
+    <>
+      <div data-testid="agent-permission-buttons">
+        <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" disabled={result === 'opening'}
+          onClick={() => { setResult('opening'); void onOpen().then((o) => setResult(o.kind)); }}>{t('sealed.open')}</Button>
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{lineText}</p>
+      {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
+    </>
+  );
 }
 
 /** One line in the button place — a status; after a press it takes the focus (the buttons may be gone · as /desktop/remote). */

@@ -25,7 +25,13 @@ export type AnswerOutcome =
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 
-export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }): Promise<AnswerOutcome> {
+/**
+ * story 4972: a SEALED card's words only the phone can read, so it is answered ON the shell's own sheet ([허용하지 않기] · [허용]) — the web
+ * does not know the answer before the person gives it. `opts.sealed`: the decision posted is the one the shell says it SIGNED (its reply's
+ * `decision`); the `decision` passed is only the shell's call shape (a stand-in that, were the row not sealed after all, can only deny).
+ * A shell that does not say (older) → nothing is posted (`failed`): never an answer the person did not give.
+ */
+export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }, opts: { sealed?: boolean } = {}): Promise<AnswerOutcome> {
   const signed = await deps.phoneCall('approval.sign', { id, decision });
   if (!signed.ok) {
     switch (signed.code) {
@@ -47,6 +53,10 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
     }
   }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
+  if (opts.sealed) {
+    if (signed.decision !== 'allow' && signed.decision !== 'deny') return { kind: 'failed' };
+    decision = signed.decision;
+  }
   let res: Response;
   try {
     res = await fetchWithAuth(`/api/agent-permission-requests/${id}/answer`, {
@@ -70,5 +80,18 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
   if (code === 'device_unreachable') return { kind: 'unreachable' };
   if (code === 'expired' || (res.status === 410 && code !== 'withdrawn')) return { kind: 'expired' };
   if (code === 'withdrawn' || code === 'remote_control_off') return { kind: 'closed' };
+  return { kind: 'failed' };
+}
+
+/**
+ * story 4972: «open it in the app» — a sealed card read on the shell's own sheet with nothing to sign (a terminal-only question has no
+ * buttons): the web names the row, the shell reads it itself. `ok` = the sheet was shown and closed.
+ */
+export type OpenOutcome = { kind: 'opened' } | { kind: 'closed' } | { kind: 'failed' };
+
+export async function openOnPhone(id: string, deps: { phoneCall: Call }): Promise<OpenOutcome> {
+  const r = await deps.phoneCall('approval.view', { id });
+  if (r.ok) return { kind: 'opened' };
+  if (r.code === 'not_pending' || r.code === 'not_answerable') return { kind: 'closed' };
   return { kind: 'failed' };
 }

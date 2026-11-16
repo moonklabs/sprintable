@@ -7987,6 +7987,13 @@
     "truncatedNote": "앞 200자만 보여요",
     "workdir": "작업 폴더 · {path}",
     "toolUnread": "무엇을 묻는지는 그 컴퓨터의 터미널에서 볼 수 있어요",
+    "sealed": {
+      "locked": "내용이 잠겨 있어요",
+      "openInApp": "앱에서 열어 보세요",
+      "open": "앱에서 열기",
+      "allowed": "허용했어요",
+      "denied": "거부했어요"
+    },
     "line": {
       "answerOnPhone": "페어링된 폰에서 답할 수 있어요",
       "expired": "시간이 지나 여기서는 답할 수 없어요 — 그 컴퓨터의 터미널에서 답해 주세요",

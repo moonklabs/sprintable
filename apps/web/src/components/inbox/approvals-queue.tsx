@@ -999,7 +999,7 @@ export function ApprovalsQueue() {
     chip: permissionLine(r) === 'unknown' ? tPerm('chipUnknown') : tPerm('chip'),
     title: agentOnDevice(r.agent_name, r.device_name),
     // story 4949: the summary (which file · which command) sits between the tool and the age — three alike rows are told apart without opening them
-    subtitle: [shownToolName(r, locale) ?? tPerm('toolUnread'), rowSummary(r), tPerm('asked', requestAge(r, perm.now))].filter((x): x is string => x !== null).join(' · '),
+    subtitle: [shownToolName(r, locale) ?? (r.sealed === true ? tPerm('sealed.locked') : tPerm('toolUnread')), rowSummary(r), tPerm('asked', requestAge(r, perm.now))].filter((x): x is string => x !== null).join(' · '),
   });
   const sections: GateQueueSection[] = [
     { id: 'hand', title: t('queueSectionHand'), rows: handItems.map(rowOf) },
@@ -1033,7 +1033,7 @@ export function ApprovalsQueue() {
               // the same card the standalone group drew (phone-app-only buttons, the one read-only line elsewhere) — the stage is in its key so the network question's second card starts fresh
               <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">
                 <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth} stale={perm.stale}
-                  answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} />
+                  answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} onOpen={() => perm.onOpen(selectedPerm)} />
               </div>
             )
             : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}

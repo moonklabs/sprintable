@@ -179,6 +179,19 @@ describe('ApprovalsQueue — 4909 2d-2 the «에이전트 권한 요청» sectio
     expect(container.querySelector('[data-testid="agent-permission-card"]')).toBeNull();
   });
 
+  it('[4972] a SEALED request\'s row says the content is locked (never «what it asks is in the terminal»), and its card is the locked line + «앱에서 열어 보세요» in a browser', async () => {
+    permissionList = [perm('r1', { tool: null, summary: null, sealed: true })];
+    await mountQueue();
+    const row = rowsIn('perm')[0]!.textContent ?? '';
+    expect(row).toContain(koMessages.agentPermissions.sealed.locked);
+    expect(row).not.toContain(koMessages.agentPermissions.toolUnread);
+    await pickRow('perm:r1');
+    const card = detail()!.querySelector('[data-testid="agent-permission-card"]')!;
+    expect(card.querySelector('[data-testid="agent-permission-sealed"]')?.textContent).toBe(koMessages.agentPermissions.sealed.locked);
+    expect(card.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(koMessages.agentPermissions.sealed.openInApp);
+    expect(card.querySelector('[data-testid="agent-permission-buttons"]')).toBeNull();
+  });
+
   it('⭐picking a permission row opens the same card the group drew (web: the one read-only line, no buttons); picking an approval brings its card back', async () => {
     pending = [lowGate('g1', '첫째 결재 항목')];
     permissionList = [perm('r1')];

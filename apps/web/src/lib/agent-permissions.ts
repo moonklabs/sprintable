@@ -58,6 +58,8 @@ export interface PermissionRequest {
   host?: string | null;
   /** story #4580 AC2 F2: the daemon could not read the host from Claude's own text — the request ended, nothing allowed */
   host_unread?: boolean;
+  /** story 4972: the card's words are sealed (an envelope only the paired phone opens) — the server holds none of them (`summary` · `tool` · `preview` are null), so the web shows a locked line and the phone app opens it */
+  sealed?: boolean;
 }
 
 /** The line in the button place — one, in the spec's order: the window passed · remote control off · the computer gone quiet · only

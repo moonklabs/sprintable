@@ -7987,6 +7987,13 @@
     "truncatedNote": "Only the first 200 characters are shown",
     "workdir": "Working folder · {path}",
     "toolUnread": "What it asks is shown in that computer's terminal",
+    "sealed": {
+      "locked": "The content is locked",
+      "openInApp": "Open it in the app",
+      "open": "Open in app",
+      "allowed": "You allowed it",
+      "denied": "You denied it"
+    },
     "line": {
       "answerOnPhone": "You can answer from a paired phone",
       "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",

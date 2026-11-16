@@ -1,6 +1,6 @@
 // story #4532 — every way an answer from the phone app ends maps to one outcome (design doc 0dceadda v3.1 ① · contract 02d2cf71 §9 ③).
 import { describe, expect, it, vi } from 'vitest';
-import { answerOnPhone } from './phone-answer';
+import { answerOnPhone, openOnPhone } from './phone-answer';
 import type { PhoneAnswer } from './phone-bridge';
 
 // the libs call fetchWithAuth (the codebase's one way to the BFF); each case hands its server here
@@ -72,5 +72,37 @@ describe('[4532] answerOnPhone', () => {
   it('a network throw → failed (the request is left as it was)', async () => {
     const fetch = vi.fn(async () => { throw new TypeError('network'); });
     await expect(answerOnPhone('r-1', 'allow', serverFor(call(signedOk), fetch))).resolves.toEqual({ kind: 'failed' });
+  });
+});
+
+describe('[4972] a sealed card is answered on the shell\'s own sheet', () => {
+  it('posts the decision the shell SIGNED (its reply), not the call\'s stand-in', async () => {
+    const phoneCall = call({ ...signedOk, decision: 'allow' });
+    const fetch = reply(200, { ok: true });
+    await expect(answerOnPhone('r-1', 'deny', serverFor(phoneCall, fetch), { sealed: true })).resolves.toEqual({ kind: 'answered', decision: 'allow' });
+    expect(phoneCall).toHaveBeenCalledWith('approval.sign', { id: 'r-1', decision: 'deny' });
+    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({ decision: 'allow', signed: 'SIGNED', phone_key_id: 'k-1' });
+  });
+
+  it('a shell that does not say which decision it signed → failed, nothing posted (never an answer the person did not give)', async () => {
+    const fetch = reply(200);
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call(signedOk), fetch), { sealed: true })).resolves.toEqual({ kind: 'failed' });
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'maybe' }), fetch), { sealed: true })).resolves.toEqual({ kind: 'failed' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('a card that is not sealed keeps its own decision (the shell\'s reply field is ignored)', async () => {
+    const fetch = reply(200, { ok: true });
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'allow' }), fetch))).resolves.toEqual({ kind: 'answered', decision: 'deny' });
+    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).decision).toBe('deny');
+  });
+
+  it('openOnPhone: approval.view {id} — ok → opened · not_pending / not_answerable → closed · else failed', async () => {
+    const phoneCall = call({ id: 'w1', ok: true });
+    await expect(openOnPhone('r-1', { phoneCall })).resolves.toEqual({ kind: 'opened' });
+    expect(phoneCall).toHaveBeenCalledWith('approval.view', { id: 'r-1' });
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'not_pending' }) })).resolves.toEqual({ kind: 'closed' });
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'vault_unavailable' }) })).resolves.toEqual({ kind: 'failed' });
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'not_phone_app' }) })).resolves.toEqual({ kind: 'failed' });
   });
 });
