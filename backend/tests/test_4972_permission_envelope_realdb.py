@@ -190,6 +190,8 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
                 f"UPDATE agent_permission_requests SET input_hash = NULL WHERE id = '{rid}'",
                 f"UPDATE agent_permission_requests SET terminal_only = true, input_hash = NULL WHERE id = '{rid}'",  # a terminal-only row is never sealed
                 f"UPDATE agent_permission_requests SET sealed = false WHERE id = '{rid}'",  # neither text nor sealed
+                f"UPDATE agent_permission_requests SET envelope = 'null'::jsonb WHERE id = '{rid}'",  # a JSON null is no envelope
+                f"UPDATE agent_permission_requests SET envelope = '[]'::jsonb WHERE id = '{rid}'",  # nor is a list
                 f"UPDATE agent_permission_requests SET summary = 'x' WHERE id = '{rid}'",  # a sealed row carries no word as text
                 f"UPDATE agent_permission_requests SET tool = 'Bash' WHERE id = '{rid}'",
                 f"UPDATE agent_permission_requests SET workdir = '~/w' WHERE id = '{rid}'",
