@@ -7722,6 +7722,7 @@
       "alreadyDone": "{device} was already disconnected",
       "emptyTitle": "No connected devices yet",
       "emptyBody": "Download the desktop app above and finish its setup — your organization's devices will show up here.",
+      "emptyBodyInApp": "Finish its setup — your organization's devices will show up here.",
       "loadFailed": "Couldn't load the list",
       "retry": "Try again",
       "member": "Your organization's admins manage its desktop connections.",

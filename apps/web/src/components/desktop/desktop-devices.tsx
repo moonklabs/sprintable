@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Loader2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { desktopApp, subscribeDesktopApp, type SprintableDesktop } from '@/lib/desktop-app';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import {
   canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, agentNameList, deviceDateOptions, linkedSetupId, readRevoked, type DesktopDevice,
@@ -38,6 +39,8 @@ type Done = { kind: 'one'; device: string; already: boolean } | { kind: 'all'; d
 export function DesktopDevices() {
   const t = useTranslations('desktop.devices');
   const tDesktop = useTranslations('desktop');
+  // story 4970: inside the app the person has the app — the empty state does not tell them to get it (the one mark is desktopApp(), never a user-agent guess)
+  const inApp = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
   const { orgId, orgMemberships } = useDashboardContext();
   const manage = canManageDevices(orgMemberships.find((o) => o.orgId === orgId)?.role);
   const [computers, setComputers] = useState<DesktopComputer[] | null>(null);
@@ -188,7 +191,7 @@ export function DesktopDevices() {
               {tDesktop('loading')}
             </p>
           ) : computers.length === 0 ? (
-            <DesktopEmptyState title={t('emptyTitle')} testId="desktop-devices-empty">{t('emptyBody')}</DesktopEmptyState>
+            <DesktopEmptyState title={t('emptyTitle')} testId="desktop-devices-empty">{t(inApp ? 'emptyBodyInApp' : 'emptyBody')}</DesktopEmptyState>
           ) : (
             <Card className="overflow-hidden p-0">
               <ul className="divide-y divide-border">
