@@ -53,10 +53,26 @@ def test_a_missing_field_and_a_non_object_are_refused():
             check_envelope(bad)
 
 
-def test_the_body_size_limit():
-    check_envelope(good(ct=b64(256 * 1024 + 16)))
+def test_the_body_size_limit_is_the_kinds_and_is_judged_before_decoding():
+    check_envelope(good(kind="approval_card", ct=b64(16 * 1024 + 16)))
     with pytest.raises(ValueError):
-        check_envelope(good(ct=b64(256 * 1024 + 17)))
+        check_envelope(good(kind="approval_card", ct=b64(16 * 1024 + 17)))  # a card is small
+    check_envelope(good(kind="send_prompt", ct=b64(256 * 1024 + 16)))  # another kind keeps the general cap
+    with pytest.raises(ValueError):
+        check_envelope(good(kind="send_prompt", ct=b64(256 * 1024 + 17)))
+    with pytest.raises(ValueError, match="too long"):
+        check_envelope(good(ct="A" * 5_000_000))  # refused on its length, not after decoding 5 MB
+
+
+@pytest.mark.parametrize("bad", ["a\x00b", "a\nb", "a\x7fb", "a\ud800b", "\udc00", "x\u2028y"])
+def test_an_id_with_a_control_character_or_a_lone_surrogate_is_refused_not_a_500(bad):
+    for field in ("setup_id", "session_key", "command_id", "from"):
+        with pytest.raises(ValueError):
+            check_envelope(good(**{field: bad}))
+    with pytest.raises(ValueError):
+        check_envelope(good(to=["p1", bad], wraps=[{"to": "p1", "enc": b64(32), "ek": b64(48)}, {"to": bad, "enc": b64(32), "ek": b64(48)}]))
+    with pytest.raises(ValueError):
+        check_envelope(good(rec={"conversation_id": bad, "record_id": "r", "rec_gen": 1}))
 
 
 def test_a_field_name_of_the_callers_is_never_echoed_and_a_spare_bit_is_refused():

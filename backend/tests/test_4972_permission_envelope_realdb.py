@@ -21,6 +21,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 )
 from tests.test_4529_desktop_relay_realdb import _device, _tok
 from tests.test_4533_agent_permissions_realdb import (  # noqa: F401 — the autouse remote-control fixture applies here too
+    PHONES,
     REQS,
     _answer,
     _ask,
@@ -211,3 +212,86 @@ async def test_a_sealed_row_is_never_a_network_question_the_second_stage_is_refu
         assert (await _post_ask(c, device, body)).status_code == 201
         r = await c.post(f"/api/v2/desktop/relay/permission-requests/{body['request_id']}/confirm-host", json={"host": "gitlab.com", "expires_at": body["expires_at"]}, headers=_tok(token))
         assert r.status_code in (409, 422) and "gitlab" not in r.text, r.text  # fail closed: a sealed card has no second stage
+
+
+async def _card(request_id):
+    return (await _sql(fetch=f"SELECT state, result_code, envelope, input_hash, preview, sealed FROM agent_permission_requests WHERE request_id = '{request_id}'"))[0]
+
+
+async def test_the_minute_sweep_lets_go_of_the_words_of_a_window_that_passed_without_waiting_for_a_report(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import purge_open_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972h"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        sealed_ask, quiet_text = _sealed_ask(agent, sid), _ask(agent)
+        lines = _ask(agent, tool="Edit", summary="notes/a.md", preview={"op": "edit", "blocks": [{"removed": ["a"], "added": ["b"], "removed_more": 0, "added_more": 0}], "blocks_more": 0, "replace_all": False, "withheld": None})
+        for b in (sealed_ask, quiet_text, lines):
+            assert (await _post_ask(c, device, b)).status_code == 201
+        fresh = _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, fresh)).status_code == 201
+        for b in (sealed_ask, quiet_text, lines):
+            await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{b['request_id']}'")
+        async with async_session_factory() as s:  # no report of that computer, nobody reads a list: the cron's minute job
+            assert await purge_open_cards(s) == 2  # the sealed card and the preview — not the text row that holds no words, not the one still waiting
+            await s.commit()
+        state, code, envelope, input_hash, _p, sealed = await _card(sealed_ask["request_id"])
+        assert (state, code, envelope, input_hash, sealed) == ("expired", "expired", None, None, True)  # the row stays whole
+        assert (await _card(lines["request_id"]))[0:2] == ("expired", "expired") and (await _card(lines["request_id"]))[4] is None
+        assert (await _card(lines["request_id"]))[3] == lines["input_hash"]  # a text row keeps its hash
+        assert (await _card(quiet_text["request_id"]))[0] == "pending"
+        assert (await _card(fresh["request_id"]))[2] is not None
+        async with async_session_factory() as s:
+            assert await purge_open_cards(s) == 0  # idempotent
+
+
+async def test_a_sealed_row_lets_go_of_its_hash_when_its_question_ends_and_not_before(world):
+    from sqlalchemy.exc import IntegrityError
+
+    async with _client() as c:
+        name = "d4424 mac 4972i"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        a, b = _sealed_ask(agent, sid), _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, a)).status_code == 201 and (await _post_ask(c, device, b)).status_code == 201
+        assert (await _card(a["request_id"]))[3] == a["input_hash"]  # waiting: the hash is what the phone signs with
+        with pytest.raises(IntegrityError):  # …and the database does not let a WAITING sealed row lose it
+            await _sql(f"UPDATE agent_permission_requests SET input_hash = NULL WHERE request_id = '{a['request_id']}'")
+        with pytest.raises(IntegrityError):  # a sealed row has no second stage
+            await _sql(f"UPDATE agent_permission_requests SET stage = 'confirm' WHERE request_id = '{a['request_id']}'")
+        [v1, v2] = sorted((await c.get(REQS, headers=_person(OWNER))).json()["requests"], key=lambda v: v["request_id"] != a["request_id"])
+        ok = await c.post(f"{REQS}/{v1['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert ok.status_code == 200, ok.text
+        assert (await _card(a["request_id"]))[3] is None  # answered
+        w = await c.post(f"/api/v2/desktop/relay/permission-requests/{b['request_id']}/withdraw", json={"reason": "answered_locally"}, headers=_tok(token))
+        assert w.status_code == 200 and (await _card(b["request_id"]))[3] is None  # withdrawn
+
+
+async def test_taking_off_the_last_phone_ends_the_sealed_cards_and_another_phone_keeps_them(world):
+    async with _client() as c:
+        name = "d4424 mac 4972j"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        p2, der2 = await _register(c, label="two")
+        await _pair(c, token, der1, der2)
+        body = _sealed_ask(agent, await _setup_id(name))
+        assert (await _post_ask(c, device, body)).status_code == 201
+        r = await c.delete(f"{PHONES}/{p1}", headers=_person(OWNER))
+        assert r.status_code in (200, 204), r.text
+        assert (await _card(body["request_id"]))[0] == "pending" and (await _card(body["request_id"]))[2] is not None  # the person still has a phone on this computer
+        r = await c.delete(f"{PHONES}/{p2}", headers=_person(OWNER))
+        assert r.status_code in (200, 204), r.text
+        state, code, envelope, input_hash, _p, sealed = await _card(body["request_id"])
+        assert (state, code, envelope, input_hash, sealed) == ("withdrawn", "session_ended", None, None, True)

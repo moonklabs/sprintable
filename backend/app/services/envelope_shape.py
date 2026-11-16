@@ -18,6 +18,8 @@ ENVELOPE_KINDS = frozenset({
     "key_notice", "migrate_approve", "record_handoff", "direct_open", "direct_offer", "direct_close",
 })
 MAX_CT_BYTES = 256 * 1024
+# a card's words are a few hundred characters and a preview of at most 2400 — a card envelope is small (the host pads to a fixed width inside this cap)
+MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024}
 MAX_TO = 16
 MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1
@@ -28,6 +30,8 @@ _B64URL = re.compile(r"[A-Za-z0-9_-]+")  # used with fullmatch — `$` would let
 
 def _b64(value: object, *, exact_bytes: int | None = None, min_bytes: int = 1, max_bytes: int | None = None, what: str) -> int:
     """a canonical base64url text (no padding) → the number of bytes it holds"""
+    if isinstance(value, str) and max_bytes is not None and len(value) > (max_bytes * 4 + 2) // 3 + 4:
+        raise ValueError(f"envelope: {what} is too long")  # judged on the TEXT, before anything is decoded
     if not isinstance(value, str) or not value or not _B64URL.fullmatch(value) or len(value) % 4 == 1:
         raise ValueError(f"envelope: {what} is not base64url")
     try:  # canonical: the text must be the ONE spelling of its bytes (no spare bits set)
@@ -50,9 +54,17 @@ def _int(value: object, what: str) -> int:
     return value
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
 def _text(value: object, what: str) -> str:
-    if not isinstance(value, str) or len(value) > MAX_TEXT:
+    """a short text with no control character (NUL included) and no lone surrogate — jsonb refuses both, which would be a 500, and a lone surrogate is two different texts to the phone and the host"""
+    if not isinstance(value, str) or len(value) > MAX_TEXT or _CONTROL.search(value):
         raise ValueError(f"envelope: {what} is not a short text")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(f"envelope: {what} is not a short text") from None
     return value
 
 
@@ -87,7 +99,7 @@ def check_envelope(env: object, *, kind: str | None = None) -> dict:
             raise ValueError("envelope: a wrap does not match its receiver")
         _b64(w["enc"], exact_bytes=32, what="wrap enc")
         _b64(w["ek"], exact_bytes=48, what="wrap key")  # a 32-byte body key + the 16-byte tag
-    _b64(env["ct"], min_bytes=20, max_bytes=MAX_CT_BYTES + 16, what="body")  # a 4-byte frame + the tag at the least
+    _b64(env["ct"], min_bytes=20, max_bytes=MAX_CT_BYTES_BY_KIND.get(env["kind"], MAX_CT_BYTES) + 16, what="body")  # a 4-byte frame + the tag at the least
     _b64(env["sig"], min_bytes=8, max_bytes=80, what="signature")
     rec = env.get("rec")
     if rec is not None:

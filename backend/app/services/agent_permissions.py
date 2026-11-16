@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -241,6 +241,7 @@ async def remove_pair(
         return False
     pair.removed_at, pair.removed_by, pair.removal_acked_at = _now(), actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {setup_id})  # story 4972: a sealed card nobody can open any more does not wait out its window
     _wake_device_after_commit(db, setup_id)
     return True
 
@@ -278,6 +279,7 @@ async def remove_computer_pairs(
         _wake_device_after_commit(db, pair.setup_id)
         removed += 1
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
     return removed
 
 
@@ -406,6 +408,7 @@ async def remove_phone(
     for pair in pairs:
         pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
     session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
@@ -962,14 +965,62 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
         row.state, row.result_code, row.preview, row.envelope = "withdrawn", "host_unread", None, None
+        if row.sealed:
+            row.input_hash = None
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
         row.state, row.result_code, row.preview, row.envelope = "withdrawn", body.reason, None, None  # story 4949: the lines go with the question (4972: so does the sealed card)
+        if row.sealed:
+            row.input_hash = None  # the hash of the raw input is the one value derived from the words that would stay: it goes when the question ends (카디르 lens M2)
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
+
+
+# story 4972 (카디르 lens M1): a card's words are kept for as long as its question waits and not longer — a sealed card is opened by the phone's STATIC key (HPKE AUTH, no
+# forward secrecy), so how long the envelope stays is how long a later leak of that key can read it. Three ways a question ends without an answer: its window passes (the
+# sweep below, run by the existing minute job `changes-purge`), the computer's last paired phone is taken off (`_end_cards_without_phone`), and a withdrawal / an answer (above).
+_OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeof(AgentPermissionRequest.preview) == "object")
+
+
+async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None) -> int:
+    """Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
+    without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
+    now = now or _now()
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS)
+        .values(state="expired", result_code="expired", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "expired")
+    return len(ended)
+
+
+async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) -> int:
+    """A person's last live pair with this computer was just removed (a pair · the computer's pairs · the whole phone): a pending request of that person that holds words
+    can be opened by nobody now — it ends as `withdrawn` (`session_ended`) and the words go. A person with another live phone on the computer keeps their cards."""
+    if not setup_ids:
+        return 0
+    has_phone = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_(None),
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id, RemoteDevice.revoked_at.is_(None))
+    )
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", _OPEN_WORDS, ~has_phone)
+        .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "withdrawn")
+    return len(ended)
 
 
 # ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
@@ -1216,6 +1267,8 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.decision, row.answered_at = body.decision, now
     row.preview = None  # story 4949: answered — the file's lines are no longer needed here
     row.envelope = None  # story 4972: nor the sealed card
+    if row.sealed:
+        row.input_hash = None  # (the command above already carries what the daemon needs) — see the withdrawal
     phone.last_used_at = now
     await db.flush()
     _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens
