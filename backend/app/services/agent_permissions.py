@@ -630,6 +630,7 @@ async def reveal_pairing(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.U
     that sent the offer. Once: the same value again is fine, another is refused (the number the person compares must not move)."""
     from app.services import pairing_sessions
 
+    await pairing_sessions.lock_setup(db, setup.id)  # against a registration being made at the same moment
     if await pairing_sessions.has_session(db, setup.id):  # story 4972: an old-style offer is not carried on for a computer on the new procedure
         raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     row = (await db.execute(

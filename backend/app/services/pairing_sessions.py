@@ -233,7 +233,7 @@ async def _mine(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, se
     row = (await db.execute(
         select(RemoteDevicePairingSession).join(DesktopSetup, DesktopSetup.id == RemoteDevicePairingSession.setup_id)
         .where(RemoteDevicePairingSession.setup_id == setup_id, RemoteDevicePairingSession.offer_id == offer_id,
-               RemoteDevicePairingSession.committed_by == member_id, DesktopSetup.org_id == org_id).with_for_update()
+               RemoteDevicePairingSession.committed_by == member_id, DesktopSetup.org_id == org_id).with_for_update(of=RemoteDevicePairingSession)  # the session row only: the lock order stays «computer row, then its sessions» (a registration takes them in that order)
     )).scalar_one_or_none()
     if row is None:
         raise DesktopRelayError(404, "offer_not_found", "no such pairing offer of yours")

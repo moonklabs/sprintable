@@ -336,3 +336,19 @@ async def test_08_an_old_style_offer_made_before_the_registration_is_not_carried
         assert (ra.status_code, rb.status_code) == (201, 201)
         live = (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairing_sessions WHERE setup_id = '{device['setup_id']}' AND burned_at IS NULL AND expires_at > now()"))[0][0]
         assert live == 1
+
+
+async def test_09_phone_reads_and_registrations_at_the_same_moment_do_not_deadlock(world):
+    import asyncio
+
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        offer_id, _ = await _register_offer(c, device)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{offer_id}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        state = f"{PHONE}/pairing-sessions/{offer_id}?setup_id={device['setup_id']}"
+        calls = []
+        for _i in range(6):
+            calls.append(c.get(state, headers=_person(OWNER)))
+            calls.append(c.post(f"{REL}/pairing-sessions", json={"offer_id": str(uuid.uuid4()), "expires_at": _exp()}, headers=_tok(device["device_token"])))
+        done = await asyncio.wait_for(asyncio.gather(*calls), timeout=60)  # a deadlock would show as a timeout (or a 500 from the database's own deadlock break)
+        assert all(r.status_code in (200, 201, 404, 409) for r in done), [r.status_code for r in done]
