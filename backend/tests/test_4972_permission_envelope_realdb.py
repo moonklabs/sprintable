@@ -417,6 +417,56 @@ async def test_a_sealed_terminal_only_card_of_a_disconnected_computer_is_not_ser
         assert all(v["envelope"] is None for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]), "the computer was disconnected: no envelope goes out for it"
 
 
+async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_terminal_only_row(world):
+    """the migration's own downgrade() and upgrade() run against the test database (not only their SQL strings): down keeps the row as a words-less terminal-only card under 0479's rule, up restores 0480's."""
+    import importlib.util
+    import pathlib
+
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480c", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    async with _client() as c:
+        name = "d4424 mac 4972z"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        body = _sealed_ask(agent, await _setup_id(name))
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+
+    def run(sync_conn, fn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            fn()
+
+    async def def_():
+        async with eng.begin() as conn:
+            return (await conn.execute(text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'"))).scalar_one()
+
+    try:
+        norm = lambda t: "".join(str(t).split())  # noqa: E731
+        async with eng.begin() as conn:
+            await conn.run_sync(run, m.downgrade)
+        assert "NOTsealed" in norm(await def_()).replace("(NOTsealed)", "NOTsealed") and norm(await def_()).count("NOTsealed") >= 2, "0479's rule is back (NOT sealed on the terminal-only branch too)"
+        row = (await _sql(fetch=f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))[0]
+        assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
+    finally:
+        async with eng.begin() as conn:
+            await conn.run_sync(run, m.upgrade)
+        await eng.dispose()
+    final = (await _sql(fetch="SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'"))[0][0]
+    assert "".join(final.split()).count("NOTsealed") == 1, "0480's rule is back after upgrade (only the first NOT sealed — the words rule — is left)"
+
+
 async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade_runs_the_sql(world):
     import importlib.util
     import inspect
@@ -432,3 +482,44 @@ async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade
     norm = lambda t: "".join(str(t).split())  # noqa: E731
     assert norm(ck.sqltext) == norm(m._NEW_RULE), "a schema made from the models carries the rule the migrations leave"
     assert "_DOWNGRADE_SQL" in inspect.getsource(m.downgrade) and "NOT sealed" in m._OLD_RULE
+
+
+async def test_the_minute_sweep_ends_a_card_whose_person_lost_every_phone_by_a_path_that_does_not_check(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972y"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        p2, der2 = await _register(c, label="two")
+        await _pair(c, token, der1, der2)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # the person has two live phones
+        # two removals that each saw the other's pair standing (concurrent) and an account reclaim that revokes keys, as the rows they leave: every pair gone / every key revoked, no card ended
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'")
+        assert (await _card(body["request_id"]))[0] == "pending" and (await _card(body["request_id"]))[2] is not None
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 1
+            await s.commit()
+        state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+        assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True)
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # idempotent
+        # revoked keys instead of removed pairs
+        again = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = NULL WHERE setup_id = '{sid}'")
+        assert (await _post_ask(c, device, again)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id IN ('{p1}', '{p2}')")
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 2
+            await s.commit()
+        assert (await _card(again["request_id"]))[2] is None and (await _card(t["request_id"]))[2] is None

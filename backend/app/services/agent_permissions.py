@@ -1027,6 +1027,16 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) 
     return len(ended)
 
 
+async def end_orphan_cards(db: AsyncSession) -> int:
+    """The minute job's second sweep (story 4972): a pending request that still holds words (a sealed envelope · the lines of a preview) whose person has NO live phone on that computer any more ends here, whichever way the phone went
+    (an account reclaim that revokes keys · two removals that ran at the same time and each saw the other's pair still standing — the paths above do their own check when they run and cannot see each other's uncommitted change).
+    Reads only the setups that have such a request; the end itself is `_end_cards_without_phone`, the same rule as the paths above. → how many ended."""
+    setup_ids = set((await db.execute(
+        select(AgentPermissionRequest.setup_id).where(AgentPermissionRequest.state == "pending", _OPEN_WORDS).distinct()
+    )).scalars().all())
+    return await _end_cards_without_phone(db, setup_ids)
+
+
 # ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
 
 
