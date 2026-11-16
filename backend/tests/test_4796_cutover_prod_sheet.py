@@ -949,7 +949,16 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     kinds = [h for h in hits if h.startswith("0477_")]
     assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds), kinds
     assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in kinds), kinds
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_"))]
+    # story 4972: 0479 is what the reading lists as FOUR lines of upgrade(): the column `sealed` (NOT NULL with a constant default — Postgres stores that without rewriting the table, and an old revision that never names it
+    # gets false), the old CHECK of `agent_permission_requests` dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan that does not block writers). Why a running old revision lives with it:
+    # it never writes `sealed` or `envelope` (the other new column — nullable, so not listed), and every row it writes (text tool + summary, a hash, no envelope, sealed false; or a terminal-only row with no hash) satisfies the new rule
+    # as it satisfied the old; nothing existing is renamed, dropped, backfilled or rewritten. The downgrade() is not read (it keeps the sealed rows as terminal-only cards, then restores the old CHECK).
+    sealed = [h for h in hits if h.startswith("0479_")]
+    assert len(sealed) == 4, sealed
+    assert any("add_column" in h and '"sealed"' in h and "nullable=False" in h and "server_default" in h for h in sealed), sealed
+    assert any("drop_constraint" in h and "_CHECK" in h for h in sealed) and any("NOT VALID" in h for h in sealed) and any("VALIDATE CONSTRAINT" in h for h in sealed), sealed
+    assert not any(k in h for h in sealed for k in ("DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no data written, no column dropped or retyped"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
