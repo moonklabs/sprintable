@@ -151,6 +151,10 @@ async def test_the_words_may_not_come_twice_and_the_header_must_be_this_requests
         t_hash = _sealed_ask(agent, sid)
         t_hash["terminal_only"] = True
         assert (await _post_ask(c, device, t_hash)).status_code == 422
+        # a sealed question that is not terminal-only has something to sign: no hash, no question
+        no_hash = _sealed_ask(agent, sid)
+        del no_hash["input_hash"]
+        assert (await _post_ask(c, device, no_hash)).status_code == 422
         # a header that is another request's: another setup · session · request id · window
         for over in ({"setup_id": "00000000-0000-0000-0000-000000000000"}, {"session_key": "s-other"}, {"command_id": "00000000-0000-0000-0000-000000000001"}, {"expires_at": 1_000}):
             bad = _sealed_ask(agent, sid)
@@ -369,6 +373,6 @@ async def test_the_downgrade_of_0480_leaves_a_sealed_terminal_only_row_that_0479
         body["terminal_only"] = True
         assert (await _post_ask(c, device, body)).status_code == 201
     # what downgrade() does to such a row, then 0479's rule over it: it holds
-    await _sql("UPDATE agent_permission_requests SET envelope = NULL, sealed = false WHERE sealed AND terminal_only")
+    await _sql(m._DOWNGRADE_SQL)
     bad = (await _sql(fetch=f"SELECT count(*) FROM agent_permission_requests WHERE NOT ({m._OLD_RULE})"))[0][0]
     assert bad == 0

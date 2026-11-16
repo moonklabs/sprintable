@@ -32,6 +32,10 @@ _OLD_RULE = _ROW_WORDS + (
 )
 
 
+# a sealed terminal-only row cannot keep its shape under 0479's rule: it stays as a terminal-only card without words
+_DOWNGRADE_SQL = "UPDATE agent_permission_requests SET envelope = NULL, sealed = false WHERE sealed AND terminal_only"
+
+
 def upgrade() -> None:
     op.drop_constraint(_CHECK, "agent_permission_requests", type_="check")
     op.execute(f"ALTER TABLE agent_permission_requests ADD CONSTRAINT {_CHECK} CHECK ({_NEW_RULE}) NOT VALID")
@@ -40,7 +44,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(_CHECK, "agent_permission_requests", type_="check")
-    # a sealed terminal-only row cannot keep its shape under 0479's rule: it stays as a terminal-only card without words
-    op.execute("UPDATE agent_permission_requests SET envelope = NULL, sealed = false WHERE sealed AND terminal_only")
+    op.execute(_DOWNGRADE_SQL)
     op.execute(f"ALTER TABLE agent_permission_requests ADD CONSTRAINT {_CHECK} CHECK ({_OLD_RULE}) NOT VALID")
     op.execute(f"ALTER TABLE agent_permission_requests VALIDATE CONSTRAINT {_CHECK}")
