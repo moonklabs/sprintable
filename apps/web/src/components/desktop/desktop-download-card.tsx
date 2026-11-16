@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Banner } from '@/components/ds/banner';
@@ -8,6 +8,8 @@ import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { DESKTOP_DOWNLOAD_BUCKET_HEADER, ourDownloadUrl } from '@/lib/desktop-downloads';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { desktopApp, subscribeDesktopApp, type SprintableDesktop } from '@/lib/desktop-app';
+import { DesktopThisComputerCard } from '@/components/desktop/desktop-this-computer-card';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -69,7 +71,22 @@ export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
  * so one screen has one primary; every other place keeps the default. */
 /** story 4715: `ctaLabel` — the onboarding's first screen says what the button gets («Mac 앱 받기»); every other place keeps [다운로드].
  * `onCta` — told when the download is pressed (the onboarding counts the app way there; the download itself is the link's). */
-export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLabel, onCta }: { hideTitle?: boolean; ctaVariant?: 'default' | 'outline'; ctaLabel?: string; onCta?: () => void } = {}) {
+/** story 4970: what every place that draws this card passes */
+interface DownloadCardProps { hideTitle?: boolean; ctaVariant?: 'default' | 'outline'; ctaLabel?: string; onCta?: () => void }
+
+/**
+ * story 4970 (선생님 11-16: 맥 앱 안에서 «데스크톱 앱» 메뉴가 앱 내려받기를 권함): the app is already here, so inside it this slot does not offer a download — it says which
+ * computer this is and which build runs (`DesktopThisComputerCard`, the same card frame). «Inside the app» is the one mark the app gives the page — `desktopApp()`
+ * (`window.sprintableDesktop.inApp`, 4679) — never a user-agent guess. In a browser (and in the phone app) it is undefined and the card below is exactly what it was.
+ * The browser card is not even mounted inside the app, so it does not ask for the download manifest either.
+ */
+export function DesktopDownloadCard(props: DownloadCardProps = {}) {
+  const bridge = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
+  if (bridge) return <DesktopThisComputerCard hideTitle={props.hideTitle} bridge={bridge} />;
+  return <BrowserDownloadCard {...props} />;
+}
+
+function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLabel, onCta }: DownloadCardProps = {}) {
   const t = useTranslations('desktop');
   const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);

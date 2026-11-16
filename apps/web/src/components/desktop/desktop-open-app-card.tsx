@@ -11,6 +11,7 @@ import { Card } from '@/components/ds/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { notAMac } from '@/components/desktop/desktop-download-card';
+import { desktopApp, subscribeDesktopApp, type SprintableDesktop } from '@/lib/desktop-app';
 
 const subscribeToNothing = () => () => {};
 
@@ -19,7 +20,9 @@ export function DesktopOpenAppCard() {
   const { inPhoneApp } = usePhoneBridge();
   // the device is read after mount (a server render has no user agent: the first client render must match it, then the card appears on a Mac — codex)
   const onAMac = useSyncExternalStore(subscribeToNothing, () => !notAMac(navigator.userAgent, inPhoneApp), () => false);
-  if (!onAMac) return null;
+  // story 4970: inside the app there is nothing to open — the person is in it (the one mark is desktopApp(), never a user-agent guess)
+  const inApp = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
+  if (inApp || !onAMac) return null;
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-open-app-card">
       <p className="text-ds-card-title font-semibold text-ds-ink">{t('openAppTitle')}</p>

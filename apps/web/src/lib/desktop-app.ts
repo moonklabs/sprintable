@@ -12,6 +12,8 @@ export interface DesktopRuntimeFound { runtime: DesktopRuntimeInApp; version: st
 export interface SprintableDesktop {
   readonly inApp: true;
   readonly device: { readonly name: string };
+  /** story 4970: the build of the app this page runs in (its own version string). Absent in an older app — the page then says only which computer it is. Read it through `appVersionOf`. */
+  readonly appVersion?: string;
   /** read once when the page loaded — a page opened later sees the app's newer list */
   readonly runtimes: readonly DesktopRuntimeFound[];
   /** story 4691: the app's «found here» list as it changes. `listener` is called ONCE right away with the newest list (so a page that
@@ -43,6 +45,13 @@ const isRuntime = (v: unknown): v is DesktopRuntimeFound => {
   const r = v as Partial<DesktopRuntimeFound> | null;
   return !!r && typeof r === 'object' && (DESKTOP_RUNTIMES_IN_APP as readonly string[]).includes(r.runtime as string) && typeof r.version === 'string' && typeof r.executable === 'string';
 };
+
+const MAX_APP_VERSION = 64;
+/** story 4970: the app's build string, or undefined (an older app · anything that is not a short string) */
+export function appVersionOf(bridge: SprintableDesktop | undefined): string | undefined {
+  const v = bridge?.appVersion;
+  return typeof v === 'string' && v.length > 0 && v.length <= MAX_APP_VERSION ? v : undefined;
+}
 
 /** the bridge when its shape checks — anything else (a browser · an older app · a page outside the app's origin) is undefined */
 export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined {
