@@ -177,6 +177,7 @@ class RemoteDevicePairingSession(Base):
     __tablename__ = "remote_device_pairing_sessions"
     __table_args__ = (
         UniqueConstraint("setup_id", "offer_id", name="uq_remote_device_pairing_sessions_setup_offer"),
+        Index("ix_pairing_sessions_setup", "setup_id"),  # the migration's name (0481)
         CheckConstraint(
             "(commit IS NULL) = (committed_by IS NULL) AND (commit IS NULL) = (phone_key_id IS NULL) AND (commit IS NULL) = (committed_at IS NULL)",
             name="ck_pairing_sessions_commit_whole",
@@ -196,7 +197,7 @@ class RemoteDevicePairingSession(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False, index=True)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
     offer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -310,3 +310,29 @@ async def test_07_either_side_can_end_the_offer_and_remote_control_off_refuses(w
         assert (r.status_code, r.json()["error"]["code"]) == (409, "remote_control_off")
         r = await c.post(f"{PHONE}/pairing-sessions/{o3}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))
         assert (r.status_code, r.json()["error"]["code"]) == (409, "remote_control_off")
+
+
+async def test_08_an_old_style_offer_made_before_the_registration_is_not_carried_on_and_registrations_do_not_both_stay_live(world):
+    import asyncio
+
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        old = _offer(device, phone_id, spki)
+        assert (await c.post(f"{PHONE}/pairing-offers", json=old, headers=_person(OWNER))).status_code == 202
+        assert [f["offer_id"] for f in await _frames(c, device, "pairing_offer")] == [old["offer_id"]]  # before the registration: sent as always
+        _o, r = await _register_offer(c, device)
+        assert r.status_code == 201
+        # after it: the old offer is sent no more, and its reveal is refused (409) — the computer is on the new procedure for good
+        assert await _frames(c, device, "pairing_offer") == []
+        up = f"{REL}/pairing-offers/{old['offer_id']}/reveal"
+        refused = await c.post(up, json={"reveal": _b(32, b"r")}, headers=_tok(device["device_token"]))
+        assert (refused.status_code, refused.json()["error"]["code"]) == (409, "pairing_protocol_mismatch")
+        # two registrations at the same moment with different ids: one stays live, the other is superseded
+        a, b = str(uuid.uuid4()), str(uuid.uuid4())
+        ra, rb = await asyncio.gather(
+            c.post(f"{REL}/pairing-sessions", json={"offer_id": a, "expires_at": _exp()}, headers=_tok(device["device_token"])),
+            c.post(f"{REL}/pairing-sessions", json={"offer_id": b, "expires_at": _exp()}, headers=_tok(device["device_token"])),
+        )
+        assert (ra.status_code, rb.status_code) == (201, 201)
+        live = (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairing_sessions WHERE setup_id = '{device['setup_id']}' AND burned_at IS NULL AND expires_at > now()"))[0][0]
+        assert live == 1

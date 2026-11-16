@@ -77,6 +77,12 @@ class SessionPhoneRef(BaseModel):
     setup_id: uuid.UUID
 
 
+async def lock_setup(db: AsyncSession, setup_id: uuid.UUID) -> None:
+    """Serialize everything that decides «which procedure does this computer pair by» — a registration (and the replacement of the offer before it) and an old-style offer — on the computer's own row, so that an old offer cannot be accepted
+    beside a registration that is just being made, and two registrations cannot both stay live (codex)."""
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup_id).with_for_update())
+
+
 async def has_session(db: AsyncSession, setup_id: uuid.UUID) -> bool:
     """Did this computer ever register an offer on the new procedure? — then the old six-digit offer is refused for it (no downgrade)."""
     return bool((await db.execute(select(exists().where(RemoteDevicePairingSession.setup_id == setup_id)))).scalar())
@@ -114,6 +120,7 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
     """The computer opened a QR on the new procedure: its offer is registered here (so that a commitment can come only for an offer that exists — and only the computer can make one exist)."""
     from app.services import remote_control
 
+    await lock_setup(db, setup.id)
     if not await remote_control.is_enabled(db, setup.org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     now = _now()

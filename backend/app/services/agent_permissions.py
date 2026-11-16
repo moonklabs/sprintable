@@ -575,6 +575,7 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
     # story 4972 (PO 11-16 · 내림 막기): a computer that registered an offer on the new procedure is on it for good — the old six-digit offer is refused for it (no downgrade)
     from app.services import pairing_sessions
 
+    await pairing_sessions.lock_setup(db, setup.id)  # against a registration being made at the same moment
     if await pairing_sessions.has_session(db, setup.id):
         raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     if not await remote_control.is_enabled(db, org_id):
@@ -608,6 +609,10 @@ async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
     """Offers for this device not yet past their window — sent on every connection until then (the daemon keeps the offers it
     opened and drops any other). `label` and `expires_at` are outside the MAC: shown, never trusted (the daemon goes by the
     window of the offer it opened)."""
+    from app.services import pairing_sessions
+
+    if await pairing_sessions.has_session(db, setup_id):  # story 4972 (PO 11-16): a computer on the new procedure is sent no old-style offer — one made before its registration included
+        return []
     now = _now()
     rows = (await db.execute(
         select(RemoteDevicePairingOffer, RemoteDevice)
@@ -623,6 +628,10 @@ async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
 async def reveal_pairing(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID, body: PairingReveal) -> None:
     """v1.11 — the desktop's random value for this pairing's number, drawn after the offer's MAC bound the key; kept for the phone
     that sent the offer. Once: the same value again is fine, another is refused (the number the person compares must not move)."""
+    from app.services import pairing_sessions
+
+    if await pairing_sessions.has_session(db, setup.id):  # story 4972: an old-style offer is not carried on for a computer on the new procedure
+        raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     row = (await db.execute(
         select(RemoteDevicePairingOffer).where(RemoteDevicePairingOffer.setup_id == setup.id, RemoteDevicePairingOffer.offer_id == offer_id)
         .with_for_update()
