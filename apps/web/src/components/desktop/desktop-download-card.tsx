@@ -95,6 +95,9 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
   const elsewhere = typeof navigator !== 'undefined' && notAMac(navigator.userAgent, inPhoneApp);
 
   useEffect(() => {
+    // story 4970 (codex): while the page hydrates, the server snapshot (no bridge) mounts this card for one render even inside the app — the app's bridge is already on the page then (the preload runs
+    // first), so a card that is about to be replaced by «this computer» asks for no download manifest
+    if (desktopApp()) return;
     let alive = true;
     fetch('/desktop/downloads/macos.json')
       .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopDownloadManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))

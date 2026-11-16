@@ -122,6 +122,20 @@ describe('story 4970 — inside the desktop app the download slot says which com
     expect(q('desktop-this-computer-card')).toBeNull();
   });
 
+  it('hydration inside the app (codex): the server HTML was drawn with no bridge, the page then hydrates with the app\'s bridge on it — the download manifest is never asked for and the card ends as «this computer»', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const { hydrateRoot } = await import('react-dom/client');
+    const html = renderToString(wrap(<DesktopDownloadCard />)); // no bridge on the server
+    container.innerHTML = html;
+    setBridge(appBridge({ appVersion: '0.2.31' })); // the app's preload is there before the page's scripts run
+    __resetDesktopAppForTest();
+    await act(async () => { hydrateRoot(container, wrap(<DesktopDownloadCard />), { onRecoverableError: () => {} }); });
+    await flush();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(q('desktop-this-computer-card')).not.toBeNull();
+    expect(q('desktop-download-button')).toBeNull();
+  });
+
   it('a page whose bridge is not the app\'s closed shape (inApp not true) is a browser: the download card stays', async () => {
     setBridge({ inApp: false, device: { name: 'x' }, runtimes: [] });
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
