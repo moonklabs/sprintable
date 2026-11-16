@@ -9,7 +9,7 @@ from the row when the request is answered, withdrawn or past its window (the sam
 - agent_permission_requests.sealed: bool, false by default — the row was reported sealed (it has no `tool` · `summary` as text, ever). Stays true after the
   envelope is gone, so the row remains a whole row.
 - the CHECK of 0445: an answerable row keeps `input_hash`, and needs `tool` AND `summary` as text OR to be sealed; an envelope is only on a sealed row;
-  a terminal-only row is never sealed.
+  a sealed row carries no word as text (tool · summary · workdir · host · preview); a terminal-only row is never sealed.
 No row changes on upgrade. Downgrade removes the sealed rows (they cannot satisfy the old rule), then restores it.
 """
 import sqlalchemy as sa
@@ -31,7 +31,8 @@ def upgrade() -> None:
     op.drop_constraint(_CHECK, "agent_permission_requests", type_="check")
     op.create_check_constraint(
         _CHECK, "agent_permission_requests",
-        "(envelope IS NULL OR sealed) AND ("
+        "(envelope IS NULL OR sealed) AND "
+        "(NOT sealed OR (tool IS NULL AND summary IS NULL AND workdir IS NULL AND host IS NULL AND (preview IS NULL OR preview = 'null'::jsonb))) AND ("
         "(terminal_only AND input_hash IS NULL AND NOT sealed) OR "
         "(NOT terminal_only AND input_hash IS NOT NULL AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed)))",
     )

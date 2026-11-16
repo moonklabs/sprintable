@@ -189,7 +189,23 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
     for sql in (f"UPDATE agent_permission_requests SET envelope = '{{}}'::jsonb WHERE id = '{pid}'",  # not sealed
                 f"UPDATE agent_permission_requests SET input_hash = NULL WHERE id = '{rid}'",
                 f"UPDATE agent_permission_requests SET terminal_only = true, input_hash = NULL WHERE id = '{rid}'",  # a terminal-only row is never sealed
-                f"UPDATE agent_permission_requests SET sealed = false WHERE id = '{rid}'"):  # neither text nor sealed
+                f"UPDATE agent_permission_requests SET sealed = false WHERE id = '{rid}'",  # neither text nor sealed
+                f"UPDATE agent_permission_requests SET summary = 'x' WHERE id = '{rid}'",  # a sealed row carries no word as text
+                f"UPDATE agent_permission_requests SET tool = 'Bash' WHERE id = '{rid}'",
+                f"UPDATE agent_permission_requests SET workdir = '~/w' WHERE id = '{rid}'",
+                f"UPDATE agent_permission_requests SET preview = '{{\"op\": \"write\"}}'::jsonb WHERE id = '{rid}'"):
         with pytest.raises(IntegrityError):
             await _sql(sql)
     await _sql(f"UPDATE agent_permission_requests SET envelope = NULL WHERE id = '{rid}'")  # the question is over: the row stays whole
+
+
+async def test_a_sealed_row_is_never_a_network_question_the_second_stage_is_refused(world):
+    async with _client() as c:
+        name = "d4424 mac 4972g"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        body = _sealed_ask(agent, await _setup_id(name))
+        assert (await _post_ask(c, device, body)).status_code == 201
+        r = await c.post(f"/api/v2/desktop/relay/permission-requests/{body['request_id']}/confirm-host", json={"host": "gitlab.com", "expires_at": body["expires_at"]}, headers=_tok(token))
+        assert r.status_code in (409, 422) and "gitlab" not in r.text, r.text  # fail closed: a sealed card has no second stage

@@ -7,6 +7,8 @@ check everything else: the signature over the whole envelope, the receiver's own
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 
 ENVELOPE_VERSION = 1
@@ -21,14 +23,20 @@ MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1
 _HEADER_KEYS = {"v", "kind", "setup_id", "session_key", "command_id", "expires_at", "from", "to", "epoch", "ctr", "ts", "nonce", "rec", "wraps", "ct", "sig"}
 _REQUIRED = _HEADER_KEYS - {"rec"}
-_B64URL = re.compile(r"^[A-Za-z0-9_-]+$")
+_B64URL = re.compile(r"[A-Za-z0-9_-]+")  # used with fullmatch — `$` would let a trailing newline through
 
 
 def _b64(value: object, *, exact_bytes: int | None = None, min_bytes: int = 1, max_bytes: int | None = None, what: str) -> int:
     """a canonical base64url text (no padding) → the number of bytes it holds"""
-    if not isinstance(value, str) or not value or not _B64URL.match(value) or len(value) % 4 == 1:
+    if not isinstance(value, str) or not value or not _B64URL.fullmatch(value) or len(value) % 4 == 1:
         raise ValueError(f"envelope: {what} is not base64url")
-    n = (len(value) * 3) // 4
+    try:  # canonical: the text must be the ONE spelling of its bytes (no spare bits set)
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (binascii.Error, ValueError):
+        raise ValueError(f"envelope: {what} is not base64url") from None
+    if base64.urlsafe_b64encode(raw).rstrip(b"=").decode() != value:
+        raise ValueError(f"envelope: {what} is not canonical base64url")
+    n = len(raw)
     if exact_bytes is not None and n != exact_bytes:
         raise ValueError(f"envelope: {what} is {n} bytes, not {exact_bytes}")
     if n < min_bytes or (max_bytes is not None and n > max_bytes):
@@ -52,13 +60,12 @@ def check_envelope(env: object, *, kind: str | None = None) -> dict:
     """The envelope unchanged, or ValueError. `kind`: the one kind this place takes."""
     if not isinstance(env, dict):
         raise ValueError("envelope: not an object")
-    extra = set(env) - _HEADER_KEYS
-    missing = _REQUIRED - set(env)
-    if extra or missing:
-        raise ValueError(f"envelope: fields {'extra ' + str(sorted(extra)) if extra else ''}{'missing ' + str(sorted(missing)) if missing else ''}")
-    if env["v"] != ENVELOPE_VERSION or isinstance(env["v"], bool):
+    # no field NAME of the caller's is echoed back (an error text reaches logs and the response; only our own names may)
+    if any(not isinstance(k, str) for k in env) or set(env) - _HEADER_KEYS or _REQUIRED - set(env):
+        raise ValueError("envelope: unknown or missing fields")
+    if type(env["v"]) is not int or env["v"] != ENVELOPE_VERSION:
         raise ValueError("envelope: unknown version")
-    if env["kind"] not in ENVELOPE_KINDS or (kind is not None and env["kind"] != kind):
+    if not isinstance(env["kind"], str) or env["kind"] not in ENVELOPE_KINDS or (kind is not None and env["kind"] != kind):
         raise ValueError("envelope: kind not accepted here")
     for k in ("setup_id", "session_key", "command_id", "from"):
         _text(env[k], k)

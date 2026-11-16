@@ -29,7 +29,7 @@ def test_a_well_shaped_envelope_comes_back_unchanged():
 
 
 @pytest.mark.parametrize("mut", [
-    {"v": 2}, {"v": True}, {"kind": "nope"}, {"kind": "chat_line"},  # not the kind this place takes
+    {"v": 2}, {"v": True}, {"v": 1.0}, {"kind": []}, {"kind": {}}, {"kind": None}, {"nonce": b64(16) + "\n"}, {"ct": b64(100) + "\n"}, {"kind": "nope"}, {"kind": "chat_line"},  # not the kind this place takes
     {"extra": 1}, {"to": []}, {"to": ["p1", "p1"]}, {"to": ["p%d" % i for i in range(17)]}, {"to": ["p1", 5]},
     {"nonce": b64(15)}, {"nonce": "AA=="}, {"nonce": "AB"}, {"ct": b64(10)}, {"ct": "!!!!"}, {"sig": b64(3)}, {"sig": b64(200)},
     {"epoch": -1}, {"ctr": 1.5}, {"ts": True}, {"expires_at": 2**53}, {"from": "x" * 300}, {"setup_id": 5},
@@ -57,3 +57,14 @@ def test_the_body_size_limit():
     check_envelope(good(ct=b64(256 * 1024 + 16)))
     with pytest.raises(ValueError):
         check_envelope(good(ct=b64(256 * 1024 + 17)))
+
+
+def test_a_field_name_of_the_callers_is_never_echoed_and_a_spare_bit_is_refused():
+    env = good()
+    env["MY_SECRET_COMMAND"] = 1
+    with pytest.raises(ValueError) as e:
+        check_envelope(env)
+    assert "MY_SECRET_COMMAND" not in str(e.value)
+    # a spelling with spare bits set is another text for the same bytes: refused
+    with pytest.raises(ValueError):
+        check_envelope(good(nonce=b64(16)[:-1] + "B"))

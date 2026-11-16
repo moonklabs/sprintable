@@ -45,7 +45,8 @@ class AgentPermissionRequest(Base):
         # other row keeps all three
         # story 4972 (0479): an answerable row's words are text (tool · summary) OR sealed (reported as one envelope, kept only while its question waits); an envelope is only on a sealed row; a terminal-only row is never sealed
         CheckConstraint(
-            "(envelope IS NULL OR sealed) AND ("
+            "(envelope IS NULL OR sealed) AND "
+            "(NOT sealed OR (tool IS NULL AND summary IS NULL AND workdir IS NULL AND host IS NULL AND (preview IS NULL OR preview = 'null'::jsonb))) AND ("
             "(terminal_only AND input_hash IS NULL AND NOT sealed) OR "
             "(NOT terminal_only AND input_hash IS NOT NULL AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed)))",
             name="ck_agent_permission_requests_terminal_only_fields",
