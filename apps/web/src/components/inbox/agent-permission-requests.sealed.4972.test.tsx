@@ -164,21 +164,20 @@ describe('[4972] a sealed card', () => {
     expect(sent.some((s) => s.type === 'approval.sign')).toBe(false);
   });
 
-  it('a terminal-only sealed card whose view fails says why — not ready · cannot open · plain failure; one already closed shows «더 이상 답할 수 없어요»', async () => {
-    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'vault_unavailable' });
+  it('a terminal-only sealed card whose view fails says why — not ready · plain failure · already closed · cannot open (and then no button is left)', async () => {
     installShell();
     await render([sealedReq({ answerable: false, terminal_only: true, input_hash: null, session_key: null })]);
-    await press('앱에서 열기');
+    const answerWith = async (code: string) => { shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code }); await press('앱에서 열기'); };
+    await answerWith('vault_unavailable');
     expect(phoneLines()).toEqual(['폰이 아직 준비되지 않았어요 — 잠시 뒤 다시 눌러 주세요. 요청은 그대로예요']);
-    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'card_refused' });
-    await press('앱에서 열기');
-    expect(phoneLines()).toEqual(['이 폰에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 그 컴퓨터의 터미널에서 답해 주세요']);
-    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'timeout' });
-    await press('앱에서 열기');
+    await answerWith('timeout');
     expect(phoneLines()).toEqual(['보내지 못했어요 — 요청은 그대로예요. 다시 눌러 주세요']);
-    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'not_pending' });
-    await press('앱에서 열기');
+    await answerWith('not_pending');
     expect(phoneLines()).toEqual(['이 요청에는 더 이상 답할 수 없어요']);
+    expect(buttons()).toEqual(['앱에서 열기']);
+    await answerWith('card_refused');
+    expect(phoneLines()).toEqual(['이 폰에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 그 컴퓨터의 터미널에서 답해 주세요']);
+    expect(buttons()).toEqual([]); // no button that could change a refusal
   });
 
   it('a sealed terminal-only card still opens when the computer has gone quiet or remote control is off — and the line stays the true one', async () => {

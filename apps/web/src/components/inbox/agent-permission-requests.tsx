@@ -427,10 +427,12 @@ function SealedOpenPlace({ onOpen, lineText }: { onOpen: () => Promise<OpenOutco
   const [result, setResult] = useState<OpenOutcome['kind'] | 'opening' | null>(null);
   return (
     <>
-      <div data-testid="agent-permission-buttons">
-        <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" disabled={result === 'opening'}
-          onClick={() => { setResult('opening'); void onOpen().then((o) => setResult(o.kind)); }}>{t('sealed.open')}</Button>
-      </div>
+      {result === 'cannot_open' ? null : ( // the shell would not open this card: no button could change that — the line below says where it is answered
+        <div data-testid="agent-permission-buttons">
+          <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" disabled={result === 'opening'}
+            onClick={() => { setResult('opening'); void onOpen().then((o) => setResult(o.kind)); }}>{t('sealed.open')}</Button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{lineText}</p>
       {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'not_ready' ? <Line focus>{t('phone.notReady')}</Line> : result === 'cannot_open' ? <Line focus>{t('phone.cannotOpen')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
     </>
