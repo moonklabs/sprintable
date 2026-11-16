@@ -118,6 +118,7 @@ async def _burn(db: AsyncSession, row: RemoteDevicePairingSession, reason: str) 
     if row.burned_at is None:
         row.burned_at, row.burn_reason = _now(), reason
         await db.flush()
+        _wake_device_after_commit(db, row.setup_id)  # the computer hears of it now, not at the stream's next look
     return DesktopRelayError(409, BURNED, "this pairing offer was ended")
 
 
@@ -300,3 +301,4 @@ async def close_by_phone(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     if row.burned_at is None:
         row.burned_at, row.burn_reason = _now(), "phone_declined"
         await db.flush()
+        _wake_device_after_commit(db, row.setup_id)

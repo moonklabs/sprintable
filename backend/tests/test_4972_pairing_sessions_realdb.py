@@ -460,3 +460,23 @@ async def test_13_a_name_the_host_would_refuse_is_not_carried(world):
         r = await c.post(f"{url}/reveal", json=_reveal_body(device, spki, label="😀" * 33), headers=_person(OWNER))
         assert r.status_code == 422
         assert (await c.post(f"{url}/reveal", json=_reveal_body(device, spki, label="😀" * 32), headers=_person(OWNER))).status_code == 202  # 32 = 64 units: the limit itself goes
+
+
+async def test_14_a_burn_wakes_the_computer_at_once(world, monkeypatch):
+    from app.services import pairing_sessions
+
+    woken = []
+    real = pairing_sessions._wake_device_after_commit
+    monkeypatch.setattr(pairing_sessions, "_wake_device_after_commit", lambda db, setup_id: (woken.append(str(setup_id)), real(db, setup_id))[1])
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        o1, _ = await _register_offer(c, device)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        woken.clear()  # (the commitment itself wakes it too)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id, commit=_b(32, b"d")), headers=_person(OWNER))).status_code == 409
+        assert woken == [device["setup_id"]], "a burn by a second commitment wakes the computer"
+        o2, _ = await _register_offer(c, device)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o2}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        woken.clear()
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o2}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200
+        assert woken == [device["setup_id"]], "the phone's [달라요] wakes the computer"
