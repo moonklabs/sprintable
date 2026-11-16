@@ -572,6 +572,11 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
     if setup is None:
         await _log_setup_not_found(db, member_id=member_id, org_id=org_id, setup_id=body.setup_id)
         raise DesktopRelayError(404, "setup_not_found", "no such computer")
+    # story 4972 (PO 11-16 · 내림 막기): a computer that registered an offer on the new procedure is on it for good — the old six-digit offer is refused for it (no downgrade)
+    from app.services import pairing_sessions
+
+    if await pairing_sessions.has_session(db, setup.id):
+        raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     if not await remote_control.is_enabled(db, org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     now = _now()

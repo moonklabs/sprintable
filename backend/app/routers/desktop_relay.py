@@ -25,7 +25,7 @@ from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
-from app.services import desktop_changes, desktop_clock
+from app.services import desktop_changes, desktop_clock, pairing_sessions
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -114,6 +114,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         last_beat = last_check = time.monotonic()
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
+        session_frames_sent: set[str] = set()  # story 4972 — each commitment · reveal of the new pairing once per connection
         reactivated_marks: set[str] = set()  # story 4739 — agents a wake named as turned on again (read below; each is looked at again before its frame)
         try:
             # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
@@ -146,6 +147,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                         commands = await relay.commands_to_send(s, setup_id, last_seq)
                         removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                         offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
+                        session_frames = [(k, f) for k, f in await pairing_sessions.frames_to_send(s, setup_id) if k not in session_frames_sent]
                         reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
                         reactivated_marks.clear()
                         if now - last_beat >= _HEARTBEAT_SEC:
@@ -160,6 +162,9 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 for o in offers:  # story #4531 — adds nothing by itself: the daemon pins only an offer it opened, its MAC and a person's [같아요]
                     offers_sent.add(o["offer_id"])
                     yield f"event: pairing_offer\ndata: {json.dumps(o)}\n\n"
+                for k, f in session_frames:  # story 4972 — a frame carries a public message of a pairing in progress and adds nothing by itself (the computer checks it against the session it opened; it pins nothing before its person's [같아요])
+                    session_frames_sent.add(k)
+                    yield f"event: pairing_{k.split(':', 1)[0]}\ndata: {json.dumps(f)}\n\n"
                 for aid in reactivated:  # story 4739 — a hint only: this agent's receiving may skip its wait now (the key still proves itself at the connect)
                     yield f"event: {sse_event_name(relay.AGENT_REACTIVATED_CODE)}\ndata: {json.dumps({'agent_member_id': str(aid)})}\n\n"
                 for c in commands:
@@ -494,6 +499,49 @@ async def post_permission_host_added(
         return _error(exc)
     await db.commit()
     return {"added": added}
+
+
+# ── story 4972 — pairing on the new procedure (design ② §5-2): the computer's half (services/pairing_sessions.py) ──────────────────────────────
+
+
+async def _session_call(db: AsyncSession, run):
+    try:
+        result = await run()
+    except relay.DesktopRelayError as exc:
+        if exc.code == pairing_sessions.BURNED:
+            await db.commit()  # the burn is the point of the refusal: it stays
+        else:
+            await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return result
+
+
+@router.post("/relay/pairing-sessions")
+async def post_pairing_session(body: pairing_sessions.SessionRegister, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer opened a QR on the new procedure: its offer is registered (a commitment can come only for an offer that exists). A new one ends the one before it."""
+    async def run():
+        await pairing_sessions.register(db, setup, body)
+        return JSONResponse(status_code=201, content={"state": "registered"})
+    return await _session_call(db, run)
+
+
+@router.post("/relay/pairing-sessions/{offer_id}/nonce")
+async def post_pairing_session_nonce(offer_id: uuid.UUID, body: pairing_sessions.SessionNonce, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer's n_m and its signature over «offer ‖ C_p ‖ n_m», after the commitment came (once)."""
+    async def run():
+        await pairing_sessions.post_nonce(db, setup, offer_id, body)
+        return {"state": "nonce"}
+    return await _session_call(db, run)
+
+
+@router.post("/relay/pairing-sessions/{offer_id}/close")
+async def post_pairing_session_close(offer_id: uuid.UUID, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer's person pressed [달라요] (or the QR was closed): the offer ends."""
+    async def run():
+        await pairing_sessions.close_by_host(db, setup, offer_id)
+        return {"state": "burned"}
+    return await _session_call(db, run)
 
 
 @router.post("/relay/pairing-offers/{offer_id}/reveal")

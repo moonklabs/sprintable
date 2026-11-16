@@ -955,6 +955,21 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/close",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/nonce",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/pairings",
 "kind": "unknown"
@@ -3157,6 +3172,26 @@
 {
 "method": "GET",
 "path": "/api/v2/remote-devices/pairing-offers/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/remote-devices/pairing-sessions/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/close",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/commit",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/reveal",
 "kind": "unknown"
 },
 {
