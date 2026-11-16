@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story 4972 — a SEALED request (an envelope only the paired phone opens: the server holds no summary · tool · preview): the card shows one locked line,
-// inside the phone app one [앱에서 열기] (answerable → the shell's sheet answers · terminal-only → the shell's read-only sheet), in a browser the line «앱에서 열어 보세요».
+// inside the phone app one [앱에서 열기] (answerable → the shell's sheet answers · terminal-only → the shell's read-only sheet), in a browser the line «폰 앱에서 열어 보세요».
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -129,6 +129,20 @@ describe('[4972] a sealed card', () => {
     expect(phoneLines()).toEqual(['거부했어요']);
   });
 
+  it('lens 807 low 2 — the shell\'s vault_unavailable → «잠시 뒤 다시» with the button back · card_refused → the terminal line, no button', async () => {
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'vault_unavailable' });
+    installShell();
+    await render([sealedReq()]);
+    await press('앱에서 열기');
+    expect(fetchWithAuth.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
+    expect(buttons()).toEqual(['앱에서 열기']);
+    expect(phoneLines()).toEqual(['폰이 아직 준비되지 않았어요 — 잠시 뒤 다시 눌러 주세요. 요청은 그대로예요']);
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'card_refused' });
+    await press('앱에서 열기');
+    expect(buttons()).toEqual([]);
+    expect(phoneLines()).toEqual(['이 폰에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 그 컴퓨터의 터미널에서 답해 주세요']);
+  });
+
   it('the person closed the sheet → nothing posted, the button comes back with «보내지 않았어요»', async () => {
     shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'cancelled' });
     installShell();
@@ -150,10 +164,16 @@ describe('[4972] a sealed card', () => {
     expect(sent.some((s) => s.type === 'approval.sign')).toBe(false);
   });
 
-  it('a terminal-only sealed card whose view fails shows «보내지 못했어요…»; one already closed shows «더 이상 답할 수 없어요»', async () => {
+  it('a terminal-only sealed card whose view fails says why — not ready · cannot open · plain failure; one already closed shows «더 이상 답할 수 없어요»', async () => {
     shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'vault_unavailable' });
     installShell();
     await render([sealedReq({ answerable: false, terminal_only: true, input_hash: null, session_key: null })]);
+    await press('앱에서 열기');
+    expect(phoneLines()).toEqual(['폰이 아직 준비되지 않았어요 — 잠시 뒤 다시 눌러 주세요. 요청은 그대로예요']);
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'card_refused' });
+    await press('앱에서 열기');
+    expect(phoneLines()).toEqual(['이 폰에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 그 컴퓨터의 터미널에서 답해 주세요']);
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'timeout' });
     await press('앱에서 열기');
     expect(phoneLines()).toEqual(['보내지 못했어요 — 요청은 그대로예요. 다시 눌러 주세요']);
     shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'not_pending' });
@@ -176,17 +196,17 @@ describe('[4972] a sealed card', () => {
     expect(container.querySelector('[data-testid="agent-permission-line"]')!.textContent).toContain('원격 제어가 꺼져');
   });
 
-  it('in a browser (no phone app): the locked line + «앱에서 열어 보세요», no button', async () => {
+  it('in a browser (no phone app): the locked line + «폰 앱에서 열어 보세요», no button', async () => {
     await render([sealedReq()]);
     expect(sealedText()).toBe('내용이 잠겨 있어요');
-    expect(container.querySelector('[data-testid="agent-permission-line"]')!.textContent).toBe('앱에서 열어 보세요');
+    expect(container.querySelector('[data-testid="agent-permission-line"]')!.textContent).toBe('폰 앱에서 열어 보세요');
     expect(buttons()).toEqual([]);
   });
 
   it('English copy', async () => {
     await render([sealedReq()], 'en');
     expect(sealedText()).toBe('The content is locked');
-    expect(container.querySelector('[data-testid="agent-permission-line"]')!.textContent).toBe('Open it in the app');
+    expect(container.querySelector('[data-testid="agent-permission-line"]')!.textContent).toBe('Open it in the phone app');
   });
 
   it('a plain card is exactly as before (the sealed branches do not touch it)', async () => {

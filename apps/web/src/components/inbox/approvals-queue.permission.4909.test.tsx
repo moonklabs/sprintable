@@ -179,7 +179,7 @@ describe('ApprovalsQueue — 4909 2d-2 the «에이전트 권한 요청» sectio
     expect(container.querySelector('[data-testid="agent-permission-card"]')).toBeNull();
   });
 
-  it('[4972] a SEALED request\'s row says the content is locked (never «what it asks is in the terminal»), and its card is the locked line + «앱에서 열어 보세요» in a browser', async () => {
+  it('[4972] a SEALED request\'s row says the content is locked (never «what it asks is in the terminal»), and its card is the locked line + «폰 앱에서 열어 보세요» in a browser', async () => {
     permissionList = [perm('r1', { tool: null, summary: null, sealed: true })];
     await mountQueue();
     const row = rowsIn('perm')[0]!.textContent ?? '';

@@ -91,10 +91,30 @@ describe('[4972] a sealed card is answered on the shell\'s own sheet', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('a card that is not sealed keeps its own decision (the shell\'s reply field is ignored)', async () => {
+  it('lens 5838 low 1 — a card the web did NOT call sealed: the shell\'s reply decision is the one posted when it says one; if it differs from the pressed one nothing is posted; an older shell (says nothing) keeps the pressed one', async () => {
     const fetch = reply(200, { ok: true });
-    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'allow' }), fetch))).resolves.toEqual({ kind: 'answered', decision: 'deny' });
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'deny' }), fetch))).resolves.toEqual({ kind: 'answered', decision: 'deny' });
     expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).decision).toBe('deny');
+    const f2 = reply(200);
+    // the web thought it was plain but the shell signed another decision (the server told the two screens different things): nothing is posted
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'allow' }), f2))).resolves.toEqual({ kind: 'failed' });
+    expect(f2).not.toHaveBeenCalled();
+    // a reply that names something else is a broken shell
+    await expect(answerOnPhone('r-1', 'deny', serverFor(call({ ...signedOk, decision: 'maybe' }), f2))).resolves.toEqual({ kind: 'failed' });
+    expect(f2).not.toHaveBeenCalled();
+    // an older shell says nothing: the pressed one, as always
+    const f3 = reply(200, { ok: true });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call(signedOk), f3))).resolves.toEqual({ kind: 'answered', decision: 'allow' });
+    expect(JSON.parse((f3.mock.calls[0] as unknown as [string, RequestInit])[1].body as string).decision).toBe('allow');
+  });
+
+  it('lens 807/5838 low 3 — the shell\'s vault_unavailable → not_ready · card_refused → cannot_open (own lines, nothing posted); openOnPhone says the same', async () => {
+    const fetch = reply(200);
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call({ id: 'w1', ok: false, code: 'vault_unavailable' }), fetch))).resolves.toEqual({ kind: 'not_ready' });
+    await expect(answerOnPhone('r-1', 'allow', serverFor(call({ id: 'w1', ok: false, code: 'card_refused' }), fetch), { sealed: true })).resolves.toEqual({ kind: 'cannot_open' });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'vault_unavailable' }) })).resolves.toEqual({ kind: 'not_ready' });
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'card_refused' }) })).resolves.toEqual({ kind: 'cannot_open' });
   });
 
   it('openOnPhone: approval.view {id} — ok → opened · not_pending / not_answerable → closed · else failed', async () => {
@@ -102,7 +122,7 @@ describe('[4972] a sealed card is answered on the shell\'s own sheet', () => {
     await expect(openOnPhone('r-1', { phoneCall })).resolves.toEqual({ kind: 'opened' });
     expect(phoneCall).toHaveBeenCalledWith('approval.view', { id: 'r-1' });
     await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'not_pending' }) })).resolves.toEqual({ kind: 'closed' });
-    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'vault_unavailable' }) })).resolves.toEqual({ kind: 'failed' });
+    await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'timeout' }) })).resolves.toEqual({ kind: 'failed' });
     await expect(openOnPhone('r-1', { phoneCall: call({ id: 'w1', ok: false, code: 'not_phone_app' }) })).resolves.toEqual({ kind: 'failed' });
   });
 });

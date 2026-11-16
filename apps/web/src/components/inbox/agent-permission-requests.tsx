@@ -414,6 +414,9 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
         </>
       );
     case 'cancelled': return <>{buttons}<Line focus={pressed}>{t('phone.cancelled')}</Line></>;
+    // story 4972: the key store was not answering — the buttons stay, with the words «try again in a moment»; a card the shell would not open has no button that could change that — the line says where it is answered
+    case 'not_ready': return <>{buttons}<Line focus={pressed}>{t('phone.notReady')}</Line></>;
+    case 'cannot_open': return <Line focus>{t('phone.cannotOpen')}</Line>;
     default: return <>{buttons}<Line focus={pressed}>{t('phone.failed')}</Line></>;
   }
 }
@@ -429,7 +432,7 @@ function SealedOpenPlace({ onOpen, lineText }: { onOpen: () => Promise<OpenOutco
           onClick={() => { setResult('opening'); void onOpen().then((o) => setResult(o.kind)); }}>{t('sealed.open')}</Button>
       </div>
       <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{lineText}</p>
-      {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
+      {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'not_ready' ? <Line focus>{t('phone.notReady')}</Line> : result === 'cannot_open' ? <Line focus>{t('phone.cannotOpen')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
     </>
   );
 }
