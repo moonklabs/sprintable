@@ -204,7 +204,7 @@ describe('[SID:4691] RecruiterClient — the found list arrives after the page l
     spies.forEach((s) => s.mockRestore());
   });
 
-  it('⑥ source pin — outside the bridge reader, only the found card\'s title reads `.executable`', () => {
+  it('⑥ source pin — outside the bridge reader, only the found card\'s title and (4973) the one-screen chip\'s title read `.executable`', () => {
     const root = join(__dirname, '../../../../..'); // apps/web/src
     const hits: string[] = [];
     const walk = (dir: string) => {
@@ -217,7 +217,9 @@ describe('[SID:4691] RecruiterClient — the found list arrives after the page l
     };
     walk(root);
     const outsideReader = hits.filter((h) => !h.startsWith('lib/desktop-app.ts:'));
-    expect(outsideReader).toHaveLength(1); // a new reader of the path must come here on purpose
-    expect(outsideReader[0]).toContain('recruiter-client.tsx');
+    expect(outsideReader).toHaveLength(2); // a new reader of the path must come here on purpose — the runtime step's card title and the one screen's chip title (4973), both a `title` attribute, never text
+    for (const h of outsideReader) expect(h).toContain('recruiter-client.tsx');
+    const src = readFileSync(join(root, outsideReader[0]!.split(':')[0]!), 'utf8').split('\n');
+    for (const h of outsideReader) expect(src[Number(h.split(':')[1]) - 1], h).toMatch(/title=\{found\.executable\}/);
   });
 });

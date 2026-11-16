@@ -112,6 +112,16 @@ describe('[SID:4973] RecruiterClient — the one screen chooses among the tools 
     expect(picker).not.toBeNull(); // reverted (no choice on the one screen) → fails
     const hero = testid(container, 'recruiter-start-here-button')!;
     expect(picker!.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // right above the start button
+    // PO 11-16 (AC4 capture): the choice is INSIDE the pinned start bundle — the first screen shows it with the button, however many roles the list has. Outside it (at the end of the
+    // role list) the first screen showed only the pinned button and a person pressed it → Claude Code. The bundle is the sticky box (the same one the button is in).
+    const bundle = testid(container, 'recruiter-step-actions')!;
+    expect(bundle.contains(picker)).toBe(true);
+    expect(bundle.contains(hero)).toBe(true);
+    expect(bundle.className).toContain('sticky');
+    // compact: name + version on the chip, never the executable path as text (it stays the chip's title) — so the row is one line, not a card row
+    const chip = testid(container, 'recruiter-found-codex')!;
+    expect(chip.textContent).not.toContain('/');
+    expect(chip.getAttribute('title')).toBe('/opt/homebrew/bin/codex');
     expect(testid(container, 'recruiter-one-screen-runtime-one')).toBeNull();
     expect([pressed('claude'), pressed('codex')]).toEqual(['true', 'false']); // default = the first found
     await click(testid(container, 'recruiter-found-codex')!);

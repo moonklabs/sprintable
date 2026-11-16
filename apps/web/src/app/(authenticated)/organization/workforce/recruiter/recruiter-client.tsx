@@ -640,6 +640,35 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
     </div>
   );
 
+  // story 4973 (PO 11-16: the card row sat at the END of the role list, so the first screen showed only the pinned [이 컴퓨터에서 시작] and a person pressed it → Claude Code): the one
+  // screen's choice lives IN the pinned start bundle, one small row right above the button — name + version as a chip, nothing else (the path stays as the title). It is on the first
+  // screen without a scroll, however many roles the list has. The same pick handler (chooseRuntime) as the runtime step's cards.
+  const renderFoundChips = () => (
+    <div className="flex flex-wrap gap-2" role="group" aria-label={t('foundHereTitle')}>
+      {foundHere.map(({ found, cap }, i) => {
+        const sel = runtime === cap.slug;
+        return (
+          <Button
+            key={cap.slug}
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => chooseRuntime(cap.slug)}
+            aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
+            aria-pressed={sel}
+            title={found.executable}
+            data-testid={`recruiter-found-${found.runtime}`}
+            className={cn('h-auto min-w-0 gap-1.5 rounded-lg px-2.5 py-1.5', sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30')}
+          >
+            {sel && <Check className="h-3.5 w-3.5 text-primary" aria-hidden />}
+            <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
+            <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+
   const currentCapability = runtimeCapabilities?.find((r) => r.slug === runtime);
   const currentRuntimeDisplayName = currentCapability ? runtimeDisplayName(currentCapability) : runtime;
 
@@ -1340,22 +1369,23 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                   {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
                     : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive" data-testid="recruiter-hire-failed">{recruitError}</p>}
-                  {/* story 4973 (선생님 11-16): the one screen has no runtime step, so the tool was always the first one found (Claude Code) and a computer with Codex too offered no way
-                      to it. Right above the start button: two or more found → the choice (the found cards, default = the one last chosen here, else the first); one → its name on one line;
-                      none → nothing (the screen as before). A pick stands against a list that arrives later (4691 · chooseRuntime). Copy: the found-here keys the runtime step already shows. */}
-                  {bridge && foundHere.length >= 2 ? (
-                    <div className="space-y-1" data-testid="recruiter-one-screen-runtime">
-                      <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal">· {bridge.device.name}</span>
-                      </p>
-                      {renderFoundCards()}
-                    </div>
-                  ) : bridge && foundHere.length === 1 ? (
-                    <p className="text-sm text-foreground" data-testid="recruiter-one-screen-runtime-one">
-                      {t('foundHereTitle')} · {runtimeDisplayName(foundHere[0]!.cap)} · {t('foundHereVersion', { version: foundHere[0]!.found.version })}
-                    </p>
-                  ) : null}
+                  {/* story 4973 (선생님 11-16 · PO 11-16 AC2): the one screen has no runtime step, so the tool was always the first one found (Claude Code) and a computer with Codex too offered no way
+                      to it. The choice sits INSIDE the pinned start bundle, one small row right above the button — so it is on the first screen, with no scroll, however many roles there are:
+                      two or more found → the chips (default = the one last chosen here if the app still finds it, else the first); one → its name on one line (nothing to choose); none → nothing.
+                      A pick stands against a list that arrives later (4691 · chooseRuntime). Copy: the found-here keys the runtime step already shows. */}
                   <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
+                    {bridge && foundHere.length >= 2 ? (
+                      <div className="space-y-1" data-testid="recruiter-one-screen-runtime">
+                        <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
+                          {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal">· {bridge.device.name}</span>
+                        </p>
+                        {renderFoundChips()}
+                      </div>
+                    ) : bridge && foundHere.length === 1 ? (
+                      <p className="text-sm text-foreground" data-testid="recruiter-one-screen-runtime-one">
+                        {t('foundHereTitle')} · {runtimeDisplayName(foundHere[0]!.cap)} · {t('foundHereVersion', { version: foundHere[0]!.found.version })}
+                      </p>
+                    ) : null}
                     <Button
                       variant="hero"
                       onClick={pressHero}
