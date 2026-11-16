@@ -352,7 +352,8 @@ async def test_the_recipient_gets_one_bell_line_with_the_agent_and_tool_only(wor
         # story 4542: «{agent} · {computer}» with the computer once · the tool by the one naming rule (Claude's own: as it is)
         assert payload["agent_name"] and payload["title"] == f"권한 대기 · {agent_on_device(payload['agent_name'], 'd4424 mac 4533i')}"
         assert payload["title"].count("d4424 mac 4533i") == 1
-        assert payload["body"] == "Bash 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
+        # story 4972 (선생님 결정): «승인 요청이 왔어요» only — not even the tool (it is inside the card)
+        assert payload["body"] == "승인 요청이 왔어요" and "Bash" not in payload["body"]
         assert "git push" not in str(payload) and "secret-project" not in str(payload)
         listed = await c.get("/api/v2/event-notifications", headers=_person(OWNER))
         assert listed.status_code == 200 and "agent.permission_request" in listed.text, listed.text[:300]

@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
+from app.services.envelope_shape import check_envelope
 from app.services.desktop_relay import SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
 from app.services.tool_names import shown_tool
 
@@ -240,6 +241,7 @@ async def remove_pair(
         return False
     pair.removed_at, pair.removed_by, pair.removal_acked_at = _now(), actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {setup_id})  # story 4972: a sealed card nobody can open any more does not wait out its window
     _wake_device_after_commit(db, setup_id)
     return True
 
@@ -277,6 +279,7 @@ async def remove_computer_pairs(
         _wake_device_after_commit(db, pair.setup_id)
         removed += 1
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
     return removed
 
 
@@ -405,6 +408,7 @@ async def remove_phone(
     for pair in pairs:
         pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
     session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
@@ -803,9 +807,23 @@ class PermissionRequestReport(BaseModel):
     # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
     # its tool and summary only when the daemon read them. Every other report keeps all three, as before.
     terminal_only: bool = False
+    # story 4972: the words (tool · summary · folder · preview) as ONE sealed envelope (kind `approval_card`) the server cannot open — in place of those four fields, never beside them
+    envelope: dict | None = None
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        return None if env is None else check_envelope(env, kind="approval_card")
 
     @model_validator(mode="after")
     def _fields_for_its_kind(self) -> "PermissionRequestReport":
+        if self.envelope is not None:
+            # story 4972: sealed, the words are in the envelope and nowhere else — a request that also carries them as text would put them on the server
+            if self.terminal_only or any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
+                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text, and is not terminal-only")
+            if self.input_hash is None:
+                raise ValueError("input_hash is required unless the request is terminal_only")
+            return self
         if self.terminal_only:
             if self.input_hash is not None:
                 raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
@@ -826,12 +844,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
-    await db.execute(
-        update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
-               AgentPermissionRequest.expires_at <= now, AgentPermissionRequest.preview.is_not(None))
-        .values(preview=None)
-    )
+    await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
     q = select(AgentPermissionRequest).where(
         AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
     )
@@ -847,12 +860,18 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         # Qadir · PO 16:17Z — another agent of the same device must not stand in for the session's own: its approval chain
         # would choose the recipient and its name would go on the bell
         raise DesktopRelayError(422, "session_agent_mismatch", "the session belongs to another agent of this device")
+    if body.envelope is not None:
+        # story 4972: the header the host sealed must be about THIS request (a server cannot read it, but it can see that it is not a copy of another's)
+        e = body.envelope
+        if e["setup_id"] != str(setup.id) or e["session_key"] != body.session_key or e["command_id"] != str(body.request_id) \
+                or abs(e["expires_at"] - int(body.expires_at.timestamp() * 1000)) > 1000:
+            raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this request's")
     recipient, reason = await resolve_recipient(db, setup, body.agent_member_id)
     row = AgentPermissionRequest(
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
-        preview=body.preview.model_dump() if body.preview is not None else None,
+        preview=body.preview.model_dump() if body.preview is not None else None, envelope=body.envelope, sealed=body.envelope is not None,
         recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
@@ -870,7 +889,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
 async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: AgentPermissionRequest, recipient: uuid.UUID) -> None:
     """The recipient's bell line (and the phone push channel every notice takes): an agent waits at a prompt with a window, so
     not knowing until the inbox is opened leaves it standing (PO 14:28Z). The words are the spec's (명세 B-2 · 폰 알림) — the
-    agent and the tool only: no summary, no working folder, no command (a lock screen · a notice history keeps them). Sent once,
+    agent and «an approval is waiting» only (story 4972, 선생님: not even the tool — it is inside the card): no summary, no working folder, no command (a lock screen · a notice history keeps them). Sent once,
     with the row (the same request_id again finds the row and sends nothing). To the chain's head too when no phone is paired —
     the look-only card is theirs."""
     from app.models.member import Member
@@ -889,7 +908,7 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
     title = t("agent_permission.notice_title", locale, agent=who) if who else t("agent_permission.notice_title_bare", locale)
     await dispatch_notification(
         db, org_id=setup.org_id, event_type="agent.permission_request", target_member_ids=[recipient],
-        title=title, body=t("agent_permission.notice_body", locale, tool=shown_tool(row.runtime, row.tool, locale)),
+        title=title, body=t("agent_permission.notice_body", locale),
         reference_type="agent_permission_request", reference_id=row.id, source_project_id=setup.project_id,
         event={"payload": {"agent_name": agent_name}},
     )
@@ -940,15 +959,64 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         # it may trust in Claude's own text; the request ends with nothing allowed (Yuna 2-7)
         if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
-        row.state, row.result_code, row.preview = "withdrawn", "host_unread", None
+        row.state, row.result_code, row.preview, row.envelope = "withdrawn", "host_unread", None, None
+        if row.sealed:
+            row.input_hash = None
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
-        row.state, row.result_code, row.preview = "withdrawn", body.reason, None  # story 4949: the lines go with the question
+        row.state, row.result_code, row.preview, row.envelope = "withdrawn", body.reason, None, None  # story 4949: the lines go with the question (4972: so does the sealed card)
+        if row.sealed:
+            row.input_hash = None  # the hash of the raw input is the one value derived from the words that would stay: it goes when the question ends (카디르 lens M2)
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
+
+
+# story 4972 (카디르 lens M1): a card's words are kept for as long as its question waits and not longer — a sealed card is opened by the phone's STATIC key (HPKE AUTH, no
+# forward secrecy), so how long the envelope stays is how long a later leak of that key can read it. Three ways a question ends without an answer: its window passes (the
+# sweep below, run by the existing minute job `changes-purge`), the computer's last paired phone is taken off (`_end_cards_without_phone`), and a withdrawal / an answer (above).
+_OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeof(AgentPermissionRequest.preview) == "object")
+
+
+async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, setup_id: uuid.UUID | None = None) -> int:
+    """(One computer's setup when `setup_id` is given — the report of that computer — else every one: the minute job.) Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
+    without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
+    now = now or _now()
+    scope = [AgentPermissionRequest.setup_id == setup_id] if setup_id is not None else []
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+        .values(state="expired", result_code="expired", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "expired")
+    return len(ended)
+
+
+async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) -> int:
+    """A person's last live pair with this computer was just removed (a pair · the computer's pairs · the whole phone): a pending request of that person that holds words
+    can be opened by nobody now — it ends as `withdrawn` (`session_ended`) and the words go. A person with another live phone on the computer keeps their cards."""
+    if not setup_ids:
+        return 0
+    has_phone = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_(None),
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id, RemoteDevice.revoked_at.is_(None))
+    )
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", _OPEN_WORDS, ~has_phone)
+        .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "withdrawn")
+    return len(ended)
 
 
 # ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
@@ -1100,6 +1168,9 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
             # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
             "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
+            # story 4972: the sealed card — served as it came, to the phone's own app only (it cannot be read here), on a row the person can answer now
+            "envelope": r.envelope if shown == "pending" and answerable and not r.terminal_only else None,
+            "sealed": r.sealed,  # a card whose words were sealed — the phone knows what it is (and that it has none to show once the envelope is gone)
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
@@ -1191,6 +1262,9 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.state, row.answered_by, row.answered_phone_key_id = "answered", member_id, phone.id
     row.decision, row.answered_at = body.decision, now
     row.preview = None  # story 4949: answered — the file's lines are no longer needed here
+    row.envelope = None  # story 4972: nor the sealed card
+    if row.sealed:
+        row.input_hash = None  # (the command above already carries what the daemon needs) — see the withdrawal
     phone.last_used_at = now
     await db.flush()
     _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens

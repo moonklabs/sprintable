@@ -59,6 +59,6 @@ def test_4580_the_daemons_sandbox_network_value_is_named_and_the_push_carries_no
     for other in ("sandboxnetwork", "SandboxNetwork ", "__proto__", "constructor"):  # exact own key only
         assert tool_name(None, other, "ko") == other
     assert tool_name("codex", "exec_command", "ko") == "작업\u2060(exec_command)"  # codex's other values as before
-    body = t("agent_permission.notice_body", "ko", tool=shown_tool("claude", "SandboxNetwork", "ko"))
-    assert _strip(body) == "네트워크 연결 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
-    assert _strip(t("agent_permission.notice_body", "en", tool=shown_tool("claude", "SandboxNetwork", "en"))) == "Waiting for you to allow Network connection — tap to check"
+    # story 4972 (선생님 결정): the notice names no tool any more — the tool is inside the card (the words below are what a lock screen shows)
+    assert t("agent_permission.notice_body", "ko") == "승인 요청이 왔어요"
+    assert t("agent_permission.notice_body", "en") == "An approval is waiting"
