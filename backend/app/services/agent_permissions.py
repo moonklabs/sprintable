@@ -844,12 +844,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
-    await db.execute(
-        update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
-               AgentPermissionRequest.expires_at <= now, or_(AgentPermissionRequest.preview.is_not(None), AgentPermissionRequest.envelope.is_not(None)))
-        .values(preview=None, envelope=None)  # story 4972: the sealed words go the same way
-    )
+    await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
     q = select(AgentPermissionRequest).where(
         AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
     )
@@ -985,13 +980,14 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
 _OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeof(AgentPermissionRequest.preview) == "object")
 
 
-async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None) -> int:
-    """Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
+async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, setup_id: uuid.UUID | None = None) -> int:
+    """(One computer's setup when `setup_id` is given — the report of that computer — else every one: the minute job.) Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
     without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
     now = now or _now()
+    scope = [AgentPermissionRequest.setup_id == setup_id] if setup_id is not None else []
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS)
+        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
         .values(state="expired", result_code="expired", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)

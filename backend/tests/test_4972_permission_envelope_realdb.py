@@ -129,6 +129,8 @@ async def test_a_withdrawal_and_a_window_that_passed_let_the_envelope_go(world):
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{b['request_id']}'")
         assert (await _post_ask(c, device, _sealed_ask(agent, sid))).status_code == 201
         assert (await _row(b["request_id"]))[4] is None
+        state, code, envelope, input_hash, _p, sealed = await _card(b["request_id"])  # the report's own purge is the same one as the minute job's: the hash goes too, the row ends
+        assert (state, code, envelope, input_hash, sealed) == ("expired", "expired", None, None, True)
 
 
 async def test_the_words_may_not_come_twice_and_the_header_must_be_this_requests(world):
