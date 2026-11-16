@@ -819,9 +819,13 @@ class PermissionRequestReport(BaseModel):
     def _fields_for_its_kind(self) -> "PermissionRequestReport":
         if self.envelope is not None:
             # story 4972: sealed, the words are in the envelope and nowhere else — a request that also carries them as text would put them on the server
-            if self.terminal_only or any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
-                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text, and is not terminal-only")
-            if self.input_hash is None:
+            if any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
+                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text")
+            if self.terminal_only:
+                # a sealed terminal-only question: words to read, nothing to sign (so no hash — as a plain one)
+                if self.input_hash is not None:
+                    raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+            elif self.input_hash is None:
                 raise ValueError("input_hash is required unless the request is terminal_only")
             return self
         if self.terminal_only:
@@ -1169,7 +1173,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
             "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
             # story 4972: the sealed card — served as it came, to the phone's own app only (it cannot be read here), on a row the person can answer now
-            "envelope": r.envelope if shown == "pending" and answerable and not r.terminal_only else None,
+            # a sealed TERMINAL-ONLY card (no buttons — its words to read, nothing to sign) is served to a phone paired with that computer even when the computer is not reachable or remote control is off: the same as its plain words were
+            "envelope": r.envelope if shown == "pending" and ((answerable and not r.terminal_only) or (r.terminal_only and s.id in paired_setups)) else None,
             "sealed": r.sealed,  # a card whose words were sealed — the phone knows what it is (and that it has none to show once the envelope is gone)
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,

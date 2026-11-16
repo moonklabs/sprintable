@@ -147,11 +147,10 @@ async def test_the_words_may_not_come_twice_and_the_header_must_be_this_requests
         both["summary"] = MARKER
         r = await _post_ask(c, device, both)
         assert r.status_code == 422 and MARKER not in r.text.replace("summary", ""), r.text
-        # a terminal-only request has no card to seal
-        t_only = _sealed_ask(agent, sid)
-        del t_only["input_hash"]
-        t_only["terminal_only"] = True
-        assert (await _post_ask(c, device, t_only)).status_code == 422
+        # a terminal-only request with an envelope and a hash: nothing is signed, so no hash (a sealed one carries none either)
+        t_hash = _sealed_ask(agent, sid)
+        t_hash["terminal_only"] = True
+        assert (await _post_ask(c, device, t_hash)).status_code == 422
         # a header that is another request's: another setup · session · request id · window
         for over in ({"setup_id": "00000000-0000-0000-0000-000000000000"}, {"session_key": "s-other"}, {"command_id": "00000000-0000-0000-0000-000000000001"}, {"expires_at": 1_000}):
             bad = _sealed_ask(agent, sid)
@@ -191,7 +190,7 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
     # an envelope only on a sealed row · a sealed row may lose its envelope (its question is over) but never gain text words by accident of NULLs
     for sql in (f"UPDATE agent_permission_requests SET envelope = '{{}}'::jsonb WHERE id = '{pid}'",  # not sealed
                 f"UPDATE agent_permission_requests SET input_hash = NULL WHERE id = '{rid}'",
-                f"UPDATE agent_permission_requests SET terminal_only = true, input_hash = NULL WHERE id = '{rid}'",  # a terminal-only row is never sealed
+                f"UPDATE agent_permission_requests SET terminal_only = true WHERE id = '{rid}'",  # a terminal-only row has no hash (sealed or not) — this one still has its hash
                 f"UPDATE agent_permission_requests SET sealed = false WHERE id = '{rid}'",  # neither text nor sealed
                 f"UPDATE agent_permission_requests SET envelope = 'null'::jsonb WHERE id = '{rid}'",  # a JSON null is no envelope
                 f"UPDATE agent_permission_requests SET envelope = '[]'::jsonb WHERE id = '{rid}'",  # nor is a list
@@ -297,3 +296,79 @@ async def test_taking_off_the_last_phone_ends_the_sealed_cards_and_another_phone
         assert r.status_code in (200, 204), r.text
         state, code, envelope, input_hash, _p, sealed = await _card(body["request_id"])
         assert (state, code, envelope, input_hash, sealed) == ("withdrawn", "session_ended", None, None, True)
+
+
+async def test_a_terminal_only_question_can_be_sealed_too_words_to_read_and_nothing_to_sign(world):
+    async with _client() as c:
+        name = "d4424 mac 4972t"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        del body["input_hash"]
+        body["terminal_only"] = True
+        made = await _post_ask(c, device, body)
+        assert made.status_code == 201, made.text
+        tool, summary, workdir, preview, envelope, state = await _row(body["request_id"])
+        assert (tool, summary, workdir, preview) == (None, None, None, None) and envelope == body["envelope"] and state == "pending"
+        assert (await _sql(fetch=f"SELECT sealed, terminal_only, input_hash FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))[0] == (True, True, None)
+        # a phone paired with that computer is served the envelope — and nothing to press or sign
+        [view] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert view["envelope"] == body["envelope"] and view["sealed"] is True and view["terminal_only"] is True and view["answerable"] is False
+        assert view["input_hash"] is None and view["tool"] is None and view["summary"] is None
+        # it cannot be answered from the phone
+        no = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert no.status_code == 409, no.text
+        # the words go with the question like any other sealed card
+        w = await c.post(f"/api/v2/desktop/relay/permission-requests/{body['request_id']}/withdraw", json={"reason": "answered_locally"}, headers=_tok(token))
+        assert w.status_code == 200, w.text
+        assert (await _row(body["request_id"]))[4] is None
+        [done] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert done["envelope"] is None and done["sealed"] is True
+        # a window that passes lets it go too (the minute sweep is the same one)
+        late = _sealed_ask(agent, sid)
+        del late["input_hash"]
+        late["terminal_only"] = True
+        assert (await _post_ask(c, device, late)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{late['request_id']}'")
+        assert (await _post_ask(c, device, _sealed_ask(agent, sid))).status_code == 201
+        assert (await _row(late["request_id"]))[4] is None
+
+
+async def test_a_sealed_terminal_only_card_is_not_served_to_a_person_with_no_phone_paired_with_that_computer(world):
+    async with _client() as c:
+        name = "d4424 mac 4972u"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+        views = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert all(v["envelope"] is None for v in views), "no paired phone: the envelope is not served (it could be opened by nobody)"
+
+
+async def test_the_downgrade_of_0480_leaves_a_sealed_terminal_only_row_that_0479s_rule_accepts(world):
+    import importlib.util
+    import pathlib
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    async with _client() as c:
+        name = "d4424 mac 4972v"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        body = _sealed_ask(agent, await _setup_id(name))
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+    # what downgrade() does to such a row, then 0479's rule over it: it holds
+    await _sql("UPDATE agent_permission_requests SET envelope = NULL, sealed = false WHERE sealed AND terminal_only")
+    bad = (await _sql(fetch=f"SELECT count(*) FROM agent_permission_requests WHERE NOT ({m._OLD_RULE})"))[0][0]
+    assert bad == 0
