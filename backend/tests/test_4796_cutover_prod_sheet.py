@@ -958,8 +958,8 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert any("add_column" in h and '"sealed"' in h and "nullable=False" in h and "server_default" in h for h in sealed), sealed
     assert any("drop_constraint" in h and "_CHECK" in h for h in sealed) and any("NOT VALID" in h for h in sealed) and any("VALIDATE CONSTRAINT" in h for h in sealed), sealed
     assert not any(k in h for h in sealed for k in ("DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no data written, no column dropped or retyped"
-    # story 4972: 0480 is THREE lines of upgrade(): the CHECK of 0479 dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan that does not block writers). Why a running old revision lives with it: the rule
-    # only gets LOOSER (the terminal-only branch no longer says `NOT sealed`), so every row an old revision writes still passes; no column is added, dropped, retyped or rewritten, and no row is written. The downgrade() is not read.
+    # story 4972: 0480 is THREE lines of upgrade(): the CHECK of 0479 dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan; the lock is held to the commit). Why a running old revision lives with it: the rule
+    # only gets LOOSER where it changes anything (the terminal-only branch no longer says `NOT sealed`) and the one new coupling (a request holds its envelope exactly while pending) is what the code of 0479 already does, so every row an old revision writes still passes; no column is added, dropped, retyped or rewritten, and no row is written. Every migration of a run shares one transaction, so the lock is held through the VALIDATE scan: writes to this table wait that long (a small table). The downgrade() is not read.
     loosened = [h for h in hits if h.startswith("0480_")]
     assert len(loosened) == 3, loosened
     assert any("drop_constraint" in h and "_CHECK" in h for h in loosened) and any("NOT VALID" in h for h in loosened) and any("VALIDATE CONSTRAINT" in h for h in loosened), loosened

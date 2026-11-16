@@ -872,7 +872,14 @@ async def changes_purge(
         # thing to set up by hand on dev and prod)
         from app.services.agent_permissions import end_orphan_cards, purge_open_cards
         cards = await purge_open_cards(session)
-        orphans = await end_orphan_cards(session)  # a card whose person has no live phone on that computer any more (whichever way it went)
+        # a card nobody can open any more (whichever way it went). On its OWN savepoint and try: a failure here (a lock order that meets a report's, a bad statement) rolls back to the savepoint only — the purges above are
+        # one transaction with it, and one failed statement would otherwise take them all (lens 5833 L5)
+        orphans: int | None = None
+        try:
+            async with session.begin_nested():
+                orphans = await end_orphan_cards(session)
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
         return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)

@@ -6,8 +6,12 @@ and no hash — nothing is signed — only words to read).
 
 - the CHECK of 0479: the terminal-only branch no longer says `NOT sealed`. Everything else is as it was: a sealed row carries no word as text, is at stage «ask», has its envelope only as a JSON object;
   a terminal-only row never has a hash (sealed or not); an answerable row keeps its hash and needs tool AND summary as text, or to be sealed.
-- No row changes on upgrade (the rule only gets looser: every row that passed before passes now). The new CHECK is added NOT VALID and then validated (the old rule is dropped first, so
-  the table is never without a rule; validation reads the table without blocking writers).
+- A new coupling in the same CHECK: a request holds its envelope exactly while it is pending (`state = 'pending' OR envelope IS NULL` — an ended row has let it go — and a pending sealed row has it).
+  Every path that ends a request already empties the envelope in the same statement; the database now says so (before, only the code did, and a terminal-only row could newly hold one).
+- No row changes on upgrade; for what the old revision writes the rule only gets looser or already holds (a sealed row is pending with its envelope, an ended one without — the code of 0479 does exactly that).
+  The new CHECK is added NOT VALID and then validated (the old rule is dropped first, so the table is never without a rule). NOTE: every migration of one run shares ONE transaction here (`env.py` — no `transaction_per_migration`),
+  so the lock the DROP / ADD takes is held through the VALIDATE scan to the commit: writes to this table wait for as long as the scan runs. The table is small, so that is short; the VALIDATE would fail the whole run (and roll it back)
+  if a row broke the rule.
 Downgrade keeps every sealed terminal-only row as a plain terminal-only card with no words (its state, decision and who answered it are kept; its envelope and sealed mark go), then restores 0479's rule.
 """
 from alembic import op
@@ -24,7 +28,8 @@ _ROW_WORDS = (
 )
 _NEW_RULE = _ROW_WORDS + (
     "((terminal_only AND input_hash IS NULL) OR "
-    "(NOT terminal_only AND (input_hash IS NOT NULL OR (sealed AND state <> 'pending')) AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed)))"
+    "(NOT terminal_only AND (input_hash IS NOT NULL OR (sealed AND state <> 'pending')) AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed))) AND "
+    "(state = 'pending' OR envelope IS NULL) AND (NOT sealed OR state <> 'pending' OR envelope IS NOT NULL)"
 )
 _OLD_RULE = _ROW_WORDS + (
     "((terminal_only AND input_hash IS NULL AND NOT sealed) OR "

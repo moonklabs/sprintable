@@ -204,7 +204,12 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
                 f"UPDATE agent_permission_requests SET preview = '{{\"op\": \"write\"}}'::jsonb WHERE id = '{rid}'"):
         with pytest.raises(IntegrityError):
             await _sql(sql)
-    await _sql(f"UPDATE agent_permission_requests SET envelope = NULL WHERE id = '{rid}'")  # the question is over: the row stays whole
+    # a request holds its envelope exactly while it is pending: an ended row with one · a pending sealed row without one
+    for sql in (f"UPDATE agent_permission_requests SET state = 'withdrawn', result_code = 'session_ended', input_hash = NULL WHERE id = '{rid}'",  # ended, envelope still there
+                f"UPDATE agent_permission_requests SET envelope = NULL WHERE id = '{rid}'"):  # pending, envelope gone
+        with pytest.raises(IntegrityError):
+            await _sql(sql)
+    await _sql(f"UPDATE agent_permission_requests SET envelope = NULL, state = 'withdrawn', result_code = 'session_ended', input_hash = NULL WHERE id = '{rid}'")  # the question is over: the row stays whole
 
 
 async def test_a_sealed_row_is_never_a_network_question_the_second_stage_is_refused(world):
@@ -458,7 +463,9 @@ async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_term
                 before = norm((await conn.execute(q_def)).scalar_one())
                 await conn.run_sync(run, m.downgrade)
                 down = norm((await conn.execute(q_def)).scalar_one())
-                assert down.count("NOTsealed") > before.count("NOTsealed"), "0479's rule is back (NOT sealed on the terminal-only branch too)"
+                assert "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" in down and "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" not in before, "0479's rule is back (NOT sealed on the terminal-only branch too)"
+                coupling = "(state='pending'::text)OR(envelopeISNULL)"
+                assert coupling in before and coupling not in down, "0480's coupling of the envelope to a pending request is gone with the downgrade"
                 row = (await conn.execute(text(f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).one()
                 assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
                 await conn.run_sync(run, m.upgrade)
@@ -529,3 +536,84 @@ async def test_the_minute_sweep_ends_a_card_whose_person_lost_every_phone_by_a_p
             assert await end_orphan_cards(s) == 2
             await s.commit()
         assert (await _card(again["request_id"]))[2] is None and (await _card(t["request_id"]))[2] is None
+
+
+async def test_a_person_who_never_paired_a_phone_keeps_the_plain_preview_card_through_the_minute_sweep(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972m"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)  # no phone is ever registered or paired for this person
+        lines = _ask(agent, tool="Edit", summary="notes/a.md", preview={"op": "edit", "blocks": [{"removed": ["a"], "added": ["b"], "removed_more": 0, "added_more": 0}], "blocks_more": 0, "replace_all": False, "withheld": None})
+        plain = _ask(agent)
+        assert (await _post_ask(c, device, lines)).status_code == 201 and (await _post_ask(c, device, plain)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # nothing was lost for this person: no phone was ever taken away from them
+            await s.commit()
+        for body in (lines, plain):
+            state, code, envelope, input_hash, preview, sealed_ = await _card(body["request_id"])
+            assert state == "pending" and code is None, body["request_id"]
+        assert (await _card(lines["request_id"]))[4] is not None, "the preview of the plain card is still there (it ends by a window · an answer · a withdrawal, as it always did)"
+
+
+async def test_a_sealed_card_of_a_disconnected_computer_is_ended_by_the_minute_sweep(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972n"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        a = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, a)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # the person's phone is paired and the computer is connected
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")  # the computer was disconnected: the pair rows stay
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 2
+            await s.commit()
+        for body in (a, t):
+            state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+            assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True)
+
+
+async def test_the_minute_cron_keeps_its_earlier_purges_when_the_orphan_sweep_fails(world, monkeypatch):
+    import app.routers.cron as cron_module
+    import app.services.agent_permissions as perms
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import text as sql_text
+
+    from app.main import app
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        name = "d4424 mac 4972o"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        late = _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, late)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{late['request_id']}'")
+
+    async def boom(db):
+        await db.execute(sql_text("SELECT 1/0"))  # a statement that aborts the transaction it runs in
+
+    monkeypatch.setattr(perms, "end_orphan_cards", boom)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post("/api/v2/internal/cron/changes-purge", headers={"Authorization": "Bearer test-cron-secret"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["orphan_cards_ended"] is None and r.json()["data"]["cards_ended"] == 1, r.text
+    state, code, envelope, input_hash, _p, sealed_ = await _card(late["request_id"])
+    assert (state, code, envelope) == ("expired", "expired", None), "the window sweep that ran BEFORE the failing one was committed"
