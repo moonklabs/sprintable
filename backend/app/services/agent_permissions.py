@@ -460,14 +460,18 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
             if row.removed_at is not None:  # dropped by the device once, now listed again: a new QR pairing
                 row.removed_at = row.removed_by = row.removal_acked_at = None
             row.paired_at, row.reported_at = p.paired_at, now
+    dropped = False
     for phone_id, row in rows.items():
         if phone_id in listed:
             continue
         if row.removed_at is None:
             row.removed_at = now  # the device dropped it on its own
+            dropped = True
         if row.removal_acked_at is None:
             row.removal_acked_at = now
     await db.flush()
+    if dropped:
+        await _end_cards_without_phone(db, {setup.id})  # story 4972: a snapshot that no longer lists the last phone of a person takes their sealed cards with it (nobody can open them now)
     return {"pairings": len(listed), "unregistered": len(snapshot.pairings) - len(listed)}
 
 
@@ -1174,7 +1178,7 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
             # story 4972: the sealed card — served as it came, to the phone's own app only (it cannot be read here), on a row the person can answer now
             # a sealed TERMINAL-ONLY card (no buttons — its words to read, nothing to sign) is served to a phone paired with that computer even when the computer is not reachable or remote control is off: the same as its plain words were
-            "envelope": r.envelope if shown == "pending" and ((answerable and not r.terminal_only) or (r.terminal_only and s.id in paired_setups)) else None,
+            "envelope": r.envelope if shown == "pending" and ((answerable and not r.terminal_only) or (r.terminal_only and s.id in paired_setups and s.revoked_at is None)) else None,
             "sealed": r.sealed,  # a card whose words were sealed — the phone knows what it is (and that it has none to show once the envelope is gone)
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,

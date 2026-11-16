@@ -376,3 +376,59 @@ async def test_the_downgrade_of_0480_leaves_a_sealed_terminal_only_row_that_0479
     await _sql(m._DOWNGRADE_SQL)
     bad = (await _sql(fetch=f"SELECT count(*) FROM agent_permission_requests WHERE NOT ({m._OLD_RULE})"))[0][0]
     assert bad == 0
+
+
+async def test_a_snapshot_that_no_longer_lists_the_last_phone_ends_the_sealed_cards(world):
+    async with _client() as c:
+        name = "d4424 mac 4972w"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        a = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, a)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        # the computer's next list of paired phones is empty: the person has no phone on it any more — a sealed card nobody can open does not wait out its window
+        await _pair(c, token)
+        for body in (a, t):
+            state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+            assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True), body["request_id"]
+
+
+async def test_a_sealed_terminal_only_card_of_a_disconnected_computer_is_not_served(world):
+    async with _client() as c:
+        name = "d4424 mac 4972x"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, t)).status_code == 201
+        assert [v["envelope"] is not None for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]] == [True]
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")
+        assert all(v["envelope"] is None for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]), "the computer was disconnected: no envelope goes out for it"
+
+
+async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade_runs_the_sql(world):
+    import importlib.util
+    import inspect
+    import pathlib
+
+    from app.models.agent_permission import AgentPermissionRequest
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480b", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    ck = next(c for c in AgentPermissionRequest.__table__.constraints if getattr(c, "name", None) == "ck_agent_permission_requests_terminal_only_fields")
+    norm = lambda t: "".join(str(t).split())  # noqa: E731
+    assert norm(ck.sqltext) == norm(m._NEW_RULE), "a schema made from the models carries the rule the migrations leave"
+    assert "_DOWNGRADE_SQL" in inspect.getsource(m.downgrade) and "NOT sealed" in m._OLD_RULE
