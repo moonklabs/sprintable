@@ -72,6 +72,10 @@ async def _row(offer_id) -> dict:
     return {"commit": r[0], "n_m": r[1], "revealed": r[2], "burned": r[3], "reason": r[4]}
 
 
+async def _burned_of(c, device, offer_id):
+    return [f for f in await _frames(c, device, "pairing_burned") if f["offer_id"] == offer_id]
+
+
 async def _frames(c, device, name):
     text = (await c.get(f"{REL}/stream", headers=_tok(device["device_token"]))).text
     return [json.loads(line[6:]) for block in text.split("\n\n") if block.startswith(f"event: {name}") for line in block.split("\n") if line.startswith("data: ")]
@@ -338,17 +342,121 @@ async def test_08_an_old_style_offer_made_before_the_registration_is_not_carried
         assert live == 1
 
 
-async def test_09_phone_reads_and_registrations_at_the_same_moment_do_not_deadlock(world):
+async def test_09_phone_calls_and_registrations_at_the_same_moment_do_not_deadlock_or_fail(world):
     import asyncio
 
     async with _client() as c:
         device, phone_id, spki = await _ready(c)
         offer_id, _ = await _register_offer(c, device)
-        assert (await c.post(f"{PHONE}/pairing-sessions/{offer_id}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
-        state = f"{PHONE}/pairing-sessions/{offer_id}?setup_id={device['setup_id']}"
+        url = f"{PHONE}/pairing-sessions/{offer_id}"
+        assert (await c.post(f"{url}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        state = f"{url}?setup_id={device['setup_id']}"
         calls = []
-        for _i in range(6):
+        for _i in range(5):
             calls.append(c.get(state, headers=_person(OWNER)))
+            calls.append(c.post(f"{url}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER)))           # the same retry
+            calls.append(c.post(f"{url}/reveal", json=_reveal_body(device, spki), headers=_person(OWNER)))              # before the nonce: 409
+            calls.append(c.post(f"{REL}/pairing-sessions/{offer_id}/nonce", json={"n_m": NM, "sig": SIG}, headers=_tok(device["device_token"])))
+            calls.append(c.post(f"{url}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER)))
+            calls.append(c.post(f"{REL}/pairing-sessions/{offer_id}/close", headers=_tok(device["device_token"])))
             calls.append(c.post(f"{REL}/pairing-sessions", json={"offer_id": str(uuid.uuid4()), "expires_at": _exp()}, headers=_tok(device["device_token"])))
-        done = await asyncio.wait_for(asyncio.gather(*calls), timeout=60)  # a deadlock would show as a timeout (or a 500 from the database's own deadlock break)
-        assert all(r.status_code in (200, 201, 404, 409) for r in done), [r.status_code for r in done]
+        done = await asyncio.wait_for(asyncio.gather(*calls), timeout=90)  # a deadlock would show as a timeout (or a 500 from the database's own deadlock break)
+        assert all(r.status_code in (200, 201, 202, 404, 409, 410, 422) for r in done), [(r.status_code, r.text[:80]) for r in done if r.status_code not in (200, 201, 202, 404, 409, 410, 422)]
+
+
+async def test_10_the_cutover_is_decided_under_the_computers_row_lock(world):
+    """the old six-digit offer (or its reveal) waits for a registration that is being made, then is refused — deterministic: the registration is held open in another connection"""
+    import asyncio
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import pairing_sessions
+
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        old = _offer(device, phone_id, spki)
+        assert (await c.post(f"{PHONE}/pairing-offers", json=old, headers=_person(OWNER))).status_code == 202
+        for what in ("reveal", "offer"):
+            async with async_session_factory() as s1:
+                setup = await s1.get(DesktopSetup, uuid.UUID(device["setup_id"]))
+                body = pairing_sessions.SessionRegister(offer_id=uuid.uuid4(), expires_at=datetime.now(timezone.utc) + timedelta(minutes=5))
+                await pairing_sessions.register(s1, setup, body)  # the registration is open — holding the computer's row
+                if what == "reveal":
+                    task = asyncio.create_task(c.post(f"{REL}/pairing-offers/{old['offer_id']}/reveal", json={"reveal": _b(32, b"r")}, headers=_tok(device["device_token"])))
+                else:
+                    task = asyncio.create_task(c.post(f"{PHONE}/pairing-offers", json=_offer(device, phone_id, spki), headers=_person(OWNER)))
+                done, _pending = await asyncio.wait({task}, timeout=1.0)
+                assert not done, f"the old {what} did not wait for the registration (the lock is gone)"
+                await s1.commit()
+            r = await asyncio.wait_for(task, timeout=15)
+            assert (r.status_code, r.json()["error"]["code"]) == (409, "pairing_protocol_mismatch"), (what, r.text)
+            await _sql(f"UPDATE desktop_setups SET pairing_v2_at = NULL WHERE id = '{device['setup_id']}'", f"DELETE FROM remote_device_pairing_sessions WHERE setup_id = '{device['setup_id']}'")
+
+
+async def test_11_the_new_procedure_mark_outlives_the_session_rows(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        _o, r = await _register_offer(c, device)
+        assert r.status_code == 201
+        assert (await _sql(fetch=f"SELECT pairing_v2_at IS NOT NULL FROM desktop_setups WHERE id = '{device['setup_id']}'"))[0][0] is True
+        # the rows go (a cleanup · a cascade from a deleted phone key): the mark stays, the old offer is still refused
+        await _sql(f"DELETE FROM remote_device_pairing_sessions WHERE setup_id = '{device['setup_id']}'")
+        refused = await c.post(f"{PHONE}/pairing-offers", json=_offer(device, phone_id, spki), headers=_person(OWNER))
+        assert (refused.status_code, refused.json()["error"]["code"]) == (409, "pairing_protocol_mismatch")
+        # and it is never turned off by a later registration
+        _o2, r2 = await _register_offer(c, device)
+        assert r2.status_code == 201
+        assert (await _sql(fetch=f"SELECT count(*) FROM desktop_setups WHERE id = '{device['setup_id']}' AND pairing_v2_at IS NOT NULL"))[0][0] == 1
+
+
+async def test_12_an_ended_offer_is_told_to_the_computer_once_and_a_registration_again_learns_it_ended(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        plain_tm = await _plain_member()
+        # a second commitment (a hand that peeked at the QR commits first, the real phone second — or the other way round): the offer ends and the computer is told
+        o1, _ = await _register_offer(c, device)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id, commit=_b(32, b"d")), headers=_person(OWNER))).status_code == 409
+        assert await _frames(c, device, "pairing_burned") == [{"offer_id": o1, "reason": "second_commit"}]
+        assert await _frames(c, device, "pairing_commit") == [] and await _frames(c, device, "pairing_reveal") == []  # nothing else of a dead offer
+        # the registration again: the real state, not «registered»
+        again = await c.post(f"{REL}/pairing-sessions", json={"offer_id": o1, "expires_at": _exp()}, headers=_tok(device["device_token"]))
+        assert (again.status_code, again.json()["error"]["code"]) == (409, "offer_burned")
+        # the phone's [달라요] · a second reveal · a key that is not the committed one
+        o2, _ = await _register_offer(c, device)
+        u2 = f"{PHONE}/pairing-sessions/{o2}"
+        assert (await c.post(f"{u2}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        assert (await c.post(f"{u2}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200
+        assert await _burned_of(c, device, o2) == [{"offer_id": o2, "reason": "phone_declined"}]
+        for kind in ("second_reveal", "key_mismatch"):
+            o, _ = await _register_offer(c, device)
+            u = f"{PHONE}/pairing-sessions/{o}"
+            assert (await c.post(f"{u}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+            assert (await c.post(f"{REL}/pairing-sessions/{o}/nonce", json={"n_m": NM, "sig": SIG}, headers=_tok(device["device_token"]))).status_code == 200
+            if kind == "second_reveal":
+                assert (await c.post(f"{u}/reveal", json=_reveal_body(device, spki), headers=_person(OWNER))).status_code == 202
+                assert (await c.post(f"{u}/reveal", json=_reveal_body(device, spki, label="other"), headers=_person(OWNER))).status_code == 409
+            else:
+                assert (await c.post(f"{u}/reveal", json=_reveal_body(device, _b(91, b"k")), headers=_person(OWNER))).status_code == 409
+            assert await _burned_of(c, device, o) == [{"offer_id": o, "reason": kind}]
+        # the computer's own closing and its own newer QR are its own acts: not told back
+        o3, _ = await _register_offer(c, device)
+        assert (await c.post(f"{REL}/pairing-sessions/{o3}/close", headers=_tok(device["device_token"]))).status_code == 200
+        assert await _burned_of(c, device, o3) == []
+        # a window that has passed: nothing is told
+        await _sql(f"UPDATE remote_device_pairing_sessions SET expires_at = now() - interval '1 second' WHERE offer_id = '{o1}'")
+        assert await _burned_of(c, device, o1) == []
+        assert plain_tm is not None
+
+
+async def test_13_a_name_the_host_would_refuse_is_not_carried(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        offer_id, _ = await _register_offer(c, device)
+        url = f"{PHONE}/pairing-sessions/{offer_id}"
+        assert (await c.post(f"{url}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        assert (await c.post(f"{REL}/pairing-sessions/{offer_id}/nonce", json={"n_m": NM, "sig": SIG}, headers=_tok(device["device_token"]))).status_code == 200
+        # 33 emoji = 33 code points (the server's old limit passes) but 66 UTF-16 code units (the host's count): refused here, before the host would kill the offer
+        r = await c.post(f"{url}/reveal", json=_reveal_body(device, spki, label="😀" * 33), headers=_person(OWNER))
+        assert r.status_code == 422
+        assert (await c.post(f"{url}/reveal", json=_reveal_body(device, spki, label="😀" * 32), headers=_person(OWNER))).status_code == 202  # 32 = 64 units: the limit itself goes

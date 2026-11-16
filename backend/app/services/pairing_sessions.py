@@ -19,8 +19,8 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
-from sqlalchemy import delete, exists, select, update
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +70,14 @@ class SessionReveal(BaseModel):
     label: str = Field(min_length=1, max_length=64)
     binding_sig: str = Field(pattern=_B64_SIG)
 
+    @field_validator("label")
+    @classmethod
+    def _label_utf16(cls, v: str) -> str:
+        """the limit in the unit the phone and the host count (UTF-16 code units): 64 code points is up to 128 of them — a name the host would refuse must not be carried"""
+        if len(v.encode("utf-16-le")) // 2 > 64:
+            raise ValueError("label too long")
+        return v
+
 
 class SessionPhoneRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,8 +92,8 @@ async def lock_setup(db: AsyncSession, setup_id: uuid.UUID) -> None:
 
 
 async def has_session(db: AsyncSession, setup_id: uuid.UUID) -> bool:
-    """Did this computer ever register an offer on the new procedure? — then the old six-digit offer is refused for it (no downgrade)."""
-    return bool((await db.execute(select(exists().where(RemoteDevicePairingSession.setup_id == setup_id)))).scalar())
+    """Did this computer ever register an offer on the new procedure? — then the old six-digit offer is refused for it (no downgrade). The mark is the column `desktop_setups.pairing_v2_at` (one way), not the existence of session rows."""
+    return (await db.execute(select(DesktopSetup.pairing_v2_at).where(DesktopSetup.id == setup_id))).scalar_one_or_none() is not None
 
 
 async def _lock(db: AsyncSession, setup_id: uuid.UUID, offer_id: uuid.UUID) -> RemoteDevicePairingSession | None:
@@ -128,6 +136,8 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
         raise DesktopRelayError(422, "invalid_expiry", "the offer has expired or reaches beyond its window")
     existing = await _lock(db, setup.id, body.offer_id)
     if existing is not None:
+        if existing.burned_at is not None:  # the real state, never «registered» again (a computer that registers again must learn the offer ended)
+            raise DesktopRelayError(409, BURNED, "this pairing offer was ended")
         if existing.expires_at == body.expires_at:  # the same registration again (a reconnect)
             return existing
         raise DesktopRelayError(409, "offer_used", "this pairing offer was already registered")
@@ -138,6 +148,8 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
     await db.execute(delete(RemoteDevicePairingSession).where(
         RemoteDevicePairingSession.setup_id == setup.id, RemoteDevicePairingSession.expires_at < now - timedelta(hours=1),
     ))
+    # the one-way mark (under the computer's row lock): from now on the old six-digit offer is refused for this computer
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id, DesktopSetup.pairing_v2_at.is_(None)).values(pairing_v2_at=now))
     row = RemoteDevicePairingSession(id=uuid.uuid4(), setup_id=setup.id, offer_id=body.offer_id, expires_at=body.expires_at)
     db.add(row)
     try:
@@ -181,6 +193,15 @@ async def frames_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[tuple[st
         ).order_by(RemoteDevicePairingSession.created_at)
     )).scalars().all()
     out: list[tuple[str, dict]] = []
+    # an offer ended by the OTHER side (a second commitment · a second reveal · a key that is not the committed one · the phone's [달라요]) is told to the computer: it must not keep showing a number — and keep its [같아요] alive — for a pairing
+    # the server has ended (the computer's own closing and its own newer QR are its own acts: not told back)
+    for r in (await db.execute(
+        select(RemoteDevicePairingSession).where(
+            RemoteDevicePairingSession.setup_id == setup_id, RemoteDevicePairingSession.expires_at > now, RemoteDevicePairingSession.burned_at.is_not(None),
+            RemoteDevicePairingSession.burn_reason.in_(("second_commit", "second_reveal", "key_mismatch", "phone_declined")),
+        ).order_by(RemoteDevicePairingSession.created_at)
+    )).scalars().all():
+        out.append((f"burned:{r.offer_id}", {"offer_id": str(r.offer_id), "reason": r.burn_reason}))
     for r in rows:
         if r.n_m is None:
             out.append((f"commit:{r.offer_id}", {"offer_id": str(r.offer_id), "phone_key_id": str(r.phone_key_id), "commit": r.commit}))

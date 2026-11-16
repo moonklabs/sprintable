@@ -5,10 +5,10 @@ public: a 32-byte commitment (an HMAC only the QR's holders can make), the host'
 random value · binding signature. What it ENFORCES is the order and the «one»: one commitment per offer (a second one — from anyone — ends the offer: `burned_at`), one nonce per
 commitment, one reveal per nonce; a commitment only from a member of the computer's organization; the window of the QR (≤ 5 min).
 
-A computer that registered such an offer is on the new procedure for good: the old six-digit offer (`remote_device_pairing_offers`) is refused for it afterwards (code, not schema: the table's existence per setup is the mark).
+A computer that registered such an offer is on the new procedure for good: the old six-digit offer (`remote_device_pairing_offers`) is refused for it afterwards. The mark is `desktop_setups.pairing_v2_at` (one way, set at the first registration, never cleared) — a column, not the existence of session rows (those can be cleaned up or cascade away with a deleted phone key).
 
 Table: remote_device_pairing_sessions. The CHECKs say the order in the database too: nonce only after a commitment, a reveal only after a nonce, a commitment names who sent it and with which key, a burn names its reason.
-Downgrade drops the table (a pairing in flight is lost; nothing paired is touched).
+Downgrade drops the table and the column (a pairing in flight is lost; nothing paired is touched).
 """
 import sqlalchemy as sa
 from alembic import op
@@ -21,6 +21,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column("desktop_setups", sa.Column("pairing_v2_at", sa.DateTime(timezone=True), nullable=True))
     op.create_table(
         "remote_device_pairing_sessions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -63,3 +64,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_pairing_sessions_setup", table_name="remote_device_pairing_sessions")
     op.drop_table("remote_device_pairing_sessions")
+    op.drop_column("desktop_setups", "pairing_v2_at")

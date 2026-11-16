@@ -57,6 +57,8 @@ class DesktopSetup(Base):
     # story #4529 (alembic 0429) — the last `desktop_commands.device_seq` handed out for this device (the stream's event id)
     relay_command_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4972 (0481): the moment this computer first registered an offer on the NEW pairing procedure — one way, never cleared: the old six-digit offer is refused for it from then on (a mark that outlives the offer rows it came from)
+    pairing_v2_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # story 4660 — why the server closed it (a closed text, e.g. «새 셋업으로 대체»); null for a person's disconnect
     revoked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
