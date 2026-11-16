@@ -188,9 +188,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요",
         "en": "The agent stopped with an error — the reason is in the desktop app on that computer",
     },
+    # story 4972 (선생님 결정): the words of a notice sit on a lock screen and in a notice history — the agent and «an approval is waiting» only; the tool is inside the card
     "agent_permission.notice_body": {
-        "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
-        "en": "Waiting for you to allow {tool} — tap to check",
+        "ko": "승인 요청이 왔어요",
+        "en": "An approval is waiting",
     },
     # story #3786 슬라이스 1 — dependencies.py(8건, 고유 키 5개: "의존성을 찾을 수 없음"이
     # 4개 호출부에서 재사용됨).

@@ -43,9 +43,11 @@ class AgentPermissionRequest(Base):
         CheckConstraint(_in("stage", PERMISSION_STAGES), name="ck_agent_permission_requests_stage"),
         # story #4590 (0445): a terminal-only row carries no hash (nothing to sign) and may lack tool · summary (not read); every
         # other row keeps all three
+        # story 4972 (0479): an answerable row's words are text (tool · summary) OR sealed (reported as one envelope, kept only while its question waits); an envelope is only on a sealed row; a terminal-only row is never sealed
         CheckConstraint(
-            "(terminal_only AND input_hash IS NULL) OR "
-            "(NOT terminal_only AND input_hash IS NOT NULL AND tool IS NOT NULL AND summary IS NOT NULL)",
+            "(envelope IS NULL OR sealed) AND ("
+            "(terminal_only AND input_hash IS NULL AND NOT sealed) OR "
+            "(NOT terminal_only AND input_hash IS NOT NULL AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed)))",
             name="ck_agent_permission_requests_terminal_only_fields",
         ),
         Index("ix_agent_permission_requests_recipient_state", "recipient_member_id", "state"),
@@ -66,6 +68,9 @@ class AgentPermissionRequest(Base):
     workdir: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story 4949: what a file tool is about to write / change — the Mac's masked, cut lines (never the original). Held while the request is pending only
     preview: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # story 4972: the words (tool · summary · folder · preview) as ONE envelope the phone opens and the server cannot — kept as it came, served to the phone, gone from the row with its question
+    sealed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")  # story 4972: reported sealed — no tool · summary as text, ever (stays true after the envelope is gone)
+    envelope: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)  # none_as_null: «no envelope» is SQL NULL, never a JSON null (the CHECK reads IS NULL)
     input_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4590: never on a terminal-only row (nothing to sign)
     # story #4590: a question only that computer's terminal can answer — shown as a card with no buttons, no notice (no push)
     terminal_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
