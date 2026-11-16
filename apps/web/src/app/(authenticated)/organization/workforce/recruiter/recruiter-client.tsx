@@ -52,6 +52,16 @@ export function startHereMode(inApp: boolean, chosen: Pick<RuntimeCapabilityItem
   return inApp ? 'app' : 'link';
 }
 
+/** story 4973: the runtime a person last chose on this computer — the next recruit starts from it (inside the app a person with two tools should not have to choose again).
+ *  A tool the app no longer finds is never forced: the caller keeps only a value that is among the found ones. Storage can be absent or refuse (private window · blocked): then there is simply no memory. */
+const LAST_RUNTIME_KEY = 'sprintable.recruiter.lastRuntime';
+export function readLastRuntime(): string | null {
+  try { return window.localStorage.getItem(LAST_RUNTIME_KEY); } catch { return null; }
+}
+export function rememberRuntime(slug: string): void {
+  try { window.localStorage.setItem(LAST_RUNTIME_KEY, slug); } catch { /* no memory */ }
+}
+
 /** story 4680 (D2): the app's «found on this computer» list matched to the server's capabilities by `desktop_runtime` (the one table,
  * agent_runtime.DESKTOP_RUNTIME_TYPES) — in the app's order; a found runtime the server has no capability for is left out. */
 export function foundRuntimes(found: readonly DesktopRuntimeFound[], caps: readonly RuntimeCapabilityItem[]): { found: DesktopRuntimeFound; cap: RuntimeCapabilityItem }[] {
@@ -576,14 +586,19 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
   const foundDefaultApplied = useRef(false);
   // story 4691: a runtime a PERSON clicked stands — a list that arrives later never replaces it with the found default
   const runtimePickedByPerson = useRef(false);
-  const chooseRuntime = useCallback((slug: string) => { runtimePickedByPerson.current = true; setRuntime(slug); }, []);
+  const chooseRuntime = useCallback((slug: string) => { runtimePickedByPerson.current = true; rememberRuntime(slug); setRuntime(slug); }, []);
 
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
     if (!foundDefaultApplied.current && foundHere.length) {
       foundDefaultApplied.current = true;
-      if (!runtimePickedByPerson.current && foundHere[0]!.cap.slug !== runtime) { setRuntime(foundHere[0]!.cap.slug); return; }
+      if (!runtimePickedByPerson.current) {
+        // story 4973: the tool last chosen on this computer, when the app still finds it — else the first found (as before)
+        const last = readLastRuntime();
+        const want = (last && foundHere.find((f) => f.cap.slug === last)?.cap.slug) || foundHere[0]!.cap.slug;
+        if (want !== runtime) { setRuntime(want); return; }
+      }
     }
     const next = pickDefaultRuntime(supportedRuntimes, runtime);
     if (next !== runtime) setRuntime(next);
@@ -596,6 +611,35 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
 
   // story 5ea9bafe: STEP4 오리엔팅 헤더·전달 카피·STEP5 intro에서 공용으로 쓰는 현재 선택 런타임의
   // 표시명(못 찾으면 slug 그대로 — 로딩 중 등 방어).
+  // the cards of what the app found on this computer (the runtime step and — story 4973 — the one screen use the same ones)
+  const renderFoundCards = () => (
+    <div className="grid grid-cols-3 gap-2">
+      {foundHere.map(({ found, cap }, i) => {
+        const sel = runtime === cap.slug;
+        return (
+          <Button
+            key={cap.slug}
+            type="button"
+            variant="outline"
+            onClick={() => chooseRuntime(cap.slug)}
+            aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
+            aria-pressed={sel}
+            data-testid={`recruiter-found-${found.runtime}`}
+            className={cn(
+              'relative h-auto min-w-0 flex-col items-start gap-1 whitespace-normal rounded-xl p-2.5 text-left',
+              sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30',
+            )}
+          >
+            {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+            <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
+            <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
+            <span className="w-full truncate font-mono text-micro text-muted-foreground" title={found.executable}>{found.executable}</span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+
   const currentCapability = runtimeCapabilities?.find((r) => r.slug === runtime);
   const currentRuntimeDisplayName = currentCapability ? runtimeDisplayName(currentCapability) : runtime;
 
@@ -627,31 +671,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
                 {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal" data-testid="recruiter-found-here-device">· {bridge.device.name}</span>
               </p>
-              <div className="grid grid-cols-3 gap-2">
-                {foundHere.map(({ found, cap }, i) => {
-                  const sel = runtime === cap.slug;
-                  return (
-                    <Button
-                      key={cap.slug}
-                      type="button"
-                      variant="outline"
-                      onClick={() => chooseRuntime(cap.slug)}
-                      aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
-                      aria-pressed={sel}
-                      data-testid={`recruiter-found-${found.runtime}`}
-                      className={cn(
-                        'relative h-auto min-w-0 flex-col items-start gap-1 whitespace-normal rounded-xl p-2.5 text-left',
-                        sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30',
-                      )}
-                    >
-                      {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
-                      <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
-                      <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
-                      <span className="w-full truncate font-mono text-micro text-muted-foreground" title={found.executable}>{found.executable}</span>
-                    </Button>
-                  );
-                })}
-              </div>
+              {renderFoundCards()}
             </div>
           ) : null}
           {bridge && foundHere.length === 0 ? (
@@ -1320,6 +1340,21 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                   {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
                     : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive" data-testid="recruiter-hire-failed">{recruitError}</p>}
+                  {/* story 4973 (선생님 11-16): the one screen has no runtime step, so the tool was always the first one found (Claude Code) and a computer with Codex too offered no way
+                      to it. Right above the start button: two or more found → the choice (the found cards, default = the one last chosen here, else the first); one → its name on one line;
+                      none → nothing (the screen as before). A pick stands against a list that arrives later (4691 · chooseRuntime). Copy: the found-here keys the runtime step already shows. */}
+                  {bridge && foundHere.length >= 2 ? (
+                    <div className="space-y-1" data-testid="recruiter-one-screen-runtime">
+                      <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal">· {bridge.device.name}</span>
+                      </p>
+                      {renderFoundCards()}
+                    </div>
+                  ) : bridge && foundHere.length === 1 ? (
+                    <p className="text-sm text-foreground" data-testid="recruiter-one-screen-runtime-one">
+                      {t('foundHereTitle')} · {runtimeDisplayName(foundHere[0]!.cap)} · {t('foundHereVersion', { version: foundHere[0]!.found.version })}
+                    </p>
+                  ) : null}
                   <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                     <Button
                       variant="hero"
