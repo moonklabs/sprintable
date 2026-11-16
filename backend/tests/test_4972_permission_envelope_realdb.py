@@ -448,23 +448,29 @@ async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_term
         with Operations.context(MigrationContext.configure(sync_conn)):
             fn()
 
-    async def def_():
-        async with eng.begin() as conn:
-            return (await conn.execute(text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'"))).scalar_one()
-
+    norm = lambda t: "".join(str(t).split())  # noqa: E731
+    q_def = text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'")
     try:
-        norm = lambda t: "".join(str(t).split())  # noqa: E731
-        async with eng.begin() as conn:
-            await conn.run_sync(run, m.downgrade)
-        assert "NOTsealed" in norm(await def_()).replace("(NOTsealed)", "NOTsealed") and norm(await def_()).count("NOTsealed") >= 2, "0479's rule is back (NOT sealed on the terminal-only branch too)"
-        row = (await _sql(fetch=f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))[0]
-        assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
+        # ONE transaction that is rolled back (Postgres DDL is transactional): the shared test database is never left at the old schema, whatever fails in between, and the global rewrite of the downgrade touches nothing that stays
+        async with eng.connect() as conn:
+            trans = await conn.begin()
+            try:
+                before = norm((await conn.execute(q_def)).scalar_one())
+                await conn.run_sync(run, m.downgrade)
+                down = norm((await conn.execute(q_def)).scalar_one())
+                assert down.count("NOTsealed") > before.count("NOTsealed"), "0479's rule is back (NOT sealed on the terminal-only branch too)"
+                row = (await conn.execute(text(f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).one()
+                assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
+                await conn.run_sync(run, m.upgrade)
+                assert norm((await conn.execute(q_def)).scalar_one()) == before, "0480's rule is back after the upgrade, exactly"
+            finally:
+                await trans.rollback()
+        async with eng.connect() as conn:
+            assert norm((await conn.execute(q_def)).scalar_one()) == before, "nothing of this test stays in the database"
+            kept = (await conn.execute(text(f"SELECT sealed FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).scalar_one()
+            assert kept is True
     finally:
-        async with eng.begin() as conn:
-            await conn.run_sync(run, m.upgrade)
         await eng.dispose()
-    final = (await _sql(fetch="SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'"))[0][0]
-    assert "".join(final.split()).count("NOTsealed") == 1, "0480's rule is back after upgrade (only the first NOT sealed — the words rule — is left)"
 
 
 async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade_runs_the_sql(world):
