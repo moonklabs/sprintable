@@ -13,7 +13,7 @@
 //
 // What the web may ask (closed shapes — the shell refuses anything else · the fields to sign never come from here):
 //   device.auth · device.key.info · pair.scan · pair.mac {offer_id, phone_key_id, label} · pair.number {offer_id, reveal} ·
-//   approval.sign {id, decision} · app.settings
+//   approval.sign {id, decision} · approval.view {id} · app.settings
 
 type Send = (message: { id: string; v: 1; type: string; args: Record<string, unknown> }) => void;
 export type PhoneAnswer = { id: string; ok: boolean; code?: string; [field: string]: unknown };

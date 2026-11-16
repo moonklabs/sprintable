@@ -21,11 +21,21 @@ export type AnswerOutcome =
   | { kind: 'expired' } // the window passed
   | { kind: 'closed' } // withdrawn · rejected · not pending · not answerable any more
   | { kind: 'unreachable' } // the computer is not reachable now
+  | { kind: 'not_ready' } // story 4972: the shell's key store is not answering just now (`vault_unavailable`) — try again in a moment; the request is still open
+  | { kind: 'cannot_open' } // story 4972: the shell would not open this request's card (`card_refused`: the envelope is not this request's · a plain card from a computer that seals) — the terminal answers it
   | { kind: 'failed' }; // anything else — the request is left as it was
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 
-export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }): Promise<AnswerOutcome> {
+/**
+ * story 4972: a SEALED card's words only the phone can read, so it is answered ON the shell's own sheet ([허용하지 않기] · [허용]) — the web
+ * does not know the answer before the person gives it. The decision posted is the one the shell says it SIGNED (its reply's `decision`), whenever it
+ * says one (lens 5838 low 1 — not the web's own guess of «sealed» that picks whose word counts):
+ *  · a shell that says one → that one; for a card the web did not call sealed it must equal the pressed one, else nothing is posted (`failed`);
+ *  · a shell that says nothing (older): the pressed one — unless `opts.sealed` (the pressed value is only the call's stand-in shape then) → `failed`.
+ * Nothing is ever posted that the person did not choose.
+ */
+export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }, opts: { sealed?: boolean } = {}): Promise<AnswerOutcome> {
   const signed = await deps.phoneCall('approval.sign', { id, decision });
   if (!signed.ok) {
     switch (signed.code) {
@@ -43,10 +53,21 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
       case 'expired': return { kind: 'expired' };
       case 'not_pending':
       case 'not_answerable': return { kind: 'closed' };
+      case 'vault_unavailable': return { kind: 'not_ready' };
+      case 'card_refused': return { kind: 'cannot_open' };
       default: return { kind: 'failed' };
     }
   }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
+  const said = signed.decision === 'allow' || signed.decision === 'deny' ? signed.decision : null;
+  if (signed.decision !== undefined && said === null) return { kind: 'failed' }; // a reply that names something else is a broken shell
+  if (said === null) {
+    if (opts.sealed) return { kind: 'failed' };
+  } else if (!opts.sealed && said !== decision) {
+    return { kind: 'failed' };
+  } else {
+    decision = said;
+  }
   let res: Response;
   try {
     res = await fetchWithAuth(`/api/agent-permission-requests/${id}/answer`, {
@@ -70,5 +91,20 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
   if (code === 'device_unreachable') return { kind: 'unreachable' };
   if (code === 'expired' || (res.status === 410 && code !== 'withdrawn')) return { kind: 'expired' };
   if (code === 'withdrawn' || code === 'remote_control_off') return { kind: 'closed' };
+  return { kind: 'failed' };
+}
+
+/**
+ * story 4972: «open it in the app» — a sealed card read on the shell's own sheet with nothing to sign (a terminal-only question has no
+ * buttons): the web names the row, the shell reads it itself. `ok` = the sheet was shown and closed.
+ */
+export type OpenOutcome = { kind: 'opened' } | { kind: 'closed' } | { kind: 'not_ready' } | { kind: 'cannot_open' } | { kind: 'failed' };
+
+export async function openOnPhone(id: string, deps: { phoneCall: Call }): Promise<OpenOutcome> {
+  const r = await deps.phoneCall('approval.view', { id });
+  if (r.ok) return { kind: 'opened' };
+  if (r.code === 'not_pending' || r.code === 'not_answerable') return { kind: 'closed' };
+  if (r.code === 'vault_unavailable') return { kind: 'not_ready' };
+  if (r.code === 'card_refused') return { kind: 'cannot_open' };
   return { kind: 'failed' };
 }

@@ -7988,6 +7988,13 @@
     "truncatedNote": "Only the first 200 characters are shown",
     "workdir": "Working folder · {path}",
     "toolUnread": "What it asks is shown in that computer's terminal",
+    "sealed": {
+      "locked": "The content is locked",
+      "openInApp": "Open it in the phone app",
+      "open": "Open in app",
+      "allowed": "You allowed it",
+      "denied": "You denied it"
+    },
     "line": {
       "answerOnPhone": "You can answer from a paired phone",
       "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",
@@ -8009,6 +8016,8 @@
       "notPaired": "This phone isn't paired with that computer, so it wasn't sent — the request is still open. Answer from a paired phone or in that computer's terminal",
       "cancelled": "Not sent — the request is still open",
       "failed": "Couldn't send it — the request is still open. Please press again",
+    "notReady": "The phone isn't ready yet — please press again in a moment. The request is still open",
+    "cannotOpen": "This phone can't open this request — it is still open. Please answer it in that computer's terminal",
       "screenLockConfirms": "No fingerprint or face is set up, so your screen lock confirms it",
       "biometricRequired": "This phone can answer only with a fingerprint — add one in the phone's settings, then press again",
       "noScreenLock": "Answers need a screen lock on this phone — turn one on in the phone's settings",

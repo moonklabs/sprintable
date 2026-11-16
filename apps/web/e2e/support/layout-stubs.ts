@@ -23,7 +23,8 @@ export const STUBS: Record<string, string> = {
       if (k === 'device.auth') return { id: 'x', ok: true, auth: 'biometric' };
       return { id: 'x', ok: false };
     };`,
-  '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
+  // story 4972: the card also opens a sealed request on the phone app's sheet (`openOnPhone`) — the stub carries every export the card imports
+  '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; } export async function openOnPhone(id) { return { kind: "opened" }; }',
   // story #4583: the inbox reads the org's remote control — the dashboard context comes with it. No remote-control answer → no «off» line.
   // a spec that needs more of the context (story 4891: the human-only gate reads `currentMemberType`) sets `window.__dashboardCtx` before it mounts
   '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1', ...(window.__dashboardCtx || {}) }; } export function useChatsHref() { return '/chats'; } export function useConnectRulesHref(fallback) { return fallback; }",
