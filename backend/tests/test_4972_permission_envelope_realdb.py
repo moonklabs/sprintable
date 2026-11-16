@@ -147,11 +147,14 @@ async def test_the_words_may_not_come_twice_and_the_header_must_be_this_requests
         both["summary"] = MARKER
         r = await _post_ask(c, device, both)
         assert r.status_code == 422 and MARKER not in r.text.replace("summary", ""), r.text
-        # a terminal-only request has no card to seal
-        t_only = _sealed_ask(agent, sid)
-        del t_only["input_hash"]
-        t_only["terminal_only"] = True
-        assert (await _post_ask(c, device, t_only)).status_code == 422
+        # a terminal-only request with an envelope and a hash: nothing is signed, so no hash (a sealed one carries none either)
+        t_hash = _sealed_ask(agent, sid)
+        t_hash["terminal_only"] = True
+        assert (await _post_ask(c, device, t_hash)).status_code == 422
+        # a sealed question that is not terminal-only has something to sign: no hash, no question
+        no_hash = _sealed_ask(agent, sid)
+        del no_hash["input_hash"]
+        assert (await _post_ask(c, device, no_hash)).status_code == 422
         # a header that is another request's: another setup · session · request id · window
         for over in ({"setup_id": "00000000-0000-0000-0000-000000000000"}, {"session_key": "s-other"}, {"command_id": "00000000-0000-0000-0000-000000000001"}, {"expires_at": 1_000}):
             bad = _sealed_ask(agent, sid)
@@ -191,7 +194,7 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
     # an envelope only on a sealed row · a sealed row may lose its envelope (its question is over) but never gain text words by accident of NULLs
     for sql in (f"UPDATE agent_permission_requests SET envelope = '{{}}'::jsonb WHERE id = '{pid}'",  # not sealed
                 f"UPDATE agent_permission_requests SET input_hash = NULL WHERE id = '{rid}'",
-                f"UPDATE agent_permission_requests SET terminal_only = true, input_hash = NULL WHERE id = '{rid}'",  # a terminal-only row is never sealed
+                f"UPDATE agent_permission_requests SET terminal_only = true WHERE id = '{rid}'",  # a terminal-only row has no hash (sealed or not) — this one still has its hash
                 f"UPDATE agent_permission_requests SET sealed = false WHERE id = '{rid}'",  # neither text nor sealed
                 f"UPDATE agent_permission_requests SET envelope = 'null'::jsonb WHERE id = '{rid}'",  # a JSON null is no envelope
                 f"UPDATE agent_permission_requests SET envelope = '[]'::jsonb WHERE id = '{rid}'",  # nor is a list
@@ -201,7 +204,12 @@ async def test_the_database_keeps_a_sealed_row_whole(world):
                 f"UPDATE agent_permission_requests SET preview = '{{\"op\": \"write\"}}'::jsonb WHERE id = '{rid}'"):
         with pytest.raises(IntegrityError):
             await _sql(sql)
-    await _sql(f"UPDATE agent_permission_requests SET envelope = NULL WHERE id = '{rid}'")  # the question is over: the row stays whole
+    # a request holds its envelope exactly while it is pending: an ended row with one · a pending sealed row without one
+    for sql in (f"UPDATE agent_permission_requests SET state = 'withdrawn', result_code = 'session_ended', input_hash = NULL WHERE id = '{rid}'",  # ended, envelope still there
+                f"UPDATE agent_permission_requests SET envelope = NULL WHERE id = '{rid}'"):  # pending, envelope gone
+        with pytest.raises(IntegrityError):
+            await _sql(sql)
+    await _sql(f"UPDATE agent_permission_requests SET envelope = NULL, state = 'withdrawn', result_code = 'session_ended', input_hash = NULL WHERE id = '{rid}'")  # the question is over: the row stays whole
 
 
 async def test_a_sealed_row_is_never_a_network_question_the_second_stage_is_refused(world):
@@ -297,3 +305,315 @@ async def test_taking_off_the_last_phone_ends_the_sealed_cards_and_another_phone
         assert r.status_code in (200, 204), r.text
         state, code, envelope, input_hash, _p, sealed = await _card(body["request_id"])
         assert (state, code, envelope, input_hash, sealed) == ("withdrawn", "session_ended", None, None, True)
+
+
+async def test_a_terminal_only_question_can_be_sealed_too_words_to_read_and_nothing_to_sign(world):
+    async with _client() as c:
+        name = "d4424 mac 4972t"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        del body["input_hash"]
+        body["terminal_only"] = True
+        made = await _post_ask(c, device, body)
+        assert made.status_code == 201, made.text
+        tool, summary, workdir, preview, envelope, state = await _row(body["request_id"])
+        assert (tool, summary, workdir, preview) == (None, None, None, None) and envelope == body["envelope"] and state == "pending"
+        assert (await _sql(fetch=f"SELECT sealed, terminal_only, input_hash FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))[0] == (True, True, None)
+        # a phone paired with that computer is served the envelope — and nothing to press or sign
+        [view] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert view["envelope"] == body["envelope"] and view["sealed"] is True and view["terminal_only"] is True and view["answerable"] is False
+        assert view["input_hash"] is None and view["tool"] is None and view["summary"] is None
+        # it cannot be answered from the phone
+        no = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert no.status_code == 409, no.text
+        # the words go with the question like any other sealed card
+        w = await c.post(f"/api/v2/desktop/relay/permission-requests/{body['request_id']}/withdraw", json={"reason": "answered_locally"}, headers=_tok(token))
+        assert w.status_code == 200, w.text
+        assert (await _row(body["request_id"]))[4] is None
+        [done] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert done["envelope"] is None and done["sealed"] is True
+        # a window that passes lets it go too (the minute sweep is the same one)
+        late = _sealed_ask(agent, sid)
+        del late["input_hash"]
+        late["terminal_only"] = True
+        assert (await _post_ask(c, device, late)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{late['request_id']}'")
+        assert (await _post_ask(c, device, _sealed_ask(agent, sid))).status_code == 201
+        assert (await _row(late["request_id"]))[4] is None
+
+
+async def test_a_sealed_terminal_only_card_is_not_served_to_a_person_with_no_phone_paired_with_that_computer(world):
+    async with _client() as c:
+        name = "d4424 mac 4972u"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+        views = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert all(v["envelope"] is None for v in views), "no paired phone: the envelope is not served (it could be opened by nobody)"
+
+
+async def test_the_downgrade_of_0480_leaves_a_sealed_terminal_only_row_that_0479s_rule_accepts(world):
+    import importlib.util
+    import pathlib
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    async with _client() as c:
+        name = "d4424 mac 4972v"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        body = _sealed_ask(agent, await _setup_id(name))
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+    # what downgrade() does to such a row, then 0479's rule over it: it holds
+    await _sql(m._DOWNGRADE_SQL)
+    bad = (await _sql(fetch=f"SELECT count(*) FROM agent_permission_requests WHERE NOT ({m._OLD_RULE})"))[0][0]
+    assert bad == 0
+
+
+async def test_a_snapshot_that_no_longer_lists_the_last_phone_ends_the_sealed_cards(world):
+    async with _client() as c:
+        name = "d4424 mac 4972w"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        a = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, a)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        # the computer's next list of paired phones is empty: the person has no phone on it any more — a sealed card nobody can open does not wait out its window
+        await _pair(c, token)
+        for body in (a, t):
+            state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+            assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True), body["request_id"]
+
+
+async def test_a_sealed_terminal_only_card_of_a_disconnected_computer_is_not_served(world):
+    async with _client() as c:
+        name = "d4424 mac 4972x"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, t)).status_code == 201
+        assert [v["envelope"] is not None for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]] == [True]
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")
+        assert all(v["envelope"] is None for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]), "the computer was disconnected: no envelope goes out for it"
+
+
+async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_terminal_only_row(world):
+    """the migration's own downgrade() and upgrade() run against the test database (not only their SQL strings): down keeps the row as a words-less terminal-only card under 0479's rule, up restores 0480's."""
+    import importlib.util
+    import pathlib
+
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480c", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    async with _client() as c:
+        name = "d4424 mac 4972z"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)
+        body = _sealed_ask(agent, await _setup_id(name))
+        del body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+
+    def run(sync_conn, fn):
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            fn()
+
+    norm = lambda t: "".join(str(t).split())  # noqa: E731
+    q_def = text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_permission_requests_terminal_only_fields'")
+    try:
+        # ONE transaction that is rolled back (Postgres DDL is transactional): the shared test database is never left at the old schema, whatever fails in between, and the global rewrite of the downgrade touches nothing that stays
+        async with eng.connect() as conn:
+            trans = await conn.begin()
+            try:
+                before = norm((await conn.execute(q_def)).scalar_one())
+                await conn.run_sync(run, m.downgrade)
+                down = norm((await conn.execute(q_def)).scalar_one())
+                assert "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" in down and "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" not in before, "0479's rule is back (NOT sealed on the terminal-only branch too)"
+                coupling = "(state='pending'::text)OR(envelopeISNULL)"
+                assert coupling in before and coupling not in down, "0480's coupling of the envelope to a pending request is gone with the downgrade"
+                row = (await conn.execute(text(f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).one()
+                assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
+                await conn.run_sync(run, m.upgrade)
+                assert norm((await conn.execute(q_def)).scalar_one()) == before, "0480's rule is back after the upgrade, exactly"
+            finally:
+                await trans.rollback()
+        async with eng.connect() as conn:
+            assert norm((await conn.execute(q_def)).scalar_one()) == before, "nothing of this test stays in the database"
+            kept = (await conn.execute(text(f"SELECT sealed FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).scalar_one()
+            assert kept is True
+    finally:
+        await eng.dispose()
+
+
+async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade_runs_the_sql(world):
+    import importlib.util
+    import inspect
+    import pathlib
+
+    from app.models.agent_permission import AgentPermissionRequest
+
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
+    spec = importlib.util.spec_from_file_location("m0480b", mod_path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    ck = next(c for c in AgentPermissionRequest.__table__.constraints if getattr(c, "name", None) == "ck_agent_permission_requests_terminal_only_fields")
+    norm = lambda t: "".join(str(t).split())  # noqa: E731
+    assert norm(ck.sqltext) == norm(m._NEW_RULE), "a schema made from the models carries the rule the migrations leave"
+    assert "_DOWNGRADE_SQL" in inspect.getsource(m.downgrade) and "NOT sealed" in m._OLD_RULE
+
+
+async def test_the_minute_sweep_ends_a_card_whose_person_lost_every_phone_by_a_path_that_does_not_check(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972y"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        p2, der2 = await _register(c, label="two")
+        await _pair(c, token, der1, der2)
+        sid = await _setup_id(name)
+        body = _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # the person has two live phones
+        # two removals that each saw the other's pair standing (concurrent) and an account reclaim that revokes keys, as the rows they leave: every pair gone / every key revoked, no card ended
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'")
+        assert (await _card(body["request_id"]))[0] == "pending" and (await _card(body["request_id"]))[2] is not None
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 1
+            await s.commit()
+        state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+        assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True)
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # idempotent
+        # revoked keys instead of removed pairs
+        again = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = NULL WHERE setup_id = '{sid}'")
+        assert (await _post_ask(c, device, again)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id IN ('{p1}', '{p2}')")
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 2
+            await s.commit()
+        assert (await _card(again["request_id"]))[2] is None and (await _card(t["request_id"]))[2] is None
+
+
+async def test_a_person_who_never_paired_a_phone_keeps_the_plain_preview_card_through_the_minute_sweep(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972m"
+        device = await _device(c, name=name)
+        agent = await _with_session(c, device)  # no phone is ever registered or paired for this person
+        lines = _ask(agent, tool="Edit", summary="notes/a.md", preview={"op": "edit", "blocks": [{"removed": ["a"], "added": ["b"], "removed_more": 0, "added_more": 0}], "blocks_more": 0, "replace_all": False, "withheld": None})
+        plain = _ask(agent)
+        assert (await _post_ask(c, device, lines)).status_code == 201 and (await _post_ask(c, device, plain)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # nothing was lost for this person: no phone was ever taken away from them
+            await s.commit()
+        for body in (lines, plain):
+            state, code, envelope, input_hash, preview, sealed_ = await _card(body["request_id"])
+            assert state == "pending" and code is None, body["request_id"]
+        assert (await _card(lines["request_id"]))[4] is not None, "the preview of the plain card is still there (it ends by a window · an answer · a withdrawal, as it always did)"
+
+
+async def test_a_sealed_card_of_a_disconnected_computer_is_ended_by_the_minute_sweep(world):
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import end_orphan_cards
+
+    async with _client() as c:
+        name = "d4424 mac 4972n"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        a = _sealed_ask(agent, sid)
+        t = _sealed_ask(agent, sid)
+        del t["input_hash"]
+        t["terminal_only"] = True
+        assert (await _post_ask(c, device, a)).status_code == 201 and (await _post_ask(c, device, t)).status_code == 201
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 0  # the person's phone is paired and the computer is connected
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")  # the computer was disconnected: the pair rows stay
+        async with async_session_factory() as s:
+            assert await end_orphan_cards(s) == 2
+            await s.commit()
+        for body in (a, t):
+            state, code, envelope, input_hash, _p, sealed_ = await _card(body["request_id"])
+            assert (state, code, envelope, input_hash, sealed_) == ("withdrawn", "session_ended", None, None, True)
+
+
+async def test_the_minute_cron_keeps_its_earlier_purges_when_the_orphan_sweep_fails(world, monkeypatch):
+    import app.routers.cron as cron_module
+    import app.services.agent_permissions as perms
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import text as sql_text
+
+    from app.main import app
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        name = "d4424 mac 4972o"
+        device = await _device(c, name=name)
+        token = device["device_token"]
+        agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        sid = await _setup_id(name)
+        late = _sealed_ask(agent, sid)
+        assert (await _post_ask(c, device, late)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{late['request_id']}'")
+
+    async def boom(db):
+        await db.execute(sql_text("SELECT 1/0"))  # a statement that aborts the transaction it runs in
+
+    monkeypatch.setattr(perms, "end_orphan_cards", boom)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post("/api/v2/internal/cron/changes-purge", headers={"Authorization": "Bearer test-cron-secret"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["orphan_cards_ended"] is None and r.json()["data"]["cards_ended"] == 1, r.text
+    state, code, envelope, input_hash, _p, sealed_ = await _card(late["request_id"])
+    assert (state, code, envelope) == ("expired", "expired", None), "the window sweep that ran BEFORE the failing one was committed"

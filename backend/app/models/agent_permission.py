@@ -43,12 +43,13 @@ class AgentPermissionRequest(Base):
         CheckConstraint(_in("stage", PERMISSION_STAGES), name="ck_agent_permission_requests_stage"),
         # story #4590 (0445): a terminal-only row carries no hash (nothing to sign) and may lack tool · summary (not read); every
         # other row keeps all three
-        # story 4972 (0479): an answerable row's words are text (tool · summary) OR sealed (reported as one envelope, kept only while its question waits); an envelope is only on a sealed row; a terminal-only row is never sealed
+        # story 4972 (0479): an answerable row's words are text (tool · summary) OR sealed (reported as one envelope, kept only while its question waits); an envelope is only on a sealed row; a terminal-only row never has a hash — sealed (0480) or not
         CheckConstraint(
             "(envelope IS NULL OR (sealed AND jsonb_typeof(envelope) = 'object')) AND "
             "(NOT sealed OR (tool IS NULL AND summary IS NULL AND workdir IS NULL AND host IS NULL AND (preview IS NULL OR preview = 'null'::jsonb) AND stage = 'ask')) AND ("
-            "(terminal_only AND input_hash IS NULL AND NOT sealed) OR "
-            "(NOT terminal_only AND (input_hash IS NOT NULL OR (sealed AND state <> 'pending')) AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed)))",
+            "(terminal_only AND input_hash IS NULL) OR "
+            "(NOT terminal_only AND (input_hash IS NOT NULL OR (sealed AND state <> 'pending')) AND ((tool IS NOT NULL AND summary IS NOT NULL) OR sealed))) AND "
+            "(state = 'pending' OR envelope IS NULL) AND (NOT sealed OR state <> 'pending' OR envelope IS NOT NULL)",
             name="ck_agent_permission_requests_terminal_only_fields",
         ),
         Index("ix_agent_permission_requests_recipient_state", "recipient_member_id", "state"),

@@ -958,7 +958,13 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert any("add_column" in h and '"sealed"' in h and "nullable=False" in h and "server_default" in h for h in sealed), sealed
     assert any("drop_constraint" in h and "_CHECK" in h for h in sealed) and any("NOT VALID" in h for h in sealed) and any("VALIDATE CONSTRAINT" in h for h in sealed), sealed
     assert not any(k in h for h in sealed for k in ("DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no data written, no column dropped or retyped"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_"))]
+    # story 4972: 0480 is THREE lines of upgrade(): the CHECK of 0479 dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan; the lock is held to the commit). Why a running old revision lives with it: the rule
+    # only gets LOOSER where it changes anything (the terminal-only branch no longer says `NOT sealed`) and the one new coupling (a request holds its envelope exactly while pending) is what the code of 0479 already does, so every row an old revision writes still passes; no column is added, dropped, retyped or rewritten, and no row is written. Every migration of a run shares one transaction, so the lock is held through the VALIDATE scan: writes to this table wait that long (a small table). The downgrade() is not read.
+    loosened = [h for h in hits if h.startswith("0480_")]
+    assert len(loosened) == 3, loosened
+    assert any("drop_constraint" in h and "_CHECK" in h for h in loosened) and any("NOT VALID" in h for h in loosened) and any("VALIDATE CONSTRAINT" in h for h in loosened), loosened
+    assert not any(k in h for h in loosened for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column, no data touched"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

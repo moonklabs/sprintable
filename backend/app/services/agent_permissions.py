@@ -460,14 +460,18 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
             if row.removed_at is not None:  # dropped by the device once, now listed again: a new QR pairing
                 row.removed_at = row.removed_by = row.removal_acked_at = None
             row.paired_at, row.reported_at = p.paired_at, now
+    dropped = False
     for phone_id, row in rows.items():
         if phone_id in listed:
             continue
         if row.removed_at is None:
             row.removed_at = now  # the device dropped it on its own
+            dropped = True
         if row.removal_acked_at is None:
             row.removal_acked_at = now
     await db.flush()
+    if dropped:
+        await _end_cards_without_phone(db, {setup.id})  # story 4972: a snapshot that no longer lists the last phone of a person takes their sealed cards with it (nobody can open them now)
     return {"pairings": len(listed), "unregistered": len(snapshot.pairings) - len(listed)}
 
 
@@ -819,9 +823,13 @@ class PermissionRequestReport(BaseModel):
     def _fields_for_its_kind(self) -> "PermissionRequestReport":
         if self.envelope is not None:
             # story 4972: sealed, the words are in the envelope and nowhere else — a request that also carries them as text would put them on the server
-            if self.terminal_only or any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
-                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text, and is not terminal-only")
-            if self.input_hash is None:
+            if any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
+                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text")
+            if self.terminal_only:
+                # a sealed terminal-only question: words to read, nothing to sign (so no hash — as a plain one)
+                if self.input_hash is not None:
+                    raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+            elif self.input_hash is None:
                 raise ValueError("input_hash is required unless the request is terminal_only")
             return self
         if self.terminal_only:
@@ -997,9 +1005,10 @@ async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, set
     return len(ended)
 
 
-async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) -> int:
+async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], *, sealed_only: bool = False) -> int:
     """A person's last live pair with this computer was just removed (a pair · the computer's pairs · the whole phone): a pending request of that person that holds words
-    can be opened by nobody now — it ends as `withdrawn` (`session_ended`) and the words go. A person with another live phone on the computer keeps their cards."""
+    can be opened by nobody now — it ends as `withdrawn` (`session_ended`) and the words go. A person with another live phone on the computer keeps their cards.
+    `sealed_only` (the minute sweep): only a request that holds an ENVELOPE — a plain text card (a preview) of a person who never paired a phone is not touched (it ends as it always did: a window · an answer · a withdrawal)."""
     if not setup_ids:
         return 0
     has_phone = exists(
@@ -1009,7 +1018,7 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) 
     )
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", _OPEN_WORDS, ~has_phone)
+        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else _OPEN_WORDS, ~has_phone)
         .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
@@ -1017,6 +1026,29 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID]) 
     for req_id, recipient in ended:
         _schedule_changed(db, req_id, recipient, "withdrawn")
     return len(ended)
+
+
+async def end_orphan_cards(db: AsyncSession) -> int:
+    """The minute job's second sweep (story 4972): a pending SEALED request (it holds an envelope) that nobody can open any more ends here — (a) its person has no live phone on that computer (an account reclaim that revokes keys · two removals
+    that ran at the same time and each saw the other's pair still standing — the paths above do their own check when they run and cannot see each other's uncommitted change), or (b) the computer was disconnected (`DesktopSetup.revoked_at`):
+    the pairs stay as rows, so (a) does not see it, and the envelope would otherwise wait out its window. Only rows that hold an envelope: a plain text card (a preview) of a person who never paired a phone is NOT this sweep's —
+    nothing was lost there, and it ends as it always did (lens 5833 M1). Reads only the setups that have such a request. → how many ended."""
+    setup_ids = set((await db.execute(
+        select(AgentPermissionRequest.setup_id).where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None)).distinct()
+    )).scalars().all())
+    ended = await _end_cards_without_phone(db, setup_ids, sealed_only=True)
+    if setup_ids:
+        cut = (await db.execute(
+            update(AgentPermissionRequest)
+            .where(AgentPermissionRequest.setup_id.in_(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids), DesktopSetup.revoked_at.is_not(None))),
+                   AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None))
+            .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None, input_hash=None)  # (only sealed rows hold an envelope: their hash goes with it)
+            .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+        )).all()
+        for req_id, recipient in cut:
+            _schedule_changed(db, req_id, recipient, "withdrawn")
+        ended += len(cut)
+    return ended
 
 
 # ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
@@ -1169,7 +1201,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
             "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
             # story 4972: the sealed card — served as it came, to the phone's own app only (it cannot be read here), on a row the person can answer now
-            "envelope": r.envelope if shown == "pending" and answerable and not r.terminal_only else None,
+            # a sealed TERMINAL-ONLY card (no buttons — its words to read, nothing to sign) is served to a phone paired with that computer even when the computer is not reachable or remote control is off: the same as its plain words were
+            "envelope": r.envelope if shown == "pending" and ((answerable and not r.terminal_only) or (r.terminal_only and s.id in paired_setups and s.revoked_at is None)) else None,
             "sealed": r.sealed,  # a card whose words were sealed — the phone knows what it is (and that it has none to show once the envelope is gone)
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
