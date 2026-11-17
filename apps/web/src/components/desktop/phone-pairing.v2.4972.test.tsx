@@ -49,6 +49,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 let sessionState: { state: string; n_m: string | null; sig: string | null };
+let listStatus = 200; // the status the server's LIST of this person's phones answers
 let readStatus = 200; // the status the server's state read answers (a read that fails: 401 · 503 …)
 let serverCalls: string[];
 let commitPost: () => Response;
@@ -69,6 +70,7 @@ beforeEach(() => {
   };
   sessionState = { state: 'committed', n_m: null, sig: null };
   readStatus = 200;
+  listStatus = 200;
   pairs = [];
   commitPost = () => res(202, { state: 'committed' });
   registerPost = () => res(201, { id: KEY_ID });
@@ -77,7 +79,7 @@ beforeEach(() => {
     const key = `${init?.method ?? 'GET'} ${url.split('?')[0]}`;
     serverCalls.push(key);
     if (key === 'POST /api/remote-devices') return registerPost();
-    if (key === 'GET /api/remote-devices') return res(200, { devices: [{ id: KEY_ID, pairs }] });
+    if (key === 'GET /api/remote-devices') return listStatus === 200 ? res(200, { devices: [{ id: KEY_ID, pairs }] }) : res(listStatus, {});
     if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/commit`) return commitPost();
     if (key === `GET /api/remote-devices/pairing-sessions/${HEAD.offer_id}`) return readStatus === 200 ? res(200, sessionState) : res(readStatus, {});
     if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/reveal`) return res(202, { state: 'revealed' });
@@ -263,6 +265,20 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('이미 페어링된 컴퓨터예요 · My Mac');
   });
 
+  it('lens 816: the server\'s list already shows this phone with this computer (an old pairing) → «remove it on the computer first», nothing was consumed', async () => {
+    installShell(); shell['pair.commit'] = { ok: false, code: 'host_already_paired' };
+    await START();
+    expect(line()).toBe('이 컴퓨터가 이 폰을 이미 기억하고 있어요 — 컴퓨터 앱의 «페어링된 폰»에서 이 폰을 먼저 빼고 다시 해 주세요');
+  });
+
+  it('lens 816: [취소] while the shell is writing the real pin → the page says «paired» (the pin is done), not «cancelled»', async () => {
+    installShell(); shell['pair.cancel'] = { ok: true, pinning: true };
+    await START(); sessionState = NONCE; await tick();
+    await press('취소'); await settle();
+    expect(line()).toContain('페어링했어요 · My Mac');
+    expect(serverCalls).not.toContain(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`); // the offer is not closed under a pin that is being written
+  });
+
   it('the computer\'s answer did not fit its key (bad_nonce) → its own line (an integrity signal), not the time-out line · the shell is told to drop the offer', async () => {
     installShell(); shell['pair.reveal'] = { ok: false, code: 'bad_nonce' };
     await START(); sessionState = NONCE; await tick();
@@ -300,6 +316,45 @@ describe('[4972] the new pairing on the phone screen', () => {
     await START(); for (let i = 0; i < 4; i++) await tick();
     readStatus = 200; await tick(); readStatus = 503; for (let i = 0; i < 4; i++) await tick();
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…');
+  });
+
+  it('after the phone\'s person agreed, reads of the server\'s LIST that fail are counted too: signed out at once · five in a row end the wait (never a silent wait until the QR runs out)', async () => {
+    installShell();
+    await START(); sessionState = NONCE; await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요');
+    listStatus = 401; sessionState = { state: 'revealed', n_m: 'N'.repeat(22), sig: 'S'.repeat(70) }; await tick();
+    expect(line()).toBe('로그인이 풀렸어요 — 다시 로그인한 뒤 새 QR을 찍어 주세요'); expect(sentTypes()).toContain('pair.cancel');
+  });
+
+  it('five failed list reads in a row end the wait with «not reachable» — not before', async () => {
+    installShell();
+    await START(); sessionState = NONCE; await tick(); listStatus = 503;
+    for (let i = 0; i < 4; i++) await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요'); await tick();
+    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+  });
+
+  it('the count of failed reads starts again with a new pairing (one that ended at five does not make the next end at its first failure)', async () => {
+    installShell(); readStatus = 503;
+    await START(); for (let i = 0; i < 5; i++) await tick();
+    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+    await press('다시 찍기'); await press('페어링'); // a new pairing on the same screen
+    await tick(); expect(line()).toBe('컴퓨터 화면을 확인하는 중…'); // the first failed read of the new one does not end it
+  });
+
+  it('the person cancels while the shell is making the pin real (pair.finish in flight): the screen goes back to the start and nothing breaks; the pin that was made is the one the server\'s list vouched for', async () => {
+    installShell(); slow.add('pair.finish');
+    await START(); sessionState = NONCE; await tick(); pairs = [{ setup_id: HEAD.setup_id }]; await tick();
+    expect(sent.filter((x) => x.type === 'pair.finish')).toHaveLength(1);
+    await press('취소'); expect(buttons()).toContain('QR 찍기');
+    release['pair.finish'](); await settle();
+    expect(buttons()).toContain('QR 찍기'); expect(text()).not.toContain('페어링했어요'); // the late answer paints nothing
+  });
+
+  it('no screen lock / biometrics missing at the OS prompt: the shell\'s offer is dropped too', async () => {
+    installShell(); shell['pair.reveal'] = { ok: false, code: 'no_screen_lock' };
+    await START(); sessionState = NONCE; await tick();
+    expect(sentTypes()).toContain('pair.cancel');
   });
 
   it('[취소] tells the shell too (pair.cancel) — not only the server', async () => {

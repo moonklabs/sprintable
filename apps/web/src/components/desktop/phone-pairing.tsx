@@ -42,7 +42,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'signedOut' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'computerHolds' | 'signedOut' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -113,6 +113,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
 
   const scan = async () => {
     gen.current += 1;
+    failedReads.current = 0;
     setPressed(true);
     setView({ kind: 'busy' });
     const r = await scanPairQr(deps);
@@ -124,6 +125,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   const pair = async (head: OfferHead) => {
     setView({ kind: 'busy' });
     gen.current += 1; // a new pairing starts: a late answer of an older one does nothing
+    failedReads.current = 0;
     const g = gen.current;
     // the procedure is the scanned QR's version and nothing else (story 4972): a v2 QR pairs the new way, any other the old way as it always did
     const r = head.version === 2 ? await sendPairCommit(head, phoneLabel(navigator.userAgent), { phoneCall, alive: () => gen.current === g }) : await sendPairOffer(head, phoneLabel(navigator.userAgent), deps);
@@ -199,7 +201,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         case 'ended': endWith(wait2.head, 'notPaired'); return;
         case 'integrity': endWith(wait2.head, 'integrity'); return; // the computer's answer did not fit its key: its own line (not a time-out)
         case 'expired': endWith(wait2.head, 'expired'); return;
-        case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+        case 'noScreenLock': case 'biometricRequired': void cancelPairSession(wait2.head, deps); setView({ kind: r.kind }); return; // (the shell's offer is dropped too: nothing is left half-open)
         default: endWith(wait2.head, 'failed');
       }
     })(), POLL_MS);
@@ -215,6 +217,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) endWith(waitHost.head, 'hostNo'); return; }
       const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
       if (off) return;
+      if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
+      failedReads.current = 0;
       if (found === 'paired') {
         const f = await finishPairSession(waitHost.head, { phoneCall });
         if (off) return;
@@ -258,7 +262,12 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     return () => { off = true; };
   }, [compare, phoneCall]);
   // a cancel while a new pairing is under way ends the offer at the server (the shell's copy ends with its own window — at most 10 minutes)
-  const abandon = (v: { head: OfferHead }) => { gen.current += 1; void cancelPairSession(v.head, deps); known.current = null; setView({ kind: 'start' }); };
+  const abandon = (v: { head: OfferHead }) => {
+    const g = ++gen.current;
+    // the shell may answer «pinning» (the real pin is being written this very moment: the computer's person has already confirmed) — then the pairing is DONE, not cancelled
+    void cancelPairSession(v.head, deps).then((r) => { if (r.pinning && gen.current === g) setView({ kind: 'paired', device: v.head.device_name }); });
+    known.current = null; setView({ kind: 'start' });
+  };
 
   // story #4624 — the limit screen: the person's phones, one confirm to remove one, then the rescan
   const loadLimitPhones = async () => {
@@ -298,6 +307,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'integrity': return t('integrity');
       case 'offerGone': return t('offerGone');
       case 'startedAlready': return t('startedAlready');
+      case 'computerHolds': return t('computerHolds');
       case 'signedOut': return t('signedOut');
       case 'hostNo': return t('hostNo');
       case 'limit': return t('limit.title');

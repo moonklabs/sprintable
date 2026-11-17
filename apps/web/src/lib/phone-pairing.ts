@@ -34,6 +34,8 @@ export type OfferOutcome =
   | { kind: 'registerAgain' } // 404 phone_key_not_found — this phone's registration is gone
   | { kind: 'offerGone' } // 404 offer_not_found — the server knows no such offer of ours (the computer never registered it · it is someone else's · it is gone): NOT «the computer is unreachable» (lens 5842)
   | { kind: 'startedAlready' } // the shell already started this QR (it is used up): a new QR is the only way
+  | { kind: 'signedOut' } // the shell could not read the server's list: the person is signed out
+  | { kind: 'computerHolds' } // the server's list already shows this phone paired with this computer (an old pairing): it must be removed on the computer first (shell `host_already_paired`)
   | { kind: 'failed' };
 
 export type WaitOutcome =
@@ -117,15 +119,24 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
 
 interface Paired { id: string; pairs: Array<{ setup_id: string }> }
 
-async function myPhones(setupId: string): Promise<Paired[] | null> {
+type PhonesRead = { phones: Paired[] } | { failed: 'signedOut' | 'remoteOff' | 'read' };
+async function readPhones(setupId: string): Promise<PhonesRead> {
   try {
     const res = await fetchWithAuth('/api/remote-devices', { headers: orgHeader(setupId) });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return { failed: 'signedOut' };
+      if ((await read(res)).code === 'remote_control_off') return { failed: 'remoteOff' };
+      return { failed: 'read' };
+    }
     const body = (await res.json()) as { devices?: Paired[] };
-    return Array.isArray(body.devices) ? body.devices : null;
+    return Array.isArray(body.devices) ? { phones: body.devices } : { failed: 'read' };
   } catch {
-    return null;
+    return { failed: 'read' };
   }
+}
+async function myPhones(setupId: string): Promise<Paired[] | null> {
+  const r = await readPhones(setupId);
+  return 'phones' in r ? r.phones : null;
 }
 
 /**
@@ -247,6 +258,12 @@ export async function sendPairCommit(head: OfferHead, label: string, deps: PairD
     if (c.code === 'vault_unavailable') return { kind: 'notReady' }; // the key store is not answering just now: try again in a moment
     if (c.code === 'already_committed') return { kind: 'startedAlready' }; // this QR was started on this phone already (the shell holds it)
     if (c.code === 'host_already_pinned') return { kind: 'alreadyPaired' }; // a REAL pin of this computer stands: it is paired
+    if (c.code === 'host_already_paired') return { kind: 'computerHolds' }; // the computer holds this phone from before (a line on the server's list): remove it there first
+    // the shell reads the server's list before it makes the commitment: what it could not do is said as it is
+    if (c.code === 'signed_out') return { kind: 'signedOut' };
+    if (c.code === 'not_registered' || c.code === 'no_key') return { kind: 'registerAgain' };
+    if (c.code === 'no_screen_lock') return { kind: 'noScreenLock' };
+    if (c.code === 'biometric_required') return { kind: 'biometricRequired' };
     return c.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
   }
   if (deps.alive && !deps.alive()) return { kind: 'failed' }; // left while the shell was making the commitment: it does not go to the server
@@ -388,9 +405,12 @@ export async function finishPairSession(head: OfferHead, deps: PairDeps): Promis
 }
 
 /** The person left, or the pairing ended on the other side: the shell drops this offer, its provisional pin and its open number window; the server's offer ends too. Best effort, never throws. */
-export async function cancelPairSession(head: OfferHead, deps: PairDeps): Promise<void> {
-  await safeCall(deps, 'pair.cancel', { offer_id: head.offer_id });
-  await closePairSession(head);
+export async function cancelPairSession(head: OfferHead, deps: PairDeps): Promise<{ pinning: boolean }> {
+  const r = await safeCall(deps, 'pair.cancel', { offer_id: head.offer_id });
+  // the shell is writing the real pin this very moment (the server's list already says the computer holds this phone): not cancelled — the page says «paired»
+  const pinning = r.ok && r.pinning === true;
+  if (!pinning) await closePairSession(head);
+  return { pinning };
 }
 
 /** the offer ends on the server (the phone's [달라요] · a cancel before the number): best effort, never throws */
@@ -401,7 +421,8 @@ export async function closePairSession(head: OfferHead): Promise<void> {
 }
 
 /** After this phone's [같아요]: has the computer pinned this phone too (its own [같아요] + its report to the server)? */
-export async function lookPaired(head: OfferHead, phoneKeyId: string): Promise<'paired' | 'waiting'> {
-  const phones = await myPhones(head.setup_id);
-  return phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id)) ? 'paired' : 'waiting';
+export async function lookPaired(head: OfferHead, phoneKeyId: string): Promise<'paired' | 'waiting' | { failed: 'signedOut' | 'remoteOff' | 'read' }> {
+  const r = await readPhones(head.setup_id);
+  if ('failed' in r) return r; // a read that failed is NOT «waiting»: the screen counts it (and says signed-out / remote-control-off at once)
+  return r.phones.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id)) ? 'paired' : 'waiting';
 }

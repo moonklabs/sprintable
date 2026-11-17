@@ -8080,6 +8080,7 @@
     "waitHost": "Press «They match» on the computer",
     "integrity": "Couldn't verify the computer's answer — this QR can't go on. Try a new QR, and tell us if it keeps happening",
     "offerGone": "The computer doesn't know this QR — make a new one on the computer and scan it again",
+    "computerHolds": "This computer already remembers this phone — remove this phone under «Paired phones» in the computer app, then try again",
     "startedAlready": "This QR was already started — make a new one on the computer and scan it again",
     "signedOut": "You've been signed out — sign in again, then scan a new QR",
     "hostNo": "Not paired — «They match» wasn't pressed on the computer. Nothing was kept on this phone. Try a new QR",

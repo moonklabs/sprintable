@@ -194,7 +194,7 @@ describe('[4972] lens 5842 — the provisional pin: finish · cancel · the guar
     await cancelPairSession(HEAD, { phoneCall });
     expect(phoneCall).toHaveBeenCalledWith('pair.cancel', { offer_id: HEAD.offer_id }); expect(calls.at(-1)!.key).toBe(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`);
     setServer(async () => { throw new Error('offline'); });
-    await expect(cancelPairSession(HEAD, { phoneCall: vi.fn(async () => { throw new Error('gone'); }) })).resolves.toBeUndefined();
+    await expect(cancelPairSession(HEAD, { phoneCall: vi.fn(async () => { throw new Error('gone'); }) })).resolves.toEqual({ pinning: false });
   });
   it('the commitment: «already started» and «a real pin stands» are their own words · a person who left while it was being made sends nothing', async () => {
     const routes = {
@@ -210,6 +210,23 @@ describe('[4972] lens 5842 — the provisional pin: finish · cancel · the guar
     const slow = vi.fn(async (type: string) => { if (type === 'pair.commit') alive = false; return type === 'device.key.info' ? okKey : { id: 'x', ok: true, commit: 'C'.repeat(43) }; });
     await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: slow, alive: () => alive })).resolves.toEqual({ kind: 'failed' });
     expect(calls.some((c) => c.key.endsWith('/commit'))).toBe(false);
+  });
+  it('lens 816: the shell\'s own refusals at the commitment have words — an old line on the list (the computer holds this phone) · signed out · key not registered · no screen lock', async () => {
+    const routes = {
+      'GET /api/remote-devices/pairing-target': () => res(404, {}), 'POST /api/remote-devices': () => res(201, { id: KEY_ID }), 'GET /api/remote-devices': () => res(200, { devices: [{ id: KEY_ID, pairs: [] }] }),
+    };
+    server(routes);
+    for (const [code, kind] of [['host_already_paired', 'computerHolds'], ['signed_out', 'signedOut'], ['not_registered', 'registerAgain'], ['no_key', 'registerAgain'], ['no_screen_lock', 'noScreenLock'], ['biometric_required', 'biometricRequired']] as const) {
+      await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: shell({ 'device.key.info': okKey, 'pair.commit': { id: 'x', ok: false, code } }) }), code).resolves.toEqual({ kind });
+    }
+  });
+  it('lens 816: cancelPairSession tells the page when the shell is writing the real pin (pinning) — and then the server\'s offer is NOT closed', async () => {
+    const calls = server({ [`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`]: () => res(200, { state: 'burned' }) });
+    await expect(cancelPairSession(HEAD, { phoneCall: shell({ 'pair.cancel': { id: 'x', ok: true, pinning: true } }) })).resolves.toEqual({ pinning: true });
+    expect(calls).toEqual([]);
+    await expect(cancelPairSession(HEAD, { phoneCall: shell({ 'pair.cancel': { id: 'x', ok: true } }) })).resolves.toEqual({ pinning: false });
+    expect(calls.at(-1)!.key).toBe(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`);
+    await expect(cancelPairSession(HEAD, { phoneCall: vi.fn(async () => { throw new Error('gone'); }) })).resolves.toEqual({ pinning: false });
   });
   it('lookPairSession says WHY a read failed: signed out (401/403) · remote control off · anything else is just «read again»', async () => {
     const url = `GET /api/remote-devices/pairing-sessions/${HEAD.offer_id}`;
