@@ -239,6 +239,12 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('컴퓨터가 보낸 확인이 이 페어링과 맞지 않아요 — 이 QR로는 이어 갈 수 없어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 보고, 계속되면 알려 주세요');
     expect(sentTypes()).toContain('pair.cancel');
   });
+  it('4a: the list shows the computer paired but the shell says the confirmation never came (its own poll ran out first) → «the computer\'s confirmation never arrived»', async () => {
+    installShell(); shell['pair.finish'] = { ok: false, code: 'no_receipt' };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    pairs = [{ setup_id: HEAD.setup_id }]; await tick();
+    expect(line()).toBe('컴퓨터의 확인을 받지 못했어요 — 컴퓨터에서 [같아요]를 눌렀어도 확인이 닿지 않았어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
+  });
   const WINDOW_OVER = async (answer: Record<string, unknown>) => {
     installShell(); shell['pair.finish'] = { ...answer };
     await START(); sessionState = NONCE; await tick(); await tick();
