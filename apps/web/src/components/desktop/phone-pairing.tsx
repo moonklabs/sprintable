@@ -219,14 +219,21 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     if (!waitHost) return;
     let off = false;
     const id = setTimeout(() => void (async () => {
-      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) {
-        if (off) return;
-        // the window is over: ask the shell ONCE what became of it — a computer that said it sends a confirmation and sent none (or a bad one) has its own line, not «you did not press»
+      // the pairing is over without a result the page itself saw (the window ran out, or the server says the offer ended): ask the shell ONCE what became of it — it may have made the pin real by itself (then it is paired), and a computer that said it sends a
+      // confirmation and sent none (or a bad one) has its own line, not «you did not press». Only then the old «not finished on the computer» line.
+      const lastWord = async () => {
         const last = await finishPairSession(waitHost.head, { phoneCall });
         if (off) return;
-        endWith(waitHost.head, last.kind === 'receiptInvalid' ? 'receiptInvalid' : last.kind === 'noReceipt' ? 'noReceipt' : 'hostNo');
-        return;
-      }
+        switch (last.kind) {
+          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name }); return;
+          case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
+          case 'receiptInvalid': endWith(waitHost.head, 'receiptInvalid'); return;
+          case 'noReceipt': endWith(waitHost.head, 'noReceipt'); return;
+          case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
+          default: endWith(waitHost.head, 'hostNo');
+        }
+      };
+      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) await lastWord(); return; }
       const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
       if (off) return;
       if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
@@ -250,7 +257,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; }
       failedReads.current = 0;
       if (look.kind === 'gone') { endWith(waitHost.head, 'offerGone'); return; }
-      if (look.kind === 'ended') { endWith(waitHost.head, 'hostNo'); return; } // the computer's person said «different» (or the window ended): the shell drops what it held
+      if (look.kind === 'ended') { await lastWord(); return; } // the computer's person said «different» (or the window ended): the shell is asked once what became of it, then drops what it held
       setView({ ...waitHost });
     })(), POLL_MS);
     return () => { off = true; clearTimeout(id); };

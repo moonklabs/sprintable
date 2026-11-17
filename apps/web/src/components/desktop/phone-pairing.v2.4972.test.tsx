@@ -239,6 +239,29 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('컴퓨터가 보낸 확인이 이 페어링과 맞지 않아요 — 이 QR로는 이어 갈 수 없어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 보고, 계속되면 알려 주세요');
     expect(sentTypes()).toContain('pair.cancel');
   });
+  const SERVER_ENDED = async (answer: Record<string, unknown>) => {
+    installShell(); shell['pair.finish'] = { ...answer };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요');
+    sessionState = { state: 'expired', n_m: null, sig: null }; await tick(); await tick(); // the server says the offer ended (its window ran out)
+  };
+  it('4a: the server says the offer ENDED and the shell says no confirmation ever came → its own line (not «not finished on the computer»)', async () => {
+    await SERVER_ENDED({ ok: false, code: 'no_receipt' });
+    expect(line()).toBe('컴퓨터의 확인을 받지 못했어요 — 컴퓨터에서 [같아요]를 눌렀어도 확인이 닿지 않았어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
+  });
+  it('4a: the server says the offer ENDED and the shell says the confirmation did not fit → the forgery line', async () => {
+    await SERVER_ENDED({ ok: false, code: 'receipt_invalid' });
+    expect(line()).toBe('컴퓨터가 보낸 확인이 이 페어링과 맞지 않아요 — 이 QR로는 이어 갈 수 없어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 보고, 계속되면 알려 주세요');
+  });
+  it('4a: the server says the offer ENDED but the shell already made the pin real by itself → «paired»', async () => {
+    await SERVER_ENDED({ ok: true, pinned: true });
+    expect(line()).toContain('페어링했어요 · My Mac');
+  });
+  it('4a: the window ends but the shell already made the pin real by itself → «paired» (never a failure line, never a cancel of a finished pairing)', async () => {
+    await WINDOW_OVER({ ok: true, pinned: true });
+    expect(line()).toContain('페어링했어요 · My Mac');
+    expect(sentTypes()).not.toContain('pair.cancel');
+  });
   it('4a: the list shows the computer paired but the shell says the confirmation never came (its own poll ran out first) → «the computer\'s confirmation never arrived»', async () => {
     installShell(); shell['pair.finish'] = { ok: false, code: 'no_receipt' };
     await START(); sessionState = NONCE; await tick(); await tick();
@@ -297,7 +320,7 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(sentTypes()).toContain('pair.cancel');
   });
   it('after the phone\'s person agreed, the computer\'s person says no (the offer burned): its own line — «nothing was kept on this phone» — and the shell is told to drop the provisional pin', async () => {
-    installShell();
+    installShell(); shell['pair.finish'] = { ok: false, code: 'not_confirmed' }; // (the shell has nothing real to make: the computer said no)
     await START(); sessionState = NONCE; await tick();
     sessionState = { state: 'burned', n_m: null, sig: null }; await tick();
     expect(line()).toBe('컴퓨터에서 끝나지 않아 페어링하지 못했어요 — 컴퓨터에서 [같아요]를 누르지 않았거나 컴퓨터가 저장하지 못했어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
