@@ -42,7 +42,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'computerHolds' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -167,10 +167,11 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   const wait2 = view.kind === 'wait2' && view.bind === 'idle' ? view : null;
   // a read of the server's state that failed is tried again — a few times: «signed out» and «remote control off» are said as what they are, and after FAILED_READS in a row the wait ends with a line (never a silent five minutes)
   const failedReads = useRef(0);
-  const readFailure = (why: 'signedOut' | 'remoteOff' | undefined): 'wait' | RetryLine | 'remoteOff' => {
+  const readFailure = (why: 'signedOut' | 'remoteOff' | 'forbidden' | undefined): 'wait' | RetryLine | 'remoteOff' => {
     failedReads.current += 1;
     if (why === 'remoteOff') return 'remoteOff';
     if (why === 'signedOut') return 'signedOut';
+    if (why === 'forbidden') return 'forbidden';
     return failedReads.current >= FAILED_READS ? 'serverUnreachable' : 'wait'; // (the read that failed is the PHONE's to the server — not the computer being unreachable)
   };
   // the pairing ends with a line: the shell drops this offer (and a provisional pin, and an open number window), the server's offer ends too
@@ -312,7 +313,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'integrity': return t('integrity');
       case 'offerGone': return t('offerGone');
       case 'startedAlready': return t('startedAlready');
-      case 'computerHolds': return t('computerHolds');
+      case 'forbidden': return t('forbidden');
       case 'signedOut': return t('signedOut');
       case 'serverUnreachable': return t('serverUnreachable');
       case 'hostNo': return t('hostNo');

@@ -35,7 +35,6 @@ export type OfferOutcome =
   | { kind: 'offerGone' } // 404 offer_not_found — the server knows no such offer of ours (the computer never registered it · it is someone else's · it is gone): NOT «the computer is unreachable» (lens 5842)
   | { kind: 'startedAlready' } // the shell already started this QR (it is used up): a new QR is the only way
   | { kind: 'signedOut' } // the shell could not read the server's list: the person is signed out
-  | { kind: 'computerHolds' } // the server's list already shows this phone paired with this computer (an old pairing): it must be removed on the computer first (shell `host_already_paired`)
   | { kind: 'failed' };
 
 export type WaitOutcome =
@@ -119,12 +118,13 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
 
 interface Paired { id: string; pairs: Array<{ setup_id: string }> }
 
-type PhonesRead = { phones: Paired[] } | { failed: 'signedOut' | 'remoteOff' | 'read' };
+type PhonesRead = { phones: Paired[] } | { failed: 'signedOut' | 'remoteOff' | 'forbidden' | 'read' };
 async function readPhones(setupId: string): Promise<PhonesRead> {
   try {
     const res = await fetchWithAuth('/api/remote-devices', { headers: orgHeader(setupId) });
     if (!res.ok) {
       if (res.status === 401) return { failed: 'signedOut' };
+      if (res.status === 403) return { failed: 'forbidden' }; // an organization refusal: not «signed out», not a read to try again
       if ((await read(res)).code === 'remote_control_off') return { failed: 'remoteOff' };
       return { failed: 'read' };
     }
@@ -261,8 +261,6 @@ export async function sendPairCommit(head: OfferHead, label: string, deps: PairD
   if (!c.ok || typeof c.commit !== 'string') {
     if (c.code === 'vault_unavailable') return { kind: 'notReady' }; // the key store is not answering just now: try again in a moment
     if (c.code === 'already_committed') return { kind: 'startedAlready' }; // this QR was started on this phone already (the shell holds it)
-    if (c.code === 'host_already_pinned') return { kind: 'alreadyPaired' }; // a REAL pin of this computer stands: it is paired
-    if (c.code === 'host_already_paired') return { kind: 'computerHolds' }; // the computer holds this phone from before (a line on the server's list): remove it there first
     // the shell reads the server's list before it makes the commitment: what it could not do is said as it is
     if (c.code === 'signed_out') return { kind: 'signedOut' };
     if (c.code === 'not_registered' || c.code === 'no_key') return { kind: 'registerAgain' };
@@ -290,7 +288,7 @@ export type SessionLook =
   | { kind: 'nonce'; n_m: string; sig: string } // it did: the shell checks it and asks the person to confirm
   | { kind: 'revealed' } // the reveal is already at the server (an earlier answer was lost on the way back): the shell holds the number — go on to its window
   | { kind: 'ended' } // burned · expired — this pairing is over (the phone cannot tell which: start again with a new QR)
-  | { kind: 'failed'; why?: 'signedOut' | 'remoteOff' } // a read that failed: signed out (401) or remote control off (409) say so — anything else is «read again» (a 403 may be an organization refusal: not «signed out»)
+  | { kind: 'failed'; why?: 'signedOut' | 'remoteOff' | 'forbidden' } // a read that failed: signed out (401) or remote control off (409) say so — anything else is «read again» (a 403 may be an organization refusal: not «signed out»)
   | { kind: 'gone' }; // 404 offer_not_found: the server knows no such offer of ours — NOT a failed read of the network
 
 /** One look at the server's state of this pairing (the screen asks every 1.5 s, up to the QR's time). */
@@ -299,6 +297,7 @@ export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
     const res = await fetchWithAuth(`${sessionUrl(head)}?setup_id=${encodeURIComponent(head.setup_id)}`, { headers: orgHeader(head.setup_id) });
     if (!res.ok) {
       if (res.status === 401) return { kind: 'failed', why: 'signedOut' };
+      if (res.status === 403) return { kind: 'failed', why: 'forbidden' }; // this account has no access to that organization's computer (not «signed out»)
       const code = (await read(res)).code;
       if (code === 'remote_control_off') return { kind: 'failed', why: 'remoteOff' };
       if (res.status === 404 && code === 'offer_not_found') return { kind: 'gone' };
@@ -406,7 +405,6 @@ export async function finishPairSession(head: OfferHead, deps: PairDeps): Promis
     case 'no_offer':
     case 'expired': return { kind: 'expired' };
     case 'vault_unavailable': return { kind: 'notReady' };
-    case 'host_already_pinned': return { kind: 'alreadyPaired' };
     case 'signed_out': return { kind: 'signedOut' };
     default: return { kind: 'failed' };
   }
@@ -429,7 +427,7 @@ export async function closePairSession(head: OfferHead): Promise<void> {
 }
 
 /** After this phone's [같아요]: has the computer pinned this phone too (its own [같아요] + its report to the server)? */
-export async function lookPaired(head: OfferHead, phoneKeyId: string): Promise<'paired' | 'waiting' | { failed: 'signedOut' | 'remoteOff' | 'read' }> {
+export async function lookPaired(head: OfferHead, phoneKeyId: string): Promise<'paired' | 'waiting' | { failed: 'signedOut' | 'remoteOff' | 'forbidden' | 'read' }> {
   const r = await readPhones(head.setup_id);
   if ('failed' in r) return r; // a read that failed is NOT «waiting»: the screen counts it (and says signed-out / remote-control-off at once)
   return r.phones.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id)) ? 'paired' : 'waiting';

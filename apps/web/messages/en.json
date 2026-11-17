@@ -8080,7 +8080,7 @@
     "waitHost": "Press «They match» on the computer",
     "integrity": "Couldn't verify the computer's answer — this QR can't go on. Try a new QR, and tell us if it keeps happening",
     "offerGone": "The computer doesn't know this QR — make a new one on the computer and scan it again",
-    "computerHolds": "This computer already remembers this phone — remove this phone under «Paired phones» in the computer app, then try again",
+    "forbidden": "This account can't access the organization that computer is in — check that you're signed in with the right account",
     "startedAlready": "This QR was already started — make a new one on the computer and scan it again",
     "signedOut": "You've been signed out — sign in again, then scan a new QR",
     "serverUnreachable": "Couldn't reach the server — check this phone's internet connection, then scan a new QR",

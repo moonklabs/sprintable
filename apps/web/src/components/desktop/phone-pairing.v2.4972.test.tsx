@@ -250,10 +250,11 @@ describe('[4972] the new pairing on the phone screen', () => {
     readStatus = 404; readBody = { error: { code: 'offer_not_found' } }; await tick();
     expect(line()).toBe('컴퓨터가 이 QR을 몰라요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
   });
-  it('lens 5842 delta 4: a 403 on the state read is not told as «signed out» (it may be an organization refusal) — it is a read that failed: tried again', async () => {
+  it('lens 5842 delta 4+6: a 403 on the state read is its own line (an organization refusal) — not «signed out», not five silent reads', async () => {
     installShell();
     await START(); readStatus = 403; await tick();
-    expect(line()).not.toContain('로그인'); expect(buttons()).not.toContain('다시 찍기');
+    expect(line()).toBe('이 계정으로는 그 컴퓨터가 있는 조직에 들어갈 수 없어요 — 올바른 계정으로 로그인했는지 확인해 주세요'); expect(line()).not.toContain('로그인이 풀렸어요');
+    expect(sentTypes()).toContain('pair.cancel');
   });
   it('after the phone\'s person agreed, the computer\'s person says no (the offer burned): its own line — «nothing was kept on this phone» — and the shell is told to drop the provisional pin', async () => {
     installShell();
@@ -282,18 +283,6 @@ describe('[4972] the new pairing on the phone screen', () => {
     installShell(); shell['pair.finish'] = { ok: false, code };
     await START(); sessionState = NONCE; await tick(); pairs = [{ setup_id: HEAD.setup_id }]; await tick();
     expect(line()).toBe(text); expect(sentTypes()).toContain('pair.cancel');
-  });
-
-  it('a real pin of this computer already stands (host_already_pinned at the commitment or at the finish) → «already paired», not a failure', async () => {
-    installShell(); shell['pair.commit'] = { ok: false, code: 'host_already_pinned' };
-    await START();
-    expect(line()).toBe('이미 페어링된 컴퓨터예요 · My Mac');
-  });
-
-  it('lens 816: the server\'s list already shows this phone with this computer (an old pairing) → «remove it on the computer first», nothing was consumed', async () => {
-    installShell(); shell['pair.commit'] = { ok: false, code: 'host_already_paired' };
-    await START();
-    expect(line()).toBe('이 컴퓨터가 이 폰을 이미 기억하고 있어요 — 컴퓨터 앱의 «페어링된 폰»에서 이 폰을 먼저 빼고 다시 해 주세요');
   });
 
   it('lens 816: [취소] while the shell is writing the real pin → the page says «paired» (the pin is done), not «cancelled»', async () => {
@@ -349,6 +338,12 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요');
     listStatus = 401; sessionState = { state: 'revealed', n_m: 'N'.repeat(22), sig: 'S'.repeat(70) }; await tick();
     expect(line()).toBe('로그인이 풀렸어요 — 다시 로그인한 뒤 새 QR을 찍어 주세요'); expect(sentTypes()).toContain('pair.cancel');
+  });
+
+  it('lens 5842 delta 6: the LIST read refused with a 403 while the phone waits for the computer is its own line (organization) — not five silent reads', async () => {
+    installShell();
+    await START(); sessionState = NONCE; await tick(); listStatus = 403; await tick();
+    expect(line()).toBe('이 계정으로는 그 컴퓨터가 있는 조직에 들어갈 수 없어요 — 올바른 계정으로 로그인했는지 확인해 주세요');
   });
 
   it('five failed list reads in a row end the wait with «not reachable» — not before', async () => {
