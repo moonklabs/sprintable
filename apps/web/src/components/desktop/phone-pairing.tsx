@@ -13,7 +13,7 @@ import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
-import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
+import { checkPairOffer, cancelPairSession, comparePairSession, finishPairSession, lookPaired, lookPairSession, phoneLabel, revealPairSession, scanPairQr, sendPairCommit, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
 /**
  * story #4532 (명세 b0713c54 «짝짓기 화면 · 짝짓기 숫자 · 폰 확인 숫자» 폰 표 · contract 02d2cf71 §10 ⑤ v1.11 · design doc 0dceadda
@@ -24,6 +24,7 @@ import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead }
  * (the computer took the offer) → «짝지었어요» (the pair stood on the computer). Waiting is read every 1.5 s up to the QR's time.
  */
 const POLL_MS = 1_500;
+const FAILED_READS = 5; // reads of the server's state that fail in a row before the wait ends (story 4972 · lens 5842)
 
 type View =
   | { kind: 'start' }
@@ -32,12 +33,16 @@ type View =
   | { kind: 'confirm'; head: OfferHead }
   | { kind: 'checking'; head: OfferHead; phoneKeyId: string }
   | { kind: 'number'; head: OfferHead; phoneKeyId: string; number: string }
+  // story 4972 — the NEW pairing: after the commitment the computer's nonce is waited for (`bind`: the OS prompt is up / was closed), then both people compare the number in the SHELL's own window (the web never draws it), then the computer's own [같아요]
+  | { kind: 'wait2'; head: OfferHead; phoneKeyId: string; bind: 'idle' | 'revealing' | 'cancelled' }
+  | { kind: 'compare'; head: OfferHead; phoneKeyId: string; note: 'open' | 'closed' | 'notReady' | 'busy' | 'failed' } // the shell's window is up (open) · was closed with no answer
+  | { kind: 'waitHost'; head: OfferHead; phoneKeyId: string }
   | { kind: 'paired'; device: string }
   | { kind: 'alreadyPaired'; device: string }
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -102,8 +107,13 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   const [pressed, setPressed] = useState(false); // a line that follows a press takes the focus (the button is gone)
   const deps = { phoneCall };
   const known = useRef<string | null>(null);
+  // a pairing's generation: bumped when it is left (cancel · a new start · the screen goes away) — a late answer of an OLDER pairing's shell call does nothing. (The reveal step cannot use the effect's own `off`: the view changes to «revealing» while the OS prompt is up, which re-runs the effect.)
+  const gen = useRef(0);
+  useEffect(() => () => { gen.current += 1; }, []);
 
   const scan = async () => {
+    gen.current += 1;
+    failedReads.current = 0;
     setPressed(true);
     setView({ kind: 'busy' });
     const r = await scanPairQr(deps);
@@ -114,12 +124,18 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
 
   const pair = async (head: OfferHead) => {
     setView({ kind: 'busy' });
-    const r = await sendPairOffer(head, phoneLabel(navigator.userAgent), deps);
+    gen.current += 1; // a new pairing starts: a late answer of an older one does nothing
+    failedReads.current = 0;
+    const g = gen.current;
+    // the procedure is the scanned QR's version and nothing else (story 4972): a v2 QR pairs the new way, any other the old way as it always did
+    const r = head.version === 2 ? await sendPairCommit(head, phoneLabel(navigator.userAgent), { phoneCall, alive: () => gen.current === g }) : await sendPairOffer(head, phoneLabel(navigator.userAgent), deps);
+    if (gen.current !== g) return; // left meanwhile (the commit step has its own guard: nothing went to the server)
     known.current = null;
     switch (r.kind) {
-      case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
+      case 'sent': setView(head.version === 2 ? { kind: 'wait2', head, phoneKeyId: r.phoneKeyId, bind: 'idle' } : { kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
       case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: head.device_name }); return; // story 4932: the computer is named
       case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+      case 'notReady': setView({ kind: 'retry', line: 'notReady' }); return;
       case 'limit': void enterLimit(); return;
       case 'takenOtherOrg': setView({ kind: 'retry', line: 'takenOtherOrg', ...(r.org ? { org: r.org } : {}) }); return;
       default: setView({ kind: 'retry', line: r.kind });
@@ -146,6 +162,118 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     }), POLL_MS);
     return () => { off = true; clearTimeout(id); };
   }, [waiting, look]);
+
+  // story 4972 — the new pairing's waits: (1) the computer's nonce → the shell checks it, the person confirms on the OS prompt, the reveal goes up, the number shows; (2) after this phone's [같아요], the computer's own
+  const wait2 = view.kind === 'wait2' && view.bind === 'idle' ? view : null;
+  // a read of the server's state that failed is tried again — a few times: «signed out» and «remote control off» are said as what they are, and after FAILED_READS in a row the wait ends with a line (never a silent five minutes)
+  const failedReads = useRef(0);
+  const readFailure = (why: 'signedOut' | 'remoteOff' | 'forbidden' | undefined): 'wait' | RetryLine | 'remoteOff' => {
+    failedReads.current += 1;
+    if (why === 'remoteOff') return 'remoteOff';
+    if (why === 'signedOut') return 'signedOut';
+    if (why === 'forbidden') return 'forbidden';
+    return failedReads.current >= FAILED_READS ? 'serverUnreachable' : 'wait'; // (the read that failed is the PHONE's to the server — not the computer being unreachable)
+  };
+  // the pairing ends with a line: the shell drops this offer (and a provisional pin, and an open number window), the server's offer ends too
+  const endWith = (head: OfferHead, how: RetryLine | 'remoteOff'): void => {
+    const g = gen.current;
+    // the shell may answer «pinning» (the real pin is being written this very moment — the computer's person had confirmed): then the pairing is DONE and the line is replaced, never an error over a finished pairing
+    void cancelPairSession(head, deps).then((r) => { if (r.pinning && gen.current === g) setView((v) => (v.kind === 'retry' || v.kind === 'remoteOff' ? { kind: 'paired', device: head.device_name } : v)); });
+    known.current = null;
+    setView(how === 'remoteOff' ? { kind: 'remoteOff' } : { kind: 'retry', line: how });
+  };
+  useEffect(() => {
+    if (!wait2) return;
+    let off = false;
+    const id = setTimeout(() => void (async () => {
+      if (Date.now() > Date.parse(wait2.head.expires_at) + POLL_MS * 2) { if (!off) endWith(wait2.head, 'notPaired'); return; }
+      const look = await lookPairSession(wait2.head);
+      if (off) return;
+      if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...wait2 }); else endWith(wait2.head, how); return; }
+      failedReads.current = 0;
+      if (look.kind === 'gone') { endWith(wait2.head, 'offerGone'); return; }
+      if (look.kind === 'ended') { endWith(wait2.head, 'notPaired'); return; }
+      if (look.kind === 'revealed') { setView({ kind: 'compare', head: wait2.head, phoneKeyId: wait2.phoneKeyId, note: 'open' }); return; } // revealed already (an answer was lost on the way back): the shell holds the number
+      if (look.kind !== 'nonce') { setView({ ...wait2 }); return; } // waiting: look again
+      const g = gen.current;
+      setView({ ...wait2, bind: 'revealing' }); // the OS prompt is up: not asked again meanwhile (one reveal)
+      const r = await revealPairSession(wait2.head, look, { phoneCall, alive: () => gen.current === g });
+      if (gen.current !== g) return; // left meanwhile (cancel · a new start · gone)
+      switch (r.kind) {
+        case 'revealed': setView({ kind: 'compare', head: wait2.head, phoneKeyId: wait2.phoneKeyId, note: 'open' }); return;
+        case 'cancelled': setView({ ...wait2, bind: 'cancelled' }); return; // the person closed the prompt: the same nonce may be tried again with [다시 확인]
+        case 'ended': endWith(wait2.head, 'notPaired'); return;
+        case 'offerGone': endWith(wait2.head, 'offerGone'); return;
+        case 'integrity': endWith(wait2.head, 'integrity'); return; // the computer's answer did not fit its key: its own line (not a time-out)
+        case 'expired': endWith(wait2.head, 'expired'); return;
+        case 'noScreenLock': case 'biometricRequired': void cancelPairSession(wait2.head, deps); setView({ kind: r.kind }); return; // (the shell's offer is dropped too: nothing is left half-open)
+        default: endWith(wait2.head, 'failed');
+      }
+    })(), POLL_MS);
+    return () => { off = true; clearTimeout(id); };
+  }, [wait2, phoneCall]);
+
+  // after this phone's person agreed (a provisional pin in the shell): the computer's person must press [같아요] too — the page sees the pair on the server's list and asks the shell to make the pin real (the shell reads the list itself)
+  const waitHost = view.kind === 'waitHost' ? view : null;
+  useEffect(() => {
+    if (!waitHost) return;
+    let off = false;
+    const id = setTimeout(() => void (async () => {
+      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) endWith(waitHost.head, 'hostNo'); return; }
+      const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
+      if (off) return;
+      if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
+      if (found === 'paired') {
+        failedReads.current = 0; // (the list read and the answer of the shell are what count here — no second read follows)
+        const f = await finishPairSession(waitHost.head, { phoneCall });
+        if (off) return;
+        switch (f.kind) {
+          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name }); return;
+          case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
+          case 'expired': endWith(waitHost.head, 'expired'); return;
+          case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
+          case 'failed': endWith(waitHost.head, 'failed'); return;
+          default: setView({ ...waitHost }); return; // not yet · the key store is busy: look again
+        }
+      }
+      const look = await lookPairSession(waitHost.head);
+      if (off) return;
+      if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; }
+      failedReads.current = 0;
+      if (look.kind === 'gone') { endWith(waitHost.head, 'offerGone'); return; }
+      if (look.kind === 'ended') { endWith(waitHost.head, 'hostNo'); return; } // the computer's person said «different» (or the window ended): the shell drops what it held
+      setView({ ...waitHost });
+    })(), POLL_MS);
+    return () => { off = true; clearTimeout(id); };
+  }, [waitHost, phoneCall]);
+
+  // the shell's own window opens once per `open` (the web only asks; the number and the buttons are the shell's)
+  const compare = view.kind === 'compare' && view.note === 'open' ? view : null;
+  useEffect(() => {
+    if (!compare) return;
+    let off = false;
+    void (async () => {
+      const r = await comparePairSession(compare.head, { phoneCall });
+      if (off) return;
+      switch (r.kind) {
+        case 'agreed': setView({ kind: 'waitHost', head: compare.head, phoneKeyId: compare.phoneKeyId }); return;
+        case 'declined': known.current = null; setView({ kind: 'start' }); return;
+        case 'closed': setView({ ...compare, note: 'closed' }); return; // no answer: [숫자 다시 보기]
+        case 'expired': setView({ kind: 'retry', line: 'expired' }); return;
+        case 'notReady': setView({ ...compare, note: 'notReady' }); return;
+        case 'busy': setView({ ...compare, note: 'busy' }); return;
+        default: setView({ ...compare, note: 'failed' });
+      }
+    })();
+    return () => { off = true; };
+  }, [compare, phoneCall]);
+  // a cancel while a new pairing is under way ends the offer at the server (the shell's copy ends with its own window — at most 10 minutes)
+  const abandon = (v: { head: OfferHead }) => {
+    const g = ++gen.current;
+    // the shell may answer «pinning» (the real pin is being written this very moment: the computer's person has already confirmed) — then the pairing is DONE, not cancelled
+    void cancelPairSession(v.head, deps).then((r) => { if (r.pinning && gen.current === g) setView({ kind: 'paired', device: v.head.device_name }); });
+    known.current = null; setView({ kind: 'start' });
+  };
 
   // story #4624 — the limit screen: the person's phones, one confirm to remove one, then the rescan
   const loadLimitPhones = async () => {
@@ -182,9 +310,17 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'setupNotFound': return t('setupNotFound');
       case 'offerUsed': return t('offerUsed');
       case 'registerAgain': return t('registerAgain');
+      case 'integrity': return t('integrity');
+      case 'offerGone': return t('offerGone');
+      case 'startedAlready': return t('startedAlready');
+      case 'forbidden': return t('forbidden');
+      case 'signedOut': return t('signedOut');
+      case 'serverUnreachable': return t('serverUnreachable');
+      case 'hostNo': return t('hostNo');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');
       case 'takenOtherOrg': return org ? t('takenOtherOrgNamed', { org }) : t('takenOtherOrg');
+      case 'notReady': return t('notReady');
       case 'failed': return t('failed');
     }
   };
@@ -230,6 +366,34 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
             <span className="block" data-testid="pairing-number-hint">{t('numberHint')}</span>
           </Line>
           <Actions><Button variant="secondary" onClick={cancel}>{t('cancel')}</Button></Actions>
+        </Shell>
+      );
+    case 'wait2':
+      return (
+        <Shell>
+          <Line focus>{view.bind === 'cancelled' ? t('bindCancelled') : t('checking')}</Line>
+          <Actions>
+            {view.bind === 'cancelled' ? <Button variant="primary" onClick={() => setView({ ...view, bind: 'idle' })}>{t('bindAgain')}</Button> : null}
+            <Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button>
+          </Actions>
+        </Shell>
+      );
+    case 'compare':
+      return (
+        <Shell>
+          {/* the number and the two buttons are in the phone app's own window (never drawn here: this page comes from the server) */}
+          <Line focus>{view.note === 'open' ? t('compareOpen') : view.note === 'notReady' ? t('notReady') : view.note === 'busy' ? t('compareBusy') : view.note === 'failed' ? t('failed') : t('compareClosed')}</Line>
+          <Actions>
+            {view.note !== 'open' ? <Button variant="primary" onClick={() => setView({ ...view, note: 'open' })}>{t('compareAgain')}</Button> : null}
+            <Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button>
+          </Actions>
+        </Shell>
+      );
+    case 'waitHost':
+      return (
+        <Shell>
+          <Line focus>{t('waitHost')}</Line>
+          <Actions><Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button></Actions>
         </Shell>
       );
     case 'paired':

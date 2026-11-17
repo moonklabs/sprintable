@@ -86,6 +86,13 @@ describe('[4532] sendPairOffer', () => {
     expect(phoneCall).not.toHaveBeenCalledWith('pair.mac', expect.anything());
   });
 
+  it('lens 5842 delta 6: the list refused with a 403 (no access to that computer\'s organization) → its own outcome, nothing offered — not read as «no pair»', async () => {
+    const phoneCall = okShell();
+    const fetch = server(okRoutes({ 'GET /api/remote-devices': () => res(403, {}) }));
+    await expect(sendPairOffer(HEAD, 'x', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'forbidden' });
+    expect(phoneCall).not.toHaveBeenCalledWith('pair.mac', expect.anything());
+  });
+
   it('a phone that cannot confirm says why, before anything is registered', async () => {
     for (const [code, kind] of [['no_screen_lock', 'noScreenLock'], ['biometric_required', 'biometricRequired'], ['failed', 'failed']]) {
       const fetch = server({});
@@ -132,6 +139,11 @@ describe('[4532] checkPairOffer', () => {
   const offerPath = `GET /api/remote-devices/pairing-offers/${HEAD.offer_id}`;
   const notYet = () => res(200, { devices: [{ id: KEY_ID, pairs: [] }] });
   const stood = () => res(200, { devices: [{ id: KEY_ID, pairs: [{ setup_id: HEAD.setup_id }] }] });
+
+  it('lens 5842 delta 6: after the computer took the offer, a list that is refused (403) is a failed look — not «no pair» (the person is not told «not paired»)', async () => {
+    const fetch = server({ [offerPath]: () => res(200, { state: 'expired', reveal: null }), 'GET /api/remote-devices': () => res(403, {}) });
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), fetch))).resolves.toEqual({ kind: 'failed' });
+  });
 
   it('sent → still waiting (the setup goes along in the query)', async () => {
     const fetch = server({ [offerPath]: () => res(200, { state: 'sent', reveal: null }) });
