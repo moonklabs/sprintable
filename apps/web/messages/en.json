@@ -8076,6 +8076,7 @@
     "compareOpen": "Compare the number on the phone with the one on the computer",
     "compareClosed": "The number wasn't checked",
     "compareAgain": "Show the number again",
+    "compareBusy": "Another window is open in the phone app — close it, then press again",
     "waitHost": "Waiting for the computer to confirm…",
     "bindCancelled": "Not confirmed, so the pairing couldn't go on",
     "bindAgain": "Confirm again",

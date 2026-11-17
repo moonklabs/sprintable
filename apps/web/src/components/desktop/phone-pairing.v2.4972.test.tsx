@@ -27,13 +27,16 @@ const res = (status: number, body?: unknown) => new Response(body === undefined 
 
 let sent: Array<{ type: string; args: Record<string, unknown> }> = [];
 let shell: Record<string, Record<string, unknown>>;
+const slow = new Set<string>(); // types whose answer is held until the test releases it (a real OS prompt takes seconds)
+const release: Record<string, () => void> = {};
 function installShell() {
   window.__sprintablePhone = {
     claim(onReply) {
       delete window.__sprintablePhone;
       return (m) => {
         sent.push({ type: m.type, args: m.args });
-        queueMicrotask(() => onReply({ id: m.id, ...(shell[m.type] ?? { ok: false, code: 'bad_request' }) } as never));
+        const answer = () => onReply({ id: m.id, ...(shell[m.type] ?? { ok: false, code: 'bad_request' }) } as never);
+        if (slow.has(m.type)) release[m.type] = answer; else queueMicrotask(answer);
       };
     },
   };
@@ -51,6 +54,7 @@ let commitPost: () => Response;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   sent = [];
+  slow.clear();
   serverCalls = [];
   shell = {
     'pair.scan': { ok: true, ...HEAD },
@@ -146,6 +150,32 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toContain('페어링했어요 · My Mac');
   });
 
+  it('a REAL (slow) OS prompt: the view changes to «revealing» meanwhile, and the answer still goes on to the shell\'s window (not dropped as a stale step)', async () => {
+    installShell(); slow.add('pair.reveal');
+    await START(); sessionState = NONCE; await tick();
+    expect(sent.filter((s) => s.type === 'pair.reveal')).toHaveLength(1);
+    await tick(); await tick(); // the screen has re-rendered while the prompt is up
+    expect(sent.filter((s) => s.type === 'pair.reveal')).toHaveLength(1); // not asked again meanwhile
+    release['pair.reveal'](); await settle();
+    expect(serverCalls).toContain(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/reveal`);
+    expect(sent.filter((s) => s.type === 'pair.compare')).toHaveLength(1);
+    await tick(); expect(line()).toBe('컴퓨터에서 확인하는 중…');
+  });
+
+  it('cancelling while the OS prompt is up: the late answer of that prompt does nothing (no reveal posted, no window)', async () => {
+    installShell(); slow.add('pair.reveal');
+    await START(); sessionState = NONCE; await tick();
+    await press('취소'); expect(buttons()).toContain('QR 찍기');
+    release['pair.reveal'](); await settle();
+    expect(serverCalls.some((c) => c.endsWith('/reveal'))).toBe(false); expect(sentTypes()).not.toContain('pair.compare'); expect(buttons()).toContain('QR 찍기');
+  });
+
+  it('the server already holds the reveal (an earlier answer was lost) → straight to the shell\'s window, no second reveal', async () => {
+    installShell(); sessionState = { state: 'revealed', n_m: 'N'.repeat(22), sig: 'S'.repeat(70) };
+    await START(); await tick();
+    expect(sentTypes()).not.toContain('pair.reveal'); expect(sent.filter((s) => s.type === 'pair.compare')).toHaveLength(1);
+  });
+
   it('[달라요] in the shell\'s window → the server ends the offer, the screen starts over', async () => {
     installShell(); shell['pair.compare'] = { ok: true, pinned: false };
     await START(); sessionState = NONCE; await tick();
@@ -212,6 +242,12 @@ describe('[4972] the new pairing on the phone screen', () => {
     installShell(); shell['pair.compare'] = { ok: false, code: 'vault_unavailable' };
     await START(); sessionState = NONCE; await tick();
     expect(text()).toContain('폰이 아직 준비되지 않았어요'); expect(buttons()).toContain('숫자 다시 보기');
+  });
+
+  it('another window of the phone app is up (busy) → its own line and [숫자 다시 보기]', async () => {
+    installShell(); shell['pair.compare'] = { ok: false, code: 'busy' };
+    await START(); sessionState = NONCE; await tick();
+    expect(line()).toBe('폰 앱에 다른 창이 열려 있어요 — 닫은 뒤 다시 눌러 주세요'); expect(buttons()).toContain('숫자 다시 보기');
   });
 
   it('English copy', async () => {

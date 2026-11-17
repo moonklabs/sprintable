@@ -83,7 +83,7 @@ describe('[4972] lookPairSession', () => {
   it.each([
     [{ state: 'committed', n_m: null, sig: null }, { kind: 'waiting' }],
     [{ state: 'nonce', n_m: 'N', sig: 'S' }, { kind: 'nonce', n_m: 'N', sig: 'S' }],
-    [{ state: 'revealed', n_m: 'N', sig: 'S' }, { kind: 'waiting' }], // already revealed: the number is up on the phone — nothing more to ask
+    [{ state: 'revealed', n_m: 'N', sig: 'S' }, { kind: 'revealed' }], // already revealed (an answer was lost on the way back): the shell holds the number — go on to its window
     [{ state: 'burned', n_m: null, sig: null }, { kind: 'ended' }],
     [{ state: 'expired', n_m: null, sig: null }, { kind: 'ended' }],
     [{ state: 'nonce', n_m: null, sig: null }, { kind: 'failed' }],
@@ -95,6 +95,19 @@ describe('[4972] lookPairSession', () => {
   it('a failed read is failed', async () => {
     server({ [url]: () => res(404, {}) });
     await expect(lookPairSession(HEAD)).resolves.toEqual({ kind: 'failed' });
+  });
+});
+
+describe('[4972] a bridge that rejects ends the step (the screen is never left waiting on a call that is gone)', () => {
+  const boom = vi.fn(async () => { throw new Error('bridge gone'); });
+  it('commit · reveal · compare each end as a plain failure', async () => {
+    server({
+      'GET /api/remote-devices/pairing-target': () => res(404, {}), 'POST /api/remote-devices': () => res(201, { id: KEY_ID }), 'GET /api/remote-devices': () => res(200, { devices: [{ id: KEY_ID, pairs: [] }] }),
+    });
+    const flaky = vi.fn(async (type: string) => { if (type === 'device.key.info') return okKey; throw new Error('bridge gone'); });
+    await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: flaky })).resolves.toEqual({ kind: 'failed' });
+    await expect(revealPairSession(HEAD, { n_m: 'N', sig: 'S' }, { phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
+    await expect(comparePairSession(HEAD, { phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
   });
 });
 
@@ -138,7 +151,7 @@ describe('[4972] comparePairSession · closePairSession · lookPaired', () => {
     expect(ok).toHaveBeenCalledWith('pair.compare', { offer_id: HEAD.offer_id });
     expect(calls).toEqual([]); // the pin is the shell's, the computer's own [같아요] is the other half
   });
-  it.each([['cancelled', 'closed'], ['vault_unavailable', 'notReady'], ['no_offer', 'expired'], ['expired', 'expired'], ['busy', 'failed'], ['bad_request', 'failed']])('the shell says %s → %s (nothing said to the server)', async (code, kind) => {
+  it.each([['cancelled', 'closed'], ['vault_unavailable', 'notReady'], ['busy', 'busy'], ['no_offer', 'expired'], ['expired', 'expired'], ['bad_request', 'failed']])('the shell says %s → %s (nothing said to the server)', async (code, kind) => {
     const calls = server({});
     await expect(comparePairSession(HEAD, { phoneCall: shell({ 'pair.compare': { id: 'x', ok: false, code } }) })).resolves.toEqual({ kind });
     expect(calls).toEqual([]);

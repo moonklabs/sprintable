@@ -8076,6 +8076,7 @@
     "compareOpen": "폰 화면에 뜬 숫자를 컴퓨터 화면의 숫자와 맞춰 보세요",
     "compareClosed": "숫자를 확인하지 않았어요",
     "compareAgain": "숫자 다시 보기",
+    "compareBusy": "폰 앱에 다른 창이 열려 있어요 — 닫은 뒤 다시 눌러 주세요",
     "waitHost": "컴퓨터에서 확인하는 중…",
     "bindCancelled": "확인하지 않아서 페어링을 이어 가지 못했어요",
     "bindAgain": "다시 확인",

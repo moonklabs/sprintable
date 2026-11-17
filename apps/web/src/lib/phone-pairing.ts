@@ -42,7 +42,7 @@ export type WaitOutcome =
   | { kind: 'failed' };
 
 type Call = (type: string, args?: Record<string, unknown>) => Promise<PhoneAnswer>;
-export interface PairDeps { phoneCall: Call }
+export interface PairDeps { phoneCall: Call; alive?: () => boolean } // `alive`: false once the person left this pairing (a step that has been waiting on the shell then sends nothing)
 
 const json = { 'Content-Type': 'application/json' };
 
@@ -239,7 +239,7 @@ export async function sendPairCommit(head: OfferHead, label: string, deps: PairD
   const prepared = await prepareKey(head, label, deps);
   if ('end' in prepared) return prepared.end;
   const { phoneKeyId } = prepared;
-  const c = await deps.phoneCall('pair.commit', { offer_id: head.offer_id, label });
+  const c = await safeCall(deps, 'pair.commit', { offer_id: head.offer_id, label });
   if (!c.ok || typeof c.commit !== 'string') {
     if (c.code === 'vault_unavailable') return { kind: 'notReady' }; // the key store is not answering just now: try again in a moment
     return c.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
@@ -253,9 +253,15 @@ export async function sendPairCommit(head: OfferHead, label: string, deps: PairD
   }
 }
 
+/** a shell call that never throws: a bridge that rejects ends the step as a plain failure (the screen is never left waiting on a call that is gone) */
+const safeCall = async (deps: PairDeps, type: string, args: Record<string, unknown>) => {
+  try { return await deps.phoneCall(type, args); } catch { return { id: '', ok: false, code: 'failed' } as Awaited<ReturnType<PairDeps['phoneCall']>>; }
+};
+
 export type SessionLook =
   | { kind: 'waiting' } // the computer has not answered the commitment yet
   | { kind: 'nonce'; n_m: string; sig: string } // it did: the shell checks it and asks the person to confirm
+  | { kind: 'revealed' } // the reveal is already at the server (an earlier answer was lost on the way back): the shell holds the number — go on to its window
   | { kind: 'ended' } // burned · expired — this pairing is over (the phone cannot tell which: start again with a new QR)
   | { kind: 'failed' };
 
@@ -266,7 +272,8 @@ export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
     if (!res.ok) return { kind: 'failed' };
     const body = (await res.json()) as { state?: string; n_m?: unknown; sig?: unknown };
     if (body.state === 'committed') return { kind: 'waiting' };
-    if ((body.state === 'nonce' || body.state === 'revealed') && typeof body.n_m === 'string' && typeof body.sig === 'string') return body.state === 'nonce' ? { kind: 'nonce', n_m: body.n_m, sig: body.sig } : { kind: 'waiting' };
+    if (body.state === 'revealed') return { kind: 'revealed' };
+    if (body.state === 'nonce' && typeof body.n_m === 'string' && typeof body.sig === 'string') return { kind: 'nonce', n_m: body.n_m, sig: body.sig };
     if (body.state === 'burned' || body.state === 'expired') return { kind: 'ended' };
     return { kind: 'failed' };
   } catch {
@@ -284,7 +291,7 @@ export type RevealOutcome =
 
 /** The computer's nonce → the shell (it checks the signature with the computer's key from the QR, signs the binding on the OS prompt) → the reveal to the server. The number is not in the shell's reply (it is drawn in the shell's own window by `comparePairSession`). */
 export async function revealPairSession(head: OfferHead, nonce: { n_m: string; sig: string }, deps: PairDeps): Promise<RevealOutcome> {
-  const r = await deps.phoneCall('pair.reveal', { offer_id: head.offer_id, n_m: nonce.n_m, sig: nonce.sig });
+  const r = await safeCall(deps, 'pair.reveal', { offer_id: head.offer_id, n_m: nonce.n_m, sig: nonce.sig });
   if (!r.ok) {
     switch (r.code) {
       case 'cancelled': return { kind: 'cancelled' };
@@ -295,6 +302,7 @@ export async function revealPairSession(head: OfferHead, nonce: { n_m: string; s
       default: return { kind: 'failed' }; // (busy · key_failed · sign_failed · bad_request …)
     }
   }
+  if (deps.alive && !deps.alive()) return { kind: 'ended' }; // the person left this pairing while the prompt was up: nothing goes up
   const reveal = r.reveal as Record<string, unknown> | undefined;
   if (!reveal || typeof reveal.phone_spki !== 'string' || typeof reveal.phone_box_pub !== 'string' || typeof reveal.n_p !== 'string' || typeof reveal.label !== 'string' || typeof reveal.binding_sig !== 'string') return { kind: 'failed' };
   try {
@@ -315,6 +323,7 @@ export type CompareOutcome =
   | { kind: 'declined' } // [달라요]: nothing was pinned, the offer is ended on both sides
   | { kind: 'closed' } // the window was closed with no answer: the session stays, the person may open it again
   | { kind: 'notReady' } // the key store is not answering just now: open it again in a moment
+  | { kind: 'busy' } // another window of the phone app (a card · an instruction) is up: the shell does not push it out — ask again once it is closed
   | { kind: 'expired' }
   | { kind: 'failed' };
 
@@ -323,7 +332,7 @@ export type CompareOutcome =
  * the shell to open the window and hears what became of the pairing). A «different» also ends the offer at the server.
  */
 export async function comparePairSession(head: OfferHead, deps: PairDeps): Promise<CompareOutcome> {
-  const r = await deps.phoneCall('pair.compare', { offer_id: head.offer_id });
+  const r = await safeCall(deps, 'pair.compare', { offer_id: head.offer_id });
   if (r.ok) {
     if (r.pinned === true) return { kind: 'pinned' };
     await closePairSession(head); // best effort: the server ends it either way when its window passes
@@ -332,6 +341,7 @@ export async function comparePairSession(head: OfferHead, deps: PairDeps): Promi
   switch (r.code) {
     case 'cancelled': return { kind: 'closed' };
     case 'vault_unavailable': return { kind: 'notReady' };
+    case 'busy': return { kind: 'busy' };
     case 'no_offer':
     case 'expired': return { kind: 'expired' };
     default: return { kind: 'failed' };
