@@ -326,7 +326,7 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('컴퓨터에서 끝나지 않아 페어링하지 못했어요 — 컴퓨터에서 [같아요]를 누르지 않았거나 컴퓨터가 저장하지 못했어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
     expect(sent.filter((x) => x.type === 'pair.cancel')).toEqual([{ type: 'pair.cancel', args: { offer_id: HEAD.offer_id } }]);
     expect(serverCalls).toContain(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`);
-    expect(sentTypes()).not.toContain('pair.finish'); // never made real
+    expect(sent.filter((x) => x.type === 'pair.finish')).toEqual([{ type: 'pair.finish', args: { offer_id: HEAD.offer_id } }]); // asked ONCE at the end (what became of it?) — the shell had nothing real to make (not_confirmed): nothing is paired
   });
 
   it('the server lists the computer but the shell does not see it yet (not_confirmed) → still waiting, asked again → then paired', async () => {
