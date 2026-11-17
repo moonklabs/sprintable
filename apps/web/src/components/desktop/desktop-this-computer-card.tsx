@@ -17,7 +17,7 @@ export function DesktopThisComputerCard({ bridge, hideTitle = false }: { bridge:
   const offer = useSyncExternalStore(subscribeAppUpdate, appUpdate, () => null);
   const [pressing, setPressing] = useState(false);
   const canPress = !!offer && (offer.phase === 'available' || offer.phase === 'failed') && typeof bridge.startUpdate === 'function' && !pressing;
-  const press = async () => { setPressing(true); try { await pressAppUpdate(); } finally { setPressing(false); } };
+  const press = async () => { setPressing(true); try { await pressAppUpdate(bridge); } finally { setPressing(false); } };
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-this-computer-card">
       {hideTitle ? null : <p className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</p>}

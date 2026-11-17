@@ -222,8 +222,9 @@ export function subscribeAppUpdate(listen: () => void): () => void {
 }
 
 /** story 4971: the press — the app's `startUpdate()` with no argument (the page never names a build or an address). `unsupported` = an older app without it; never rejects. */
-export async function pressAppUpdate(): Promise<'ok' | 'busy' | 'failed' | 'none' | 'unsupported'> {
-  const raw = rawBridge();
+export async function pressAppUpdate(bridge?: SprintableDesktop): Promise<'ok' | 'busy' | 'failed' | 'none' | 'unsupported'> {
+  // the bridge the screen drew its button from when it gives one (the same object — never another instance); else the page's own
+  const raw = bridge ?? rawBridge();
   if (typeof raw?.startUpdate !== 'function') return 'unsupported';
   try {
     const r = await raw.startUpdate();

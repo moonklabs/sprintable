@@ -96,4 +96,12 @@ describe('[SID:4971 ③] pressAppUpdate — takes nothing from the page', () => 
     setBridge(undefined);
     expect(await pressAppUpdate()).toBe('unsupported');
   });
+  it('codex: the press goes to the bridge the screen was drawn from when one is given (not to another instance on the page)', async () => {
+    const mine = vi.fn(async () => ({ ok: true as const }));
+    const other = vi.fn(async () => ({ ok: true as const }));
+    setBridge(base({ startUpdate: other }));
+    expect(await pressAppUpdate(base({ startUpdate: mine }) as never)).toBe('ok');
+    expect(mine).toHaveBeenCalledTimes(1);
+    expect(other).not.toHaveBeenCalled();
+  });
 });
