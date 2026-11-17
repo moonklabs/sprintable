@@ -32,6 +32,8 @@ export type OfferOutcome =
   | { kind: 'unreachable' }
   | { kind: 'setupNotFound' }
   | { kind: 'registerAgain' } // 404 phone_key_not_found — this phone's registration is gone
+  | { kind: 'offerGone' } // 404 offer_not_found — the server knows no such offer of ours (the computer never registered it · it is someone else's · it is gone): NOT «the computer is unreachable» (lens 5842)
+  | { kind: 'startedAlready' } // the shell already started this QR (it is used up): a new QR is the only way
   | { kind: 'failed' };
 
 export type WaitOutcome =
@@ -225,7 +227,7 @@ function sessionRefusal(code: string): OfferOutcome | { kind: 'notReady' } {
   switch (code) {
     case 'offer_burned': return { kind: 'offerUsed' }; // another hand got to this QR first (or the offer was ended): «this QR was already used»
     case 'offer_expired': return { kind: 'expired' };
-    case 'offer_not_found': return { kind: 'unreachable' }; // the computer never registered this offer with the server: it is not connected
+    case 'offer_not_found': return { kind: 'offerGone' }; // the server knows no such offer of ours (not registered · someone else's · gone) — it is not a word about the computer being reachable
     case 'remote_control_off': return { kind: 'remoteOff' };
     case 'device_unreachable': return { kind: 'unreachable' };
     case 'setup_not_found': return { kind: 'setupNotFound' };
@@ -238,12 +240,16 @@ function sessionRefusal(code: string): OfferOutcome | { kind: 'notReady' } {
 export async function sendPairCommit(head: OfferHead, label: string, deps: PairDeps): Promise<OfferOutcome | { kind: 'notReady' }> {
   const prepared = await prepareKey(head, label, deps);
   if ('end' in prepared) return prepared.end;
+  if (deps.alive && !deps.alive()) return { kind: 'failed' }; // the person left while the key was being registered: nothing goes further
   const { phoneKeyId } = prepared;
   const c = await safeCall(deps, 'pair.commit', { offer_id: head.offer_id, label });
   if (!c.ok || typeof c.commit !== 'string') {
     if (c.code === 'vault_unavailable') return { kind: 'notReady' }; // the key store is not answering just now: try again in a moment
+    if (c.code === 'already_committed') return { kind: 'startedAlready' }; // this QR was started on this phone already (the shell holds it)
+    if (c.code === 'host_already_pinned') return { kind: 'alreadyPaired' }; // a REAL pin of this computer stands: it is paired
     return c.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
   }
+  if (deps.alive && !deps.alive()) return { kind: 'failed' }; // left while the shell was making the commitment: it does not go to the server
   try {
     const res = await fetchWithAuth(sessionUrl(head, '/commit'), { method: 'POST', headers: sessionHeaders(head), body: JSON.stringify({ setup_id: head.setup_id, phone_key_id: phoneKeyId, commit: c.commit }) });
     if (res.ok) return { kind: 'sent', phoneKeyId };
@@ -263,13 +269,17 @@ export type SessionLook =
   | { kind: 'nonce'; n_m: string; sig: string } // it did: the shell checks it and asks the person to confirm
   | { kind: 'revealed' } // the reveal is already at the server (an earlier answer was lost on the way back): the shell holds the number — go on to its window
   | { kind: 'ended' } // burned · expired — this pairing is over (the phone cannot tell which: start again with a new QR)
-  | { kind: 'failed' };
+  | { kind: 'failed'; why?: 'signedOut' | 'remoteOff' }; // a read that failed: signed out (401/403) or remote control off (409) say so — anything else is «read again»
 
 /** One look at the server's state of this pairing (the screen asks every 1.5 s, up to the QR's time). */
 export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
   try {
     const res = await fetchWithAuth(`${sessionUrl(head)}?setup_id=${encodeURIComponent(head.setup_id)}`, { headers: orgHeader(head.setup_id) });
-    if (!res.ok) return { kind: 'failed' };
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return { kind: 'failed', why: 'signedOut' };
+      if ((await read(res)).code === 'remote_control_off') return { kind: 'failed', why: 'remoteOff' };
+      return { kind: 'failed' };
+    }
     const body = (await res.json()) as { state?: string; n_m?: unknown; sig?: unknown };
     if (body.state === 'committed') return { kind: 'waiting' };
     if (body.state === 'revealed') return { kind: 'revealed' };
@@ -284,7 +294,8 @@ export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
 export type RevealOutcome =
   | { kind: 'revealed' } // the reveal is at the server: the number is up in the SHELL's own window (never here) for both people to compare
   | { kind: 'cancelled' } // the person did not confirm on the OS prompt — the same nonce may be tried again
-  | { kind: 'ended' } // the nonce did not fit (the shell ended the pairing) · the offer ended
+  | { kind: 'ended' } // the offer ended (the server burned it)
+  | { kind: 'integrity' } // the computer's nonce did not fit the key the QR carried (`bad_nonce`): NOT a time-out — a signal worth a line of its own
   | { kind: 'expired' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   | { kind: 'failed' };
@@ -295,7 +306,7 @@ export async function revealPairSession(head: OfferHead, nonce: { n_m: string; s
   if (!r.ok) {
     switch (r.code) {
       case 'cancelled': return { kind: 'cancelled' };
-      case 'bad_nonce': return { kind: 'ended' };
+      case 'bad_nonce': return { kind: 'integrity' };
       case 'no_offer': return { kind: 'expired' };
       case 'no_screen_lock': return { kind: 'noScreenLock' };
       case 'biometric_required': return { kind: 'biometricRequired' };
@@ -312,14 +323,14 @@ export async function revealPairSession(head: OfferHead, nonce: { n_m: string; s
     });
     if (res.ok) return { kind: 'revealed' };
     const refusal = sessionRefusal((await read(res)).code);
-    return refusal.kind === 'offerUsed' ? { kind: 'ended' } : refusal.kind === 'expired' ? { kind: 'expired' } : { kind: 'failed' };
+    return refusal.kind === 'offerUsed' || refusal.kind === 'offerGone' ? { kind: 'ended' } : refusal.kind === 'expired' ? { kind: 'expired' } : { kind: 'failed' };
   } catch {
     return { kind: 'failed' };
   }
 }
 
 export type CompareOutcome =
-  | { kind: 'pinned' } // the person pressed [같아요] in the shell's window: the shell pinned the computer — what is left is the computer's own [같아요]
+  | { kind: 'agreed' } // the person pressed [같아요] in the shell's window: a PROVISIONAL pin in the shell — what is left is the computer's own [같아요], then `finishPairSession`
   | { kind: 'declined' } // [달라요]: nothing was pinned, the offer is ended on both sides
   | { kind: 'closed' } // the window was closed with no answer: the session stays, the person may open it again
   | { kind: 'notReady' } // the key store is not answering just now: open it again in a moment
@@ -334,7 +345,7 @@ export type CompareOutcome =
 export async function comparePairSession(head: OfferHead, deps: PairDeps): Promise<CompareOutcome> {
   const r = await safeCall(deps, 'pair.compare', { offer_id: head.offer_id });
   if (r.ok) {
-    if (r.pinned === true) return { kind: 'pinned' };
+    if (r.agreed === true) return { kind: 'agreed' };
     await closePairSession(head); // best effort: the server ends it either way when its window passes
     return { kind: 'declined' };
   }
@@ -346,6 +357,40 @@ export async function comparePairSession(head: OfferHead, deps: PairDeps): Promi
     case 'expired': return { kind: 'expired' };
     default: return { kind: 'failed' };
   }
+}
+
+export type FinishOutcome =
+  | { kind: 'pinned' } // the computer is paired with this phone on the server and the shell made its pin real
+  | { kind: 'waiting' } // the server does not list the computer yet (its person has not pressed [같아요]): ask again
+  | { kind: 'expired' }
+  | { kind: 'notReady' } // the key store is not answering just now
+  | { kind: 'alreadyPaired' } // a real pin of this computer is there already
+  | { kind: 'signedOut' }
+  | { kind: 'failed' };
+
+/**
+ * The computer's person pressed [같아요] too (the page sees this phone paired with the computer in the server's list): ask the shell to make its provisional pin real. The shell READS the server's list itself — the page's word
+ * is only «look now»; it can neither make a pin real nor stop one from becoming real (lens 5842 med 1 · PO).
+ */
+export async function finishPairSession(head: OfferHead, deps: PairDeps): Promise<FinishOutcome> {
+  const r = await safeCall(deps, 'pair.finish', { offer_id: head.offer_id });
+  if (r.ok) return r.pinned === true ? { kind: 'pinned' } : { kind: 'failed' };
+  switch (r.code) {
+    case 'not_confirmed':
+    case 'busy': return { kind: 'waiting' };
+    case 'no_offer':
+    case 'expired': return { kind: 'expired' };
+    case 'vault_unavailable': return { kind: 'notReady' };
+    case 'host_already_pinned': return { kind: 'alreadyPaired' };
+    case 'signed_out': return { kind: 'signedOut' };
+    default: return { kind: 'failed' };
+  }
+}
+
+/** The person left, or the pairing ended on the other side: the shell drops this offer, its provisional pin and its open number window; the server's offer ends too. Best effort, never throws. */
+export async function cancelPairSession(head: OfferHead, deps: PairDeps): Promise<void> {
+  await safeCall(deps, 'pair.cancel', { offer_id: head.offer_id });
+  await closePairSession(head);
 }
 
 /** the offer ends on the server (the phone's [달라요] · a cancel before the number): best effort, never throws */
