@@ -42,7 +42,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'receiptInvalid' | 'noReceipt' | 'qrUnreadable' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -219,7 +219,14 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     if (!waitHost) return;
     let off = false;
     const id = setTimeout(() => void (async () => {
-      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) endWith(waitHost.head, 'hostNo'); return; }
+      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) {
+        if (off) return;
+        // the window is over: ask the shell ONCE what became of it — a computer that said it sends a confirmation and sent none (or a bad one) has its own line, not «you did not press»
+        const last = await finishPairSession(waitHost.head, { phoneCall });
+        if (off) return;
+        endWith(waitHost.head, last.kind === 'receiptInvalid' ? 'receiptInvalid' : last.kind === 'noReceipt' ? 'noReceipt' : 'hostNo');
+        return;
+      }
       const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
       if (off) return;
       if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
@@ -232,6 +239,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
           case 'expired': endWith(waitHost.head, 'expired'); return;
           case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
+          case 'receiptInvalid': endWith(waitHost.head, 'receiptInvalid'); return;
+          case 'noReceipt': endWith(waitHost.head, 'noReceipt'); return;
           case 'failed': endWith(waitHost.head, 'failed'); return;
           default: setView({ ...waitHost }); return; // not yet · the key store is busy: look again
         }
@@ -316,6 +325,9 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'forbidden': return t('forbidden');
       case 'signedOut': return t('signedOut');
       case 'serverUnreachable': return t('serverUnreachable');
+      case 'receiptInvalid': return t('receiptInvalid');
+      case 'noReceipt': return t('noReceipt');
+      case 'qrUnreadable': return t('qrUnreadable');
       case 'hostNo': return t('hostNo');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');

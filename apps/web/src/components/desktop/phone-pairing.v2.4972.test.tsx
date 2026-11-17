@@ -232,6 +232,40 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(buttons()).toContain('다시 찍기'); expect(sentTypes()).not.toContain('pair.reveal');
   });
 
+  it('4a: the computer said it sends a confirmation and sent one that does not fit → its own line at once (a forgery attempt is SEEN, never «time ran out») — and the shell is told to drop the offer', async () => {
+    installShell(); shell['pair.finish'] = { ok: false, code: 'receipt_invalid' };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    pairs = [{ setup_id: HEAD.setup_id }]; await tick();
+    expect(line()).toBe('컴퓨터가 보낸 확인이 이 페어링과 맞지 않아요 — 이 QR로는 이어 갈 수 없어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 보고, 계속되면 알려 주세요');
+    expect(sentTypes()).toContain('pair.cancel');
+  });
+  const WINDOW_OVER = async (answer: Record<string, unknown>) => {
+    installShell(); shell['pair.finish'] = { ...answer };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요');
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(HEAD.expires_at) + 10 * 60_000); // the window is over
+    try { await tick(); await tick(); } finally { spy.mockRestore(); }
+    expect(sent.filter((x) => x.type === 'pair.finish').length).toBeGreaterThanOrEqual(1); // the shell is asked ONCE what became of it
+  };
+  it('4a: the window ends and the shell says no confirmation ever came → «the computer\'s confirmation never arrived» (not «you did not press»)', async () => {
+    await WINDOW_OVER({ ok: false, code: 'no_receipt' });
+    expect(line()).toBe('컴퓨터의 확인을 받지 못했어요 — 컴퓨터에서 [같아요]를 눌렀어도 확인이 닿지 않았어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
+  });
+  it('4a: the window ends and the shell says the confirmation did not fit (its own poll found it first) → the forgery line, not «time ran out»', async () => {
+    await WINDOW_OVER({ ok: false, code: 'receipt_invalid' });
+    expect(line()).toBe('컴퓨터가 보낸 확인이 이 페어링과 맞지 않아요 — 이 QR로는 이어 갈 수 없어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 보고, 계속되면 알려 주세요');
+  });
+  it('4a: the window ends and the shell has nothing to add (an older computer: no confirmation expected) → the old «not finished on the computer» line stays', async () => {
+    await WINDOW_OVER({ ok: false, code: 'not_confirmed' });
+    expect(line()).toBe('컴퓨터에서 끝나지 않아 페어링하지 못했어요 — 컴퓨터에서 [같아요]를 누르지 않았거나 컴퓨터가 저장하지 못했어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
+  });
+  it('4a: a QR the shell could not read (an older app does not know a newer computer\'s QR) → «update the app», never the «not a Sprintable QR» line', async () => {
+    installShell(); shell['pair.scan'] = { ok: false, code: 'bad' };
+    await render(); await press('QR 찍기');
+    expect(line()).toBe('이 QR을 읽지 못했어요 — 이 앱이 오래된 것이거나 QR이 상했을 수 있어요. 앱을 업데이트한 뒤 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+    shell['pair.scan'] = { ok: false, code: 'not_ours' }; await press('다시 찍기');
+    expect(line()).toBe('Sprintable 페어링 QR이 아니에요');
+  });
   it('lens 5842 delta 4: the server knows no such offer (404 offer_not_found) → its own line «the computer does not know this QR» at once — not five failed reads and «not reachable»', async () => {
     installShell();
     await START(); readStatus = 404; readBody = { error: { code: 'offer_not_found' } }; await tick();

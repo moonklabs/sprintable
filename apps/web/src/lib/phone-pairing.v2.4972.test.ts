@@ -188,7 +188,7 @@ describe('[4972] lens 5842 — the provisional pin: finish · cancel · the guar
     const ok = shell({ 'pair.finish': { id: 'x', ok: true, pinned: true } });
     await expect(finishPairSession(HEAD, { phoneCall: ok })).resolves.toEqual({ kind: 'pinned' });
     expect(ok).toHaveBeenCalledWith('pair.finish', { offer_id: HEAD.offer_id }); // the offer id and nothing the page could say
-    for (const [code, kind] of [['not_confirmed', 'waiting'], ['busy', 'waiting'], ['no_offer', 'expired'], ['expired', 'expired'], ['vault_unavailable', 'notReady'], ['host_already_pinned', 'failed'], ['signed_out', 'signedOut'], ['failed', 'failed'], ['bad_request', 'failed']] as const) {
+    for (const [code, kind] of [['not_confirmed', 'waiting'], ['busy', 'waiting'], ['no_offer', 'expired'], ['expired', 'expired'], ['vault_unavailable', 'notReady'], ['host_already_pinned', 'failed'], ['signed_out', 'signedOut'], ['receipt_invalid', 'receiptInvalid'], ['no_receipt', 'noReceipt'], ['failed', 'failed'], ['bad_request', 'failed']] as const) {
       await expect(finishPairSession(HEAD, { phoneCall: shell({ 'pair.finish': { id: 'x', ok: false, code } }) }), code).resolves.toEqual({ kind });
     }
     await expect(finishPairSession(HEAD, { phoneCall: shell({ 'pair.finish': { id: 'x', ok: true } }) })).resolves.toEqual({ kind: 'failed' }); // an answer that does not say «pinned»
