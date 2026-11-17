@@ -106,6 +106,9 @@ describe('[4972] a bridge that rejects ends the step (the screen is never left w
     });
     const flaky = vi.fn(async (type: string) => { if (type === 'device.key.info') return okKey; throw new Error('bridge gone'); });
     await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: flaky })).resolves.toEqual({ kind: 'failed' });
+    // the scan and the key step are shared by both procedures: a bridge that rejects there ends as a plain failure too (the screen never stays on «busy»)
+    await expect(scanPairQr({ phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
+    await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
     await expect(revealPairSession(HEAD, { n_m: 'N', sig: 'S' }, { phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
     await expect(comparePairSession(HEAD, { phoneCall: boom })).resolves.toEqual({ kind: 'failed' });
   });

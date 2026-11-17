@@ -96,7 +96,7 @@ export function phoneLabel(userAgent: string): string {
 }
 
 export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
-  const r = await deps.phoneCall('pair.scan');
+  const r = await safeCall(deps, 'pair.scan', {});
   if (r.ok) {
     const { offer_id, setup_id, device_name, expires_at } = r as unknown as OfferHead;
     if ([offer_id, setup_id, device_name, expires_at].every((v) => typeof v === 'string')) {
@@ -131,7 +131,7 @@ async function myPhones(setupId: string): Promise<Paired[] | null> {
  * → `{ phoneKeyId }`, or the outcome that ends the step. Shared as it was (story 4972 moved these lines into a function; the old procedure's calls and answers are the same ones).
  */
 async function prepareKey(head: OfferHead, label: string, deps: PairDeps): Promise<{ phoneKeyId: string } | { end: OfferOutcome }> {
-  const key = await deps.phoneCall('device.key.info');
+  const key = await safeCall(deps, 'device.key.info', {});
   if (!key.ok) {
     if (key.code === 'no_screen_lock') return { end: { kind: 'noScreenLock' } };
     if (key.code === 'biometric_required') return { end: { kind: 'biometricRequired' } };
