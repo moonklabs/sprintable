@@ -13,7 +13,7 @@ import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
-import { checkPairOffer, phoneLabel, scanPairQr, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
+import { checkPairOffer, comparePairSession, closePairSession, lookPaired, lookPairSession, phoneLabel, revealPairSession, scanPairQr, sendPairCommit, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
 
 /**
  * story #4532 (명세 b0713c54 «짝짓기 화면 · 짝짓기 숫자 · 폰 확인 숫자» 폰 표 · contract 02d2cf71 §10 ⑤ v1.11 · design doc 0dceadda
@@ -32,12 +32,16 @@ type View =
   | { kind: 'confirm'; head: OfferHead }
   | { kind: 'checking'; head: OfferHead; phoneKeyId: string }
   | { kind: 'number'; head: OfferHead; phoneKeyId: string; number: string }
+  // story 4972 — the NEW pairing: after the commitment the computer's nonce is waited for (`bind`: the OS prompt is up / was closed), then both people compare the number in the SHELL's own window (the web never draws it), then the computer's own [같아요]
+  | { kind: 'wait2'; head: OfferHead; phoneKeyId: string; bind: 'idle' | 'revealing' | 'cancelled' }
+  | { kind: 'compare'; head: OfferHead; phoneKeyId: string; note: 'open' | 'closed' | 'notReady' | 'failed' } // the shell's window is up (open) · was closed with no answer
+  | { kind: 'waitHost'; head: OfferHead; phoneKeyId: string }
   | { kind: 'paired'; device: string }
   | { kind: 'alreadyPaired'; device: string }
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -114,12 +118,14 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
 
   const pair = async (head: OfferHead) => {
     setView({ kind: 'busy' });
-    const r = await sendPairOffer(head, phoneLabel(navigator.userAgent), deps);
+    // the procedure is the scanned QR's version and nothing else (story 4972): a v2 QR pairs the new way, any other the old way as it always did
+    const r = head.version === 2 ? await sendPairCommit(head, phoneLabel(navigator.userAgent), deps) : await sendPairOffer(head, phoneLabel(navigator.userAgent), deps);
     known.current = null;
     switch (r.kind) {
-      case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
+      case 'sent': setView(head.version === 2 ? { kind: 'wait2', head, phoneKeyId: r.phoneKeyId, bind: 'idle' } : { kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
       case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: head.device_name }); return; // story 4932: the computer is named
       case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+      case 'notReady': setView({ kind: 'retry', line: 'notReady' }); return;
       case 'limit': void enterLimit(); return;
       case 'takenOtherOrg': setView({ kind: 'retry', line: 'takenOtherOrg', ...(r.org ? { org: r.org } : {}) }); return;
       default: setView({ kind: 'retry', line: r.kind });
@@ -146,6 +152,68 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     }), POLL_MS);
     return () => { off = true; clearTimeout(id); };
   }, [waiting, look]);
+
+  // story 4972 — the new pairing's waits: (1) the computer's nonce → the shell checks it, the person confirms on the OS prompt, the reveal goes up, the number shows; (2) after this phone's [같아요], the computer's own
+  const wait2 = view.kind === 'wait2' && view.bind === 'idle' ? view : null;
+  useEffect(() => {
+    if (!wait2) return;
+    let off = false;
+    const id = setTimeout(() => void (async () => {
+      if (Date.now() > Date.parse(wait2.head.expires_at) + POLL_MS * 2) { if (!off) setView({ kind: 'retry', line: 'notPaired' }); return; }
+      const look = await lookPairSession(wait2.head);
+      if (off) return;
+      if (look.kind === 'ended') { setView({ kind: 'retry', line: 'notPaired' }); return; }
+      if (look.kind !== 'nonce') { setView({ ...wait2 }); return; } // waiting · a failed read: look again
+      setView({ ...wait2, bind: 'revealing' }); // the OS prompt is up: not asked again meanwhile (one reveal)
+      const r = await revealPairSession(wait2.head, look, { phoneCall });
+      if (off) return;
+      switch (r.kind) {
+        case 'revealed': setView({ kind: 'compare', head: wait2.head, phoneKeyId: wait2.phoneKeyId, note: 'open' }); return;
+        case 'cancelled': setView({ ...wait2, bind: 'cancelled' }); return; // the person closed the prompt: the same nonce may be tried again with [다시 확인]
+        case 'ended': setView({ kind: 'retry', line: 'notPaired' }); return;
+        case 'expired': setView({ kind: 'retry', line: 'expired' }); return;
+        case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+        default: setView({ kind: 'retry', line: 'failed' });
+      }
+    })(), POLL_MS);
+    return () => { off = true; clearTimeout(id); };
+  }, [wait2, phoneCall]);
+
+  const waitHost = view.kind === 'waitHost' ? view : null;
+  useEffect(() => {
+    if (!waitHost) return;
+    let off = false;
+    const id = setTimeout(() => void (async () => {
+      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) setView({ kind: 'retry', line: 'notPaired' }); return; }
+      if ((await lookPaired(waitHost.head, waitHost.phoneKeyId)) === 'paired') { if (!off) setView({ kind: 'paired', device: waitHost.head.device_name }); return; }
+      if (off) return;
+      if ((await lookPairSession(waitHost.head)).kind === 'ended') { if (!off) setView({ kind: 'retry', line: 'notPaired' }); return; } // the computer said «different» (or the window ended)
+      if (!off) setView({ ...waitHost });
+    })(), POLL_MS);
+    return () => { off = true; clearTimeout(id); };
+  }, [waitHost]);
+
+  // the shell's own window opens once per `open` (the web only asks; the number and the buttons are the shell's)
+  const compare = view.kind === 'compare' && view.note === 'open' ? view : null;
+  useEffect(() => {
+    if (!compare) return;
+    let off = false;
+    void (async () => {
+      const r = await comparePairSession(compare.head, { phoneCall });
+      if (off) return;
+      switch (r.kind) {
+        case 'pinned': setView({ kind: 'waitHost', head: compare.head, phoneKeyId: compare.phoneKeyId }); return;
+        case 'declined': known.current = null; setView({ kind: 'start' }); return;
+        case 'closed': setView({ ...compare, note: 'closed' }); return; // no answer: [숫자 다시 보기]
+        case 'expired': setView({ kind: 'retry', line: 'expired' }); return;
+        case 'notReady': setView({ ...compare, note: 'notReady' }); return;
+        default: setView({ ...compare, note: 'failed' });
+      }
+    })();
+    return () => { off = true; };
+  }, [compare, phoneCall]);
+  // a cancel while a new pairing is under way ends the offer at the server (the shell's copy ends with its own window — at most 10 minutes)
+  const abandon = (v: { head: OfferHead }) => { void closePairSession(v.head); known.current = null; setView({ kind: 'start' }); };
 
   // story #4624 — the limit screen: the person's phones, one confirm to remove one, then the rescan
   const loadLimitPhones = async () => {
@@ -185,6 +253,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');
       case 'takenOtherOrg': return org ? t('takenOtherOrgNamed', { org }) : t('takenOtherOrg');
+      case 'notReady': return t('notReady');
       case 'failed': return t('failed');
     }
   };
@@ -230,6 +299,34 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
             <span className="block" data-testid="pairing-number-hint">{t('numberHint')}</span>
           </Line>
           <Actions><Button variant="secondary" onClick={cancel}>{t('cancel')}</Button></Actions>
+        </Shell>
+      );
+    case 'wait2':
+      return (
+        <Shell>
+          <Line focus>{view.bind === 'cancelled' ? t('bindCancelled') : t('checking')}</Line>
+          <Actions>
+            {view.bind === 'cancelled' ? <Button variant="primary" onClick={() => setView({ ...view, bind: 'idle' })}>{t('bindAgain')}</Button> : null}
+            <Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button>
+          </Actions>
+        </Shell>
+      );
+    case 'compare':
+      return (
+        <Shell>
+          {/* the number and the two buttons are in the phone app's own window (never drawn here: this page comes from the server) */}
+          <Line focus>{view.note === 'open' ? t('compareOpen') : view.note === 'notReady' ? t('notReady') : view.note === 'failed' ? t('failed') : t('compareClosed')}</Line>
+          <Actions>
+            {view.note !== 'open' ? <Button variant="primary" onClick={() => setView({ ...view, note: 'open' })}>{t('compareAgain')}</Button> : null}
+            <Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button>
+          </Actions>
+        </Shell>
+      );
+    case 'waitHost':
+      return (
+        <Shell>
+          <Line focus>{t('waitHost')}</Line>
+          <Actions><Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button></Actions>
         </Shell>
       );
     case 'paired':

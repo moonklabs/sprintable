@@ -8,7 +8,8 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
-export interface OfferHead { offer_id: string; setup_id: string; device_name: string; expires_at: string }
+/** `version: 2` = the QR of the NEW pairing (the shell scanned it — the choice of procedure is the scanned QR's version and nothing else: story 4972 · lens 808 C-b); a head without it is the old six-digit one, exactly as before */
+export interface OfferHead { offer_id: string; setup_id: string; device_name: string; expires_at: string; version?: 2 }
 
 export type ScanOutcome =
   | { kind: 'confirm'; head: OfferHead }
@@ -99,7 +100,7 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
   if (r.ok) {
     const { offer_id, setup_id, device_name, expires_at } = r as unknown as OfferHead;
     if ([offer_id, setup_id, device_name, expires_at].every((v) => typeof v === 'string')) {
-      return { kind: 'confirm', head: { offer_id, setup_id, device_name, expires_at } };
+      return { kind: 'confirm', head: { offer_id, setup_id, device_name, expires_at, ...(r.version === 2 ? { version: 2 as const } : {}) } };
     }
     return { kind: 'failed' };
   }
@@ -125,13 +126,16 @@ async function myPhones(setupId: string): Promise<Paired[] | null> {
   }
 }
 
-/** [짝짓기]: register this phone's key (the same key again = the same row) → already paired? → the shell's MAC → the offer. */
-export async function sendPairOffer(head: OfferHead, label: string, deps: PairDeps): Promise<OfferOutcome> {
+/**
+ * The first half of both procedures: this phone's key (the shell's own) → the computer's org → register the key (the same key again = the same row) → already paired?
+ * → `{ phoneKeyId }`, or the outcome that ends the step. Shared as it was (story 4972 moved these lines into a function; the old procedure's calls and answers are the same ones).
+ */
+async function prepareKey(head: OfferHead, label: string, deps: PairDeps): Promise<{ phoneKeyId: string } | { end: OfferOutcome }> {
   const key = await deps.phoneCall('device.key.info');
   if (!key.ok) {
-    if (key.code === 'no_screen_lock') return { kind: 'noScreenLock' };
-    if (key.code === 'biometric_required') return { kind: 'biometricRequired' };
-    return { kind: 'failed' };
+    if (key.code === 'no_screen_lock') return { end: { kind: 'noScreenLock' } };
+    if (key.code === 'biometric_required') return { end: { kind: 'biometricRequired' } };
+    return { end: { kind: 'failed' } };
   }
   const org = await findTargetOrg(head.setup_id);
   if (org) targetOrgOf.set(head.setup_id, org); else targetOrgOf.delete(head.setup_id);
@@ -140,18 +144,26 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
     const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) }, body: JSON.stringify({ label, public_key: key.public_key }) });
     const { code, body } = await read(res);
     if (!res.ok) {
-      if (code === 'remote_device_limit') return { kind: 'limit' };
-      if (code === 'remote_device_taken') return { kind: 'taken' }; // story #4624: its own line, not the general «보내지 못했어요»
-      if (code === 'remote_device_other_org') return { kind: 'takenOtherOrg', ...orgOf(body) }; // story 4695: not «another account» — the same person's phone, another organization
-      return { kind: 'failed' };
+      if (code === 'remote_device_limit') return { end: { kind: 'limit' } };
+      if (code === 'remote_device_taken') return { end: { kind: 'taken' } }; // story #4624: its own line, not the general «보내지 못했어요»
+      if (code === 'remote_device_other_org') return { end: { kind: 'takenOtherOrg', ...orgOf(body) } }; // story 4695: not «another account» — the same person's phone, another organization
+      return { end: { kind: 'failed' } };
     }
-    if (typeof body.id !== 'string') return { kind: 'failed' };
+    if (typeof body.id !== 'string') return { end: { kind: 'failed' } };
     phoneKeyId = body.id;
   } catch {
-    return { kind: 'failed' };
+    return { end: { kind: 'failed' } };
   }
   const phones = await myPhones(head.setup_id);
-  if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'alreadyPaired' };
+  if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { end: { kind: 'alreadyPaired' } };
+  return { phoneKeyId };
+}
+
+/** [짝짓기]: register this phone's key (the same key again = the same row) → already paired? → the shell's MAC → the offer. */
+export async function sendPairOffer(head: OfferHead, label: string, deps: PairDeps): Promise<OfferOutcome> {
+  const prepared = await prepareKey(head, label, deps);
+  if ('end' in prepared) return prepared.end;
+  const { phoneKeyId } = prepared;
 
   const mac = await deps.phoneCall('pair.mac', { offer_id: head.offer_id, phone_key_id: phoneKeyId, label });
   if (!mac.ok || typeof mac.mac !== 'string') return mac.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
@@ -199,4 +211,142 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   if (typeof reveal !== 'string') return { kind: 'failed' };
   const n = await deps.phoneCall('pair.number', { offer_id: head.offer_id, reveal });
   return n.ok && typeof n.number === 'string' ? { kind: 'number', number: n.number } : { kind: 'failed' };
+}
+
+// ── story 4972 — the NEW pairing (design ② §5-2 «숫자 절차») ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// The shell does the cryptography (the commitment · the check of the computer's nonce signature · the box key's binding signature on the OS prompt · the 8-digit number · the pin after THIS phone's person pressed [같아요]);
+// the web carries the four public messages to the server and back. Nothing here sees the QR's secret or a key of the computer. The procedure is the scanned QR's version (`head.version === 2`) and nothing else.
+
+const sessionUrl = (head: OfferHead, step = ''): string => `/api/remote-devices/pairing-sessions/${head.offer_id}${step}`;
+const sessionHeaders = (head: OfferHead) => ({ ...json, ...orgHeader(head.setup_id) });
+
+/** the server's refusals of the pairing messages, as the screen's lines (the same words as the old procedure's where the cause is the same) */
+function sessionRefusal(code: string): OfferOutcome | { kind: 'notReady' } {
+  switch (code) {
+    case 'offer_burned': return { kind: 'offerUsed' }; // another hand got to this QR first (or the offer was ended): «this QR was already used»
+    case 'offer_expired': return { kind: 'expired' };
+    case 'offer_not_found': return { kind: 'unreachable' }; // the computer never registered this offer with the server: it is not connected
+    case 'remote_control_off': return { kind: 'remoteOff' };
+    case 'device_unreachable': return { kind: 'unreachable' };
+    case 'setup_not_found': return { kind: 'setupNotFound' };
+    case 'phone_key_not_found': return { kind: 'registerAgain' };
+    default: return { kind: 'failed' };
+  }
+}
+
+/** [페어링] on a v2 QR: register this phone's key → the shell's commitment → the server. `sent` = the commitment is with the computer (the screen then waits for its nonce). */
+export async function sendPairCommit(head: OfferHead, label: string, deps: PairDeps): Promise<OfferOutcome | { kind: 'notReady' }> {
+  const prepared = await prepareKey(head, label, deps);
+  if ('end' in prepared) return prepared.end;
+  const { phoneKeyId } = prepared;
+  const c = await deps.phoneCall('pair.commit', { offer_id: head.offer_id, label });
+  if (!c.ok || typeof c.commit !== 'string') {
+    if (c.code === 'vault_unavailable') return { kind: 'notReady' }; // the key store is not answering just now: try again in a moment
+    return c.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
+  }
+  try {
+    const res = await fetchWithAuth(sessionUrl(head, '/commit'), { method: 'POST', headers: sessionHeaders(head), body: JSON.stringify({ setup_id: head.setup_id, phone_key_id: phoneKeyId, commit: c.commit }) });
+    if (res.ok) return { kind: 'sent', phoneKeyId };
+    return sessionRefusal((await read(res)).code);
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+export type SessionLook =
+  | { kind: 'waiting' } // the computer has not answered the commitment yet
+  | { kind: 'nonce'; n_m: string; sig: string } // it did: the shell checks it and asks the person to confirm
+  | { kind: 'ended' } // burned · expired — this pairing is over (the phone cannot tell which: start again with a new QR)
+  | { kind: 'failed' };
+
+/** One look at the server's state of this pairing (the screen asks every 1.5 s, up to the QR's time). */
+export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
+  try {
+    const res = await fetchWithAuth(`${sessionUrl(head)}?setup_id=${encodeURIComponent(head.setup_id)}`, { headers: orgHeader(head.setup_id) });
+    if (!res.ok) return { kind: 'failed' };
+    const body = (await res.json()) as { state?: string; n_m?: unknown; sig?: unknown };
+    if (body.state === 'committed') return { kind: 'waiting' };
+    if ((body.state === 'nonce' || body.state === 'revealed') && typeof body.n_m === 'string' && typeof body.sig === 'string') return body.state === 'nonce' ? { kind: 'nonce', n_m: body.n_m, sig: body.sig } : { kind: 'waiting' };
+    if (body.state === 'burned' || body.state === 'expired') return { kind: 'ended' };
+    return { kind: 'failed' };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+export type RevealOutcome =
+  | { kind: 'revealed' } // the reveal is at the server: the number is up in the SHELL's own window (never here) for both people to compare
+  | { kind: 'cancelled' } // the person did not confirm on the OS prompt — the same nonce may be tried again
+  | { kind: 'ended' } // the nonce did not fit (the shell ended the pairing) · the offer ended
+  | { kind: 'expired' }
+  | { kind: 'noScreenLock' | 'biometricRequired' }
+  | { kind: 'failed' };
+
+/** The computer's nonce → the shell (it checks the signature with the computer's key from the QR, signs the binding on the OS prompt) → the reveal to the server. The number is not in the shell's reply (it is drawn in the shell's own window by `comparePairSession`). */
+export async function revealPairSession(head: OfferHead, nonce: { n_m: string; sig: string }, deps: PairDeps): Promise<RevealOutcome> {
+  const r = await deps.phoneCall('pair.reveal', { offer_id: head.offer_id, n_m: nonce.n_m, sig: nonce.sig });
+  if (!r.ok) {
+    switch (r.code) {
+      case 'cancelled': return { kind: 'cancelled' };
+      case 'bad_nonce': return { kind: 'ended' };
+      case 'no_offer': return { kind: 'expired' };
+      case 'no_screen_lock': return { kind: 'noScreenLock' };
+      case 'biometric_required': return { kind: 'biometricRequired' };
+      default: return { kind: 'failed' }; // (busy · key_failed · sign_failed · bad_request …)
+    }
+  }
+  const reveal = r.reveal as Record<string, unknown> | undefined;
+  if (!reveal || typeof reveal.phone_spki !== 'string' || typeof reveal.phone_box_pub !== 'string' || typeof reveal.n_p !== 'string' || typeof reveal.label !== 'string' || typeof reveal.binding_sig !== 'string') return { kind: 'failed' };
+  try {
+    const res = await fetchWithAuth(sessionUrl(head, '/reveal'), {
+      method: 'POST', headers: sessionHeaders(head),
+      body: JSON.stringify({ setup_id: head.setup_id, phone_spki: reveal.phone_spki, phone_box_pub: reveal.phone_box_pub, n_p: reveal.n_p, label: reveal.label, binding_sig: reveal.binding_sig }),
+    });
+    if (res.ok) return { kind: 'revealed' };
+    const refusal = sessionRefusal((await read(res)).code);
+    return refusal.kind === 'offerUsed' ? { kind: 'ended' } : refusal.kind === 'expired' ? { kind: 'expired' } : { kind: 'failed' };
+  } catch {
+    return { kind: 'failed' };
+  }
+}
+
+export type CompareOutcome =
+  | { kind: 'pinned' } // the person pressed [같아요] in the shell's window: the shell pinned the computer — what is left is the computer's own [같아요]
+  | { kind: 'declined' } // [달라요]: nothing was pinned, the offer is ended on both sides
+  | { kind: 'closed' } // the window was closed with no answer: the session stays, the person may open it again
+  | { kind: 'notReady' } // the key store is not answering just now: open it again in a moment
+  | { kind: 'expired' }
+  | { kind: 'failed' };
+
+/**
+ * Open the shell's own window with the 8-digit number and [같아요] / [달라요] (story 4972 · lens 812: the web is served by the server, so it neither draws the number nor says «same» — it only asks
+ * the shell to open the window and hears what became of the pairing). A «different» also ends the offer at the server.
+ */
+export async function comparePairSession(head: OfferHead, deps: PairDeps): Promise<CompareOutcome> {
+  const r = await deps.phoneCall('pair.compare', { offer_id: head.offer_id });
+  if (r.ok) {
+    if (r.pinned === true) return { kind: 'pinned' };
+    await closePairSession(head); // best effort: the server ends it either way when its window passes
+    return { kind: 'declined' };
+  }
+  switch (r.code) {
+    case 'cancelled': return { kind: 'closed' };
+    case 'vault_unavailable': return { kind: 'notReady' };
+    case 'no_offer':
+    case 'expired': return { kind: 'expired' };
+    default: return { kind: 'failed' };
+  }
+}
+
+/** the offer ends on the server (the phone's [달라요] · a cancel before the number): best effort, never throws */
+export async function closePairSession(head: OfferHead): Promise<void> {
+  try {
+    await fetchWithAuth(sessionUrl(head, '/close'), { method: 'POST', headers: sessionHeaders(head), body: JSON.stringify({ setup_id: head.setup_id }) });
+  } catch { /* the window ends it */ }
+}
+
+/** After this phone's [같아요]: has the computer pinned this phone too (its own [같아요] + its report to the server)? */
+export async function lookPaired(head: OfferHead, phoneKeyId: string): Promise<'paired' | 'waiting'> {
+  const phones = await myPhones(head.setup_id);
+  return phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id)) ? 'paired' : 'waiting';
 }
