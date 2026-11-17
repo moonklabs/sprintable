@@ -9,6 +9,17 @@ export type DesktopRuntimeInApp = (typeof DESKTOP_RUNTIMES_IN_APP)[number];
 /** a runtime the app found on this computer — name · version · where (the app's «이 컴퓨터에서 찾은 에이전트» panel's picked ones) */
 export interface DesktopRuntimeFound { runtime: DesktopRuntimeInApp; version: string; executable: string }
 
+/** story 4971 ③: the build the app offers as an update, and how far it is — the app's own closed shape (a canonical N.N.N and one of four phases) */
+export const APP_UPDATE_PHASES = ['available', 'downloading', 'installing', 'failed'] as const;
+export interface AppUpdateOffer { readonly version: string; readonly phase: (typeof APP_UPDATE_PHASES)[number] }
+const OFFER_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+/** the offer when it fits the closed shape — anything else (extra keys are dropped, a bad version or phase is no offer) is null */
+export function appUpdateOfferOf(raw: unknown): AppUpdateOffer | null {
+  const o = raw as Partial<AppUpdateOffer> | null | undefined;
+  if (!o || typeof o !== 'object' || typeof o.version !== 'string' || !OFFER_VERSION.test(o.version) || !(APP_UPDATE_PHASES as readonly string[]).includes(o.phase as string)) return null;
+  return Object.freeze({ version: o.version, phase: o.phase as AppUpdateOffer['phase'] });
+}
+
 export interface SprintableDesktop {
   readonly inApp: true;
   readonly device: { readonly name: string };
@@ -32,6 +43,12 @@ export interface SprintableDesktop {
    *  `{path}` = one `pickFolder` returned in this page. Absent in an older app (the page then shows nothing new). Read it through
    *  `readFolderTraces` — never call it from a screen. */
   folderTraces?(a: { projectId?: string; path?: string; agentIds?: readonly string[] }): Promise<unknown>;
+  /** story 4971 ③: the build the app offers as an update when this page loaded (absent when none · in an older app). Read it through `appUpdate`. */
+  readonly update?: AppUpdateOffer;
+  /** story 4971 ③: press «update» — the app downloads the build it offered, then restarts into it. Takes NOTHING from the page. Absent in an older app. Call it through `pressAppUpdate`. */
+  startUpdate?(): Promise<{ ok: true } | { ok: false; code: string }>;
+  /** story 4971 ③: the offered build as it changes (the current one at once, null when none). Absent in an older app. Read it through `subscribeAppUpdate`. */
+  subscribeUpdate?(listener: (offer: AppUpdateOffer | null) => void): () => void;
 }
 
 /** story 4693: the two files the app looks for, and the runtime each one means (the app's own table — design 4693 §2) */
@@ -64,6 +81,9 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   if (d.subscribeRuntimes !== undefined && typeof d.subscribeRuntimes !== 'function') return undefined;
   // 4693: the same — an older app has no `folderTraces` (the page shows nothing new); present means a function
   if (d.folderTraces !== undefined && typeof d.folderTraces !== 'function') return undefined;
+  // 4971: the update hands are optional the same way (an older app has none → no update line); present means a function
+  if (d.startUpdate !== undefined && typeof d.startUpdate !== 'function') return undefined;
+  if (d.subscribeUpdate !== undefined && typeof d.subscribeUpdate !== 'function') return undefined;
   return d as SprintableDesktop;
 }
 
@@ -158,8 +178,68 @@ export function subscribeDesktopApp(listen: () => void): () => void {
   };
 }
 
+// ── story 4971 ③: the offered update — the app's current offer (read at load, then pushed). The SAME value gives the SAME object (useSyncExternalStore must not loop). ──
+let pushedOffer: AppUpdateOffer | null | undefined; // undefined = nothing pushed yet (the load-time value stands)
+let offerNow: AppUpdateOffer | null = null;
+const offerListeners = new Set<() => void>();
+let stopOffer: (() => void) | null = null;
+const sameOffer = (a: AppUpdateOffer | null, b: AppUpdateOffer | null) => (a === null || b === null ? a === b : a.version === b.version && a.phase === b.phase);
+
+/** the build the app offers as an update right now, or null (a browser · an older app · nothing on offer) */
+export function appUpdate(): AppUpdateOffer | null {
+  const raw = rawBridge();
+  if (!raw) return null;
+  const next = pushedOffer !== undefined ? pushedOffer : appUpdateOfferOf(raw.update);
+  if (sameOffer(offerNow, next)) return offerNow;
+  offerNow = next;
+  return offerNow;
+}
+
+/** story 4971 — for useSyncExternalStore: tell me when the offer changed. The app calls back right away with the current one. Nothing to subscribe to (a browser · an app without `subscribeUpdate`) → a no-op. One subscription to the app is shared by all. */
+export function subscribeAppUpdate(listen: () => void): () => void {
+  const raw = rawBridge();
+  if (!raw?.subscribeUpdate) return () => undefined;
+  offerListeners.add(listen);
+  if (!stopOffer) {
+    try {
+      stopOffer = raw.subscribeUpdate((next) => {
+        const checked = next === null ? null : appUpdateOfferOf(next);
+        if (next !== null && checked === null) return; // not the closed shape: ignored
+        if (sameOffer(pushedOffer === undefined ? appUpdateOfferOf(raw.update) : pushedOffer, checked)) { pushedOffer = checked; return; }
+        pushedOffer = checked;
+        for (const l of [...offerListeners]) l();
+      });
+    } catch { stopOffer = null; }
+  }
+  return () => {
+    offerListeners.delete(listen);
+    if (offerListeners.size === 0 && stopOffer) {
+      const stop = stopOffer;
+      stopOffer = null;
+      try { stop(); } catch { /* the app is gone */ }
+    }
+  };
+}
+
+/** story 4971: the press — the app's `startUpdate()` with no argument (the page never names a build or an address). `unsupported` = an older app without it; never rejects. */
+export async function pressAppUpdate(bridge?: SprintableDesktop): Promise<'ok' | 'busy' | 'failed' | 'none' | 'unsupported'> {
+  // the bridge the screen drew its button from when it gives one (the same object — never another instance); else the page's own
+  const raw = bridge ?? rawBridge();
+  if (typeof raw?.startUpdate !== 'function') return 'unsupported';
+  try {
+    const r = await raw.startUpdate();
+    if (r && typeof r === 'object' && (r as { ok?: unknown }).ok === true) return 'ok';
+    const code = (r as { code?: unknown } | null)?.code;
+    return code === 'busy' || code === 'failed' ? code : 'none';
+  } catch { return 'failed'; }
+}
+
 /** tests only: forget the app's list and the shared subscription */
 export function __resetDesktopAppForTest(): void {
+  pushedOffer = undefined;
+  offerNow = null;
+  offerListeners.clear();
+  stopOffer = null;
   latestRuntimes = null;
   derived = null;
   listeners.clear();
