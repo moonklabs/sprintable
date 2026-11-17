@@ -580,3 +580,47 @@ async def test_17_the_database_says_the_same_a_receipt_only_whole_after_a_reveal
             with pytest.raises(Exception):
                 await _sql(bad)
         await _sql(f"UPDATE remote_device_pairing_sessions SET confirmed_sig = '{RECEIPT}', confirmed_at = now() WHERE offer_id = '{o2}'")  # the whole one goes
+
+
+async def test_18_an_offer_the_computer_has_receipted_is_a_finished_pairing_only_the_phones_own_decline_ends_it(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        offer_id, url, state = await _to_reveal(c, device, phone_id, spki)
+        up = f"{REL}/pairing-sessions/{offer_id}/confirmed"
+        assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200
+        # a NEW QR of the same computer does not end it (the computer already holds the phone: the receipt must stay readable)
+        o2, r2 = await _register_offer(c, device)
+        assert r2.status_code == 201
+        assert (await _receipt_row(offer_id)) == (RECEIPT, True, False), "the new QR did not burn the receipted offer"
+        assert (await c.get(state, headers=_person(OWNER))).json()["confirmed_sig"] == RECEIPT
+        # …while an offer WITHOUT a receipt is still ended by it (the old rule)
+        o3, _ = await _register_offer(c, device)
+        assert (await _receipt_row(o2))[2] is True
+        # a second commitment · a second reveal (anyone who knows the offer id) are refused and burn nothing
+        r = await c.post(f"{url}/commit", json=_commit_body(device, phone_id, commit=_b(32, b"d")), headers=_person(OWNER))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "already_confirmed")
+        r = await c.post(f"{url}/reveal", json=_reveal_body(device, spki, label="Another"), headers=_person(OWNER))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "already_confirmed")
+        assert await _receipt_row(offer_id) == (RECEIPT, True, False), "neither burned it"
+        # the computer closing its own window afterwards does not hide the receipt either
+        assert (await c.post(f"{REL}/pairing-sessions/{offer_id}/close", headers=_tok(device["device_token"]))).status_code == 200
+        assert await _receipt_row(offer_id) == (RECEIPT, True, False)
+        # a retry of the SAME bytes after the window is still 200 (a host that lost the answer must not read it as a failure); other bytes are 409 — never 410
+        await _sql(f"UPDATE remote_device_pairing_sessions SET expires_at = now() - interval '20 minutes' WHERE offer_id = '{offer_id}'")
+        assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200
+        other = await c.post(up, json={"sig": _b(71, b"q")}, headers=_tok(device["device_token"]))
+        assert (other.status_code, other.json()["error"]["code"]) == (409, "already_confirmed")
+        del o3
+
+
+async def test_19_the_phones_own_decline_ends_a_receipted_offer_and_a_dead_offer_shows_no_receipt(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        offer_id, url, state = await _to_reveal(c, device, phone_id, spki)
+        up = f"{REL}/pairing-sessions/{offer_id}/confirmed"
+        assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200
+        assert (await c.post(f"{url}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200  # the person on the phone said no
+        assert (await _receipt_row(offer_id))[2] is True
+        body = (await c.get(state, headers=_person(OWNER))).json()
+        assert body == {"state": "burned", "n_m": None, "sig": None, "confirmed_sig": None}, "a dead offer shows no receipt (nothing is carried on it)"
+        assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200  # the same bytes again: stored already

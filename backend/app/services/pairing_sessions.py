@@ -121,7 +121,11 @@ def _live(row: RemoteDevicePairingSession | None) -> RemoteDevicePairingSession:
 
 
 async def _burn(db: AsyncSession, row: RemoteDevicePairingSession, reason: str) -> DesktopRelayError:
-    """end the offer for good and return the refusal to raise (the router commits the burn for this code)"""
+    """end the offer for good and return the refusal to raise (the router commits the burn for this code).
+    story 4972 (4a · lens 5844): an offer the computer has already RECEIPTED is a finished pairing (the computer holds the phone): no one else's second commitment · reveal · key mismatch ends it — a burn would hide the receipt the
+    phone has yet to read, leaving only the computer paired. Those are refused (409 `already_confirmed`) and the row is left whole; only the phone's own [달라요] (`close_by_phone`) ends such an offer."""
+    if row.confirmed_sig is not None:
+        return DesktopRelayError(409, "already_confirmed", "this pairing offer was already confirmed")
     if row.burned_at is None:
         row.burned_at, row.burn_reason = _now(), reason
         await db.flush()
@@ -152,7 +156,8 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
     # a new QR replaces the one before it: that one ends (no two offers of one computer are live at once), and old rows go
     await db.execute(update(RemoteDevicePairingSession).where(
         RemoteDevicePairingSession.setup_id == setup.id, RemoteDevicePairingSession.burned_at.is_(None), RemoteDevicePairingSession.expires_at > now,
-    ).values(burned_at=now, burn_reason="superseded"))
+        RemoteDevicePairingSession.confirmed_sig.is_(None),
+    ).values(burned_at=now, burn_reason="superseded"))  # (a row with the computer's receipt is a finished pairing: `confirmed_sig IS NULL` keeps it whole until its own end)
     await db.execute(delete(RemoteDevicePairingSession).where(
         RemoteDevicePairingSession.setup_id == setup.id, RemoteDevicePairingSession.expires_at < now - timedelta(hours=1),
     ))
@@ -184,20 +189,22 @@ async def post_confirmed(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.U
     """story 4972 (wiring 4a): the computer's signed receipt «I confirmed THIS offer» — only for the offer of THIS setup (its device token: another setup's token finds «no such offer»), only after the phone revealed,
     once (the same value again is fine; another is refused and nothing is overwritten). The server does not check the signature: the phone does, with the computer's key the QR carried.
     The window it is taken in is the offer's end + RECEIPT_GRACE (the phone's provisional pin waits the same time): a person who pressed [같아요] just before the QR's end and whose computer needed a moment to keep the phone still gets
-    the receipt through. A burned offer takes none."""
+    the receipt through. A burned offer takes none.
+    The order is the one a host that lost an answer needs: a receipt already stored is judged FIRST (the same value again is 200 — even after the window or after the phone's own [달라요] — another is 409 `already_confirmed`), so a
+    retry of the very bytes that went through is never read as a failure; only then «ended» (409 `offer_burned`) · «ran out» (410 `offer_expired`) · «nothing to confirm yet» (409 `no_reveal`) — four different answers."""
     row = await _lock(db, setup.id, offer_id)
     if row is None:
         raise DesktopRelayError(404, "offer_not_found", "no such pairing offer")
+    if row.confirmed_sig is not None:
+        if row.confirmed_sig == body.sig:
+            return
+        raise DesktopRelayError(409, "already_confirmed", "this pairing offer was already confirmed")
     if row.burned_at is not None:
         raise DesktopRelayError(409, BURNED, "this pairing offer was ended")
     if row.expires_at + RECEIPT_GRACE <= _now():
         raise DesktopRelayError(410, "offer_expired", "the pairing offer has expired")
     if row.reveal is None:
         raise DesktopRelayError(409, "no_reveal", "there is no reveal to confirm")
-    if row.confirmed_sig is not None:
-        if row.confirmed_sig == body.sig:
-            return
-        raise DesktopRelayError(409, "already_confirmed", "this pairing offer was already confirmed")
     row.confirmed_sig, row.confirmed_at = body.sig, _now()
     await db.flush()
 
@@ -207,7 +214,7 @@ async def close_by_host(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UU
     row = await _lock(db, setup.id, offer_id)
     if row is None:
         raise DesktopRelayError(404, "offer_not_found", "no such pairing offer")
-    if row.burned_at is None:
+    if row.burned_at is None and row.confirmed_sig is None:  # (a receipted offer is a finished pairing: the computer closing its window afterwards does not hide the receipt)
         row.burned_at, row.burn_reason = _now(), "host_closed"
         await db.flush()
 
