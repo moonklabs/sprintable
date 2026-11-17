@@ -964,7 +964,13 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert len(loosened) == 3, loosened
     assert any("drop_constraint" in h and "_CHECK" in h for h in loosened) and any("NOT VALID" in h for h in loosened) and any("VALIDATE CONSTRAINT" in h for h in loosened), loosened
     assert not any(k in h for h in loosened for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column, no data touched"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_"))]
+    # story 4972 (4a): 0482 is THREE lines of upgrade() the reading lists: the CHECKs on the two columns it adds to `remote_device_pairing_sessions` (the `add_column` lines of two NULLABLE columns are not listed — they are not rewrites).
+    # Why a running old revision lives with it: it never writes either column, so every row it writes has both NULL and every one of the three CHECKs passes for NULLs (both-or-neither · only-after-a-reveal · size); the table is tiny
+    # (an offer lives five minutes, rows older than an hour are deleted when the next QR is made), so the validating scan under the CHECK's brief lock is nothing; nothing existing is altered, dropped, renamed, backfilled or rewritten.
+    receipt = [h for h in hits if h.startswith("0482_")]
+    assert len(receipt) == 3 and all("create_check_constraint" in h and "ck_pairing_sessions_confirm_" in h for h in receipt), receipt
+    assert not any(k in h for h in receipt for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

@@ -54,6 +54,7 @@ _KNOWN = {
     "app/routers/desktop_relay.py::post_pairing_session",
     "app/routers/desktop_relay.py::post_pairing_session_nonce",
     "app/routers/desktop_relay.py::post_pairing_session_close",
+    "app/routers/desktop_relay.py::post_pairing_session_confirmed",  # story 4972 (4a) — the same device token: the computer's signed receipt on ITS OWN offer (setup_id + offer_id, like nonce and close; the server only carries it)
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",
