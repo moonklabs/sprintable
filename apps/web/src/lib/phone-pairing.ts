@@ -35,6 +35,7 @@ export type OfferOutcome =
   | { kind: 'offerGone' } // 404 offer_not_found — the server knows no such offer of ours (the computer never registered it · it is someone else's · it is gone): NOT «the computer is unreachable» (lens 5842)
   | { kind: 'startedAlready' } // the shell already started this QR (it is used up): a new QR is the only way
   | { kind: 'signedOut' } // the shell could not read the server's list: the person is signed out
+  | { kind: 'forbidden' } // the server refused the list read (403): this account has no access to that computer's organization
   | { kind: 'failed' };
 
 export type WaitOutcome =
@@ -134,10 +135,6 @@ async function readPhones(setupId: string): Promise<PhonesRead> {
     return { failed: 'read' };
   }
 }
-async function myPhones(setupId: string): Promise<Paired[] | null> {
-  const r = await readPhones(setupId);
-  return 'phones' in r ? r.phones : null;
-}
 
 /**
  * The first half of both procedures: this phone's key (the shell's own) → the computer's org → register the key (the same key again = the same row) → already paired?
@@ -170,8 +167,9 @@ async function prepareKey(head: OfferHead, label: string, deps: PairDeps, opts: 
   // the OLD procedure: a phone that is already paired with this computer ends here (as it always did). The NEW procedure does not decide this on the page: the shell reads the list itself before it makes the commitment and says what it found
   // (a REAL pin → paired again at the final moment · an old line on the list → «remove it on the computer first» · nothing → on) — lens 5842 delta 2
   if (!opts.newProcedure) {
-    const phones = await myPhones(head.setup_id);
-    if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { end: { kind: 'alreadyPaired' } };
+    const r = await readPhones(head.setup_id);
+    if ('failed' in r && r.failed === 'forbidden') return { end: { kind: 'forbidden' } }; // (not «no pair»: the list could not be read for want of access)
+    if ('phones' in r && r.phones.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { end: { kind: 'alreadyPaired' } };
   }
   return { phoneKeyId };
 }
@@ -221,8 +219,9 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   if (state === 'sent') return { kind: 'waiting' };
   if (state !== 'revealed' && state !== 'expired') return { kind: 'failed' };
   // after the computer took it (or the time ran out) the pair may have stood: the server's list says so
-  const phones = await myPhones(head.setup_id);
-  if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'paired' };
+  const listed = await readPhones(head.setup_id);
+  if ('failed' in listed && listed.failed === 'forbidden') return { kind: 'failed' }; // (a list that could not be read for want of access is not «no pair»)
+  if ('phones' in listed && listed.phones.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'paired' };
   if (state === 'expired') return { kind: 'notPaired' };
   if (known) return { kind: 'number', number: known };
   if (typeof reveal !== 'string') return { kind: 'failed' };
