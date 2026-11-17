@@ -163,7 +163,7 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
 async def post_nonce(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID, body: SessionNonce) -> None:
     """The computer's n_m and its signature — only after a commitment, once (the same again is fine; another is refused and the offer is not touched: it is the computer's own mistake)."""
     row = _live(await _lock(db, setup.id, offer_id))
-    if row.commit is None:
+    if row.commitment is None:
         raise DesktopRelayError(409, "no_commit", "there is no commitment to answer")
     if row.n_m is not None:
         if (row.n_m, row.nonce_sig) == (body.n_m, body.sig):
@@ -190,7 +190,7 @@ async def frames_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[tuple[st
     rows = (await db.execute(
         select(RemoteDevicePairingSession).where(
             RemoteDevicePairingSession.setup_id == setup_id, RemoteDevicePairingSession.expires_at > now, RemoteDevicePairingSession.burned_at.is_(None),
-            RemoteDevicePairingSession.commit.is_not(None),
+            RemoteDevicePairingSession.commitment.is_not(None),
         ).order_by(RemoteDevicePairingSession.created_at)
     )).scalars().all()
     out: list[tuple[str, dict]] = []
@@ -205,7 +205,7 @@ async def frames_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[tuple[st
         out.append((f"burned:{r.offer_id}", {"offer_id": str(r.offer_id), "reason": r.burn_reason}))
     for r in rows:
         if r.n_m is None:
-            out.append((f"commit:{r.offer_id}", {"offer_id": str(r.offer_id), "phone_key_id": str(r.phone_key_id), "commit": r.commit}))
+            out.append((f"commit:{r.offer_id}", {"offer_id": str(r.offer_id), "phone_key_id": str(r.phone_key_id), "commit": r.commitment}))
         if r.reveal is not None:
             out.append((f"reveal:{r.offer_id}", {"offer_id": str(r.offer_id), "phone_key_id": str(r.phone_key_id), **r.reveal}))
     return out
@@ -239,13 +239,13 @@ async def commit(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, o
     if not await remote_control.is_enabled(db, org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     row = _live(await _lock(db, setup.id, offer_id))
-    if row.commit is not None:
-        if (row.committed_by, row.phone_key_id, row.commit) == (member_id, phone.id, body.commit):
+    if row.commitment is not None:
+        if (row.committed_by, row.phone_key_id, row.commitment) == (member_id, phone.id, body.commit):
             return
         raise await _burn(db, row, "second_commit")
     if setup.id not in await _reachable(db, {setup.id}, _now()):
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
-    row.commit, row.committed_by, row.phone_key_id, row.committed_at = body.commit, member_id, phone.id, _now()
+    row.commitment, row.committed_by, row.phone_key_id, row.committed_at = body.commit, member_id, phone.id, _now()
     await db.flush()
     _wake_device_after_commit(db, setup.id)
 

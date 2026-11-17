@@ -179,11 +179,11 @@ class RemoteDevicePairingSession(Base):
         UniqueConstraint("setup_id", "offer_id", name="uq_remote_device_pairing_sessions_setup_offer"),
         Index("ix_pairing_sessions_setup", "setup_id"),  # the migration's name (0481)
         CheckConstraint(
-            "(commit IS NULL) = (committed_by IS NULL) AND (commit IS NULL) = (phone_key_id IS NULL) AND (commit IS NULL) = (committed_at IS NULL)",
+            "(commitment IS NULL) = (committed_by IS NULL) AND (commitment IS NULL) = (phone_key_id IS NULL) AND (commitment IS NULL) = (committed_at IS NULL)",
             name="ck_pairing_sessions_commit_whole",
         ),
         CheckConstraint(
-            "(n_m IS NULL) = (nonce_sig IS NULL) AND (n_m IS NULL) = (nonced_at IS NULL) AND (n_m IS NULL OR commit IS NOT NULL)",
+            "(n_m IS NULL) = (nonce_sig IS NULL) AND (n_m IS NULL) = (nonced_at IS NULL) AND (n_m IS NULL OR commitment IS NOT NULL)",
             name="ck_pairing_sessions_nonce_after_commit",
         ),
         CheckConstraint(
@@ -191,7 +191,7 @@ class RemoteDevicePairingSession(Base):
             name="ck_pairing_sessions_reveal_after_nonce",
         ),
         CheckConstraint("(burned_at IS NULL) = (burn_reason IS NULL)", name="ck_pairing_sessions_burn_has_reason"),
-        CheckConstraint("commit IS NULL OR char_length(commit) = 43", name="ck_pairing_sessions_commit_size"),
+        CheckConstraint("commitment IS NULL OR char_length(commitment) = 43", name="ck_pairing_sessions_commit_size"),
         CheckConstraint("n_m IS NULL OR char_length(n_m) = 22", name="ck_pairing_sessions_nonce_size"),
         CheckConstraint("nonce_sig IS NULL OR char_length(nonce_sig) BETWEEN 16 AND 100", name="ck_pairing_sessions_sig_size"),
     )
@@ -201,7 +201,7 @@ class RemoteDevicePairingSession(Base):
     offer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    commit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commitment: Mapped[str | None] = mapped_column(Text, nullable=True)
     committed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     phone_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=True)
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

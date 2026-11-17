@@ -68,7 +68,7 @@ def _reveal_body(device, spki, **over):
 
 
 async def _row(offer_id) -> dict:
-    r = (await _sql(fetch=f"SELECT commit, n_m, reveal IS NOT NULL, burned_at IS NOT NULL, burn_reason FROM remote_device_pairing_sessions WHERE offer_id = '{offer_id}'"))[0]
+    r = (await _sql(fetch=f"SELECT commitment, n_m, reveal IS NOT NULL, burned_at IS NOT NULL, burn_reason FROM remote_device_pairing_sessions WHERE offer_id = '{offer_id}'"))[0]
     return {"commit": r[0], "n_m": r[1], "revealed": r[2], "burned": r[3], "reason": r[4]}
 
 
@@ -147,16 +147,16 @@ async def test_02_the_order_is_enforced_in_the_service_and_in_the_database(world
         assert (r.status_code, r.json()["error"]["code"]) == (409, "no_nonce")  # a reveal before the computer's nonce
         # the database says it too: a nonce with no commitment · a reveal with no nonce · a half-written commitment
         for sql in (
-            f"UPDATE remote_device_pairing_sessions SET n_m = '{NM}', nonce_sig = '{SIG}', nonced_at = now() WHERE offer_id = '{offer_id}' AND commit IS NULL",
+            f"UPDATE remote_device_pairing_sessions SET n_m = '{NM}', nonce_sig = '{SIG}', nonced_at = now() WHERE offer_id = '{offer_id}' AND commitment IS NULL",
         ):
             await _sql(sql)  # (matches no row: the offer has a commitment) — the real checks are below, on fresh rows
         o2, _ = await _register_offer(c, device)
         for bad in (
             f"UPDATE remote_device_pairing_sessions SET n_m = '{NM}', nonce_sig = '{SIG}', nonced_at = now() WHERE offer_id = '{o2}'",
             f"UPDATE remote_device_pairing_sessions SET reveal = '{{}}'::jsonb, revealed_at = now() WHERE offer_id = '{o2}'",
-            f"UPDATE remote_device_pairing_sessions SET commit = '{COMMIT}' WHERE offer_id = '{o2}'",
+            f"UPDATE remote_device_pairing_sessions SET commitment = '{COMMIT}' WHERE offer_id = '{o2}'",
             f"UPDATE remote_device_pairing_sessions SET burned_at = now() WHERE offer_id = '{o2}'",
-            f"UPDATE remote_device_pairing_sessions SET commit = 'short', committed_by = '{OWNER_TM}', phone_key_id = '{phone_id}', committed_at = now() WHERE offer_id = '{o2}'",
+            f"UPDATE remote_device_pairing_sessions SET commitment = 'short', committed_by = '{OWNER_TM}', phone_key_id = '{phone_id}', committed_at = now() WHERE offer_id = '{o2}'",
         ):
             with pytest.raises(Exception):
                 await _sql(bad)

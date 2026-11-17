@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column("offer_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("commit", sa.Text(), nullable=True),
+        sa.Column("commitment", sa.Text(), nullable=True),
         sa.Column("committed_by", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("phone_key_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=True),
         sa.Column("committed_at", sa.DateTime(timezone=True), nullable=True),
@@ -42,11 +42,11 @@ def upgrade() -> None:
         sa.Column("burn_reason", sa.Text(), nullable=True),
         sa.UniqueConstraint("setup_id", "offer_id", name="uq_remote_device_pairing_sessions_setup_offer"),
         sa.CheckConstraint(
-            "(commit IS NULL) = (committed_by IS NULL) AND (commit IS NULL) = (phone_key_id IS NULL) AND (commit IS NULL) = (committed_at IS NULL)",
+            "(commitment IS NULL) = (committed_by IS NULL) AND (commitment IS NULL) = (phone_key_id IS NULL) AND (commitment IS NULL) = (committed_at IS NULL)",
             name="ck_pairing_sessions_commit_whole",
         ),
         sa.CheckConstraint(
-            "(n_m IS NULL) = (nonce_sig IS NULL) AND (n_m IS NULL) = (nonced_at IS NULL) AND (n_m IS NULL OR commit IS NOT NULL)",
+            "(n_m IS NULL) = (nonce_sig IS NULL) AND (n_m IS NULL) = (nonced_at IS NULL) AND (n_m IS NULL OR commitment IS NOT NULL)",
             name="ck_pairing_sessions_nonce_after_commit",
         ),
         sa.CheckConstraint(
@@ -54,7 +54,7 @@ def upgrade() -> None:
             name="ck_pairing_sessions_reveal_after_nonce",
         ),
         sa.CheckConstraint("(burned_at IS NULL) = (burn_reason IS NULL)", name="ck_pairing_sessions_burn_has_reason"),
-        sa.CheckConstraint("commit IS NULL OR char_length(commit) = 43", name="ck_pairing_sessions_commit_size"),
+        sa.CheckConstraint("commitment IS NULL OR char_length(commitment) = 43", name="ck_pairing_sessions_commit_size"),
         sa.CheckConstraint("n_m IS NULL OR char_length(n_m) = 22", name="ck_pairing_sessions_nonce_size"),
         sa.CheckConstraint("nonce_sig IS NULL OR char_length(nonce_sig) BETWEEN 16 AND 100", name="ck_pairing_sessions_sig_size"),
     )
