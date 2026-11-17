@@ -45,7 +45,7 @@ describe('[4532] scanPairQr', () => {
     const phoneCall = shell({ 'pair.scan': { id: 'x', ok: true, ...HEAD } });
     await expect(scanPairQr(serverFor(phoneCall, server({})))).resolves.toEqual({ kind: 'confirm', head: HEAD });
   });
-  it.each([['cancelled', 'cancelled'], ['expired', 'expired'], ['not_ours', 'notOurs'], ['bad', 'notOurs'], ['failed', 'failed']])(
+  it.each([['cancelled', 'cancelled'], ['expired', 'expired'], ['not_ours', 'notOurs'], ['bad', 'qrUnreadable'], ['failed', 'failed']])(
     'the shell says %s → %s', async (code, kind) => {
       await expect(scanPairQr(serverFor(shell({ 'pair.scan': { id: 'x', ok: false, code } }), server({})))).resolves.toEqual({ kind });
     });

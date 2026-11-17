@@ -13,7 +13,8 @@ export interface OfferHead { offer_id: string; setup_id: string; device_name: st
 
 export type ScanOutcome =
   | { kind: 'confirm'; head: OfferHead }
-  | { kind: 'notOurs' } // not a Sprintable pairing QR (or one this app cannot read)
+  | { kind: 'notOurs' } // not a Sprintable pairing QR (the shell said so by its own word)
+  | { kind: 'qrUnreadable' } // the shell could not read it (an older app does not know a newer computer's QR: «update the app» — or the picture is damaged)
   | { kind: 'expired' } // the QR's 5 minutes passed
   | { kind: 'cancelled' } // closed the camera
   | { kind: 'failed' };
@@ -111,8 +112,8 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
   switch (r.code) {
     case 'cancelled': return { kind: 'cancelled' };
     case 'expired': return { kind: 'expired' };
-    case 'not_ours':
-    case 'bad': return { kind: 'notOurs' };
+    case 'not_ours': return { kind: 'notOurs' };
+    case 'bad': return { kind: 'qrUnreadable' };
     default: return { kind: 'failed' };
   }
 }
@@ -389,6 +390,8 @@ export type FinishOutcome =
   | { kind: 'notReady' } // the key store is not answering just now
   | { kind: 'alreadyPaired' } // a real pin of this computer is there already
   | { kind: 'signedOut' }
+  | { kind: 'receiptInvalid' } // the computer sent a confirmation that does not fit this pairing — a forgery attempt must be SEEN (story 4972 · 4a)
+  | { kind: 'noReceipt' } // the window ended with no confirmation from the computer (it may have pressed and not been heard)
   | { kind: 'failed' };
 
 /**
@@ -405,6 +408,8 @@ export async function finishPairSession(head: OfferHead, deps: PairDeps): Promis
     case 'expired': return { kind: 'expired' };
     case 'vault_unavailable': return { kind: 'notReady' };
     case 'signed_out': return { kind: 'signedOut' };
+    case 'receipt_invalid': return { kind: 'receiptInvalid' };
+    case 'no_receipt': return { kind: 'noReceipt' };
     default: return { kind: 'failed' };
   }
 }

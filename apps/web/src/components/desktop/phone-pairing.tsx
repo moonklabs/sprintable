@@ -42,7 +42,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'receiptInvalid' | 'noReceipt' | 'qrUnreadable' | 'offerGone' | 'startedAlready' | 'forbidden' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -219,7 +219,21 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     if (!waitHost) return;
     let off = false;
     const id = setTimeout(() => void (async () => {
-      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) endWith(waitHost.head, 'hostNo'); return; }
+      // the pairing is over without a result the page itself saw (the window ran out, or the server says the offer ended): ask the shell ONCE what became of it — it may have made the pin real by itself (then it is paired), and a computer that said it sends a
+      // confirmation and sent none (or a bad one) has its own line, not «you did not press». Only then the old «not finished on the computer» line.
+      const lastWord = async () => {
+        const last = await finishPairSession(waitHost.head, { phoneCall });
+        if (off) return;
+        switch (last.kind) {
+          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name }); return;
+          case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
+          case 'receiptInvalid': endWith(waitHost.head, 'receiptInvalid'); return;
+          case 'noReceipt': endWith(waitHost.head, 'noReceipt'); return;
+          case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
+          default: endWith(waitHost.head, 'hostNo');
+        }
+      };
+      if (Date.now() > Date.parse(waitHost.head.expires_at) + POLL_MS * 2) { if (!off) await lastWord(); return; }
       const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
       if (off) return;
       if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
@@ -232,6 +246,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
           case 'expired': endWith(waitHost.head, 'expired'); return;
           case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
+          case 'receiptInvalid': endWith(waitHost.head, 'receiptInvalid'); return;
+          case 'noReceipt': endWith(waitHost.head, 'noReceipt'); return;
           case 'failed': endWith(waitHost.head, 'failed'); return;
           default: setView({ ...waitHost }); return; // not yet · the key store is busy: look again
         }
@@ -241,7 +257,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; }
       failedReads.current = 0;
       if (look.kind === 'gone') { endWith(waitHost.head, 'offerGone'); return; }
-      if (look.kind === 'ended') { endWith(waitHost.head, 'hostNo'); return; } // the computer's person said «different» (or the window ended): the shell drops what it held
+      if (look.kind === 'ended') { await lastWord(); return; } // the computer's person said «different» (or the window ended): the shell is asked once what became of it, then drops what it held
       setView({ ...waitHost });
     })(), POLL_MS);
     return () => { off = true; clearTimeout(id); };
@@ -316,6 +332,9 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'forbidden': return t('forbidden');
       case 'signedOut': return t('signedOut');
       case 'serverUnreachable': return t('serverUnreachable');
+      case 'receiptInvalid': return t('receiptInvalid');
+      case 'noReceipt': return t('noReceipt');
+      case 'qrUnreadable': return t('qrUnreadable');
       case 'hostNo': return t('hostNo');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');
