@@ -50,6 +50,10 @@ _KNOWN = {
     # story #4733 (S2) — the same device token: the computer's closed clock view (ids and closed words; rows of an agent it was not set up with are dropped) — setup-scoped, no project entity
     "app/routers/desktop_relay.py::put_clock_view",
     "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
+    # story 4972 — the new pairing's device-token routes: the computer registers its OWN offer, answers a commitment with its nonce, closes its offer — rows of that device's setup (setup_id + offer_id), no project-owned entity is read
+    "app/routers/desktop_relay.py::post_pairing_session",
+    "app/routers/desktop_relay.py::post_pairing_session_nonce",
+    "app/routers/desktop_relay.py::post_pairing_session_close",
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",

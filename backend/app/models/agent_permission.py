@@ -167,3 +167,48 @@ class RemoteDevicePairingOffer(Base):
     reveal: Mapped[str | None] = mapped_column(Text, nullable=True)
     revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RemoteDevicePairingSession(Base):
+    """story 4972 (design ② §5-2) — one pairing on the new procedure: the host registers the QR's offer; the phone's commitment, the host's signed nonce and the phone's reveal are carried between them,
+    in that order and each once (the CHECKs of 0481 say the order too). Nothing here is secret (the QR's secret never comes to the server) and the server checks no cryptography of it — the two screens' 8-digit
+    number is the check; it only enforces who may send, the order and the «one» (`burned_at`: a second commitment, a second reveal or a refusal by either side ends the offer for good)."""
+
+    __tablename__ = "remote_device_pairing_sessions"
+    __table_args__ = (
+        UniqueConstraint("setup_id", "offer_id", name="uq_remote_device_pairing_sessions_setup_offer"),
+        Index("ix_pairing_sessions_setup", "setup_id"),  # the migration's name (0481)
+        CheckConstraint(
+            "(commitment IS NULL) = (committed_by IS NULL) AND (commitment IS NULL) = (phone_key_id IS NULL) AND (commitment IS NULL) = (committed_at IS NULL)",
+            name="ck_pairing_sessions_commit_whole",
+        ),
+        CheckConstraint(
+            "(n_m IS NULL) = (nonce_sig IS NULL) AND (n_m IS NULL) = (nonced_at IS NULL) AND (n_m IS NULL OR commitment IS NOT NULL)",
+            name="ck_pairing_sessions_nonce_after_commit",
+        ),
+        CheckConstraint(
+            "(reveal IS NULL) = (revealed_at IS NULL) AND (reveal IS NULL OR (n_m IS NOT NULL AND jsonb_typeof(reveal) = 'object'))",
+            name="ck_pairing_sessions_reveal_after_nonce",
+        ),
+        CheckConstraint("(burned_at IS NULL) = (burn_reason IS NULL)", name="ck_pairing_sessions_burn_has_reason"),
+        CheckConstraint("commitment IS NULL OR char_length(commitment) = 43", name="ck_pairing_sessions_commit_size"),
+        CheckConstraint("n_m IS NULL OR char_length(n_m) = 22", name="ck_pairing_sessions_nonce_size"),
+        CheckConstraint("nonce_sig IS NULL OR char_length(nonce_sig) BETWEEN 16 AND 100", name="ck_pairing_sessions_sig_size"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    offer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    commitment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    committed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    phone_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=True)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    n_m: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nonce_sig: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nonced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reveal: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    burned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    burn_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

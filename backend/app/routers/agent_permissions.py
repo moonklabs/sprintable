@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
-from app.services import agent_permissions
+from app.services import agent_permissions, pairing_sessions
 from app.services.desktop_relay import DesktopRelayError
 from app.services.member_resolver import is_active_org_admin, resolve_member
 
@@ -117,6 +117,91 @@ async def post_pairing_offer(
         return _error(exc)
     await db.commit()
     return JSONResponse(status_code=202, content={"state": "sent"})
+
+
+# ── story 4972 — pairing on the new procedure (design ② §5-2): the phone's half. The server carries four small public messages and enforces order and «one» (services/pairing_sessions.py) ──────────
+
+
+async def _session_call(db: AsyncSession, run):
+    from app.services import pairing_sessions
+
+    try:
+        result = await run()
+    except DesktopRelayError as exc:
+        if exc.code == pairing_sessions.BURNED:
+            await db.commit()  # the burn is the point of the refusal: it stays
+        else:
+            await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return result
+
+
+@router.post("/remote-devices/pairing-sessions/{offer_id}/commit")
+async def post_pairing_commit(
+    offer_id: uuid.UUID,
+    body: pairing_sessions.SessionCommit,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4972 — the phone's commitment C_p for the offer the computer registered. A member of the computer's organization, the key their own; the first one only (a second ends the offer)."""
+    member = await _person(db, auth, org_id, interactive=True)
+
+    async def run():
+        await pairing_sessions.commit(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, offer_id=offer_id, body=body)
+        return JSONResponse(status_code=202, content={"state": "committed"})
+    return await _session_call(db, run)
+
+
+@router.get("/remote-devices/pairing-sessions/{offer_id}")
+async def get_pairing_session(
+    offer_id: uuid.UUID,
+    setup_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4972 — the phone that committed reads the computer's nonce (its value and signature). Only that person: anyone else gets the same «not found»."""
+    member = await _person(db, auth, org_id, interactive=True)
+
+    async def run():
+        return await pairing_sessions.state(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, offer_id=offer_id)
+    return await _session_call(db, run)
+
+
+@router.post("/remote-devices/pairing-sessions/{offer_id}/reveal")
+async def post_pairing_reveal_v2(
+    offer_id: uuid.UUID,
+    body: pairing_sessions.SessionReveal,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4972 — the phone's reveal (its keys · n_p · name · the box key's binding signature) — after the computer's nonce, once."""
+    member = await _person(db, auth, org_id, interactive=True)
+
+    async def run():
+        await pairing_sessions.reveal(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, offer_id=offer_id, body=body)
+        return JSONResponse(status_code=202, content={"state": "revealed"})
+    return await _session_call(db, run)
+
+
+@router.post("/remote-devices/pairing-sessions/{offer_id}/close")
+async def post_pairing_session_close(
+    offer_id: uuid.UUID,
+    body: pairing_sessions.SessionPhoneRef,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4972 — the phone's person pressed [달라요] (or left): the offer ends."""
+    member = await _person(db, auth, org_id, interactive=True)
+
+    async def run():
+        await pairing_sessions.close_by_phone(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=body.setup_id, offer_id=offer_id)
+        return JSONResponse(status_code=200, content={"state": "burned"})
+    return await _session_call(db, run)
 
 
 @router.get("/remote-devices/pairing-target")
