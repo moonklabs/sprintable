@@ -194,6 +194,10 @@ class RemoteDevicePairingSession(Base):
         CheckConstraint("commitment IS NULL OR char_length(commitment) = 43", name="ck_pairing_sessions_commit_size"),
         CheckConstraint("n_m IS NULL OR char_length(n_m) = 22", name="ck_pairing_sessions_nonce_size"),
         CheckConstraint("nonce_sig IS NULL OR char_length(nonce_sig) BETWEEN 16 AND 100", name="ck_pairing_sessions_sig_size"),
+        # story 4972 (wiring 4a): the computer's signed receipt «I confirmed THIS offer» — carried, never checked here; only after a reveal, whole, one size like the nonce's signature
+        CheckConstraint("(confirmed_sig IS NULL) = (confirmed_at IS NULL)", name="ck_pairing_sessions_confirm_whole"),
+        CheckConstraint("confirmed_sig IS NULL OR reveal IS NOT NULL", name="ck_pairing_sessions_confirm_after_reveal"),
+        CheckConstraint("confirmed_sig IS NULL OR char_length(confirmed_sig) BETWEEN 16 AND 100", name="ck_pairing_sessions_confirm_size"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -212,3 +216,5 @@ class RemoteDevicePairingSession(Base):
     revealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     burned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     burn_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confirmed_sig: Mapped[str | None] = mapped_column(Text, nullable=True)  # story 4972 (4a): the computer's signature over «this offer, these keys, these nonces, this number» — the phone verifies it, the server only carries it
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

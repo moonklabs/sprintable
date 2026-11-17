@@ -966,6 +966,11 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/confirmed",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/desktop/relay/pairing-sessions/{}/nonce",
 "kind": "unknown"
 },

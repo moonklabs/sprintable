@@ -110,7 +110,7 @@ async def test_01_the_whole_procedure_in_order_and_each_message_reaches_the_othe
         assert (await c.get(state, headers=_person(OWNER))).status_code == 404  # nobody has committed: nothing of the phone's yet
         r = await c.post(f"{url}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))
         assert (r.status_code, r.json()) == (202, {"state": "committed"})
-        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "committed", "n_m": None, "sig": None}
+        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "committed", "n_m": None, "sig": None, "confirmed_sig": None}
         # the computer hears the commitment, as it is, with the phone key's id (the server's name for the key)
         assert await _frames(c, device, "pairing_commit") == [{"offer_id": offer_id, "phone_key_id": phone_id, "commit": COMMIT}]
 
@@ -121,7 +121,7 @@ async def test_01_the_whole_procedure_in_order_and_each_message_reaches_the_othe
         other = await c.post(up, json={"n_m": _b(16, b"z"), "sig": SIG}, headers=_tok(device["device_token"]))
         assert (other.status_code, other.json()["error"]["code"]) == (409, "nonce_used")
         assert (await _row(offer_id))["burned"] is False  # the computer's own second nonce does not end the offer
-        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "nonce", "n_m": NM, "sig": SIG}
+        assert (await c.get(state, headers=_person(OWNER))).json() == {"state": "nonce", "n_m": NM, "sig": SIG, "confirmed_sig": None}
         assert await _frames(c, device, "pairing_commit") == []  # answered: no commitment frame any more
 
         r = await c.post(f"{url}/reveal", json=_reveal_body(device, spki), headers=_person(OWNER))
@@ -480,3 +480,103 @@ async def test_14_a_burn_wakes_the_computer_at_once(world, monkeypatch):
         woken.clear()
         assert (await c.post(f"{PHONE}/pairing-sessions/{o2}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200
         assert woken == [device["setup_id"]], "the phone's [달라요] wakes the computer"
+
+
+# ── story 4972 · wiring 4a: the computer's signed receipt «I confirmed THIS offer» (the server carries it, the phone checks it) ────────────────────────────────────────────────────────────────────
+
+RECEIPT = _b(71, b"r")  # a DER ECDSA P-256 signature is 70-72 bytes: 95 chars
+
+
+async def _to_reveal(c, device, phone_id, spki):
+    offer_id, _ = await _register_offer(c, device)
+    url = f"{PHONE}/pairing-sessions/{offer_id}"
+    assert (await c.post(f"{url}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+    assert (await c.post(f"{REL}/pairing-sessions/{offer_id}/nonce", json={"n_m": NM, "sig": SIG}, headers=_tok(device["device_token"]))).status_code == 200
+    assert (await c.post(f"{url}/reveal", json=_reveal_body(device, spki), headers=_person(OWNER))).status_code == 202
+    return offer_id, url, f"{url}?setup_id={device['setup_id']}"
+
+
+async def _receipt_row(offer_id) -> tuple:
+    r = (await _sql(fetch=f"SELECT confirmed_sig, confirmed_at IS NOT NULL, burned_at IS NOT NULL FROM remote_device_pairing_sessions WHERE offer_id = '{offer_id}'"))[0]
+    return (r[0], r[1], r[2])
+
+
+async def test_15_the_receipt_is_written_once_by_the_offers_own_computer_and_read_by_the_phone(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        offer_id, url, state = await _to_reveal(c, device, phone_id, spki)
+        up = f"{REL}/pairing-sessions/{offer_id}/confirmed"
+        assert (await c.get(state, headers=_person(OWNER))).json()["confirmed_sig"] is None  # nothing yet
+        r = await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))
+        assert (r.status_code, r.json()) == (200, {"state": "confirmed"})
+        assert await _receipt_row(offer_id) == (RECEIPT, True, False)  # the receipt does not end the offer
+        assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200  # the same again (a retry): fine
+        other = await c.post(up, json={"sig": _b(71, b"q")}, headers=_tok(device["device_token"]))
+        assert (other.status_code, other.json()["error"]["code"]) == (409, "already_confirmed")
+        assert await _receipt_row(offer_id) == (RECEIPT, True, False), "another value never overwrites the first"
+        body = (await c.get(state, headers=_person(OWNER))).json()
+        assert body["confirmed_sig"] == RECEIPT and body["state"] == "revealed" and body["sig"] == SIG
+        # the phone may read it a moment AFTER the window ran out (its own end is a little after the QR's)
+        await _sql(f"UPDATE remote_device_pairing_sessions SET expires_at = now() - interval '1 second' WHERE offer_id = '{offer_id}'")
+        late = (await c.get(state, headers=_person(OWNER))).json()
+        assert late == {"state": "expired", "n_m": None, "sig": None, "confirmed_sig": RECEIPT}
+
+
+async def test_16_the_receipt_is_refused_before_a_reveal_on_a_dead_offer_and_from_another_computer(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        mine = _tok(device["device_token"])
+        # before the phone revealed
+        o1, _ = await _register_offer(c, device)
+        up1 = f"{REL}/pairing-sessions/{o1}/confirmed"
+        r = await c.post(up1, json={"sig": RECEIPT}, headers=mine)
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "no_reveal")
+        assert (await _receipt_row(o1))[0] is None
+        # an offer that was ended
+        o2, url2, _state2 = await _to_reveal(c, device, phone_id, spki)
+        assert (await c.post(f"{url2}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200
+        r = await c.post(f"{REL}/pairing-sessions/{o2}/confirmed", json={"sig": RECEIPT}, headers=mine)
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "offer_burned")
+        assert (await _receipt_row(o2))[0] is None
+        # an offer whose window passed more than the grace (the phone's own provisional-pin window: the offer's end + 15 s)
+        o3, _url3, state3 = await _to_reveal(c, device, phone_id, spki)
+        await _sql(f"UPDATE remote_device_pairing_sessions SET expires_at = now() - interval '16 seconds' WHERE offer_id = '{o3}'")
+        r = await c.post(f"{REL}/pairing-sessions/{o3}/confirmed", json={"sig": RECEIPT}, headers=mine)
+        assert (r.status_code, r.json()["error"]["code"]) == (410, "offer_expired")
+        assert (await _receipt_row(o3))[0] is None
+        # …but a person who pressed [같아요] just before the end, whose computer needed a moment, still gets the receipt through (inside the grace)
+        o3b, _url3b, _state3b = await _to_reveal(c, device, phone_id, spki)
+        await _sql(f"UPDATE remote_device_pairing_sessions SET expires_at = now() - interval '10 seconds' WHERE offer_id = '{o3b}'")
+        assert (await c.post(f"{REL}/pairing-sessions/{o3b}/confirmed", json={"sig": RECEIPT}, headers=mine)).status_code == 200
+        assert (await _receipt_row(o3b))[0] == RECEIPT
+        # ANOTHER computer's device token can neither write the receipt of this offer nor block the real one (the one write is the real computer's)
+        o4, _url4, state4 = await _to_reveal(c, device, phone_id, spki)
+        other = await _device(c, name="d4424 mac 4972q")
+        r = await c.post(f"{REL}/pairing-sessions/{o4}/confirmed", json={"sig": _b(71, b"z")}, headers=_tok(other["device_token"]))
+        assert (r.status_code, r.json()["error"]["code"]) == (404, "offer_not_found")
+        assert (await _receipt_row(o4))[0] is None
+        assert (await c.post(f"{REL}/pairing-sessions/{o4}/confirmed", json={"sig": RECEIPT}, headers=mine)).status_code == 200
+        assert (await _receipt_row(o4))[0] == RECEIPT
+        # a person's token (not a device's) is refused · the body is exactly one field of the right shape
+        assert (await c.post(f"{REL}/pairing-sessions/{o4}/confirmed", json={"sig": RECEIPT}, headers=_person(OWNER))).status_code == 401
+        o5, _u5, _s5 = await _to_reveal(c, device, phone_id, spki)
+        for bad in ({"sig": "short"}, {"sig": "!" * 40}, {"sig": _b(80, b"x") + "xxxxxxxxxxxxxxxxxxxxxxxxxx"}, {"sig": RECEIPT, "extra": 1}, {}):
+            assert (await c.post(f"{REL}/pairing-sessions/{o5}/confirmed", json=bad, headers=mine)).status_code == 422, bad
+        assert (await _receipt_row(o5))[0] is None
+
+
+async def test_17_the_database_says_the_same_a_receipt_only_whole_after_a_reveal_and_of_one_size(world):
+    async with _client() as c:
+        device, phone_id, spki = await _ready(c)
+        o1, _ = await _register_offer(c, device)
+        o2, _u2, _s2 = await _to_reveal(c, device, phone_id, spki)
+        for bad in (
+            f"UPDATE remote_device_pairing_sessions SET confirmed_sig = '{RECEIPT}', confirmed_at = now() WHERE offer_id = '{o1}'",  # no reveal yet
+            f"UPDATE remote_device_pairing_sessions SET confirmed_sig = '{RECEIPT}' WHERE offer_id = '{o2}'",  # half
+            f"UPDATE remote_device_pairing_sessions SET confirmed_at = now() WHERE offer_id = '{o2}'",  # the other half
+            f"UPDATE remote_device_pairing_sessions SET confirmed_sig = 'short', confirmed_at = now() WHERE offer_id = '{o2}'",  # too small
+            f"UPDATE remote_device_pairing_sessions SET confirmed_sig = '{'x' * 101}', confirmed_at = now() WHERE offer_id = '{o2}'",  # too large
+        ):
+            with pytest.raises(Exception):
+                await _sql(bad)
+        await _sql(f"UPDATE remote_device_pairing_sessions SET confirmed_sig = '{RECEIPT}', confirmed_at = now() WHERE offer_id = '{o2}'")  # the whole one goes
