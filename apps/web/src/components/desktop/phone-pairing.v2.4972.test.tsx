@@ -334,6 +334,21 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
   });
 
+  it('codex r5: a good LIST read does not reset the count of a session read that keeps failing — five in a row still end the wait', async () => {
+    installShell();
+    await START(); sessionState = NONCE; await tick(); readStatus = 503; // the list answers (waiting), the session read fails each time
+    for (let i = 0; i < 4; i++) await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요'); await tick();
+    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+  });
+
+  it('codex r5: an automatic end (reads failing) while the shell is writing the real pin → «paired», never an error over a finished pairing', async () => {
+    installShell(); shell['pair.cancel'] = { ok: true, pinning: true };
+    await START(); sessionState = NONCE; await tick(); readStatus = 503;
+    for (let i = 0; i < 5; i++) await tick(); await settle();
+    expect(line()).toContain('페어링했어요 · My Mac');
+  });
+
   it('the count of failed reads starts again with a new pairing (one that ended at five does not make the next end at its first failure)', async () => {
     installShell(); readStatus = 503;
     await START(); for (let i = 0; i < 5; i++) await tick();

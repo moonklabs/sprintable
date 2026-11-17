@@ -175,7 +175,9 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   };
   // the pairing ends with a line: the shell drops this offer (and a provisional pin, and an open number window), the server's offer ends too
   const endWith = (head: OfferHead, how: RetryLine | 'remoteOff'): void => {
-    void cancelPairSession(head, deps);
+    const g = gen.current;
+    // the shell may answer «pinning» (the real pin is being written this very moment — the computer's person had confirmed): then the pairing is DONE and the line is replaced, never an error over a finished pairing
+    void cancelPairSession(head, deps).then((r) => { if (r.pinning && gen.current === g) setView((v) => (v.kind === 'retry' || v.kind === 'remoteOff' ? { kind: 'paired', device: head.device_name } : v)); });
     known.current = null;
     setView(how === 'remoteOff' ? { kind: 'remoteOff' } : { kind: 'retry', line: how });
   };
@@ -218,8 +220,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       const found = await lookPaired(waitHost.head, waitHost.phoneKeyId);
       if (off) return;
       if (typeof found === 'object') { const how = readFailure(found.failed === 'read' ? undefined : found.failed); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; } // (a failed read of the list: counted like any failed read)
-      failedReads.current = 0;
       if (found === 'paired') {
+        failedReads.current = 0; // (the list read and the answer of the shell are what count here — no second read follows)
         const f = await finishPairSession(waitHost.head, { phoneCall });
         if (off) return;
         switch (f.kind) {
