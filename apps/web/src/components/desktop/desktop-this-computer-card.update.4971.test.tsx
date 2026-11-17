@@ -93,7 +93,7 @@ describe('[SID:4971 ③] the «이 컴퓨터» card and the update line', () => 
     const { updateAvailable, updateDownloading, updateInstalling, updateFailed } = koMessages.desktop;
     for (const line of [updateAvailable, updateDownloading, updateInstalling, updateFailed]) {
       expect(line, line).toContain('버전');
-      expect(line, line).not.toMatch(/판/);
+      expect(line, line).not.toMatch(/(?<![가-힣])판/); // the standalone team word (새 판 · 판이 …) — not a longer word that merely contains 판 (게시판)
       expect(line.split('{version}').length - 1, line).toBe(1);
       // a Korean particle (이/가/은/는/을/를/과/와/으로…) glued to the number would read wrong for some numbers (0.2.151이 · 0.2.150가)
       expect(line, line).not.toMatch(/\{version\}[가-힣]/);
