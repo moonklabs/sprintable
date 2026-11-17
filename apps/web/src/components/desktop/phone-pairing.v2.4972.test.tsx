@@ -51,6 +51,8 @@ let root: Root;
 let sessionState: { state: string; n_m: string | null; sig: string | null };
 let listStatus = 200; // the status the server's LIST of this person's phones answers
 let readStatus = 200; // the status the server's state read answers (a read that fails: 401 · 503 …)
+let readBody: unknown = {}; // …and what it says with that status
+let revealRes: (() => Response) | null = null; // the reveal post's answer when it is not the good 202
 let serverCalls: string[];
 let commitPost: () => Response;
 beforeEach(() => {
@@ -69,7 +71,7 @@ beforeEach(() => {
     'app.settings': { ok: true },
   };
   sessionState = { state: 'committed', n_m: null, sig: null };
-  readStatus = 200;
+  readStatus = 200; readBody = {}; revealRes = null;
   listStatus = 200;
   pairs = [];
   commitPost = () => res(202, { state: 'committed' });
@@ -81,8 +83,8 @@ beforeEach(() => {
     if (key === 'POST /api/remote-devices') return registerPost();
     if (key === 'GET /api/remote-devices') return listStatus === 200 ? res(200, { devices: [{ id: KEY_ID, pairs }] }) : res(listStatus, {});
     if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/commit`) return commitPost();
-    if (key === `GET /api/remote-devices/pairing-sessions/${HEAD.offer_id}`) return readStatus === 200 ? res(200, sessionState) : res(readStatus, {});
-    if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/reveal`) return res(202, { state: 'revealed' });
+    if (key === `GET /api/remote-devices/pairing-sessions/${HEAD.offer_id}`) return readStatus === 200 ? res(200, sessionState) : res(readStatus, readBody);
+    if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/reveal`) return revealRes ? revealRes() : res(202, { state: 'revealed' });
     if (key === `POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`) return res(200, { state: 'burned' });
     if (key === 'GET /api/remote-devices/pairing-target') return res(404, {});
     throw new Error(`unexpected ${key}`);
@@ -230,11 +232,34 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(buttons()).toContain('다시 찍기'); expect(sentTypes()).not.toContain('pair.reveal');
   });
 
+  it('lens 5842 delta 4: the server knows no such offer (404 offer_not_found) → its own line «the computer does not know this QR» at once — not five failed reads and «not reachable»', async () => {
+    installShell();
+    await START(); readStatus = 404; readBody = { error: { code: 'offer_not_found' } }; await tick();
+    expect(line()).toBe('컴퓨터가 이 QR을 몰라요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+    expect(sentTypes()).not.toContain('pair.reveal');
+  });
+  it('lens 5842 delta 4: the server says «no such offer» at the reveal → its own line (not «not paired»)', async () => {
+    installShell(); revealRes = () => res(404, { error: { code: 'offer_not_found' } });
+    await START(); sessionState = NONCE; await tick(); await tick();
+    expect(line()).toBe('컴퓨터가 이 QR을 몰라요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+  });
+  it('lens 5842 delta 4: the offer is gone while the phone waits for the computer\'s [같아요] → the same own line (not «the computer did not press»)', async () => {
+    installShell(); pairs = [];
+    await START(); sessionState = NONCE; await tick(); await tick();
+    expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요');
+    readStatus = 404; readBody = { error: { code: 'offer_not_found' } }; await tick();
+    expect(line()).toBe('컴퓨터가 이 QR을 몰라요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+  });
+  it('lens 5842 delta 4: a 403 on the state read is not told as «signed out» (it may be an organization refusal) — it is a read that failed: tried again', async () => {
+    installShell();
+    await START(); readStatus = 403; await tick();
+    expect(line()).not.toContain('로그인'); expect(buttons()).not.toContain('다시 찍기');
+  });
   it('after the phone\'s person agreed, the computer\'s person says no (the offer burned): its own line — «nothing was kept on this phone» — and the shell is told to drop the provisional pin', async () => {
     installShell();
     await START(); sessionState = NONCE; await tick();
     sessionState = { state: 'burned', n_m: null, sig: null }; await tick();
-    expect(line()).toBe('컴퓨터에서 [같아요]를 누르지 않아 페어링하지 못했어요 — 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
+    expect(line()).toBe('컴퓨터에서 끝나지 않아 페어링하지 못했어요 — 컴퓨터에서 [같아요]를 누르지 않았거나 컴퓨터가 저장하지 못했어요. 폰에는 아무것도 남지 않았어요. 새 QR로 다시 해 주세요');
     expect(sent.filter((x) => x.type === 'pair.cancel')).toEqual([{ type: 'pair.cancel', args: { offer_id: HEAD.offer_id } }]);
     expect(serverCalls).toContain(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`);
     expect(sentTypes()).not.toContain('pair.finish'); // never made real
@@ -308,7 +333,7 @@ describe('[4972] the new pairing on the phone screen', () => {
     installShell(); readStatus = 503;
     await START(); for (let i = 0; i < 4; i++) await tick();
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…'); await tick();
-    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+    expect(line()).toBe('서버에 닿지 않아요 — 폰의 인터넷 연결을 확인한 뒤 새 QR을 찍어 주세요');
   });
 
   it('a good read in between starts the count again', async () => {
@@ -331,7 +356,7 @@ describe('[4972] the new pairing on the phone screen', () => {
     await START(); sessionState = NONCE; await tick(); listStatus = 503;
     for (let i = 0; i < 4; i++) await tick();
     expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요'); await tick();
-    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+    expect(line()).toBe('서버에 닿지 않아요 — 폰의 인터넷 연결을 확인한 뒤 새 QR을 찍어 주세요');
   });
 
   it('codex r5: a good LIST read does not reset the count of a session read that keeps failing — five in a row still end the wait', async () => {
@@ -339,7 +364,7 @@ describe('[4972] the new pairing on the phone screen', () => {
     await START(); sessionState = NONCE; await tick(); readStatus = 503; // the list answers (waiting), the session read fails each time
     for (let i = 0; i < 4; i++) await tick();
     expect(line()).toBe('컴퓨터에서 [같아요]를 눌러 주세요'); await tick();
-    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+    expect(line()).toBe('서버에 닿지 않아요 — 폰의 인터넷 연결을 확인한 뒤 새 QR을 찍어 주세요');
   });
 
   it('codex r5: an automatic end (reads failing) while the shell is writing the real pin → «paired», never an error over a finished pairing', async () => {
@@ -352,7 +377,7 @@ describe('[4972] the new pairing on the phone screen', () => {
   it('the count of failed reads starts again with a new pairing (one that ended at five does not make the next end at its first failure)', async () => {
     installShell(); readStatus = 503;
     await START(); for (let i = 0; i < 5; i++) await tick();
-    expect(line()).toBe('그 컴퓨터에 지금 닿지 않아요 — 컴퓨터의 Sprintable 앱이 켜져 있는지 본 뒤 다시 찍어 주세요');
+    expect(line()).toBe('서버에 닿지 않아요 — 폰의 인터넷 연결을 확인한 뒤 새 QR을 찍어 주세요');
     await press('다시 찍기'); await press('페어링'); // a new pairing on the same screen
     await tick(); expect(line()).toBe('컴퓨터 화면을 확인하는 중…'); // the first failed read of the new one does not end it
   });

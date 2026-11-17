@@ -70,11 +70,13 @@ describe('[4972] sendPairCommit', () => {
   it('the key step ends as it did before: no screen lock · already paired (nothing asked of the shell)', async () => {
     server(routes(() => res(202, {})));
     await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall: shell({ 'device.key.info': { id: 'x', ok: false, code: 'no_screen_lock' } }) })).resolves.toEqual({ kind: 'noScreenLock' });
+  });
+  it('lens 5842 delta 2: a phone the list already shows as paired is NOT ended on the page — the shell reads the list itself and says what it found (a real pin · an old line · nothing)', async () => {
     const routes2 = { ...routes(() => res(202, {})), 'GET /api/remote-devices': () => res(200, { devices: [{ id: KEY_ID, pairs: [{ setup_id: HEAD.setup_id }] }] }) };
     server(routes2);
-    const phoneCall = okShell();
-    await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall })).resolves.toEqual({ kind: 'alreadyPaired' });
-    expect(phoneCall).not.toHaveBeenCalledWith('pair.commit', expect.anything());
+    const phoneCall = shell({ 'device.key.info': okKey, 'pair.commit': { id: 'x', ok: false, code: 'host_already_paired' } });
+    await expect(sendPairCommit(HEAD, 'iPhone', { phoneCall })).resolves.toEqual({ kind: 'computerHolds' });
+    expect(phoneCall).toHaveBeenCalledWith('pair.commit', expect.anything());
   });
 });
 
@@ -131,6 +133,10 @@ describe('[4972] revealPairSession', () => {
     const calls = server({ [post]: () => res(202, {}) });
     await expect(revealPairSession(HEAD, NONCE, { phoneCall: shell({ 'pair.reveal': { id: 'x', ok: false, code } }) })).resolves.toEqual({ kind });
     expect(calls).toEqual([]);
+  });
+  it('lens 5842 delta 4: the server\'s «no such offer» at the reveal is its own kind (not folded into «ended»)', async () => {
+    server({ [post]: () => res(404, { error: { code: 'offer_not_found' } }) });
+    await expect(revealPairSession(HEAD, NONCE, { phoneCall: shell({ 'pair.reveal': okReveal }) })).resolves.toEqual({ kind: 'offerGone' });
   });
   it('a reveal that is missing a field is failed (nothing posted)', async () => {
     const calls = server({ [post]: () => res(202, {}) });
@@ -228,11 +234,15 @@ describe('[4972] lens 5842 — the provisional pin: finish · cancel · the guar
     expect(calls.at(-1)!.key).toBe(`POST /api/remote-devices/pairing-sessions/${HEAD.offer_id}/close`);
     await expect(cancelPairSession(HEAD, { phoneCall: vi.fn(async () => { throw new Error('gone'); }) })).resolves.toEqual({ pinning: false });
   });
-  it('lookPairSession says WHY a read failed: signed out (401/403) · remote control off · anything else is just «read again»', async () => {
+  it('lookPairSession says WHY a read failed: signed out (401 — a 403 may be an organization refusal: not «signed out») · remote control off · anything else is just «read again»', async () => {
     const url = `GET /api/remote-devices/pairing-sessions/${HEAD.offer_id}`;
-    for (const [status, body, why] of [[401, {}, 'signedOut'], [403, {}, 'signedOut'], [409, { error: { code: 'remote_control_off' } }, 'remoteOff'], [500, {}, undefined], [404, { error: { code: 'offer_not_found' } }, undefined]] as const) {
+    for (const [status, body, why] of [[401, {}, 'signedOut'], [403, {}, undefined], [409, { error: { code: 'remote_control_off' } }, 'remoteOff'], [500, {}, undefined]] as const) {
       server({ [url]: () => res(status, body) });
       await expect(lookPairSession(HEAD), String(status)).resolves.toEqual(why ? { kind: 'failed', why } : { kind: 'failed' });
     }
+    server({ [url]: () => res(404, { error: { code: 'offer_not_found' } }) });
+    await expect(lookPairSession(HEAD)).resolves.toEqual({ kind: 'gone' }); // not a read that failed (that was told as «the computer is unreachable» after five): the server knows no such offer of ours
+    server({ [url]: () => res(404, {}) });
+    await expect(lookPairSession(HEAD)).resolves.toEqual({ kind: 'failed' });
   });
 });

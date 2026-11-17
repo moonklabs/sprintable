@@ -42,7 +42,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'computerHolds' | 'signedOut' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'notReady' | 'integrity' | 'offerGone' | 'startedAlready' | 'computerHolds' | 'signedOut' | 'serverUnreachable' | 'hostNo' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -171,7 +171,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     failedReads.current += 1;
     if (why === 'remoteOff') return 'remoteOff';
     if (why === 'signedOut') return 'signedOut';
-    return failedReads.current >= FAILED_READS ? 'unreachable' : 'wait';
+    return failedReads.current >= FAILED_READS ? 'serverUnreachable' : 'wait'; // (the read that failed is the PHONE's to the server — not the computer being unreachable)
   };
   // the pairing ends with a line: the shell drops this offer (and a provisional pin, and an open number window), the server's offer ends too
   const endWith = (head: OfferHead, how: RetryLine | 'remoteOff'): void => {
@@ -190,6 +190,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       if (off) return;
       if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...wait2 }); else endWith(wait2.head, how); return; }
       failedReads.current = 0;
+      if (look.kind === 'gone') { endWith(wait2.head, 'offerGone'); return; }
       if (look.kind === 'ended') { endWith(wait2.head, 'notPaired'); return; }
       if (look.kind === 'revealed') { setView({ kind: 'compare', head: wait2.head, phoneKeyId: wait2.phoneKeyId, note: 'open' }); return; } // revealed already (an answer was lost on the way back): the shell holds the number
       if (look.kind !== 'nonce') { setView({ ...wait2 }); return; } // waiting: look again
@@ -201,6 +202,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         case 'revealed': setView({ kind: 'compare', head: wait2.head, phoneKeyId: wait2.phoneKeyId, note: 'open' }); return;
         case 'cancelled': setView({ ...wait2, bind: 'cancelled' }); return; // the person closed the prompt: the same nonce may be tried again with [다시 확인]
         case 'ended': endWith(wait2.head, 'notPaired'); return;
+        case 'offerGone': endWith(wait2.head, 'offerGone'); return;
         case 'integrity': endWith(wait2.head, 'integrity'); return; // the computer's answer did not fit its key: its own line (not a time-out)
         case 'expired': endWith(wait2.head, 'expired'); return;
         case 'noScreenLock': case 'biometricRequired': void cancelPairSession(wait2.head, deps); setView({ kind: r.kind }); return; // (the shell's offer is dropped too: nothing is left half-open)
@@ -237,6 +239,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       if (off) return;
       if (look.kind === 'failed') { const how = readFailure(look.why); if (how === 'wait') setView({ ...waitHost }); else endWith(waitHost.head, how); return; }
       failedReads.current = 0;
+      if (look.kind === 'gone') { endWith(waitHost.head, 'offerGone'); return; }
       if (look.kind === 'ended') { endWith(waitHost.head, 'hostNo'); return; } // the computer's person said «different» (or the window ended): the shell drops what it held
       setView({ ...waitHost });
     })(), POLL_MS);
@@ -311,6 +314,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'startedAlready': return t('startedAlready');
       case 'computerHolds': return t('computerHolds');
       case 'signedOut': return t('signedOut');
+      case 'serverUnreachable': return t('serverUnreachable');
       case 'hostNo': return t('hostNo');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');

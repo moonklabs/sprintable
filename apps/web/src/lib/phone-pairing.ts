@@ -124,7 +124,7 @@ async function readPhones(setupId: string): Promise<PhonesRead> {
   try {
     const res = await fetchWithAuth('/api/remote-devices', { headers: orgHeader(setupId) });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return { failed: 'signedOut' };
+      if (res.status === 401) return { failed: 'signedOut' };
       if ((await read(res)).code === 'remote_control_off') return { failed: 'remoteOff' };
       return { failed: 'read' };
     }
@@ -143,7 +143,7 @@ async function myPhones(setupId: string): Promise<Paired[] | null> {
  * The first half of both procedures: this phone's key (the shell's own) → the computer's org → register the key (the same key again = the same row) → already paired?
  * → `{ phoneKeyId }`, or the outcome that ends the step. Shared as it was (story 4972 moved these lines into a function; the old procedure's calls and answers are the same ones).
  */
-async function prepareKey(head: OfferHead, label: string, deps: PairDeps): Promise<{ phoneKeyId: string } | { end: OfferOutcome }> {
+async function prepareKey(head: OfferHead, label: string, deps: PairDeps, opts: { newProcedure?: boolean } = {}): Promise<{ phoneKeyId: string } | { end: OfferOutcome }> {
   const key = await safeCall(deps, 'device.key.info', {});
   if (!key.ok) {
     if (key.code === 'no_screen_lock') return { end: { kind: 'noScreenLock' } };
@@ -167,8 +167,12 @@ async function prepareKey(head: OfferHead, label: string, deps: PairDeps): Promi
   } catch {
     return { end: { kind: 'failed' } };
   }
-  const phones = await myPhones(head.setup_id);
-  if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { end: { kind: 'alreadyPaired' } };
+  // the OLD procedure: a phone that is already paired with this computer ends here (as it always did). The NEW procedure does not decide this on the page: the shell reads the list itself before it makes the commitment and says what it found
+  // (a REAL pin → paired again at the final moment · an old line on the list → «remove it on the computer first» · nothing → on) — lens 5842 delta 2
+  if (!opts.newProcedure) {
+    const phones = await myPhones(head.setup_id);
+    if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { end: { kind: 'alreadyPaired' } };
+  }
   return { phoneKeyId };
 }
 
@@ -249,7 +253,7 @@ function sessionRefusal(code: string): OfferOutcome | { kind: 'notReady' } {
 
 /** [페어링] on a v2 QR: register this phone's key → the shell's commitment → the server. `sent` = the commitment is with the computer (the screen then waits for its nonce). */
 export async function sendPairCommit(head: OfferHead, label: string, deps: PairDeps): Promise<OfferOutcome | { kind: 'notReady' }> {
-  const prepared = await prepareKey(head, label, deps);
+  const prepared = await prepareKey(head, label, deps, { newProcedure: true });
   if ('end' in prepared) return prepared.end;
   if (deps.alive && !deps.alive()) return { kind: 'failed' }; // the person left while the key was being registered: nothing goes further
   const { phoneKeyId } = prepared;
@@ -286,15 +290,18 @@ export type SessionLook =
   | { kind: 'nonce'; n_m: string; sig: string } // it did: the shell checks it and asks the person to confirm
   | { kind: 'revealed' } // the reveal is already at the server (an earlier answer was lost on the way back): the shell holds the number — go on to its window
   | { kind: 'ended' } // burned · expired — this pairing is over (the phone cannot tell which: start again with a new QR)
-  | { kind: 'failed'; why?: 'signedOut' | 'remoteOff' }; // a read that failed: signed out (401/403) or remote control off (409) say so — anything else is «read again»
+  | { kind: 'failed'; why?: 'signedOut' | 'remoteOff' } // a read that failed: signed out (401) or remote control off (409) say so — anything else is «read again» (a 403 may be an organization refusal: not «signed out»)
+  | { kind: 'gone' }; // 404 offer_not_found: the server knows no such offer of ours — NOT a failed read of the network
 
 /** One look at the server's state of this pairing (the screen asks every 1.5 s, up to the QR's time). */
 export async function lookPairSession(head: OfferHead): Promise<SessionLook> {
   try {
     const res = await fetchWithAuth(`${sessionUrl(head)}?setup_id=${encodeURIComponent(head.setup_id)}`, { headers: orgHeader(head.setup_id) });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return { kind: 'failed', why: 'signedOut' };
-      if ((await read(res)).code === 'remote_control_off') return { kind: 'failed', why: 'remoteOff' };
+      if (res.status === 401) return { kind: 'failed', why: 'signedOut' };
+      const code = (await read(res)).code;
+      if (code === 'remote_control_off') return { kind: 'failed', why: 'remoteOff' };
+      if (res.status === 404 && code === 'offer_not_found') return { kind: 'gone' };
       return { kind: 'failed' };
     }
     const body = (await res.json()) as { state?: string; n_m?: unknown; sig?: unknown };
@@ -312,6 +319,7 @@ export type RevealOutcome =
   | { kind: 'revealed' } // the reveal is at the server: the number is up in the SHELL's own window (never here) for both people to compare
   | { kind: 'cancelled' } // the person did not confirm on the OS prompt — the same nonce may be tried again
   | { kind: 'ended' } // the offer ended (the server burned it)
+  | { kind: 'offerGone' } // the server knows no such offer of ours (not registered · someone else's · gone) — its own line
   | { kind: 'integrity' } // the computer's nonce did not fit the key the QR carried (`bad_nonce`): NOT a time-out — a signal worth a line of its own
   | { kind: 'expired' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
@@ -340,7 +348,7 @@ export async function revealPairSession(head: OfferHead, nonce: { n_m: string; s
     });
     if (res.ok) return { kind: 'revealed' };
     const refusal = sessionRefusal((await read(res)).code);
-    return refusal.kind === 'offerUsed' || refusal.kind === 'offerGone' ? { kind: 'ended' } : refusal.kind === 'expired' ? { kind: 'expired' } : { kind: 'failed' };
+    return refusal.kind === 'offerUsed' ? { kind: 'ended' } : refusal.kind === 'offerGone' ? { kind: 'offerGone' } : refusal.kind === 'expired' ? { kind: 'expired' } : { kind: 'failed' };
   } catch {
     return { kind: 'failed' };
   }
