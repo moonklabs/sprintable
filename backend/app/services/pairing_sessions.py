@@ -31,6 +31,7 @@ from app.services.desktop_relay import DesktopRelayError
 
 logger = logging.getLogger(__name__)
 
+RECEIPT_GRACE = timedelta(seconds=15)  # story 4972 (4a): how long after the offer's end a receipt is still taken — the same constant as the phone's provisional-pin window (FINISH_GRACE_MS in lib/phoneCalls.js)
 BURNED = "offer_burned"  # the code a router commits (the burn is the point of the refusal: it must not be rolled back with it)
 _B64_32 = r"^[A-Za-z0-9_-]{43}$"   # 32 bytes
 _B64_16 = r"^[A-Za-z0-9_-]{22}$"   # 16 bytes
@@ -57,6 +58,12 @@ class SessionNonce(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     n_m: str = Field(pattern=_B64_16)
+    sig: str = Field(pattern=_B64_SIG)
+
+
+class SessionConfirmed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sig: str = Field(pattern=_B64_SIG)
 
 
@@ -114,7 +121,11 @@ def _live(row: RemoteDevicePairingSession | None) -> RemoteDevicePairingSession:
 
 
 async def _burn(db: AsyncSession, row: RemoteDevicePairingSession, reason: str) -> DesktopRelayError:
-    """end the offer for good and return the refusal to raise (the router commits the burn for this code)"""
+    """end the offer for good and return the refusal to raise (the router commits the burn for this code).
+    story 4972 (4a · lens 5844): an offer the computer has already RECEIPTED is a finished pairing (the computer holds the phone): no one else's second commitment · reveal · key mismatch ends it — a burn would hide the receipt the
+    phone has yet to read, leaving only the computer paired. Those are refused (409 `already_confirmed`) and the row is left whole; only the phone's own [달라요] (`close_by_phone`) ends such an offer."""
+    if row.confirmed_sig is not None:
+        return DesktopRelayError(409, "already_confirmed", "this pairing offer was already confirmed")
     if row.burned_at is None:
         row.burned_at, row.burn_reason = _now(), reason
         await db.flush()
@@ -145,7 +156,8 @@ async def register(db: AsyncSession, setup: DesktopSetup, body: SessionRegister)
     # a new QR replaces the one before it: that one ends (no two offers of one computer are live at once), and old rows go
     await db.execute(update(RemoteDevicePairingSession).where(
         RemoteDevicePairingSession.setup_id == setup.id, RemoteDevicePairingSession.burned_at.is_(None), RemoteDevicePairingSession.expires_at > now,
-    ).values(burned_at=now, burn_reason="superseded"))
+        RemoteDevicePairingSession.confirmed_sig.is_(None),
+    ).values(burned_at=now, burn_reason="superseded"))  # (a row with the computer's receipt is a finished pairing: `confirmed_sig IS NULL` keeps it whole until its own end)
     await db.execute(delete(RemoteDevicePairingSession).where(
         RemoteDevicePairingSession.setup_id == setup.id, RemoteDevicePairingSession.expires_at < now - timedelta(hours=1),
     ))
@@ -173,12 +185,36 @@ async def post_nonce(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID,
     await db.flush()
 
 
+async def post_confirmed(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID, body: SessionConfirmed) -> None:
+    """story 4972 (wiring 4a): the computer's signed receipt «I confirmed THIS offer» — only for the offer of THIS setup (its device token: another setup's token finds «no such offer»), only after the phone revealed,
+    once (the same value again is fine; another is refused and nothing is overwritten). The server does not check the signature: the phone does, with the computer's key the QR carried.
+    The window it is taken in is the offer's end + RECEIPT_GRACE (the phone's provisional pin waits the same time): a person who pressed [같아요] just before the QR's end and whose computer needed a moment to keep the phone still gets
+    the receipt through. A burned offer takes none.
+    The order is the one a host that lost an answer needs: a receipt already stored is judged FIRST (the same value again is 200 — even after the window or after the phone's own [달라요] — another is 409 `already_confirmed`), so a
+    retry of the very bytes that went through is never read as a failure; only then «ended» (409 `offer_burned`) · «ran out» (410 `offer_expired`) · «nothing to confirm yet» (409 `no_reveal`) — four different answers."""
+    row = await _lock(db, setup.id, offer_id)
+    if row is None:
+        raise DesktopRelayError(404, "offer_not_found", "no such pairing offer")
+    if row.confirmed_sig is not None:
+        if row.confirmed_sig == body.sig:
+            return
+        raise DesktopRelayError(409, "already_confirmed", "this pairing offer was already confirmed")
+    if row.burned_at is not None:
+        raise DesktopRelayError(409, BURNED, "this pairing offer was ended")
+    if row.expires_at + RECEIPT_GRACE <= _now():
+        raise DesktopRelayError(410, "offer_expired", "the pairing offer has expired")
+    if row.reveal is None:
+        raise DesktopRelayError(409, "no_reveal", "there is no reveal to confirm")
+    row.confirmed_sig, row.confirmed_at = body.sig, _now()
+    await db.flush()
+
+
 async def close_by_host(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID) -> None:
     """The computer's person pressed [달라요] (or the window closed on its side): the offer ends. Idempotent."""
     row = await _lock(db, setup.id, offer_id)
     if row is None:
         raise DesktopRelayError(404, "offer_not_found", "no such pairing offer")
-    if row.burned_at is None:
+    if row.burned_at is None and row.confirmed_sig is None:  # (a receipted offer is a finished pairing: the computer closing its window afterwards does not hide the receipt)
         row.burned_at, row.burn_reason = _now(), "host_closed"
         await db.flush()
 
@@ -263,15 +299,17 @@ async def _mine(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, se
 
 
 async def state(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, offer_id: uuid.UUID) -> dict:
-    """What the phone that committed waits for: the computer's nonce (its value and signature). `burned` / `expired` end the wait."""
+    """What the phone that committed waits for: the computer's nonce (its value and signature). `burned` / `expired` end the wait. `confirmed_sig` (story 4972 · 4a): the computer's signed receipt once it
+    wrote one — also after the window ran out (the phone may read it a moment late: its own end is a little after the QR's) — and never on a burned offer (nothing is carried on a dead offer)."""
     row = await _mine(db, member_id=member_id, org_id=org_id, setup_id=setup_id, offer_id=offer_id)
     if row.burned_at is not None:
-        return {"state": "burned", "n_m": None, "sig": None}
+        return {"state": "burned", "n_m": None, "sig": None, "confirmed_sig": None}
+    receipt = row.confirmed_sig
     if row.expires_at <= _now():
-        return {"state": "expired", "n_m": None, "sig": None}
+        return {"state": "expired", "n_m": None, "sig": None, "confirmed_sig": receipt}
     if row.n_m is None:
-        return {"state": "committed", "n_m": None, "sig": None}
-    return {"state": "revealed" if row.reveal is not None else "nonce", "n_m": row.n_m, "sig": row.nonce_sig}
+        return {"state": "committed", "n_m": None, "sig": None, "confirmed_sig": None}
+    return {"state": "revealed" if row.reveal is not None else "nonce", "n_m": row.n_m, "sig": row.nonce_sig, "confirmed_sig": receipt}
 
 
 async def reveal(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, offer_id: uuid.UUID, body: SessionReveal) -> None:

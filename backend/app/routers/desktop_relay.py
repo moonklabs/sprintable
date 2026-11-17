@@ -535,6 +535,15 @@ async def post_pairing_session_nonce(offer_id: uuid.UUID, body: pairing_sessions
     return await _session_call(db, run)
 
 
+@router.post("/relay/pairing-sessions/{offer_id}/confirmed")
+async def post_pairing_session_confirmed(offer_id: uuid.UUID, body: pairing_sessions.SessionConfirmed, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 (wiring 4a) — the computer's signed receipt «I confirmed THIS offer», written once after the computer kept the phone. Only this setup's device token; the server carries it, the phone checks it."""
+    async def run():
+        await pairing_sessions.post_confirmed(db, setup, offer_id, body)
+        return {"state": "confirmed"}
+    return await _session_call(db, run)
+
+
 @router.post("/relay/pairing-sessions/{offer_id}/close")
 async def post_pairing_session_close(offer_id: uuid.UUID, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """story 4972 — the computer's person pressed [달라요] (or the QR was closed): the offer ends."""
