@@ -886,6 +886,13 @@ async def _sealed_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
     )).scalar())
 
 
+async def _lock_machine(db: AsyncSession, setup: DesktopSetup) -> None:
+    """Serialize everything that reads or stands the sealed mark for ONE Mac: the mark is shared by `org_id + machine_key` (a sibling lane · a replaced setup), so the lock is on EVERY setup row of that machine — always taken in the same order (by id),
+    so two siblings cannot wait for each other. (codex AC3 ① high: locking only this setup let setup A read «no mark» while sibling B committed its first sealed card — A's plaintext card then landed after the mark.) A setup with no machine key locks itself."""
+    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, or_(*same_mac)).order_by(DesktopSetup.id).with_for_update())
+
+
 async def _stand_sealed_mark(db: AsyncSession, setup: DesktopSetup, envelope: dict) -> None:
     """The mark stands with a freshly committed sealed card whose receivers ALL are active pins of this computer (the server cannot check a signature — it does not know the computer's identity key —
     so a form-only envelope naming unknown receivers does not close the plaintext road). The server's own now(), first one kept (COALESCE), in the card's transaction (a roll-back takes both)."""
@@ -909,9 +916,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
     # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock, the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
     # same moment: either order, no plaintext card is made AFTER the mark). The answer is ALWAYS 422, a re-send of a plaintext body included (no branch that tells the first from the second). No `detail`: not a word of the body comes back.
-    from app.services import pairing_sessions
-
-    await pairing_sessions.lock_setup(db, setup.id)
+    await _lock_machine(db, setup)
     if _plain_words(body) and not _network_first_stage(body) and await _sealed_mark(db, setup):
         raise DesktopRelayError(422, "sealed_required", "this computer sends sealed cards")
     q = select(AgentPermissionRequest).where(
@@ -1243,11 +1248,13 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
         # no state: the newest 100 of everything — and every request still waiting or only just expired (the lists' own «still shown» window is ≤ 1 h = MAX_WINDOW),
         # so a screen that reads the whole list cannot lose a waiting request to 100 newer ended ones
         recent = (await db.execute(base.limit(RECENT_CAP))).all()
-        live = (await db.execute(base.where(A.state == "pending", A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
-        merged = {r.id: (r, s) for r, s in [*recent, *live]}
-        # one answer carries at most LIST_CAP rows — the waiting ones first (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
-        live_ids = {r.id for r, _s in live}
-        ordered = sorted(merged.values(), key=lambda rs: (rs[0].id not in live_ids, -rs[0].created_at.timestamp()))
+        # (codex AC3 ① medium) the ones still OPEN are taken first and apart from the ones that only just ran out: more than LIST_CAP newer «pending but past their window» rows cannot push an older still-open one out of the answer
+        opened = (await db.execute(base.where(A.state == "pending", A.expires_at > now).limit(LIST_CAP))).all()
+        lapsed = (await db.execute(base.where(A.state == "pending", A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
+        merged = {r.id: (r, s) for r, s in [*recent, *lapsed, *opened]}
+        # one answer carries at most LIST_CAP rows — the open ones first, then the just-lapsed ones (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
+        open_ids, lapsed_ids = {r.id for r, _s in opened}, {r.id for r, _s in lapsed}
+        ordered = sorted(merged.values(), key=lambda rs: (0 if rs[0].id in open_ids else 1 if rs[0].id in lapsed_ids else 2, -rs[0].created_at.timestamp()))
         rows = sorted(ordered[:LIST_CAP], key=lambda rs: rs[0].created_at, reverse=True)
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:

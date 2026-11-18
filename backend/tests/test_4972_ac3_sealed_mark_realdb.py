@@ -309,7 +309,61 @@ def test_the_setup_lock_is_taken_before_the_mark_is_read_a_source_pin_for_the_ra
     from app.services import agent_permissions
 
     src = inspect.getsource(agent_permissions.report_request)
-    assert "lock_setup" in src and "_sealed_mark(" in src
-    assert src.index("lock_setup") < src.index("_sealed_mark("), "the lock must come before the mark is read"
+    assert "_sealed_mark(" in src
+    assert "_lock_machine(" in src and src.index("_lock_machine(") < src.index("_sealed_mark("), "the lock (every setup row of the machine) must come before the mark is read"
     assert src.index("_sealed_mark(") < src.index("existing = "), "the plaintext refusal comes before the re-send shortcut (a plaintext re-send is always 422)"
     assert "_stand_sealed_mark(" in src and src.index("_stand_sealed_mark(") > src.index("db.begin_nested()"), "the mark stands only after the row is made, in the same transaction"
+
+
+async def test_the_plaintext_decision_waits_for_a_sibling_setup_of_the_same_mac_the_lock_covers_the_machine_not_one_row(world):
+    """codex AC3 ① (high): the mark is shared by org + machine_key, so the lock must be too — with a lock on the setup's own row only, setup A could read «no mark» while sibling B stands it. Deterministic: another connection holds a
+    FOR UPDATE on the SIBLING's row; A's plaintext post must WAIT for it (and then be taken — no mark stood); reverting to the own-row lock makes it come back at once."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    a_name, b_name = "d4424 mac 4972mc1", "d4424 mac 4972mc2"
+    mk = "mk-4972-lock-" + uuid.uuid4().hex[:8]
+    async with _client() as c:
+        dev_a = await _device(c, name=a_name); agent_a = await _with_session(c, dev_a)
+        await _device(c, name=b_name)
+        await _sql(f"UPDATE desktop_setups SET machine_key = '{mk}' WHERE device_name IN ('{a_name}','{b_name}')")
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng)() as holder:
+                await holder.execute(text("SELECT id FROM desktop_setups WHERE device_name = :n FOR UPDATE"), {"n": b_name})  # the sibling's row is held
+                task = asyncio.create_task(_post_ask(c, dev_a, _plain(agent_a)))
+                await asyncio.sleep(1.5)
+                assert not task.done(), "A's plaintext decision did not wait for the sibling setup of the same Mac (the lock covers one row only)"
+                await holder.commit()
+            r = await asyncio.wait_for(task, 15)
+            assert r.status_code == 201, r.text  # (no mark stood: taken)
+        finally:
+            await eng.dispose()
+
+
+async def test_still_open_requests_come_before_just_lapsed_ones_in_the_whole_list_even_when_many_newer_lapsed_ones_exist(world, monkeypatch):
+    """codex AC3 ① (medium): the lapsed (pending in the database, window passed within the hour) used to share one LIMIT with the open ones — more than LIST_CAP newer lapsed rows pushed an older still-open request out."""
+    from app.services import agent_permissions
+
+    monkeypatch.setattr(agent_permissions, "RECENT_CAP", 1)
+    monkeypatch.setattr(agent_permissions, "LIST_CAP", 3)
+    name = "d4424 mac 4972md"
+    async with _client() as c:
+        device = await _device(c, name=name); agent = await _with_session(c, device)
+        ids = {}
+        for k in ("open_old", "l1", "l2", "l3", "l4", "l5"):
+            body = _ask(agent, request_id=str(uuid.uuid4())); ids[k] = body["request_id"]
+            assert (await _post_ask(c, device, body)).status_code == 201
+        base = datetime.now(timezone.utc) - timedelta(hours=2)
+        for i, k in enumerate(("open_old", "l1", "l2", "l3", "l4", "l5")):
+            await _sql(f"UPDATE agent_permission_requests SET created_at = '{(base + timedelta(minutes=i)).isoformat()}' WHERE request_id = '{ids[k]}'")
+        for k in ("l1", "l2", "l3", "l4", "l5"):  # newer, pending in the database, their window passed 10 minutes ago
+            await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '10 minutes' WHERE request_id = '{ids[k]}'")
+        got = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert ids["open_old"] in {r["request_id"] for r in got}, "the still-open request must not be pushed out by newer lapsed ones"
+        assert len(got) <= 3
