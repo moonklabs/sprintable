@@ -13,8 +13,8 @@ No schema change (no CHECK on `payload`). One UPDATE, row locks only; dev measur
 """
 from alembic import op
 
-revision = "0485"
-down_revision = "0484"
+revision = "0486"
+down_revision = "0485"
 branch_labels = None
 depends_on = None
 

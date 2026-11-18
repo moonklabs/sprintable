@@ -991,15 +991,15 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert any("drop_constraint" in h and "_CHECK" in h for h in cleared) and any("NOT VALID" in h for h in cleared) and any("VALIDATE CONSTRAINT" in h for h in cleared), cleared
     assert any("_END_PENDING" in h for h in cleared) and any("_CLEAR_ENDED" in h for h in cleared), cleared
     assert not any(k in h for h in cleared for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "DELETE")), "no column added, dropped or retyped, no row deleted"
-    # story 4976: 0485 is ONE statement of upgrade(): an UPDATE of `desktop_commands` — a `send_prompt` command that is over (done · failed · rejected) keeps {session_key, conversation_id} and loses the words, the plain signature (a sha256 of the words) and the
+    # story 4976: 0486 is ONE statement of upgrade(): an UPDATE of `desktop_commands` — a `send_prompt` command that is over (done · failed · rejected) keeps {session_key, conversation_id} and loses the words, the plain signature (a sha256 of the words) and the
     # envelope. Why a running old revision lives with it: it only drops words from rows that are OVER (the old code never reads the payload of a finished command again — a result is stored on the row, the conversation line was written when it went `done`), no schema
     # change (no CHECK on `payload`), open commands are not touched, nothing is renamed, dropped or added. Irreversible by design (the downgrade is a no-op). Row locks only, a few rows in dev (9, measured by the PO) and a table of recent commands in prod.
-    cmds = [h for h in hits if h.startswith("0485_")]
+    cmds = [h for h in hits if h.startswith("0486_")]
     assert len(cmds) == 1 and "op.execute(" in cmds[0], cmds
-    up0485 = (_ROOT / "backend/alembic/versions/0485_desktop_prompt_ended_payload.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
-    assert "UPDATE desktop_commands" in up0485 and "kind = 'send_prompt'" in up0485 and "state IN ('done', 'failed', 'rejected')" in up0485, "only the finished instruction rows"
-    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0485), "0485 changes rows only: no schema change, no row deleted"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_"))]
+    up0486 = (_ROOT / "backend/alembic/versions/0486_desktop_prompt_ended_payload.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert "UPDATE desktop_commands" in up0486 and "kind = 'send_prompt'" in up0486 and "state IN ('done', 'failed', 'rejected')" in up0486, "only the finished instruction rows"
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0486), "0486 changes rows only: no schema change, no row deleted"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

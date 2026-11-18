@@ -184,11 +184,11 @@ async def test_a_refused_press_never_sends_the_words_back(world):
 
 
 def _migration_sql(monkeypatch) -> str:
-    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0485_desktop_prompt_ended_payload.py"
-    spec = importlib.util.spec_from_file_location("m0485", path)
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0486_desktop_prompt_ended_payload.py"
+    spec = importlib.util.spec_from_file_location("m0486", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    assert (mod.revision, mod.down_revision) == ("0485", "0484")
+    assert (mod.revision, mod.down_revision) == ("0486", "0485")
     got: list[str] = []
     monkeypatch.setattr(mod.op, "execute", lambda sql: got.append(str(sql)))  # (alembic's `op` is one shared module: undone at the end of the test, or every later migration test would run nothing)
     mod.upgrade()
