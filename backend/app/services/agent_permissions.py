@@ -36,6 +36,9 @@ from app.services.tool_names import shown_tool
 logger = logging.getLogger(__name__)
 
 MAX_WINDOW = timedelta(seconds=3600)  # a daemon's permission window is never longer (contract §9 ①)
+OPEN_LIMIT = 50  # story 4972 (AC3 ① · lens push landing · PO 8787): the open questions (pending · window not passed) the server keeps for ONE computer — measured on dev over 30 days: at most 11 at once; past this a card is refused (422 open_limit), never silently dropped
+RECENT_CAP = 100  # the newest rows of EVERY state one list answer starts from (before the waiting ones are added)
+LIST_CAP = 200  # story 4972 (lens push landing): the most rows ONE list answer carries (the waiting ones first) — a response's size is bounded whatever a computer reported
 PHONES_PER_PERSON = 3  # PO B-4 · story #4535 AC2 — registered phone keys a person may hold
 _TOOL_PATTERN = r"^[A-Za-z0-9_.:-]{1,64}$"
 _HASH_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -860,20 +863,84 @@ class PermissionRequestReport(BaseModel):
         return self
 
 
+def _plain_words(body: "PermissionRequestReport") -> bool:
+    """A request that carries any of its words as text (tool · summary · workdir · preview) — the words the server may not read once a computer has sealed."""
+    return any(v is not None for v in (body.tool, body.summary, body.workdir, body.preview))
+
+
+def _network_first_stage(body: "PermissionRequestReport") -> bool:
+    """The one plain request a sealing computer still sends (contract §3 · AC3 exception): Claude's sandbox network question at its FIRST stage — the fixed word `network` and nothing else
+    (the server needs its tool name to run the second step). Every field is pinned: a different word, a detail, a folder, a preview, a mask or a cut mark → not this question."""
+    return (
+        body.runtime == "claude" and body.tool == SANDBOX_NET_TOOL and body.summary == "network" and body.masked is False and body.truncated is False
+        and body.terminal_only is False and body.workdir is None and body.preview is None and body.input_hash is not None and body.envelope is None
+    )
+
+
+async def _sealed_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """Has this computer sealed a card before? — its own mark, or the mark of any setup of the same Mac in the same organization (`org_id + machine_key` — revoked ones included: a replaced
+    setup keeps its mark, so a new setup_id does not open a plaintext window). A setup with no `machine_key` (an app that sent no device id) reads its own mark only."""
+    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
+    return bool((await db.execute(
+        select(exists().where(DesktopSetup.org_id == setup.org_id, DesktopSetup.sealed_cards_at.is_not(None), or_(*same_mac)))
+    )).scalar())
+
+
+async def _lock_machine(db: AsyncSession, setup: DesktopSetup) -> None:
+    """Serialize everything that reads or stands the sealed mark for ONE Mac: the mark is shared by `org_id + machine_key` (a sibling lane · a replaced setup), so the lock is on EVERY setup row of that machine — always taken in the same order (by id),
+    so two siblings cannot wait for each other. (codex AC3 ① high: locking only this setup let setup A read «no mark» while sibling B committed its first sealed card — A's plaintext card then landed after the mark.) A setup with no machine key locks itself."""
+    # (lens 5848 · low) the lock covers the LIVE siblings and this setup only: a revoked setup cannot report a card (its token is gone), so there is nothing to wait for — and a Mac that is installed again and again would otherwise pile up
+    # revoked rows that every card then locks. The mark is still READ across revoked setups (`_sealed_mark`).
+    live_siblings = [and_(DesktopSetup.machine_key == setup.machine_key, DesktopSetup.revoked_at.is_(None))] if setup.machine_key is not None else []
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, or_(DesktopSetup.id == setup.id, *live_siblings)).order_by(DesktopSetup.id).with_for_update())
+
+
+async def _stand_sealed_mark(db: AsyncSession, setup: DesktopSetup, envelope: dict) -> None:
+    """The mark stands with a freshly committed sealed card whose receivers ALL are active pins of this computer (the server cannot check a signature — it does not know the computer's identity key —
+    so a form-only envelope naming unknown receivers does not close the plaintext road). The server's own now(), first one kept (COALESCE), in the card's transaction (a roll-back takes both)."""
+    to = {str(t) for t in envelope["to"]}
+    active = {str(i) for i in (await db.execute(
+        select(RemoteDevicePairing.remote_device_id).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id).where(
+            RemoteDevicePairing.setup_id == setup.id, RemoteDevicePairing.removed_at.is_(None), RemoteDevice.revoked_at.is_(None),
+        )
+    )).scalars()}
+    if to and to <= active:
+        await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id).values(sealed_cards_at=func.coalesce(DesktopSetup.sealed_cards_at, func.now())))
+
+
 async def report_request(db: AsyncSession, setup: DesktopSetup, body: PermissionRequestReport) -> tuple[AgentPermissionRequest, bool]:
     _check_agent(setup, body.agent_member_id)
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    # LOCK ORDER (lens 5848 · codex deltas): the setup rows FIRST (the order an organization's delete takes: setup → its requests by cascade), and the purge below takes NO wait on a request row somebody else holds
+    # (`SKIP LOCKED`) — so this report never waits for a request row while it holds the setup rows. `answer_request` takes request → setup; with this report waiting for no request row, the two cannot wait for each other.
+    await _lock_machine(db, setup)
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
     await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
+    # (codex delta on lens 5848 · medium) a request that authenticated BEFORE its setup was revoked reaches this point after the revocation: under the lock the setup is read again — a revoked one takes no card (it is outside every live sibling's lock set, so a
+    # card of it could stand a mark a new setup of the same Mac never read). The token check is a read without a lock; this is the fence.
+    if (await db.execute(select(DesktopSetup.revoked_at).where(DesktopSetup.id == setup.id))).scalar_one_or_none() is not None:
+        raise DesktopRelayError(401, "DEVICE_TOKEN_INVALID", "a valid device token is required")
+    # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock (taken above), the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
+    # same moment: either order, no plaintext card is made AFTER the mark). The answer is ALWAYS 422, a re-send of a plaintext body included (no branch that tells the first from the second). No `detail`: not a word of the body comes back.
+    if _plain_words(body) and not _network_first_stage(body) and await _sealed_mark(db, setup):
+        raise DesktopRelayError(422, "sealed_required", "this computer sends sealed cards")
     q = select(AgentPermissionRequest).where(
         AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
     )
     existing = (await db.execute(q)).scalar_one_or_none()
     if existing is not None:
         return existing, False
+    # story 4972 (AC3 ① · lens push landing): the open questions the server keeps for ONE computer — one device token cannot push the real ones out of every list; past the limit the card is refused (a fixed word — no count, no id)
+    open_now = (await db.execute(
+        select(func.count()).select_from(AgentPermissionRequest).where(
+            AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at > now,
+        )
+    )).scalar_one()
+    if open_now >= OPEN_LIMIT:
+        raise DesktopRelayError(422, "open_limit", "this computer has the most open questions the server keeps")
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == body.session_key)
     )).scalar_one_or_none()
@@ -902,6 +969,8 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
             db.add(row)
     except IntegrityError:
         return (await db.execute(q)).scalar_one(), False
+    if body.envelope is not None:
+        await _stand_sealed_mark(db, setup, body.envelope)  # (same transaction: the router commits once, at the end)
     # story #4590 (Yuna §3): a terminal-only question sends no notice — the notice is the phone's push, and a push calls a person to
     # something they cannot do there; the card is on the approvals list (its count), the one at that computer sees the board
     if recipient is not None and not row.terminal_only:
@@ -1008,9 +1077,14 @@ async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, set
     without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
     now = now or _now()
     scope = [AgentPermissionRequest.setup_id == setup_id] if setup_id is not None else []
+    # `SKIP LOCKED`: a request row held by another transaction (an answer landing at the end of its window · an organization's delete) is left for the next report / the minute job — the purge never WAITS on a request row, so a report
+    # that holds its computer's setup rows cannot be one side of a deadlock with a path that takes a request row first
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+           .with_for_update(skip_locked=True))
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+        .where(AgentPermissionRequest.id.in_(due))
         .values(state="expired", result_code="expired", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
@@ -1182,14 +1256,19 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "pending": and_(A.state == "pending", A.expires_at > now),
             "expired": or_(A.state == "expired", and_(A.state == "pending", A.expires_at <= now)),
         }.get(state, A.state == state)
-        rows = (await db.execute(base.where(shown).limit(100))).all()
+        rows = (await db.execute(base.where(shown).limit(RECENT_CAP))).all()
     else:
         # no state: the newest 100 of everything — and every request still waiting or only just expired (the lists' own «still shown» window is ≤ 1 h = MAX_WINDOW),
         # so a screen that reads the whole list cannot lose a waiting request to 100 newer ended ones
-        recent = (await db.execute(base.limit(100))).all()
-        live = (await db.execute(base.where(A.state == "pending", A.expires_at > now - MAX_WINDOW).limit(500))).all()
-        merged = {r.id: (r, s) for r, s in [*recent, *live]}
-        rows = sorted(merged.values(), key=lambda rs: rs[0].created_at, reverse=True)
+        recent = (await db.execute(base.limit(RECENT_CAP))).all()
+        # (codex AC3 ① medium) the ones still OPEN are taken first and apart from the ones that only just ran out: more than LIST_CAP newer «pending but past their window» rows cannot push an older still-open one out of the answer
+        opened = (await db.execute(base.where(A.state == "pending", A.expires_at > now).limit(LIST_CAP))).all()
+        lapsed = (await db.execute(base.where(A.state == "pending", A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
+        merged = {r.id: (r, s) for r, s in [*recent, *lapsed, *opened]}
+        # one answer carries at most LIST_CAP rows — the open ones first, then the just-lapsed ones (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
+        open_ids, lapsed_ids = {r.id for r, _s in opened}, {r.id for r, _s in lapsed}
+        ordered = sorted(merged.values(), key=lambda rs: (0 if rs[0].id in open_ids else 1 if rs[0].id in lapsed_ids else 2, -rs[0].created_at.timestamp()))
+        rows = sorted(ordered[:LIST_CAP], key=lambda rs: rs[0].created_at, reverse=True)
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:
         return []

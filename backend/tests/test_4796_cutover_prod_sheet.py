@@ -970,7 +970,18 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     receipt = [h for h in hits if h.startswith("0482_")]
     assert len(receipt) == 3 and all("create_check_constraint" in h and "ck_pairing_sessions_confirm_" in h for h in receipt), receipt
     assert not any(k in h for h in receipt for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_"))]
+    # story 4972 (AC3 ①): 0483 is THREE lines of upgrade() the reading lists: the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_cards_one_way` — a new function; nothing existing is touched), `DROP TRIGGER IF EXISTS` (nothing is
+    # there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds (`sealed_cards_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never writes the column,
+    # so every UPDATE it makes to a `desktop_setups` row leaves it NULL (`OLD.sealed_cards_at IS NOT NULL` is false → the function raises nothing and returns the row); the check is one comparison per updated row; nothing existing is altered,
+    # dropped, renamed, backfilled or rewritten, and no data is written by the migration.
+    mark = [h for h in hits if h.startswith("0483_")]
+    assert len(mark) == 3, mark
+    assert any("DROP TRIGGER IF EXISTS trg_desktop_setups_sealed_cards_one_way ON desktop_setups" in h for h in mark), mark
+    assert not any(k in h for h in mark for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column dropped or retyped, no data touched"
+    # (codex: the reading sees only the `op.execute(` line of a multi-line SQL string — so the SQL INSIDE the three calls is read here, from the file itself: nothing in upgrade() writes data, drops, renames or retypes)
+    up0483 = (_ROOT / "backend/alembic/versions/0483_desktop_setups_sealed_cards.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0483), "0483's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

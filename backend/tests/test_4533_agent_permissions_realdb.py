@@ -406,10 +406,13 @@ async def test_a_waiting_request_is_not_pushed_out_of_the_list_by_100_newer_ende
         agent = await _with_session(c, device)
         _phone, der = await _register(c)
         await _pair(c, device["device_token"], der)
-        old = await _post_ask(c, device, _ask(agent))
+        old_body = _ask(agent)
+        old = await _post_ask(c, device, old_body)
         assert old.status_code == 201, old.text
-        for _ in range(101):
+        for i in range(101):
             assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+            if i % 40 == 39:  # (a computer keeps at most OPEN_LIMIT open questions — AC3 ①: the earlier ones end by their clocks before the next batch)
+                await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '2 hours' WHERE request_id <> '{old_body['request_id']}' AND setup_id = (SELECT setup_id FROM agent_permission_requests WHERE id = '{old.json()['id']}')")
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '2 hours' WHERE id <> '{old.json()['id']}' AND setup_id = "
                    f"(SELECT setup_id FROM agent_permission_requests WHERE id = '{old.json()['id']}')")
         whole = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
