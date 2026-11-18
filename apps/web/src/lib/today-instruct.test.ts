@@ -29,8 +29,33 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     expect(soleAgentDm(items, ME, items.length)).toBe('c1');
   });
 
-  it('two agent DMs → null (nothing is picked for the person)', () => {
+  it('DMs with two DIFFERENT agents → null (nothing is picked for the person)', () => {
     expect(soleAgentDm([dm('c1', [{ member_id: 'a1', type: 'agent' }]), dm('c2', [{ member_id: 'a2', type: 'agent' }])], ME, 2)).toBeNull();
+  });
+
+  // story 4980 (PO 11-18): the server makes a new DM for the same pair on every «start a chat» — the rule is about the AGENT, not the room
+  const when = (id: string, agent: string, over: Record<string, unknown>) => ({ ...dm(id, [{ member_id: agent, type: 'agent' }]), ...over });
+  it('several DMs with the SAME agent → the one used last (the newest message · else the room\'s updated_at)', () => {
+    const a = when('c-old', 'a1', { updated_at: '2026-11-18T10:00:00Z' });
+    const b = when('c-new', 'a1', { updated_at: '2026-11-18T11:00:00Z' });
+    expect(soleAgentDm([a, b], ME, 2)).toBe('c-new');
+    expect(soleAgentDm([b, a], ME, 2)).toBe('c-new'); // not the list's order
+    // the latest message's time beats the room's updated_at
+    const c = when('c-msg', 'a1', { updated_at: '2026-11-18T09:00:00Z', latest_message: { created_at: '2026-11-18T12:00:00Z' } });
+    expect(soleAgentDm([a, b, c], ME, 3)).toBe('c-msg');
+  });
+
+  it('equal or unreadable times keep the list\'s own order (the first one) — deterministic', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {})], ME, 2)).toBe('c1');
+    expect(soleAgentDm([when('c1', 'a1', { updated_at: 5 }), when('c2', 'a1', { updated_at: '2026-11-18T11:00:00Z' })], ME, 2)).toBe('c2');
+  });
+
+  it('two DMs of one agent AND a DM of another agent → null (two agents: nothing is picked)', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {}), when('c3', 'a2', {})], ME, 3)).toBeNull();
+  });
+
+  it('a page that is not the whole list stays «not sure» even when every DM read is the same agent', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {})], ME, 150)).toBeNull();
   });
 
   it('no agent DM → null', () => {
@@ -46,6 +71,13 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
   it('a count that is missing or not a number is «not sure» (a truncated answer must not read as the whole list)', () => {
     const one = [dm('c1', [{ member_id: 'a1', type: 'agent' }])];
     for (const bad of [undefined, null, '1', NaN]) expect(soleAgentDm(one, ME, bad)).toBeNull();
+  });
+
+  it('an agent DM whose agent has no readable id is not one the person can be said to have chosen — it does not count', () => {
+    const noId = { id: 'c1', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { type: 'agent' }] };
+    expect(soleAgentDm([noId], ME, 1)).toBeNull();
+    expect(soleAgentDm([noId, { ...noId, id: 'c2' }], ME, 2)).toBeNull(); // two rooms of «an agent with no id» are not «the same agent»
+    expect(soleAgentDm([noId, dm('c3', [{ member_id: 'a1', type: 'agent' }])], ME, 2)).toBe('c3');
   });
 
   it('unreadable input → null', () => {
