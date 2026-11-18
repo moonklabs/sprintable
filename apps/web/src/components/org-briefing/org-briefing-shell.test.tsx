@@ -537,7 +537,7 @@ describe('OrgBriefingShell — 로드 실패(에러를 삼키지 않는다)', ()
 // story #4762 (AC1 · AC3) — one press of the instruction line sends when the person has exactly one agent DM; the send button keeps clear of the support button.
 describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시지', () => {
   const ME = 'me-1';
-  const agentDm = (id: string, agent: string) => ({ id, type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: agent, type: 'agent' }] });
+  const agentDm = (id: string, agent: string) => ({ id, type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: agent, type: 'agent' }] });
   let calls: Array<{ url: string; method: string; body?: string }>;
 
   function stubWorld(opts: { conversations: unknown[]; total?: number; sendOk?: boolean }) {

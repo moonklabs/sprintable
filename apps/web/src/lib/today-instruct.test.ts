@@ -11,7 +11,7 @@ import { CHAT_API_PREFIX } from './chat-api-prefix';
 
 const ME = 'me-1';
 const dm = (id: string, others: Array<{ member_id: string; type: 'agent' | 'human' }>) => ({
-  id, type: 'dm', participants: [{ member_id: ME, type: 'human' }, ...others],
+  id, type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, ...others],
 });
 
 describe('soleAgentDm — the one direct conversation with an agent', () => {
@@ -74,7 +74,7 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
   });
 
   it('an agent DM whose agent has no readable id is not one the person can be said to have chosen — it does not count', () => {
-    const noId = { id: 'c1', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { type: 'agent' }] };
+    const noId = { id: 'c1', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { type: 'agent' }] };
     expect(soleAgentDm([noId], ME, 1)).toBeNull();
     expect(soleAgentDm([noId, { ...noId, id: 'c2' }], ME, 2)).toBeNull(); // two rooms of «an agent with no id» are not «the same agent»
     expect(soleAgentDm([noId, dm('c3', [{ member_id: 'a1', type: 'agent' }])], ME, 2)).toBe('c3');
@@ -91,12 +91,12 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
   });
 
   it('a room whose agent has left (or cannot be resolved) does not count; a room the person is not in does not count', () => {
-    const left = { id: 'c-left', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: true }] };
-    const orphan = { id: 'c-orphan', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', resolved: false }] };
-    const live = { id: 'c-live', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: false, resolved: true }] };
+    const left = { id: 'c-left', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: true }] };
+    const orphan = { id: 'c-orphan', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', resolved: false }] };
+    const live = { id: 'c-live', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: false, resolved: true }] };
     expect(soleAgentDm([left, orphan], ME, 2)).toBeNull();
     expect(soleAgentDm([left, orphan, live], ME, 3)).toBe('c-live');
-    expect(soleAgentDm([{ id: 'x', type: 'dm', participants: [{ member_id: 'a1', type: 'agent' }] }], ME, 1)).toBeNull(); // the person is not among the participants
+    expect(soleAgentDm([{ id: 'x', type: 'dm', status: 'open', participants: [{ member_id: 'a1', type: 'agent' }] }], ME, 1)).toBeNull(); // the person is not among the participants
   });
 
   it('a room with a latest message is compared by that message; a room without one by its updated_at (the two kinds mix)', () => {
@@ -106,8 +106,14 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     expect(soleAgentDm([emptyNewer, talked], ME, 2)).toBe('c-empty');
   });
 
-  it('a malformed item among good ones is skipped, not fatal', () => {
-    expect(soleAgentDm([null, { id: 1 }, 'x', when('c1', 'a1', {})], ME, 4)).toBe('c1');
+  it('an item that cannot be read, or a direct room that does not say its status or participants, makes the whole answer «not sure» — it could be a second agent\'s room (codex 4980)', () => {
+    const good = when('c1', 'a1', {});
+    expect(soleAgentDm([good], ME, 1)).toBe('c1');
+    for (const bad of [null, { id: 1 }, 'x', { id: 'z' }, { id: 'z', type: 'dm' }, { id: 'z', type: 'dm', status: 'open' }, { id: 'z', type: 'dm', participants: [] }, { id: 'z', type: 'dm', status: 5, participants: [] }]) {
+      expect(soleAgentDm([good, bad], ME, 2)).toBeNull();
+    }
+    // …while a readable room of another kind, or a closed one, is simply not a candidate
+    expect(soleAgentDm([good, { id: 'g', type: 'group', participants: [] }, { id: 'r', type: 'dm', status: 'resolved', participants: [] }], ME, 3)).toBe('c1');
   });
 
   it('unreadable input → null', () => {

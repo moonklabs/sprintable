@@ -34,8 +34,11 @@ export function soleAgentDm(items: unknown, selfMemberId: string, total: unknown
   const found: Array<{ id: string; agent: string; at: string }> = [];
   for (const raw of items) {
     const c = raw as { id?: unknown; type?: unknown; status?: unknown; participants?: unknown; updated_at?: unknown; latest_message?: { created_at?: unknown } | null } | null;
-    if (!c || typeof c.id !== 'string' || c.type !== 'dm' || !Array.isArray(c.participants)) continue;
-    if (typeof c.status === 'string' && c.status !== 'open') continue; // only an OPEN room is where an instruction goes (resolved · the old deleted state · anything not known)
+    // a row that cannot be read at all, or a direct room that does not say what it is, could be a SECOND agent's room we cannot see: «not sure» (the old hand-over), never a pick (codex 4980)
+    if (!c || typeof c !== 'object' || typeof c.id !== 'string' || typeof c.type !== 'string') return null;
+    if (c.type !== 'dm') continue; // a group (or any other kind) is not a direct room
+    if (!Array.isArray(c.participants) || typeof c.status !== 'string') return null;
+    if (c.status !== 'open') continue; // only an OPEN room is where an instruction goes (resolved · the old deleted state · anything not known)
     const people = c.participants as ParticipantLike[];
     if (!people.some((p) => p && p.member_id === selfMemberId)) continue; // the person is in it (the list is theirs; a room that does not say so is not read as theirs)
     const others = people.filter((p) => p && p.member_id !== selfMemberId);
