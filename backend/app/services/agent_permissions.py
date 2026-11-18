@@ -1139,9 +1139,16 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], 
         .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_(None),
                RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id, RemoteDevice.revoked_at.is_(None))
     )
+    # (0484 · codex) a plain card with no preview/envelope ends here only for a person who actually LOST a phone on this computer (a pair of theirs is now removed): a look-only card of a person who never paired one
+    # (`no_paired_phone`) is not «lost» because somebody else's pair came off the same computer
+    lost_a_pair = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_not(None),
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id)
+    )
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, _holds_plain_words()), ~has_phone)  # (0484: a plain card with no preview holds words too)
+        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, and_(_holds_plain_words(), lost_a_pair)), ~has_phone)
         .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)

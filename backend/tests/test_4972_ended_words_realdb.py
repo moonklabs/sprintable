@@ -344,3 +344,21 @@ async def test_a_card_the_purge_ended_stays_in_the_list_for_its_hour_whatever_ne
         monkeypatch.setattr(ap, "RECENT_CAP", 2)
         got = {r["request_id"] for r in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]}
         assert old["request_id"] in got, "the ended-by-purge card is still in the list (its own hour)"
+
+
+async def test_taking_a_pair_off_does_not_end_the_look_only_card_of_a_person_who_never_paired_a_phone(world):
+    """codex 2nd review (medium): the plain-card branch of the pair-removal end used only «this recipient has no live phone» — a `no_paired_phone` card (nobody ever paired) was ended whenever a pair came off that computer. Only a person who LOST a phone loses their card."""
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import _end_cards_without_phone
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewe")
+        agent = await _with_session(c, device)
+        body = _ask(agent)  # no phone paired at all: the card goes to the chain's head as a look-only / no_paired_phone card
+        made = await _post_ask(c, device, body)
+        assert made.status_code == 201 and made.json()["recipient_reason"] == "no_paired_phone", made.text
+        sid = (await _sql(fetch="SELECT id FROM desktop_setups WHERE device_name = 'd4424 mac 4972ewe'"))[0][0]
+        async with async_session_factory() as s:
+            assert await _end_cards_without_phone(s, {sid}) == 0  # (what a pair removal on this computer runs)
+            await s.commit()
+        assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "nobody lost a phone: the card and its words stay"
