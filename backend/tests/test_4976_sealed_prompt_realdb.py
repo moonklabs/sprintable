@@ -384,7 +384,7 @@ async def test_an_instruction_copy_still_open_after_ten_minutes_is_ended_and_scr
     eng = create_async_engine(_ASYNC, poolclass=NullPool)
     try:
         async with async_sessionmaker(eng)() as db:
-            assert await purge_stale_prompts(db) == 3
+            assert await purge_stale_prompts(db) == 4  # three open copies ended + `done_old` (marked done by hand here: it still holds words, so the leftovers step scrubs it)
             await db.commit()
         async with async_sessionmaker(eng)() as db:
             assert await purge_stale_prompts(db) == 0  # once is enough
@@ -396,7 +396,7 @@ async def test_an_instruction_copy_still_open_after_ten_minutes_is_ended_and_scr
         assert (await _sql(fetch=f"SELECT result_code FROM desktop_commands WHERE id = '{cid}'"))[0][0] == "expired"
     assert "envelope" in (await _row(fresh))[0] and (await _row(fresh))[1] == "queued"  # not old yet
     assert (await _row(stop))[1] == "queued" and (await _row(stop))[0]["signed"]  # another kind
-    assert (await _row(done_old))[1] == "done"  # a finished one is not touched here (its own end scrubbed it)
+    assert (await _row(done_old))[1] == "done" and set((await _row(done_old))[0]) == {"session_key", "conversation_id"}  # a finished one keeps its state (only its words go)
     assert MARKER not in json.dumps([r[0] for r in await _sql(fetch="SELECT payload FROM desktop_commands")])
 
 
@@ -474,3 +474,201 @@ async def test_the_cut_off_scrub_does_not_wait_for_a_command_row_a_result_is_lan
     finally:
         await eng.dispose()
     assert set((await _row(cid))[0]) == {"session_key", "conversation_id"}
+
+
+# ── Kadir lens 5850 (the fixes) ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def test_a_press_that_waited_on_the_switch_off_is_refused_once_the_switch_is_off(world):
+    """Kadir 5850 · middle 1 (reproduced there): the switch-off holds the computer's row while it scrubs. A press that read «on» waits on the row, then used to make its command AFTER the scrub — the
+    words stayed until the minute sweep. It asks again after the wait and is refused (409 · no row). Real concurrency: the holder's transaction has the row AND the switch off, uncommitted."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.desktop_setup import DesktopSetup
+    from app.services.desktop_relay import DesktopRelayError, enqueue_command
+    from tests.test_4424_desktop_setup_realdb import _ASYNC, ORG
+
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac p")
+        sid = await _setup_id("d4976 mac p")
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as holder, async_sessionmaker(eng)() as db:
+            setup = await db.get(DesktopSetup, sid)  # the caller read the computer (and the switch: on) …
+            await holder.execute(text(f"SELECT 1 FROM desktop_setups WHERE id = '{sid}' FOR UPDATE"))  # … the switch-off took the row …
+            await holder.execute(text(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'"))  # … and turned the switch off (not committed yet)
+            task = asyncio.create_task(enqueue_command(db, setup=setup, kind="send_prompt", payload={"session_key": "s-1", "conversation_id": str(conv), "envelope": sealed_env(sid, "k-wait")},
+                                                      idempotency_key="b4:wait", requested_by=OWNER_TM))
+            await asyncio.sleep(1.0)
+            assert not task.done()  # it is waiting on the row (the test would prove nothing if it were not)
+            await holder.commit()
+            with pytest.raises(DesktopRelayError) as e:
+                await asyncio.wait_for(task, timeout=10)
+            assert (e.value.status, e.value.code) == (409, "remote_control_off")
+            await db.rollback()
+    finally:
+        await eng.dispose()
+    assert (await _sql(fetch=f"SELECT count(*) FROM desktop_commands WHERE setup_id = '{sid}'"))[0][0] == 0
+
+
+async def test_the_minute_job_ends_the_instruction_copies_even_when_an_older_step_keeps_failing(world, monkeypatch):
+    """Kadir 5850 · middle 2: the sweep used to run LAST, so one older step that kept failing kept every open instruction's words on the server for ever. It runs first and is committed on its own —
+    and the call is a live one (an old open copy is gone after one request through the route)."""
+    import app.routers.cron as cron_module
+    import app.services.desktop_changes as changes
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac q")
+        sid = await _setup_id("d4976 mac q")
+        old = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '11 minutes' WHERE id = '{old}'")
+
+    async def boom(db, *_a, **_k):
+        from sqlalchemy import text as sql_text
+
+        await db.execute(sql_text("SELECT 1/0"))  # a statement that ABORTS the transaction it runs in — what would take the sweep's UPDATE with it if that were not committed first
+
+    monkeypatch.setattr(changes, "purge_expired", boom)
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test") as client:
+        await client.post("/api/v2/internal/cron/changes-purge", headers={"Authorization": "Bearer test-cron-secret"})  # (the job as a whole may answer an error: that is not what is asked)
+    payload, state, _k = await _row(old)
+    assert state == "rejected" and set(payload) == {"session_key", "conversation_id"}, (state, list(payload))  # ended and scrubbed, and committed before the failing step
+
+
+async def test_the_minute_job_answers_with_the_instruction_copies_it_ended(world, monkeypatch):
+    import app.routers.cron as cron_module
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac r")
+        sid = await _setup_id("d4976 mac r")
+        old = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '11 minutes' WHERE id = '{old}'")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post("/api/v2/internal/cron/changes-purge", headers={"Authorization": "Bearer test-cron-secret"})
+    assert r.status_code == 200 and r.json()["data"]["stale_prompts_ended"] == 1, r.text
+
+
+async def test_a_replaced_line_and_a_reclaimed_account_keep_no_word_of_an_instruction(world):
+    """Kadir 5850 · low 3: the two cut-off paths that sit inside larger flows (the text guard alone let their argument go empty without a test failing)."""
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.user import User
+    from app.routers.auth import _reclaim_unproved_account
+    from app.services.desktop_setup import _retire_same_machine
+    from tests.test_4424_desktop_setup_realdb import PLAIN
+
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac s")
+        sid = await _setup_id("d4976 mac s")
+        device2, agent2, phone2, _der2, conv2 = await _world(c, "d4976 mac t")
+        sid2 = await _setup_id("d4976 mac t")
+        for s, a, p, cv in ((sid, agent, phone, conv), (sid2, agent2, phone2, conv2)):
+            first = (await _post(c, a, _sealed_cmd(s, p, cv))).json()["command_id"]
+            second = (await _post(c, a, _cmd("send_prompt", p, conv=cv, text=f"{MARKER} {s}"))).json()["command_id"]
+            await _sql(f"UPDATE desktop_commands SET state = 'acked' WHERE id = '{first}'", f"UPDATE desktop_commands SET state = 'delivered' WHERE id = '{second}'")
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4976' WHERE id = '{sid}'")
+        async with async_session_factory() as s:
+            setup = await s.get(DesktopSetup, sid)
+            agents = frozenset(uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent")
+            assert await _retire_same_machine(s, machine_key="mk-4976", others=[setup], now=datetime.now(timezone.utc), new_agents=agents, before={setup.id: agents}) == 1
+            await s.commit()
+        await _sql(f"UPDATE users SET email_verified = false WHERE id = '{PLAIN}'", f"UPDATE desktop_setups SET confirmed_by = '{PLAIN}' WHERE id = '{sid2}'")
+        async with async_session_factory() as s:
+            user = await s.get(User, PLAIN)
+            assert await _reclaim_unproved_account(s, user, why="test 4976") is not None
+            await s.commit()
+    for s in (sid, sid2):
+        rows = await _prompts_of(s)
+        assert len(rows) == 2 and all(keys == {"session_key", "conversation_id"} for _st, keys in rows), (s, rows)
+    assert MARKER not in json.dumps([r[0] for r in await _sql(fetch="SELECT payload FROM desktop_commands")])
+
+
+async def test_the_clock_window_of_a_sealed_header_is_five_and_a_half_minutes(world):
+    """Kadir 5850 · low 7: the earlier test only saw an hour of drift. Five minutes either way is fine; six is not (a window widened to ten minutes would pass this one)."""
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac u")
+        sid = await _setup_id("d4976 mac u")
+        for offset, want in ((-300_000, 201), (300_000, 201), (-360_000, 422), (360_000, 422)):
+            key = str(uuid.uuid4())
+            ts = now_ms() + offset
+            env = sealed_env(sid, key, ts=ts, expires_at=max(ts, now_ms()) + 60_000)
+            r = await _post(c, agent, {**_sealed_cmd(sid, phone, conv, key=key), "envelope": env})
+            assert r.status_code == want, (offset, r.status_code, r.text)
+
+
+async def test_the_sweep_stamps_the_end_and_does_not_wait_for_a_row_that_is_held(world):
+    """Kadir 5850 · low 7: an ended press has its `finished_at`; the minute sweep skips a row another transaction holds (a wait there is one side of a deadlock) and takes it when it is free."""
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.desktop_relay import DesktopCommand
+    from app.services.desktop_relay import purge_stale_prompts
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac v")
+        sid = await _setup_id("d4976 mac v")
+        held = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+        free = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '11 minutes' WHERE id IN ('{held}', '{free}')")
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as holder, async_sessionmaker(eng)() as sweep:
+            await holder.execute(select(DesktopCommand.id).where(DesktopCommand.id == uuid.UUID(held)).with_for_update())
+            assert await asyncio.wait_for(purge_stale_prompts(sweep), timeout=4) == 1  # the free one only — no wait for the held one
+            await sweep.commit()
+            await holder.commit()
+        async with async_sessionmaker(eng)() as again:
+            assert await purge_stale_prompts(again) == 1  # the held one, now free
+            await again.commit()
+    finally:
+        await eng.dispose()
+    for cid in (held, free):
+        assert (await _sql(fetch=f"SELECT finished_at IS NOT NULL, state FROM desktop_commands WHERE id = '{cid}'"))[0] == (True, "rejected")
+
+
+async def test_the_sweep_scrubs_a_finished_press_an_older_build_left_with_its_words(world):
+    """Kadir 5850 · low 6: the migration ran, then a server of the older build (still rolling out) ended a press and left its words — the same minute sweep takes it."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.services.desktop_relay import purge_stale_prompts
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac w")
+        sid = await _setup_id("d4976 mac w")
+        left = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} left"))).json()["command_id"]
+        clean = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+        stop = (await _post(c, agent, {**_cmd("stop_session", phone), "idempotency_key": "stop-left"})).json()["command_id"]
+        ancient = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} ancient"))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE id IN ('{left}', '{clean}', '{stop}', '{ancient}')",
+                   f"UPDATE desktop_commands SET created_at = now() - interval '3 days' WHERE id = '{ancient}'")  # older than the sweep's day: the migration's, not this sweep's
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as db:
+            assert await purge_stale_prompts(db) == 2  # both finished instructions with words (the plain and the sealed); the stop is no instruction
+            await db.commit()
+        async with async_sessionmaker(eng)() as db:
+            assert await purge_stale_prompts(db) == 0
+    finally:
+        await eng.dispose()
+    assert set((await _row(left))[0]) == {"session_key", "conversation_id"} and set((await _row(clean))[0]) == {"session_key", "conversation_id"}
+    assert (await _row(stop))[0]["signed"]  # another kind: untouched
+    assert "text" in (await _row(ancient))[0]  # the bound: the last day only (a deliberate limit — nothing scans the whole table every minute)
+    assert MARKER not in json.dumps([r[0] for r in await _sql(fetch=f"SELECT payload FROM desktop_commands WHERE id <> '{ancient}'")])

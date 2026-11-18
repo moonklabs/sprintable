@@ -1069,8 +1069,8 @@ async def forget_prompts(db: AsyncSession, setup_ids: list[uuid.UUID]) -> int:
     if not setup_ids:
         return 0
     # `SKIP LOCKED` (codex 4976 · third delta): a command row that a result is landing on right now is held by that transaction (it takes the row, then the device's token — the cut-off paths take the
-    # token first), so waiting for it here would be one side of a deadlock. Such a row is not lost: its result ends it (and scrubs it), and the minute sweep (`purge_stale_prompts`) takes anything
-    # still open ten minutes on.
+    # token first), so waiting for it here would be one side of a deadlock. Such a row is not lost: a result that ENDS it (done · failed · rejected) scrubs it; one that only acknowledges it (`acked`) does not,
+    # and the minute sweep (`purge_stale_prompts`) takes it when it is still open ten minutes on.
     due = (
         select(DesktopCommand.id)
         .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.kind == "send_prompt",
@@ -1104,7 +1104,21 @@ async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, 
         .values(state="rejected", result_code="expired", finished_at=now,
                 payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
     )
-    return res.rowcount or 0
+    ended = res.rowcount or 0
+    # (Kadir lens 5850 · low 6) a press an OLDER build of the server ended while this one was rolling out keeps its words — 0485 ran before that build stopped: the same sweep takes every finished
+    # instruction of the last day that still holds any (a press ends within minutes of its making, and the rollout is shorter than a day; the older ones are 0485's)
+    leftovers = (
+        select(DesktopCommand.id)
+        .where(DesktopCommand.kind == "send_prompt", DesktopCommand.state.in_(("done", "failed", "rejected")),
+               DesktopCommand.created_at > now - timedelta(days=1),
+               or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
+        .with_for_update(skip_locked=True)
+    )
+    res2 = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(leftovers))
+        .values(payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    return ended + (res2.rowcount or 0)
 
 
 async def enqueue_command(
@@ -1138,6 +1152,10 @@ async def enqueue_command(
     )).scalar_one_or_none()
     if seq is None:
         raise DesktopRelayError(409, DISCONNECTED_CODE, "that computer has been disconnected")
+    # story 4976 (Kadir lens 5850 · middle 1): the remote-control switch-off holds the computer's row while it forgets what it holds (`desktop_clock.forget`) — a press that read «on» above waits on the
+    # UPDATE just now and would then make its command AFTER that scrub. Ask again: this is a NEW statement after the wait (READ COMMITTED), it sees the switch-off's commit. No new lock · no new order.
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     body = parsed.model_dump(mode="json")
     if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
@@ -1185,7 +1203,8 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         rows = await reject_stale_commands(db, rows, now=now)
     # story 4976 (codex third delta): «queued → delivered» is a GUARDED statement (`state = 'queued'`), not the ORM's blind write of the row read above: a command that a sweep or a cut-off ended
     # and scrubbed between that read and now is NOT rewritten back to `delivered` and is NOT sent with the words read a moment ago (a row already `delivered` is re-sent as always — at least
-    # once; the computer drops an id it has seen). No lock is taken here: the stream's own transaction also touches the device's token, and a lock on the rows would meet the cut-off paths' order.
+    # once; the computer drops an id it has seen). The rows it moves are HELD to the commit — as the ORM write it replaces held them (command row, then the device's token in `touch_device`; the
+    # cut-off paths take the token first: that pair, stream vs disconnect, exists before this change and is not in its scope — Kadir lens 5850). Nothing is locked beyond what that write locked.
     queued = [r.id for r in rows if r.state == "queued"]
     if queued:
         moved = set((await db.execute(
