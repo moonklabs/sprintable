@@ -273,6 +273,33 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     return view
 
 
+async def usage_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
+    """story 4981 (연결 ③ · PR 3): the agent usage numbers of the computer this agent is bound to, as its host last said them — closed numbers (whole percent per limit window · when it resets) or the word
+    `unavailable` with its reason, each with the host's «seen_at» (the phone says «마지막으로 본 지 N분 전»), and whether the computer is SHOWN connected right now (the same rule as every other screen). Whoever
+    may see this agent's session may see this (`can_view` — the very check of `session_view`): no new role, no new rule. A computer of another agent, another organization or a setup that was disconnected (revoked) is never in it; a computer that is merely silent now keeps its last numbers, with `connected: false` and their `seen_at` (PO 11-18 ⓑ).
+    With the organization's «원격 제어» off the device line is off and what the computer last said is old: no rows. These numbers are for SHOWING only — no decision is made by them anywhere."""
+    from app.models.desktop_relay import DesktopUsage
+    from app.services import remote_control
+    from app.services.agent_permissions import _shown_reachable
+    from app.services.desktop_usage import MAX_ACCOUNTS, row_view
+
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    await _agent(db, org_id, agent_id)
+    enabled = await remote_control.is_enabled(db, org_id)
+    bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
+    view: dict = {"agent_id": str(agent_id), "remote_control": enabled, "setup_id": None, "device_name": None, "connected": False, "usage": []}
+    if bound is None or not enabled:
+        return view
+    setup_id = bound["setup_id"]
+    connected, _heard = await _shown_reachable(db, {setup_id}, _now())
+    rows = (await db.execute(
+        select(DesktopUsage).where(DesktopUsage.setup_id == setup_id).order_by(DesktopUsage.runtime, DesktopUsage.account).limit(MAX_ACCOUNTS * 8)  # bounded: the door keeps at most MAX_ACCOUNTS rows per computer, so a table written some other way cannot make this read grow — the cut to MAX_ACCOUNTS is made AFTER the rows are judged (below), so odd rows cannot hide good ones
+    )).scalars().all()
+    view.update({"setup_id": str(setup_id), "device_name": bound["device_name"], "connected": setup_id in connected, "usage": [v for v in (row_view(r) for r in rows) if v is not None][:MAX_ACCOUNTS]})
+    return view
+
+
 # ── ①-b the list of every agent (the Today screen) ─────────────────────────────────────────────────────────────────────────
 
 OVERVIEW_MAX = 100
