@@ -307,7 +307,8 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
       {/* story #4590 (Yuna §1): a terminal-only question whose tool was not read — where to see it, never a made-up name */}
       {tool !== null ? <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
-        : sealed ? null : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
+        : sealed || r.state !== 'pending' ? null // story 4972: an ENDED card has no tool because the server let its words go with the question — not because the computer did not read them: no «see it in the terminal» line
+          : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
       {net === 'confirm' ? (!asking ? null :
         <div className="space-y-1" data-testid="agent-permission-net-confirm">
           <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
@@ -391,7 +392,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
     case 'answered':
       if (net === 'ask' && a.decision === 'allow') return <Line focus>{hostUnread ? t('net.hostUnread') : t('net.checking')}</Line>; // the second card comes with the host
       if (net === 'confirm') return <Line focus>{a.decision === 'allow' ? t('net.allowedGo', { host }) : t('net.notAllowed')}</Line>;
-      if (sealed) return <Line focus>{a.decision === 'allow' ? t('sealed.allowed') : t('sealed.denied')}</Line>;
+      if (sealed || tool === '') return <Line focus>{a.decision === 'allow' ? t('sealed.allowed') : t('sealed.denied')}</Line>; // (story 4972: a card with no tool name — sealed, or one whose words the server let go when the answer came — says what was done, never «허용됨 · »)
       return <Line focus>{a.decision === 'allow' ? t('phone.allowed', { tool }) : t('phone.denied', { tool })}</Line>;
     case 'answered_by':
       return <Line focus>{a.name && a.decision ? t(a.decision === 'allow' ? 'phone.allowedBy' : 'phone.deniedBy', { name: a.name }) : t('phone.answeredElsewhere')}</Line>;

@@ -249,13 +249,13 @@ async def test_the_minute_sweep_lets_go_of_the_words_of_a_window_that_passed_wit
         for b in (sealed_ask, quiet_text, lines):
             await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE request_id = '{b['request_id']}'")
         async with async_session_factory() as s:  # no report of that computer, nobody reads a list: the cron's minute job
-            assert await purge_open_cards(s) == 2  # the sealed card and the preview — not the text row that holds no words, not the one still waiting
+            assert await purge_open_cards(s) == 3  # the sealed card · the preview · and (0484) the plain text row — its words go with its question now; not the one still waiting
             await s.commit()
         state, code, envelope, input_hash, _p, sealed = await _card(sealed_ask["request_id"])
         assert (state, code, envelope, input_hash, sealed) == ("expired", "expired", None, None, True)  # the row stays whole
         assert (await _card(lines["request_id"]))[0:2] == ("expired", "expired") and (await _card(lines["request_id"]))[4] is None
         assert (await _card(lines["request_id"]))[3] == lines["input_hash"]  # a text row keeps its hash
-        assert (await _card(quiet_text["request_id"]))[0] == "pending"
+        assert (await _card(quiet_text["request_id"]))[0] == "expired"  # (0484: a plain card past its window ends too — its words go)
         assert (await _card(fresh["request_id"]))[2] is not None
         async with async_session_factory() as s:
             assert await purge_open_cards(s) == 0  # idempotent
@@ -469,7 +469,8 @@ async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_term
                 row = (await conn.execute(text(f"SELECT sealed, envelope IS NULL, terminal_only FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).one()
                 assert tuple(row) == (False, True, True), "the sealed terminal-only row stays, as a terminal-only card with no words"
                 await conn.run_sync(run, m.upgrade)
-                assert norm((await conn.execute(q_def)).scalar_one()) == before, "0480's rule is back after the upgrade, exactly"
+                after = norm((await conn.execute(q_def)).scalar_one())
+                assert coupling in after and after != before, "0480's rule is back after the upgrade (not 0484's looser words rule: the database is at 0484 here, the test rolls back to it)"
             finally:
                 await trans.rollback()
         async with eng.connect() as conn:
@@ -487,8 +488,8 @@ async def test_the_model_and_the_migration_state_the_same_rule_and_the_downgrade
 
     from app.models.agent_permission import AgentPermissionRequest
 
-    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0480_sealed_terminal_only_card.py"
-    spec = importlib.util.spec_from_file_location("m0480b", mod_path)
+    mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0484_agent_permission_ended_words.py"  # (0484 restates the rule: the one the models carry now)
+    spec = importlib.util.spec_from_file_location("m0484b", mod_path)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     ck = next(c for c in AgentPermissionRequest.__table__.constraints if getattr(c, "name", None) == "ck_agent_permission_requests_terminal_only_fields")

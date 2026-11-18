@@ -1059,6 +1059,7 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         return row
     if row.state == "pending":
         row.state, row.result_code, row.preview, row.envelope = "withdrawn", body.reason, None, None  # story 4949: the lines go with the question (4972: so does the sealed card)
+        _end_words_of(row)  # (and the plain words)
         if row.sealed:
             row.input_hash = None  # the hash of the raw input is the one value derived from the words that would stay: it goes when the question ends (카디르 lens M2)
         await db.flush()
@@ -1072,6 +1073,40 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
 _OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeof(AgentPermissionRequest.preview) == "object")
 
 
+# story 4972 (카디르 5848 알림 · PO 8821): the plaintext words of a plain card — `tool · summary · workdir` — go when the question ends, like the envelope · the preview · the hash do (선생님 11-16:
+# the automatic deletion is for the delivery copy only, once the question is over). ONE exception, by shape: the network question's FIXED vocabulary (`tool = SandboxNetwork` of the claude runtime ·
+# `summary = network` · no workdir) — no word of the person's, and the same row is opened again for its second (confirm) stage, which the card draws from that tool. (`host` — the address of the confirm stage —
+# is not in this change: its result line still names it.)
+def _is_net_question():
+    # (codex: `tool` is nullable — a terminal-only row may lack it; `NOT (… tool = 'X')` would then be NULL and the row would never match a WHERE) so the comparison is made on COALESCE(tool, ''): always true or false
+    # (카디르 5849 lens · low) the exception is for the FIXED vocabulary — the tool name AND `summary = 'network'`: a computer that does not seal yet (an older build) can send a plain card with that tool name and any summary (an address)
+    return and_(AgentPermissionRequest.runtime == "claude", func.coalesce(AgentPermissionRequest.tool, "") == SANDBOX_NET_TOOL, func.coalesce(AgentPermissionRequest.summary, "") == "network")
+
+
+def _ended_words() -> dict:
+    """the `values(...)` part that takes a plain card's words with it when its question ends (an UPDATE statement)"""
+    return {
+        "tool": case((_is_net_question(), AgentPermissionRequest.tool), else_=None),
+        "summary": case((_is_net_question(), AgentPermissionRequest.summary), else_=None),
+        "workdir": None,
+    }
+
+
+def _end_words_of(row: AgentPermissionRequest) -> None:
+    """the same on a row in hand (the answer · the withdrawal)"""
+    if not (row.runtime == "claude" and row.tool == SANDBOX_NET_TOOL and row.summary == "network"):
+        row.tool, row.summary = None, None
+    row.workdir = None
+
+
+def _holds_plain_words():
+    """a row whose plain words are still there: a tool or a summary that is not the network question's fixed vocabulary, or any workdir"""
+    return or_(
+        AgentPermissionRequest.workdir.is_not(None),
+        and_(~_is_net_question(), or_(AgentPermissionRequest.tool.is_not(None), AgentPermissionRequest.summary.is_not(None))),
+    )
+
+
 async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, setup_id: uuid.UUID | None = None) -> int:
     """(One computer's setup when `setup_id` is given — the report of that computer — else every one: the minute job.) Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
     without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
@@ -1080,13 +1115,13 @@ async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, set
     # `SKIP LOCKED`: a request row held by another transaction (an answer landing at the end of its window · an organization's delete) is left for the next report / the minute job — the purge never WAITS on a request row, so a report
     # that holds its computer's setup rows cannot be one side of a deadlock with a path that takes a request row first
     due = (select(AgentPermissionRequest.id)
-           .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+           .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, or_(_OPEN_WORDS, _holds_plain_words()), *scope)
            .with_for_update(skip_locked=True))
     ended = (await db.execute(
         update(AgentPermissionRequest)
         .where(AgentPermissionRequest.id.in_(due))
         .values(state="expired", result_code="expired", envelope=None, preview=None,
-                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
     )).all()
     for req_id, recipient in ended:
@@ -1105,11 +1140,24 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], 
         .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_(None),
                RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id, RemoteDevice.revoked_at.is_(None))
     )
+    # (0484 · codex) a plain card with no preview/envelope ends here only for a person who actually LOST a phone on this computer (a pair of theirs is now removed): a look-only card of a person who never paired one
+    # (`no_paired_phone`) is not «lost» because somebody else's pair came off the same computer
+    lost_a_pair = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_not(None),
+               RemoteDevicePairing.removed_at >= AgentPermissionRequest.created_at,  # (codex 3rd: a loss that came BEFORE the card was made is no reason to end it later — the loss must be one the card lived through)
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id)
+    )
+    # (카디르 5849 lens · medium) `SKIP LOCKED` + update by id, as the purge does: a phone's revocation takes the PHONE row first and then waits here for the request rows; an answer takes the REQUEST row first and then the phone row —
+    # waiting for a request row somebody holds closes that circle. A row held right now is being answered (or ended) by someone else; the window ends it otherwise.
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, and_(_holds_plain_words(), lost_a_pair)), ~has_phone)
+           .with_for_update(skip_locked=True, of=AgentPermissionRequest))
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else _OPEN_WORDS, ~has_phone)
+        .where(AgentPermissionRequest.id.in_(due))
         .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
-                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
     )).all()
     for req_id, recipient in ended:
@@ -1131,7 +1179,7 @@ async def end_orphan_cards(db: AsyncSession) -> int:
             update(AgentPermissionRequest)
             .where(AgentPermissionRequest.setup_id.in_(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids), DesktopSetup.revoked_at.is_not(None))),
                    AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None))
-            .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None, input_hash=None)  # (only sealed rows hold an envelope: their hash goes with it)
+            .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None, input_hash=None, **_ended_words())  # (only sealed rows hold an envelope: their hash goes with it)
             .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
         )).all()
         for req_id, recipient in cut:
@@ -1263,7 +1311,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
         recent = (await db.execute(base.limit(RECENT_CAP))).all()
         # (codex AC3 ① medium) the ones still OPEN are taken first and apart from the ones that only just ran out: more than LIST_CAP newer «pending but past their window» rows cannot push an older still-open one out of the answer
         opened = (await db.execute(base.where(A.state == "pending", A.expires_at > now).limit(LIST_CAP))).all()
-        lapsed = (await db.execute(base.where(A.state == "pending", A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
+        # (codex · 0484: a plain card whose window passed is now ended as `expired` by the purge — still «just lapsed» for the list, like a `pending` one past its window)
+        lapsed = (await db.execute(base.where(A.state.in_(("pending", "expired")), A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
         merged = {r.id: (r, s) for r, s in [*recent, *lapsed, *opened]}
         # one answer carries at most LIST_CAP rows — the open ones first, then the just-lapsed ones (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
         open_ids, lapsed_ids = {r.id for r, _s in opened}, {r.id for r, _s in lapsed}
@@ -1405,6 +1454,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.decision, row.answered_at = body.decision, now
     row.preview = None  # story 4949: answered — the file's lines are no longer needed here
     row.envelope = None  # story 4972: nor the sealed card
+    _end_words_of(row)  # the plain words too (the command above already carries what the daemon needs) — the network question keeps its fixed vocabulary: its confirm stage opens this row again
     if row.sealed:
         row.input_hash = None  # (the command above already carries what the daemon needs) — see the withdrawal
     phone.last_used_at = now

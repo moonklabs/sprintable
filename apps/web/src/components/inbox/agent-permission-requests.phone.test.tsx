@@ -587,6 +587,22 @@ describe('[4590] a question only that computer\'s terminal answers (Yuna 4590-te
     expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
   });
 
+  it('[4972] an ENDED card whose words the server let go: the agent and its state — no «see it in the terminal» line, no summary box, no folder', async () => {
+    await render([req({ state: 'expired', tool: null, tool_name: null, summary: null, workdir: null, answerable: false, session_key: null, input_hash: null, expires_at: new Date(Date.now() - 5 * 60_000).toISOString() })]);
+    expect(container.querySelector('[data-testid="agent-permission-card"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-tool"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
+    expect(container.querySelector('.font-mono')).toBeNull();
+    expect(container.textContent).not.toContain('터미널에서 볼 수 있어요');
+  });
+
+  it('[4972] answering a card whose tool name is gone says what was done and nothing after the dot', async () => {
+    installShell();
+    await render([req({ tool: null, tool_name: null, summary: null })]);
+    await press('허용');
+    expect(phoneLines()).toEqual(['허용했어요']);
+  });
+
   it('a tool not read: where to see it in its place, no summary box, no made-up name', async () => {
     await render([terminal({ tool: null, tool_name: null, summary: null })]);
     expect(container.querySelector('[data-testid="agent-permission-tool"]')).toBeNull();
