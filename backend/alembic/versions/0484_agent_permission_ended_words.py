@@ -10,6 +10,8 @@ on the row for ever (카디르's 5848 lens · 선생님 11-16: the automatic del
   (b) every other ended row (answered · rejected · expired · withdrawn) loses `tool · summary · workdir`.
   Open cards are not touched. The one exception by shape: the network question's FIXED vocabulary (`runtime = claude AND tool = SandboxNetwork`, and its `summary`): no word of the person's, and the same row is opened
   again for its second (confirm) stage, which the card draws from it. `host` is not in this change.
+Lock and time: every migration of one run shares ONE transaction (`env.py`), so the DROP / ADD CONSTRAINT lock on `agent_permission_requests` (ACCESS EXCLUSIVE) is held through the two UPDATEs and the VALIDATE scan to the commit; this table keeps only
+recent requests (ended ones are deleted after about 30 days — 0 rows older than that in prod, measured by the PO), so each of the three statements scans a table of a few thousand rows at most: the same shape as 0480. A table that grew far beyond that would block permission reads / writes for the length of the scans — this migration is not for it.
 Downgrade restores 0480's rule. The words cannot come back: an ended plain row whose words are gone becomes a terminal-only history row (no hash — the only shape the old rule lets lack tool · summary); its state · decision ·
 who answered it are kept.
 """
@@ -36,7 +38,7 @@ _OLD_RULE = _ROW_WORDS + (
     "(state = 'pending' OR envelope IS NULL) AND (NOT sealed OR state <> 'pending' OR envelope IS NOT NULL)"
 )
 
-_NET = "(runtime = 'claude' AND tool = 'SandboxNetwork')"
+_NET = "(runtime = 'claude' AND COALESCE(tool, '') = 'SandboxNetwork')"  # (COALESCE: `tool` is nullable — `NOT (… tool = 'X')` would be NULL for a row without a tool and the row would never match)
 # a row that still holds a plain word that is not the network question's fixed vocabulary
 _HOLDS_PLAIN = f"(workdir IS NOT NULL OR (NOT {_NET} AND (tool IS NOT NULL OR summary IS NOT NULL)))"
 _KEEP_NET = f"CASE WHEN {_NET} THEN tool END"

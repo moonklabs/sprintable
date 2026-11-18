@@ -1078,7 +1078,8 @@ _OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeo
 # `summary = network` · no workdir) — no word of the person's, and the same row is opened again for its second (confirm) stage, which the card draws from that tool. (`host` — the address of the confirm stage —
 # is not in this change: its result line still names it.)
 def _is_net_question():
-    return and_(AgentPermissionRequest.runtime == "claude", AgentPermissionRequest.tool == SANDBOX_NET_TOOL)
+    # (codex: `tool` is nullable — a terminal-only row may lack it; `NOT (… tool = 'X')` would then be NULL and the row would never match a WHERE) so the comparison is made on COALESCE(tool, ''): always true or false
+    return and_(AgentPermissionRequest.runtime == "claude", func.coalesce(AgentPermissionRequest.tool, "") == SANDBOX_NET_TOOL)
 
 
 def _ended_words() -> dict:
@@ -1140,7 +1141,7 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], 
     )
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else _OPEN_WORDS, ~has_phone)
+        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, _holds_plain_words()), ~has_phone)  # (0484: a plain card with no preview holds words too)
         .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
@@ -1296,7 +1297,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
         recent = (await db.execute(base.limit(RECENT_CAP))).all()
         # (codex AC3 ① medium) the ones still OPEN are taken first and apart from the ones that only just ran out: more than LIST_CAP newer «pending but past their window» rows cannot push an older still-open one out of the answer
         opened = (await db.execute(base.where(A.state == "pending", A.expires_at > now).limit(LIST_CAP))).all()
-        lapsed = (await db.execute(base.where(A.state == "pending", A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
+        # (codex · 0484: a plain card whose window passed is now ended as `expired` by the purge — still «just lapsed» for the list, like a `pending` one past its window)
+        lapsed = (await db.execute(base.where(A.state.in_(("pending", "expired")), A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
         merged = {r.id: (r, s) for r, s in [*recent, *lapsed, *opened]}
         # one answer carries at most LIST_CAP rows — the open ones first, then the just-lapsed ones (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
         open_ids, lapsed_ids = {r.id for r, _s in opened}, {r.id for r, _s in lapsed}

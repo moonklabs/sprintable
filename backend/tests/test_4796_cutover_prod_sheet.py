@@ -981,7 +981,17 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # (codex: the reading sees only the `op.execute(` line of a multi-line SQL string — so the SQL INSIDE the three calls is read here, from the file itself: nothing in upgrade() writes data, drops, renames or retypes)
     up0483 = (_ROOT / "backend/alembic/versions/0483_desktop_setups_sealed_cards.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0483), "0483's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_"))]
+    # story 4972: 0484 is FIVE lines of upgrade(): the CHECK of 0480 dropped, the new one added NOT VALID (a brief lock, no scan), the two data statements (`_END_PENDING`: a PENDING row whose window passed and that still holds words ends as `expired` — what the
+    # minute job does for it from now on; `_CLEAR_ENDED`: every other ended row loses `tool · summary · workdir`, the network question's fixed words kept) and the VALIDATE. Why a running old revision lives with it: the new CHECK is only LOOSER (an ended plain
+    # row may lack its words; a pending one may not — every row the old code writes is pending with its words); the old code reads `tool · summary · workdir` as nullable columns (a sealed row has had none since 0479, a terminal-only one may lack them) so a row without
+    # them is a shape it already serves; open cards are not touched; nothing is renamed, dropped or added. The data change is irreversible by design (the downgrade keeps the rows as terminal-only history). The lock is held to the commit — the table keeps
+    # recent requests only (ended ones are deleted after about 30 days), so the scans are small, as 0480's were.
+    cleared = [h for h in hits if h.startswith("0484_")]
+    assert len(cleared) == 5, cleared
+    assert any("drop_constraint" in h and "_CHECK" in h for h in cleared) and any("NOT VALID" in h for h in cleared) and any("VALIDATE CONSTRAINT" in h for h in cleared), cleared
+    assert any("_END_PENDING" in h for h in cleared) and any("_CLEAR_ENDED" in h for h in cleared), cleared
+    assert not any(k in h for h in cleared for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "DELETE")), "no column added, dropped or retyped, no row deleted"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

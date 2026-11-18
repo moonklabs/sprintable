@@ -282,3 +282,64 @@ async def test_an_organization_delete_shaped_transaction_and_a_report_never_wait
         finally:
             await holder.rollback()
             await eng.dispose()
+
+
+async def test_taking_off_the_last_phone_ends_a_plain_card_that_has_no_preview_and_takes_its_words(world):
+    """codex (0484 · PO 8829 — a real defect): the pair-removal path ended only the cards with an envelope or a preview; a plain card with neither stayed `pending` with its words until its window passed."""
+    from tests.test_4533_agent_permissions_realdb import PHONES
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewb")
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        p2, der2 = await _register(c, label="two")
+        await _pair(c, device["device_token"], der1, der2)
+        body = _ask(agent)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        assert (await c.delete(f"{PHONES}/{p1}", headers=_person(OWNER))).status_code in (200, 204)
+        assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "another phone is still paired: the card stays, with its words"
+        assert (await c.delete(f"{PHONES}/{p2}", headers=_person(OWNER))).status_code in (200, 204)
+        assert await _row(body["request_id"]) == ("withdrawn", None, None, None, True), "the last phone is off: the card ends and its words go"
+
+
+async def test_a_terminal_only_card_without_a_tool_name_loses_its_summary_too(world):
+    """codex (0484 · high): `tool` is nullable — with a NULL tool the «not the network question» test was SQL NULL and the row was never selected, so its summary stayed for ever"""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewc")
+        agent = await _with_session(c, device)
+        body = _ask(agent)
+        del body["tool"], body["input_hash"]
+        body["terminal_only"] = True
+        made = await _post_ask(c, device, body)
+        assert made.status_code == 201, made.text
+        assert (await _row(body["request_id"]))[1:4] == (None, "npm install --save ••••(가림)", "~/w"), "(a terminal-only row that did not read its tool: a summary and no tool)"
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{body['request_id']}'")
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201  # the next report ends it
+        assert (await _row(body["request_id"]))[:4] == ("expired", None, None, None)
+        # the migration's statement says the same: a NULL tool is not the network question
+        mod_path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0484_agent_permission_ended_words.py"
+        spec = importlib.util.spec_from_file_location("m0484n", mod_path)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        assert "COALESCE(tool, '') = 'SandboxNetwork'" in m._NET
+
+
+async def test_a_card_the_purge_ended_stays_in_the_list_for_its_hour_whatever_newer_rows_there_are(world, monkeypatch):
+    """codex (0484 · medium): the list took the «just lapsed» rows only from raw `pending` — a plain card the purge ended is raw `expired` now, and with more than RECENT_CAP newer rows it fell out of the list inside its own hour"""
+    from app.services import agent_permissions as ap
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewd")
+        agent = await _with_session(c, device)
+        old = _ask(agent)
+        assert (await _post_ask(c, device, old)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes', created_at = now() - interval '30 minutes' WHERE request_id = '{old['request_id']}'")
+        for _ in range(4):  # four NEWER rows, ended
+            b = _ask(agent)
+            assert (await _post_ask(c, device, b)).status_code == 201
+            await _sql(f"UPDATE agent_permission_requests SET state = 'withdrawn', tool = NULL, summary = NULL, workdir = NULL WHERE request_id = '{b['request_id']}'")
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201  # the report that ends `old` (raw `expired` now)
+        assert (await _row(old["request_id"]))[0] == "expired"
+        monkeypatch.setattr(ap, "RECENT_CAP", 2)
+        got = {r["request_id"] for r in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]}
+        assert old["request_id"] in got, "the ended-by-purge card is still in the list (its own hour)"

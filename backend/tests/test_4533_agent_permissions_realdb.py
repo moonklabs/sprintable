@@ -233,6 +233,10 @@ async def test_a_removal_works_at_once_and_goes_down_until_the_device_drops_it(w
         gone = await c.delete(f"{PHONES}/{phone_id}/pairs/{sid}", headers=_person(OWNER))
         assert gone.status_code == 200 and gone.json() == {"removed": True}
         assert (await c.delete(f"{PHONES}/{phone_id}/pairs/{sid}", headers=_person(OWNER))).json() == {"removed": False}
+        # story 4972 (0484): taking off the person's last phone now ends their plain card too (it can be answered by nobody) — the answer finds it withdrawn; a card made AFTER the removal is the one that shows «this phone is not paired»
+        ended = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert ended.json()["error"]["code"] == "withdrawn"
+        view = (await _post_ask(c, device, _ask(agent))).json()
         refused = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
         assert refused.json()["error"]["code"] == "phone_not_paired"  # at once, before the device hears of it
 
