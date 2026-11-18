@@ -37,7 +37,7 @@ export function soleAgentDm(items: unknown, selfMemberId: string, total: unknown
     // a row that cannot be read at all, or a direct room that does not say what it is, could be a SECOND agent's room we cannot see: «not sure» (the old hand-over), never a pick (codex 4980)
     if (!c || typeof c !== 'object' || typeof c.id !== 'string' || typeof c.type !== 'string') return null;
     if (c.type !== 'dm') continue; // a group (or any other kind) is not a direct room
-    if (!Array.isArray(c.participants) || typeof c.status !== 'string') return null;
+    if (!Array.isArray(c.participants) || c.participants.length === 0 || typeof c.status !== 'string') return null; // (a direct room with nobody in it is not a readable room)
     if (c.status !== 'open') continue; // only an OPEN room is where an instruction goes (resolved · the old deleted state · anything not known)
     const people = c.participants as ParticipantLike[];
     if (!people.some((p) => p && p.member_id === selfMemberId)) continue; // the person is in it (the list is theirs; a room that does not say so is not read as theirs)
