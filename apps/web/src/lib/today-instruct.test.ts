@@ -11,7 +11,7 @@ import { CHAT_API_PREFIX } from './chat-api-prefix';
 
 const ME = 'me-1';
 const dm = (id: string, others: Array<{ member_id: string; type: 'agent' | 'human' }>) => ({
-  id, type: 'dm', participants: [{ member_id: ME, type: 'human' }, ...others],
+  id, type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, ...others],
 });
 
 describe('soleAgentDm — the one direct conversation with an agent', () => {
@@ -29,8 +29,33 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     expect(soleAgentDm(items, ME, items.length)).toBe('c1');
   });
 
-  it('two agent DMs → null (nothing is picked for the person)', () => {
+  it('DMs with two DIFFERENT agents → null (nothing is picked for the person)', () => {
     expect(soleAgentDm([dm('c1', [{ member_id: 'a1', type: 'agent' }]), dm('c2', [{ member_id: 'a2', type: 'agent' }])], ME, 2)).toBeNull();
+  });
+
+  // story 4980 (PO 11-18): the server makes a new DM for the same pair on every «start a chat» — the rule is about the AGENT, not the room
+  const when = (id: string, agent: string, over: Record<string, unknown>) => ({ ...dm(id, [{ member_id: agent, type: 'agent' }]), ...over });
+  it('several DMs with the SAME agent → the one used last (the newest message · else the room\'s updated_at)', () => {
+    const a = when('c-old', 'a1', { updated_at: '2026-11-18T10:00:00Z' });
+    const b = when('c-new', 'a1', { updated_at: '2026-11-18T11:00:00Z' });
+    expect(soleAgentDm([a, b], ME, 2)).toBe('c-new');
+    expect(soleAgentDm([b, a], ME, 2)).toBe('c-new'); // not the list's order
+    // the latest message's time beats the room's updated_at
+    const c = when('c-msg', 'a1', { updated_at: '2026-11-18T09:00:00Z', latest_message: { created_at: '2026-11-18T12:00:00Z' } });
+    expect(soleAgentDm([a, b, c], ME, 3)).toBe('c-msg');
+  });
+
+  it('equal or unreadable times keep the list\'s own order (the first one) — deterministic', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {})], ME, 2)).toBe('c1');
+    expect(soleAgentDm([when('c1', 'a1', { updated_at: 5 }), when('c2', 'a1', { updated_at: '2026-11-18T11:00:00Z' })], ME, 2)).toBe('c2');
+  });
+
+  it('two DMs of one agent AND a DM of another agent → null (two agents: nothing is picked)', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {}), when('c3', 'a2', {})], ME, 3)).toBeNull();
+  });
+
+  it('a page that is not the whole list stays «not sure» even when every DM read is the same agent', () => {
+    expect(soleAgentDm([when('c1', 'a1', {}), when('c2', 'a1', {})], ME, 150)).toBeNull();
   });
 
   it('no agent DM → null', () => {
@@ -46,6 +71,50 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
   it('a count that is missing or not a number is «not sure» (a truncated answer must not read as the whole list)', () => {
     const one = [dm('c1', [{ member_id: 'a1', type: 'agent' }])];
     for (const bad of [undefined, null, '1', NaN]) expect(soleAgentDm(one, ME, bad)).toBeNull();
+  });
+
+  it('an agent DM whose agent has no readable id is not one the person can be said to have chosen — it does not count', () => {
+    const noId = { id: 'c1', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { type: 'agent' }] };
+    expect(soleAgentDm([noId], ME, 1)).toBeNull();
+    expect(soleAgentDm([noId, { ...noId, id: 'c2' }], ME, 2)).toBeNull(); // two rooms of «an agent with no id» are not «the same agent»
+    expect(soleAgentDm([noId, dm('c3', [{ member_id: 'a1', type: 'agent' }])], ME, 2)).toBe('c3');
+  });
+
+  it('a resolved room never counts — not even as «the one used last» (closing a room moves its updated_at)', () => {
+    const open = when('c-open', 'a1', { updated_at: '2026-11-18T10:00:00Z' });
+    const closed = when('c-closed', 'a1', { updated_at: '2026-11-18T12:00:00Z', status: 'resolved' });
+    expect(soleAgentDm([open, closed], ME, 2)).toBe('c-open');
+    expect(soleAgentDm([closed], ME, 1)).toBeNull(); // only a closed room: handed over as before
+    expect(soleAgentDm([when('c-del', 'a1', { status: 'deleted', updated_at: '2026-11-18T13:00:00Z' }), open], ME, 2)).toBe('c-open'); // the legacy deleted state
+    expect(soleAgentDm([when('c-odd', 'a1', { status: 'archived' })], ME, 1)).toBeNull(); // a state not known is not «open»
+    expect(soleAgentDm([when('c-open2', 'a1', { status: 'open' })], ME, 1)).toBe('c-open2');
+  });
+
+  it('a room whose agent has left (or cannot be resolved) does not count; a room the person is not in does not count', () => {
+    const left = { id: 'c-left', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: true }] };
+    const orphan = { id: 'c-orphan', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', resolved: false }] };
+    const live = { id: 'c-live', type: 'dm', status: 'open', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: false, resolved: true }] };
+    expect(soleAgentDm([left, orphan], ME, 2)).toBeNull();
+    expect(soleAgentDm([left, orphan, live], ME, 3)).toBe('c-live');
+    expect(soleAgentDm([{ id: 'x', type: 'dm', status: 'open', participants: [{ member_id: 'a1', type: 'agent' }] }], ME, 1)).toBeNull(); // the person is not among the participants
+  });
+
+  it('a room with a latest message is compared by that message; a room without one by its updated_at (the two kinds mix)', () => {
+    const talked = when('c-talked', 'a1', { updated_at: '2026-11-18T09:00:00Z', latest_message: { created_at: '2026-11-18T10:00:00Z' } });
+    const emptyNewer = when('c-empty', 'a1', { updated_at: '2026-11-18T11:00:00Z', latest_message: null });
+    expect(soleAgentDm([talked, emptyNewer], ME, 2)).toBe('c-empty'); // the specified fallback: the newer activity wins
+    expect(soleAgentDm([emptyNewer, talked], ME, 2)).toBe('c-empty');
+  });
+
+  it('an item that cannot be read, or a direct room that does not say its status or participants, makes the whole answer «not sure» — it could be a second agent\'s room (codex 4980)', () => {
+    const good = when('c1', 'a1', {});
+    expect(soleAgentDm([good], ME, 1)).toBe('c1');
+    for (const bad of [null, { id: 1 }, 'x', { id: 'z' }, { id: 'z', type: 'dm' }, { id: 'z', type: 'dm', status: 'open' }, { id: 'z', type: 'dm', participants: [] }, { id: 'z', type: 'dm', status: 'open', participants: [] }, { id: 'z', type: 'dm', status: 'open', participants: 'nope' }, { id: 'z', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent' }] }, { id: 'z', type: 'dm', status: 5, participants: [] }]) {
+      expect(soleAgentDm([good, bad], ME, 2)).toBeNull();
+    }
+    expect(soleAgentDm([when('c-up', 'a1', { status: 'OPEN', updated_at: '2026-11-18T23:00:00Z' }), good], ME, 2)).toBe('c1'); // status is compared exactly: anything but «open» is not a candidate
+    // …while a readable room of another kind, or a closed one, is simply not a candidate
+    expect(soleAgentDm([good, { id: 'g', type: 'group', participants: [] }, when('r', 'a1', { status: 'resolved' })], ME, 3)).toBe('c1');
   });
 
   it('unreadable input → null', () => {
