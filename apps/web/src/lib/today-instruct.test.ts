@@ -80,6 +80,34 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     expect(soleAgentDm([noId, dm('c3', [{ member_id: 'a1', type: 'agent' }])], ME, 2)).toBe('c3');
   });
 
+  it('a resolved room never counts — not even as «the one used last» (closing a room moves its updated_at)', () => {
+    const open = when('c-open', 'a1', { updated_at: '2026-11-18T10:00:00Z' });
+    const closed = when('c-closed', 'a1', { updated_at: '2026-11-18T12:00:00Z', status: 'resolved' });
+    expect(soleAgentDm([open, closed], ME, 2)).toBe('c-open');
+    expect(soleAgentDm([closed], ME, 1)).toBeNull(); // only a closed room: handed over as before
+    expect(soleAgentDm([when('c-open2', 'a1', { status: 'open' })], ME, 1)).toBe('c-open2');
+  });
+
+  it('a room whose agent has left (or cannot be resolved) does not count; a room the person is not in does not count', () => {
+    const left = { id: 'c-left', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: true }] };
+    const orphan = { id: 'c-orphan', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', resolved: false }] };
+    const live = { id: 'c-live', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent', departed: false, resolved: true }] };
+    expect(soleAgentDm([left, orphan], ME, 2)).toBeNull();
+    expect(soleAgentDm([left, orphan, live], ME, 3)).toBe('c-live');
+    expect(soleAgentDm([{ id: 'x', type: 'dm', participants: [{ member_id: 'a1', type: 'agent' }] }], ME, 1)).toBeNull(); // the person is not among the participants
+  });
+
+  it('a room with a latest message is compared by that message; a room without one by its updated_at (the two kinds mix)', () => {
+    const talked = when('c-talked', 'a1', { updated_at: '2026-11-18T09:00:00Z', latest_message: { created_at: '2026-11-18T10:00:00Z' } });
+    const emptyNewer = when('c-empty', 'a1', { updated_at: '2026-11-18T11:00:00Z', latest_message: null });
+    expect(soleAgentDm([talked, emptyNewer], ME, 2)).toBe('c-empty'); // the specified fallback: the newer activity wins
+    expect(soleAgentDm([emptyNewer, talked], ME, 2)).toBe('c-empty');
+  });
+
+  it('a malformed item among good ones is skipped, not fatal', () => {
+    expect(soleAgentDm([null, { id: 1 }, 'x', when('c1', 'a1', {})], ME, 4)).toBe('c1');
+  });
+
   it('unreadable input → null', () => {
     for (const bad of [null, undefined, 'x', 42, {}, [null], [{ id: 1 }], [{ id: 'c', type: 'dm' }]]) expect(soleAgentDm(bad, ME, 1)).toBeNull();
     expect(soleAgentDm([dm('c1', [{ member_id: 'a1', type: 'agent' }])], '', 1)).toBeNull();
