@@ -51,6 +51,8 @@ _KNOWN = {
     "app/routers/desktop_relay.py::put_clock_view",
     # story 4979 — the same device token: the computer's own «I am here» (`POST /relay/presence`) — device-token authentication · stamps only THAT token's row (`last_heard_at` · `last_presence_at`) · counted per verified device (20/min, before any write) · no project-owned entity is read or written (Kadir 5851 ① measured: a presence changes no command gate)
     "app/routers/desktop_relay.py::post_presence",
+    # story 4981 — the same device token: the computer's own agent-usage numbers (`PUT /relay/usage`) — device-token authentication · closed whole-number body (extra forbidden) · written only to THAT device's own rows (desktop_usage, keyed by the token's setup) · counted per verified device (20/min, before any write) · no project-owned entity is read or written
+    "app/routers/desktop_relay.py::put_usage",
     "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
     # story 4972 — the new pairing's device-token routes: the computer registers its OWN offer, answers a commitment with its nonce, closes its offer — rows of that device's setup (setup_id + offer_id), no project-owned entity is read
     "app/routers/desktop_relay.py::post_pairing_session",
