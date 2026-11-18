@@ -1279,7 +1279,7 @@ async def _reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime)
 async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> tuple[set[uuid.UUID], dict[uuid.UUID, datetime | None]]:
     """story 4979 — the computers a person is SHOWN as connected, and the last time each one itself spoke (`last_heard_at`).
 
-    A computer whose host sends `presence` (its last presence is younger than PRESENCE_AWARE_WINDOW) is connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) AND its stream was ticked within PRESENCE_STREAM_TICK_MAX (400 s) — `last_heard_at` is stamped only by what the device
+    A computer whose host sends `presence` (its last presence is younger than PRESENCE_AWARE_WINDOW) is connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) AND the server has heard its connection (the stream's tick or the host's own report · ack) within PRESENCE_STREAM_TICK_MAX (400 s) — `last_heard_at` is stamped only by what the device
     sends, so a stream whose peer is gone (the server's own tick keeps `last_used_at` fresh) is no longer «connected» for minutes. A computer whose host sends no presence (an older version) keeps the old rule exactly:
     `last_used_at` within UNKNOWN_AFTER (90 s). Also what `_reachable` returns (the same rule everywhere); `_reachable` is now this same rule (story 4979 gate alignment — before it, the old rule alone judged whether a command is accepted).
     Returns `(connected, last_heard_at by setup)` — a setup with no token row is in neither."""
@@ -1296,7 +1296,7 @@ async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: dat
     for sid, used, said, presence in rows:
         heard[sid] = said
         if presence is not None and now - presence <= PRESENCE_AWARE_WINDOW:
-            # it has spoken itself within 150 s AND its stream was ticked within 400 s (a stream dead for good must not stay «connected» on presence alone — Kadir 5853 ①)
+            # it has spoken itself within 150 s AND the server has heard its connection (stream tick or the host's own report · ack) within 400 s — presence alone must not keep a host «connected» (Kadir 5853 ①)
             if said is not None and now - said <= PRESENCE_UNKNOWN_AFTER and used is not None and now - used <= PRESENCE_STREAM_TICK_MAX:
                 connected.add(sid)
         elif used is not None and now - used <= UNKNOWN_AFTER:
