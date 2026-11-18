@@ -978,6 +978,9 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert len(mark) == 3, mark
     assert any("DROP TRIGGER IF EXISTS trg_desktop_setups_sealed_cards_one_way ON desktop_setups" in h for h in mark), mark
     assert not any(k in h for h in mark for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column dropped or retyped, no data touched"
+    # (codex: the reading sees only the `op.execute(` line of a multi-line SQL string — so the SQL INSIDE the three calls is read here, from the file itself: nothing in upgrade() writes data, drops, renames or retypes)
+    up0483 = (_ROOT / "backend/alembic/versions/0483_desktop_setups_sealed_cards.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0483), "0483's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
     hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
