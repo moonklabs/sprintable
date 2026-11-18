@@ -736,7 +736,7 @@ async def test_the_minute_sweep_reads_by_index_not_by_walking_the_table(world):
     seen: list[tuple[str, tuple]] = []
 
     def capture(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().upper().startswith("UPDATE DESKTOP_COMMANDS") and "send_prompt" in repr(parameters):
+        if statement.lstrip().upper().startswith("UPDATE DESKTOP_COMMANDS") and "'send_prompt'" in statement:
             seen.append((statement, parameters))
 
     event.listen(eng.sync_engine, "before_cursor_execute", capture)
@@ -745,10 +745,17 @@ async def test_the_minute_sweep_reads_by_index_not_by_walking_the_table(world):
             await purge_stale_prompts(db)
             await db.rollback()
         assert len(seen) == 2, [s[0][:60] for s in seen]  # the open ones and the finished leftovers
+        # the kind · state tests are constants in the statement (a partial index is provable only then — a prepared statement that has gone generic would walk the table with bind parameters)
+        assert any("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('queued', 'delivered', 'acked')" in st for st, _p in seen), [st[:80] for st, _p in seen]
+        assert any("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('done', 'failed', 'rejected')" in st for st, _p in seen), [st[:80] for st, _p in seen]
         async with eng.connect() as conn:
+            generic = int((await conn.exec_driver_sql("SHOW server_version_num")).scalar_one()) >= 160000  # EXPLAIN (GENERIC_PLAN) exists from PG 16
             for statement, params in seen:
                 plan = "\n".join(r[0] for r in (await conn.exec_driver_sql("EXPLAIN " + statement, params)).all())
                 assert "Seq Scan on desktop_commands" not in plan, plan
                 assert "ix_desktop_commands_prompt_" in plan, plan
+                if generic:  # the plan a statement that has gone GENERIC would use (no parameter value known): the sweep's read still starts from the partial index
+                    gplan = "\n".join(r[0] for r in (await conn.exec_driver_sql("EXPLAIN (GENERIC_PLAN) " + statement, params)).all())
+                    assert "ix_desktop_commands_prompt_" in gplan, gplan
     finally:
         await eng.dispose()

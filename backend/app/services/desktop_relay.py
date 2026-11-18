@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -1095,7 +1095,9 @@ async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, 
     now = now or _now()
     due = (
         select(DesktopCommand.id)
-        .where(DesktopCommand.kind == "send_prompt", DesktopCommand.state.in_(("queued", "delivered", "acked")),
+        # the kind · state tests are written as LITERALS (not bind parameters): the partial index of 0486 can only be proven usable by the planner when the predicate is a constant in the statement —
+        # with parameters, a prepared statement that has switched to a generic plan (asyncpg's statement cache does after a few runs) falls back to walking the table (codex 5850)
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('queued', 'delivered', 'acked')"),
                DesktopCommand.created_at < now - timedelta(minutes=minutes))
         .with_for_update(skip_locked=True)
     )
@@ -1110,7 +1112,7 @@ async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, 
     # index of 0486 (open · ended instruction rows by `created_at`), so neither walks the whole table each minute (Kadir lens 5850: 77 / 85 ms on a million rows before).
     leftovers = (
         select(DesktopCommand.id)
-        .where(DesktopCommand.kind == "send_prompt", DesktopCommand.state.in_(("done", "failed", "rejected")),
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('done', 'failed', 'rejected')"),  # literals, for the partial index (see above)
                DesktopCommand.created_at > now - timedelta(days=1),
                or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
         .with_for_update(skip_locked=True)
