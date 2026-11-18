@@ -99,6 +99,9 @@ _CATALOG: dict[str, dict[str, str]] = {
     "desktop_setup.agent_created_line": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool} · 폴더 {folder}", "en": "Agent created · name {name} · tool {tool} · folder {folder}"},
     "desktop_setup.agent_created_line_no_folder": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool}", "en": "Agent created · name {name} · tool {tool}"},
     "desktop_command.prompt_line_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음", "en": "Instruction · queued after the step in progress"},
+    # story 4976 (PO 11-18): a SEALED instruction — the server holds no word of it, so its line in the conversation is these fixed words (the phone opens the sealed record; story 4977 replaces this line with it)
+    "desktop_command.prompt_line_sealed": {"ko": "지시 · 지금 턴에 보냄 · 잠긴 글(앱에서 열기)", "en": "Instruction · sent into the current turn · sealed (open in the app)"},
+    "desktop_command.prompt_line_sealed_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음 · 잠긴 글(앱에서 열기)", "en": "Instruction · queued after the step in progress · sealed (open in the app)"},
     "desktop_command.turn_end_title": {"ko": "{agent} · 다음 일 기다림", "en": "{agent} · Waiting for work"},
     "desktop_command.turn_end_title_bare": {"ko": "다음 일 기다림", "en": "Waiting for work"},
     "desktop_command.turn_end_body": {

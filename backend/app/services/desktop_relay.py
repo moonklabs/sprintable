@@ -22,9 +22,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.desktop_relay import (
     COMMAND_KINDS,
@@ -902,11 +903,28 @@ class StartSessionPayload(_Payload):
 
 class SendPromptPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
-    text: str = Field(min_length=1, max_length=PROMPT_MAX)
+    text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     # story #4534 (contract v1.9) — the conversation the agent answers in, and the phone's signed blob (its conversation_id
     # and text hash inside — the daemon wraps «this conversation» from the signed value only); carried as is
     conversation_id: uuid.UUID
-    signed: str = Field(min_length=1, max_length=16384)
+    signed: str | None = Field(default=None, min_length=1, max_length=16384)
+    # story 4976: or the SEALED road — `envelope` (kind `send_prompt`: the words and the phone's signature over the whole envelope inside, the server cannot open it) in place
+    # of `text` + `signed`, never beside them: a sealed press stores no word and no hash of the words
+    envelope: dict | None = None
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        from app.services.envelope_shape import check_envelope
+
+        return None if env is None else check_envelope(env, kind="send_prompt")
+
+    @model_validator(mode="after")
+    def _one_road(self) -> SendPromptPayload:
+        sealed = self.envelope is not None
+        if sealed == (self.text is not None or self.signed is not None) or (not sealed and (self.text is None or self.signed is None)):
+            raise ValueError("an instruction is the plain road (text and signed) or the sealed road (envelope), one of the two")
+        return self
 
 
 class AnswerApprovalPayload(_Payload):
@@ -1033,6 +1051,79 @@ def validate_payload(kind: str, payload: dict) -> _Payload:
         raise DesktopRelayError(422, "invalid_payload", exc.errors(include_url=False, include_input=False)[0]["msg"]) from exc
 
 
+COMMAND_END_STATES = ("done", "failed", "rejected")
+
+
+def ended_prompt_payload(payload: dict | None) -> dict:
+    """story 4976: what a finished instruction press keeps — which session and which conversation, nothing of the words (the text · the plain road's signature with a hash of
+    the words · the sealed envelope). A new dict: the JSONB column is set to it, never changed in place."""
+    p = payload or {}
+    return {k: p[k] for k in ("session_key", "conversation_id") if k in p}
+
+
+async def forget_prompts(db: AsyncSession, setup_ids: list[uuid.UUID]) -> int:
+    """story 4976: the instruction copies of computers that cannot be reached any more go (a disconnect · a replaced line · an account's computers cut off · the organization's remote
+    control turned off): EVERY `send_prompt` of those computers — queued · delivered · acked · over — keeps `{session_key, conversation_id}` and nothing of the words (text · plain
+    signature · envelope). `reject_open_commands` ends the open ones; this also covers the one it does not (an `acked` instruction: the computer took it, then the line was cut) and the
+    paths that end no command (a replacement, an account cut-off). Row locks of the commands only — the same place `desktop_clock.forget` and `desktop_changes.forget` stand."""
+    if not setup_ids:
+        return 0
+    # `SKIP LOCKED` (codex 4976 · third delta): a command row that a result is landing on right now is held by that transaction (it takes the row, then the device's token — the cut-off paths take the
+    # token first), so waiting for it here would be one side of a deadlock. Such a row is not lost: a result that ENDS it (done · failed · rejected) scrubs it; one that only acknowledges it (`acked`) does not,
+    # and the minute sweep (`purge_stale_prompts`) takes it when it is still open ten minutes on.
+    due = (
+        select(DesktopCommand.id)
+        .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.kind == "send_prompt",
+               or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
+        .with_for_update(skip_locked=True)
+    )
+    res = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(due))
+        .values(payload=func.jsonb_build_object(
+            "session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    return res.rowcount or 0
+
+
+STALE_PROMPT_COPY_MINUTES = 10  # a command is refused by the computer after 120 s (RELAY_COMMAND_MAX_AGE_MS): ten minutes is far past any answer — what is still open then is a copy nobody will use
+
+
+async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, minutes: int = STALE_PROMPT_COPY_MINUTES) -> int:
+    """story 4976 (the minute job, with the card sweep): a `send_prompt` that is still OPEN (queued · delivered · acked) after `minutes` ends as `rejected` / `expired` and keeps
+    {session_key, conversation_id} only. It closes what no cut-off path can: a press made while a switch-off was committing (the switch-off ended the commands it saw; this one landed after) and
+    a computer that took a press and never reported. A row held by another transaction (its result landing · an organization's delete) is skipped (`SKIP LOCKED`) and taken the next minute. → how many ended."""
+    now = now or _now()
+    due = (
+        select(DesktopCommand.id)
+        # the kind · state tests are written as LITERALS (not bind parameters): the partial index of 0486 can only be proven usable by the planner when the predicate is a constant in the statement —
+        # with parameters, a prepared statement that has switched to a generic plan (asyncpg's statement cache does after a few runs) falls back to walking the table (codex 5850)
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('queued', 'delivered', 'acked')"),
+               DesktopCommand.created_at < now - timedelta(minutes=minutes))
+        .with_for_update(skip_locked=True)
+    )
+    res = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(due))
+        .values(state="rejected", result_code="expired", finished_at=now,
+                payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    ended = res.rowcount or 0
+    # (Kadir lens 5850 · low 6) a press an OLDER build of the server ended while this one was rolling out keeps its words — 0486 ran before that build stopped: the same sweep takes every finished
+    # instruction of the last day that still holds any (a press ends within minutes of its making, and the rollout is shorter than a day; the older ones are 0486's). Both reads start from a partial
+    # index of 0486 (open · ended instruction rows by `created_at`), so neither walks the whole table each minute (Kadir lens 5850: 77 / 85 ms on a million rows before).
+    leftovers = (
+        select(DesktopCommand.id)
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('done', 'failed', 'rejected')"),  # literals, for the partial index (see above)
+               DesktopCommand.created_at > now - timedelta(days=1),
+               or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
+        .with_for_update(skip_locked=True)
+    )
+    res2 = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(leftovers))
+        .values(payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    return ended + (res2.rowcount or 0)
+
+
 async def enqueue_command(
     db: AsyncSession, *, setup: DesktopSetup, kind: str, payload: dict, idempotency_key: str, requested_by: uuid.UUID,
 ) -> DesktopCommand:
@@ -1055,14 +1146,24 @@ async def enqueue_command(
     )).scalar_one_or_none()
     if existing is not None:
         return existing
+    # story 4976: only a computer that is NOT cut off takes a number. The caller read the computer a moment ago; a disconnect · a replacement · an account cut-off that committed since
+    # (this UPDATE waited on its row lock) is seen here again by the UPDATE's own WHERE — no command is made for a computer whose copies were just scrubbed
     seq = (await db.execute(
-        update(DesktopSetup).where(DesktopSetup.id == setup.id)
+        update(DesktopSetup).where(DesktopSetup.id == setup.id, DesktopSetup.revoked_at.is_(None))
         .values(relay_command_seq=DesktopSetup.relay_command_seq + 1)
         .returning(DesktopSetup.relay_command_seq)
-    )).scalar_one()
+    )).scalar_one_or_none()
+    if seq is None:
+        raise DesktopRelayError(409, DISCONNECTED_CODE, "that computer has been disconnected")
+    # story 4976 (Kadir lens 5850 · middle 1): the remote-control switch-off holds the computer's row while it forgets what it holds (`desktop_clock.forget`) — a press that read «on» above waits on the
+    # UPDATE just now and would then make its command AFTER that scrub. Ask again: this is a NEW statement after the wait (READ COMMITTED), it sees the switch-off's commit. No new lock · no new order.
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     body = parsed.model_dump(mode="json")
     if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
+    if kind == "send_prompt":  # story 4976: a plain press is exactly {session_key, text, conversation_id, signed} as before, a sealed one {session_key, conversation_id, envelope}
+        body = {k: v for k, v in body.items() if v is not None}
     if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
         body.pop("agent_member_id", None)
     if kind == "clock" and body.get("computer") is None:  # story #4734 (B): a press without the mark carries none of its three keys (the same bytes as before)
@@ -1103,9 +1204,22 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         from app.services.desktop_changes import reject_stale_commands
 
         rows = await reject_stale_commands(db, rows, now=now)
-    for r in rows:
-        if r.state == "queued":
-            r.state, r.delivered_at = "delivered", now
+    # story 4976 (codex third delta): «queued → delivered» is a GUARDED statement (`state = 'queued'`), not the ORM's blind write of the row read above: a command that a sweep or a cut-off ended
+    # and scrubbed between that read and now is NOT rewritten back to `delivered` and is NOT sent with the words read a moment ago (a row already `delivered` is re-sent as always — at least
+    # once; the computer drops an id it has seen). The rows it moves are HELD to the commit — as the ORM write it replaces held them (command row, then the device's token in `touch_device`; the
+    # cut-off paths take the token first: that pair, stream vs disconnect, exists before this change and is not in its scope — Kadir lens 5850). Nothing is locked beyond what that write locked.
+    queued = [r.id for r in rows if r.state == "queued"]
+    if queued:
+        moved = set((await db.execute(
+            update(DesktopCommand).where(DesktopCommand.id.in_(queued), DesktopCommand.state == "queued")
+            .values(state="delivered", delivered_at=now).returning(DesktopCommand.id)
+            .execution_options(synchronize_session=False)  # (the ORM must not «evaluate» the guard on its own stale copies: a row the database refused would still look moved)
+        )).scalars().all())
+        rows = [r for r in rows if r.state != "queued" or r.id in moved]
+        for r in rows:
+            if r.id in moved:
+                set_committed_value(r, "state", "delivered")
+                set_committed_value(r, "delivered_at", now)
     await db.flush()
     return rows
 
@@ -1148,6 +1262,8 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)
+    if cmd.kind == "send_prompt" and cmd.state in COMMAND_END_STATES:  # story 4976: the words (or the sealed envelope) were a copy for delivery — gone once the press is over (the line above has been written)
+        cmd.payload = ended_prompt_payload(cmd.payload)
     if cmd.kind == "clock":  # story #4733: a submitted / cancelled clock-out takes the draft lines off the server at once
         from app.services.desktop_clock import on_clock_result, scrub_clock_edits
 
@@ -1187,6 +1303,13 @@ async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], 
         .values(state="rejected", result_code=result_code, finished_at=now)
         .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
     )).all()
+    if any(kind == "send_prompt" for _, kind, _p in rejected):  # story 4976: an instruction that never reached the computer leaves no words (or envelope) behind either
+        await db.execute(
+            update(DesktopCommand)
+            .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.kind == "send_prompt", DesktopCommand.state == "rejected", DesktopCommand.finished_at == now)
+            .values(payload=func.jsonb_build_object(
+                "session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+        )
     if any(kind == "clock" for _, kind, _p in rejected):  # S5 · P2: an edit that never reached the computer leaves no typed text behind
         from app.services.desktop_clock import scrub_clock_edits
 

@@ -742,6 +742,9 @@ async def _reclaim_unproved_account(
     await desktop_clock.forget(session, cut_ids)
     from app.services import desktop_changes
 
+    from app.services.desktop_relay import forget_prompts
+
+    await forget_prompts(session, cut_ids)  # story 4976 — nor the words of an instruction a cut-off computer still holds
     await desktop_changes.forget(session, cut_ids)  # story #4951 — no changed-file list stays for a computer cut off (the default lock: asked again on rows this transaction already holds — nothing waits)
     await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
     # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)

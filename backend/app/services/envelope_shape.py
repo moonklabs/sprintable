@@ -19,7 +19,8 @@ ENVELOPE_KINDS = frozenset({
 })
 MAX_CT_BYTES = 256 * 1024
 # a card's words are a few hundred characters and a preview of at most 2400 — a card envelope is small (the host pads to a fixed width inside this cap)
-MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024}
+# story 4976: a phone's instruction into the running turn is at most INSTRUCT_NOW_MAX (400) characters — a few KiB at 4 bytes a character; the phone pads to a fixed width inside this cap
+MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024, "send_prompt": 8 * 1024}
 MAX_TO = 16
 MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1

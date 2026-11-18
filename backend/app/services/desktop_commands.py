@@ -14,7 +14,7 @@ from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,11 @@ from app.services.desktop_relay import (
 )
 
 logger = logging.getLogger(__name__)
+
+# story 4976: a sealed instruction's header time (ms): `ts` within this of the server's clock (design ② §4-2: the 5-minute signature window + 30 s of clock
+# difference), and the envelope open no longer than this after `ts` — the computer judges the window itself; the server only refuses what cannot be a press of now
+ENVELOPE_TS_SKEW_MS = 5 * 60_000 + 30_000
+ENVELOPE_LIFETIME_MAX_MS = 10 * 60_000
 
 TURN_END_EVENT_TYPE = "agent.turn_ended"
 
@@ -386,8 +391,31 @@ class CommandRequest(BaseModel):
     text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     conversation_id: uuid.UUID | None = None
     idempotency_key: str = Field(min_length=1, max_length=100)
-    signed: str = Field(min_length=1, max_length=16384)
+    # story 4976: `signed` is the plain road's (the phone's signature over fields that include a sha256 of the words); a SEALED instruction carries
+    # `envelope` instead — the words and the phone's signature over the whole envelope are in it, the server cannot open it, and no text · no hash of the words is anywhere beside it
+    signed: str | None = Field(default=None, min_length=1, max_length=16384)
+    envelope: dict | None = None
     phone_key_id: uuid.UUID
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        from app.services.envelope_shape import check_envelope
+
+        return None if env is None else check_envelope(env, kind="send_prompt")
+
+    @model_validator(mode="after")
+    def _one_road(self) -> CommandRequest:
+        if self.envelope is not None:
+            if self.kind != "send_prompt":
+                raise ValueError("only an instruction is sealed")
+            if self.text is not None or self.signed is not None:
+                raise ValueError("a sealed instruction carries no text and no plain signature beside its envelope")
+            if self.conversation_id is None:
+                raise ValueError("a sealed instruction names its conversation")
+        elif self.signed is None:
+            raise ValueError("a command carries its signature")
+        return self
 
 
 async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: uuid.UUID) -> bool:
@@ -409,9 +437,9 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     from app.services.agent_permissions import _reachable, paired_phone
     from app.services.desktop_relay import enqueue_command
 
-    if body.kind == "send_prompt" and (body.text is None or body.conversation_id is None):
+    if body.kind == "send_prompt" and body.envelope is None and (body.text is None or body.conversation_id is None):
         raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
-    if body.kind == "send_prompt" and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
+    if body.kind == "send_prompt" and body.text is not None and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
         raise DesktopRelayError(422, "instruct_too_long", f"an instruction into the turn is {INSTRUCT_NOW_MAX} characters at most")
     if body.kind in ("stop_session", "end_session") and (body.text is not None or body.conversation_id is not None):
         raise DesktopRelayError(422, "invalid_payload", "a stop or an end carries no text or conversation")
@@ -460,9 +488,19 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         return None, "already_stopped"
     if body.kind == "send_prompt" and session.state != "working":
         raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
-    payload: dict = {"session_key": body.session_key, "signed": body.signed}
-    if body.kind == "send_prompt":
-        payload.update(text=body.text, conversation_id=str(body.conversation_id))
+    if body.envelope is not None:
+        # story 4976: the header the phone sealed must be about THIS press (a server cannot read it, but it can see that it is not a copy of another's):
+        # this computer · this session · this press's own key (the id the envelope's AAD names) · a time near now
+        e = body.envelope
+        now_ms = int(_now().timestamp() * 1000)
+        if e["setup_id"] != str(setup.id) or e["session_key"] != body.session_key or e["command_id"] != body.idempotency_key \
+                or abs(e["ts"] - now_ms) > ENVELOPE_TS_SKEW_MS or not e["ts"] <= e["expires_at"] <= e["ts"] + ENVELOPE_LIFETIME_MAX_MS:
+            raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this press's")
+        payload: dict = {"session_key": body.session_key, "conversation_id": str(body.conversation_id), "envelope": body.envelope}
+    else:
+        payload = {"session_key": body.session_key, "signed": body.signed}
+        if body.kind == "send_prompt":
+            payload.update(text=body.text, conversation_id=str(body.conversation_id))
     cmd = await enqueue_command(
         db, setup=setup, kind=body.kind, payload=payload, idempotency_key=f"b3:{member_id}:{body.idempotency_key}",
         requested_by=member_id,
@@ -718,7 +756,7 @@ async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
     )).first() is not None
 
 
-async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str, command_id,
+async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str | None, command_id,
                              after_step: bool = False) -> None:
     """«지시 · 지금 턴에 보냄» + the text, from the person who sent it (명세 B-3). Not dispatched to the agent — it already has
     the instruction in its turn; a second copy as a message would be a second instruction."""
@@ -729,7 +767,9 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
     locale = await resolve_org_locale(db, org_id)
     db.add(ConversationMessage(
         id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id,
-        content=f"{t('desktop_command.prompt_line_after_step' if after_step else 'desktop_command.prompt_line', locale)}\n{text}",
+        # story 4976: a sealed instruction (no text) leaves only the fixed words — the server never had its text
+        content=(f"{t('desktop_command.prompt_line_after_step' if after_step else 'desktop_command.prompt_line', locale)}\n{text}" if text is not None
+                 else t("desktop_command.prompt_line_sealed_after_step" if after_step else "desktop_command.prompt_line_sealed", locale)),
         mentioned_ids=[],
         msg_metadata={"activation": {"audience": [], "kind": "remote_prompt", "expects_response": False},
                       "remote_prompt": {"command_id": str(command_id), "agent_member_id": str(agent_id)}},
@@ -818,9 +858,9 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
             select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == cmd.setup_id,
                                                          DesktopSession.session_key == cmd.session_key)
         )).scalar_one_or_none()
-        if setup is not None and agent_id is not None and payload.get("conversation_id") and payload.get("text") is not None:
+        if setup is not None and agent_id is not None and payload.get("conversation_id") and (payload.get("text") is not None or payload.get("envelope") is not None):
             await _write_prompt_line(db, org_id=setup.org_id, conversation_id=uuid.UUID(str(payload["conversation_id"])),
-                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload["text"], command_id=cmd.id,
+                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload.get("text"), command_id=cmd.id,
                                      after_step=cmd.result_code == "after_step")
 
 

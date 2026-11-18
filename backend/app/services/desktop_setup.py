@@ -1319,6 +1319,9 @@ async def _retire_same_machine(
 
         await desktop_changes.forget(db, [o.id for o in old], lock=False)  # story #4951 — a replaced line keeps no changed-file list either
         await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
+        from app.services.desktop_relay import forget_prompts
+
+        await forget_prompts(db, [o.id for o in old])  # story 4976 — nor the words of an instruction it still holds (queued · delivered · acked)
         await db.execute(
             update(DesktopDeviceToken)
             .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
@@ -1624,6 +1627,7 @@ async def _disconnect_setup(
 
     await desktop_changes.forget(db, [setup.id], lock=False)  # story #4951 — no changed-file list outlives the computer's connection (the row is held: `_lock_in_order` above)
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
+    await desktop_relay.forget_prompts(db, [setup.id])  # story 4976 — nor the words of an instruction: the open ones ended just above, this also covers an acked one
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = set(_made_agent_ids(setup.members))

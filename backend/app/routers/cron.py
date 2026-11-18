@@ -865,6 +865,18 @@ async def changes_purge(
     """story #4951 (Kadir lens A): a changed-file list a person never came back to read is deleted when its 120 seconds are over — the sweep that does not wait for anyone's next read."""
     verify_cron(request)
     try:
+        # story 4976 (Kadir lens 5850 · middle 2): the instruction-copy sweep goes FIRST, in its own savepoint and try, and is COMMITTED before the other steps run — «an open instruction's words do not
+        # stay on the server past about eleven minutes» must not depend on the three older steps below succeeding (one that keeps failing used to take the whole job — and this sweep — with it)
+        prompts: int | None = None
+        try:
+            async with session.begin_nested():
+                from app.services.desktop_relay import purge_stale_prompts
+
+                prompts = await purge_stale_prompts(session)
+            await session.commit()
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · stale prompts): %s", type(exc).__name__)
+            await session.rollback()
         from app.services.desktop_changes import purge_audit, purge_expired
         purged = await purge_expired(session)  # (the session commits at the end of the request, as the other sweeps rely on)
         audit = await purge_audit(session)  # the audit lines past their 90 days
@@ -880,7 +892,7 @@ async def changes_purge(
                 orphans = await end_orphan_cards(session)
         except Exception as exc:
             logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
-        return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans})
+        return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
