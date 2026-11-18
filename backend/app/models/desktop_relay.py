@@ -68,6 +68,11 @@ class DesktopDeviceToken(Base):
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4979: «the computer itself spoke» — stamped ONLY by what the device sends (the stream connect · its reports and acks · `POST /relay/presence`), never by the server's own 30-second tick (which keeps
+    # `last_used_at` fresh for a stream whose peer is gone — measured 11-18: up to 5 min 20 s after the computer fell silent). The phone's «last seen N min ago» and the new «disconnected» rule read this.
+    last_heard_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4979: the last time the device sent its own `presence` (a host version that sends none keeps this empty — its «disconnected» rule stays the old 90 s one)
+    last_presence_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopSession(Base):

@@ -30,7 +30,7 @@ from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, Re
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
 from app.services.envelope_shape import check_envelope
-from app.services.desktop_relay import SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
+from app.services.desktop_relay import PRESENCE_AWARE_WINDOW, PRESENCE_UNKNOWN_AFTER, SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
 from app.services.tool_names import shown_tool
 
 logger = logging.getLogger(__name__)
@@ -1279,6 +1279,33 @@ async def _reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime)
         .group_by(DesktopDeviceToken.setup_id)
     )).all()
     return {sid for sid, last in rows if last is not None and now - last <= UNKNOWN_AFTER}
+
+
+async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> tuple[set[uuid.UUID], dict[uuid.UUID, datetime | None]]:
+    """story 4979 — the computers a person is SHOWN as connected, and the last time each one itself spoke (`last_heard_at`).
+
+    A computer whose host sends `presence` (its last presence is younger than PRESENCE_AWARE_WINDOW) is connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) — `last_heard_at` is stamped only by what the device
+    sends, so a stream whose peer is gone (the server's own tick keeps `last_used_at` fresh) is no longer «connected» for minutes. A computer whose host sends no presence (an older version) keeps the old rule exactly:
+    `last_used_at` within UNKNOWN_AFTER (90 s). Used ONLY for what a person is shown (state · «connected» · «last seen»); `_reachable` (the old rule) still judges whether a command is accepted.
+    Returns `(connected, last_heard_at by setup)` — a setup with no token row is in neither."""
+    if not setup_ids:
+        return set(), {}
+    rows = (await db.execute(
+        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at), func.max(DesktopDeviceToken.last_heard_at), func.max(DesktopDeviceToken.last_presence_at))
+        .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
+        .where(DesktopDeviceToken.setup_id.in_(setup_ids), DesktopDeviceToken.revoked_at.is_(None), DesktopSetup.revoked_at.is_(None))
+        .group_by(DesktopDeviceToken.setup_id)
+    )).all()
+    connected: set[uuid.UUID] = set()
+    heard: dict[uuid.UUID, datetime | None] = {}
+    for sid, used, said, presence in rows:
+        heard[sid] = said
+        if presence is not None and now - presence <= PRESENCE_AWARE_WINDOW:
+            if said is not None and now - said <= PRESENCE_UNKNOWN_AFTER:
+                connected.add(sid)
+        elif used is not None and now - used <= UNKNOWN_AFTER:
+            connected.add(sid)
+    return connected, heard
 
 
 def shown_state(row: AgentPermissionRequest, now: datetime) -> str:

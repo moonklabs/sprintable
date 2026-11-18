@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 
 TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
+# story 4979 (PO 11-18): a device that sends `presence` every 60 s is «disconnected» once it has been silent this long (two missed beats and a margin) — measured: the 90 s rule on the SERVER's tick showed «connected» for up to
+# 5 min 20 s after a computer fell silent. A device counts as presence-aware only while its last presence is this young; an older host version (no presence) keeps the 90 s rule on `last_used_at`.
+PRESENCE_UNKNOWN_AFTER = timedelta(seconds=150)
+# How long a last presence still makes a device «presence-aware» (Kadir 5851 ②: a day let a host that went back to an older version flip between «connected» and «disconnected» for a day). The number is the longest a half-open
+# connection can keep the SERVER's tick-stamped `last_used_at` fresh after a computer fell silent — the stream's lifetime 5 min 20 s + the 90 s rule = ≈ 6 min 50 s (measured 11-18) — doubled and rounded: 15 minutes. Past it the old
+# rule judges, and by then it says «not heard» on its own; a host that really sends presence is never that quiet (it sends one at every connect, then every 60 s).
+PRESENCE_AWARE_WINDOW = timedelta(minutes=15)
+PRESENCE_LIMIT = "20/minute"  # per verified device: a host asks once a minute (reconnects add a few) — a token that asks more is answered 429 BEFORE any write (the request costs the token check, nothing else)
+PRESENCE_MIN_GAP = timedelta(seconds=10)  # a presence closer than this to the last one is accepted and ignored (nothing is written: no one can turn the endpoint into a write load)
 SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 # story #4554 (PO 11:45Z) — the relay's edges, each a named number:
 INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
@@ -145,13 +154,31 @@ async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup 
     return setup
 
 
-async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
-    """The device was heard from now (connect · heartbeat · any report) — what `unknown` is measured from."""
+async def touch_device(db: AsyncSession, setup_id: uuid.UUID, *, heard: bool = True) -> None:
+    """The device was heard from now (connect · heartbeat · any report) — what `unknown` is measured from. `heard=False` is the SERVER's own tick on an open stream: it keeps `last_used_at` as it always did
+    but is NOT the computer speaking, so `last_heard_at` is left alone (story 4979)."""
+    now = _now()
+    values: dict = {"last_used_at": now}
+    if heard:
+        values["last_heard_at"] = now
     await db.execute(
         update(DesktopDeviceToken)
         .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
-        .values(last_used_at=_now())
+        .values(**values)
     )
+
+
+async def touch_presence(db: AsyncSession, setup_id: uuid.UUID, token: str | None = None) -> bool:
+    """story 4979: the device's own «I am here» (`POST /relay/presence`). Stamps `last_heard_at` and `last_presence_at` of the token the request CAME WITH (`token`; None = every live token of the device) — and NOT `last_used_at`
+    (Kadir 5851 ①: `last_used_at` is what the SERVER judges «may a command go to this computer» by; a presence alone must not turn a computer with no stream and no report into one that accepts commands — this change moves only what a
+    person is SHOWN). Only when the last presence is older than PRESENCE_MIN_GAP (one UPDATE with the guard in its WHERE: a flood writes nothing, and costs no read). Returns whether anything was written."""
+    now = _now()
+    where = [DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None),
+             or_(DesktopDeviceToken.last_presence_at.is_(None), DesktopDeviceToken.last_presence_at < now - PRESENCE_MIN_GAP)]
+    if token:
+        where.append(DesktopDeviceToken.token_hash == _hash(token))
+    res = await db.execute(update(DesktopDeviceToken).where(*where).values(last_heard_at=now, last_presence_at=now))
+    return bool(res.rowcount)
 
 
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:

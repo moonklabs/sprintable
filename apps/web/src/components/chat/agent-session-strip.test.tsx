@@ -63,6 +63,42 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  // story 4979 (PO 11-18): a computer no longer heard says WHEN it was last seen — its OWN last word (`last_heard_at`), never «상태 모름» alone when the server has the time
+  it.each([
+    [20_000, '연결이 끊겼어요 · 마지막으로 본 지 방금 전', 'Disconnected · last seen just now'],
+    [3 * 60_000 + 5_000, '연결이 끊겼어요 · 마지막으로 본 지 3분 전', 'Disconnected · last seen 3 min ago'],
+    [59 * 60_000 + 30_000, '연결이 끊겼어요 · 마지막으로 본 지 59분 전', 'Disconnected · last seen 59 min ago'],
+    [61 * 60_000, '연결이 끊겼어요 · 마지막으로 본 지 1시간 전', 'Disconnected · last seen 1 h ago'],
+    [50 * 3_600_000, '연결이 끊겼어요 · 마지막으로 본 지 2일 전', 'Disconnected · last seen 2 d ago'],
+  ])('unknown with last_heard_at %i ms ago → «%s» (ko) / «%s» (en)', async (ago, ko, en) => {
+    const at = new Date(Date.now() - ago).toISOString();
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'unknown', last_heard_at: at }));
+    await render();
+    expect(chip()).toBe('연결 끊김 · 상태 모름'); expect(line()).toBe(ko);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'unknown', last_heard_at: at }));
+    await render('en');
+    expect(line()).toBe(en);
+  });
+
+  it('unknown without a usable last_heard_at keeps the older line (none · not a date · a time in the future)', async () => {
+    const old = '그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요';
+    for (const last of [undefined, null, 'not a date', new Date(Date.now() + 3_600_000).toISOString()]) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state: 'unknown', ...(last === undefined ? {} : { last_heard_at: last }) }));
+      await render();
+      expect(line(), String(last)).toBe(old);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  it('a connected session never shows the last-seen line, whatever last_heard_at says', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', last_heard_at: new Date(Date.now() - 600_000).toISOString() }));
+    await render();
+    expect(line()).toBe('페어링된 폰에서 멈추거나 지시할 수 있어요');
+  });
+
   it('remote control off says why — over the permission line too; not on a computer draws nothing', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ remote_control: false }));
     await render();

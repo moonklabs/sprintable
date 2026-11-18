@@ -50,6 +50,8 @@ interface View {
   can_read_changes?: boolean;
   // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
   setup_id?: string | null;
+  // story 4979: the last time that computer ITSELF spoke (its own presence · reports — never the server's tick); the server sends it with the session, an older one sends none
+  last_heard_at?: string | null;
   device_name: string | null;
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
@@ -515,12 +517,27 @@ function WidenedLine({ view }: { view: View }) {
   return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-widened">{t('widened', { time, mode })}</p>;
 }
 
+/** story 4979: «마지막으로 본 지 N분 전» from the computer's own last word — a time that cannot be read (none · not a date · in the future by more than a minute) says nothing (the caller keeps the older line). Minutes up to an hour, then hours, then days. */
+export function lastSeenLine(t: (key: string, values?: Record<string, number>) => string, heardAt: string | null | undefined, now: number): string | null {
+  if (!heardAt) return null;
+  const at = Date.parse(heardAt);
+  if (!Number.isFinite(at)) return null;
+  const ms = now - at;
+  if (ms < -60_000) return null;
+  const min = Math.max(0, Math.floor(ms / 60_000));
+  if (min < 1) return t('line.disconnectedSeenNow');
+  if (min < 60) return t('line.disconnectedSeenMin', { n: min });
+  if (min < 24 * 60) return t('line.disconnectedSeenHour', { n: Math.floor(min / 60) });
+  return t('line.disconnectedSeenDay', { n: Math.floor(min / (24 * 60)) });
+}
+
 function Line({ view, now, phone, href }: { view: View & { state: SessionState }; now: number; phone: boolean; href: string }) {
   const t = useTranslations('chats.agentSession');
   const tPermissions = useTranslations('agentPermissions'); // story #4590: the terminal-only line is the card's own key (Yuna §2)
   const locale = useLocale();
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
-  if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
+  // story 4979 (PO 11-18): a computer that is no longer heard says WHEN it was last seen («연결이 끊겼어요 · 마지막으로 본 지 N분 전»; under a minute = «방금 전») — «상태 모름» alone when the server has no such time
+  if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{lastSeenLine(t, view.last_heard_at, now) ?? t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
   // story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — what to do is on that computer's screen, whatever remote control says;
   // the folder named only when the daemon read it (a wrong folder name is worse than none). Inside the phone app, where [세션 끝내기]
