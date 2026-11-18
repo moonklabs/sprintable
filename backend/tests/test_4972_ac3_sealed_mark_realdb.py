@@ -310,6 +310,10 @@ def test_the_setup_lock_is_taken_before_the_mark_is_read_a_source_pin_for_the_ra
 
     src = inspect.getsource(agent_permissions.report_request)
     assert "_sealed_mark(" in src
+    assert "purge_open_cards(" in src and src.index("_lock_machine(") < src.index("purge_open_cards("), "the setup rows are locked BEFORE the request rows are touched (lens 5848: the project's one lock order)"
+    lock_src = inspect.getsource(agent_permissions._lock_machine)
+    assert ".order_by(DesktopSetup.id)" in lock_src and ".with_for_update()" in lock_src, "the lock takes the rows in ONE order (by id) — the order is what keeps two siblings from waiting for each other"
+    assert "revoked_at.is_(None)" in lock_src, "the lock covers the LIVE siblings (a revoked setup cannot report)"
     assert "_lock_machine(" in src and src.index("_lock_machine(") < src.index("_sealed_mark("), "the lock (every setup row of the machine) must come before the mark is read"
     assert src.index("_sealed_mark(") < src.index("existing = "), "the plaintext refusal comes before the re-send shortcut (a plaintext re-send is always 422)"
     assert "_stand_sealed_mark(" in src and src.index("_stand_sealed_mark(") > src.index("db.begin_nested()"), "the mark stands only after the row is made, in the same transaction"
@@ -367,3 +371,67 @@ async def test_still_open_requests_come_before_just_lapsed_ones_in_the_whole_lis
         got = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
         assert ids["open_old"] in {r["request_id"] for r in got}, "the still-open request must not be pushed out by newer lapsed ones"
         assert len(got) <= 3
+
+
+async def test_the_mark_needs_EVERY_receiver_to_be_a_pin_of_THIS_setup_not_one_and_not_a_pin_of_another_computer(world):
+    """lens 5848 (low · test holes ⓐ ⓑ): a card sealed to a pinned phone AND an unpinned one does not stand the mark; a card sealed to a phone pinned only on ANOTHER computer does not either."""
+    async with _client() as c:
+        x_name, y_name = "d4424 mac 4972me", "d4424 mac 4972mf"
+        dev_x, agent_x, p1 = await _sealed_computer(c, x_name)            # X has P1 pinned
+        p2_id, _der2 = await _register(c)                                    # P2: registered, pinned NOWHERE
+        mixed = _sealed_to(agent_x, await _setup_id(x_name), p1)
+        env = mixed["envelope"]; env["to"] = [p1, p2_id]; env["wraps"] = [{"to": p1, "enc": b64(32), "ek": b64(48)}, {"to": p2_id, "enc": b64(32), "ek": b64(48)}]
+        assert (await _post_ask(c, dev_x, mixed)).status_code == 201 and await _mark(x_name) is None, "one pinned + one unpinned receiver: the card is taken, the mark does not stand"
+        dev_y = await _device(c, name=y_name); agent_y = await _with_session(c, dev_y)  # Y: no pin at all
+        assert (await _post_ask(c, dev_y, _sealed_to(agent_y, await _setup_id(y_name), p1))).status_code == 201 and await _mark(y_name) is None, "a phone pinned only on ANOTHER computer is no receiver of this one"
+        assert (await _post_ask(c, dev_y, _plain(agent_y))).status_code == 201  # (Y's plaintext road is still open)
+
+
+async def test_the_open_limit_is_per_setup_not_per_organization(world):
+    """lens 5848 (low · test hole ⓒ): a computer at its limit does not shut another computer of the same organization."""
+    from app.services import agent_permissions
+
+    a_name, b_name = "d4424 mac 4972mg", "d4424 mac 4972mh"
+    async with _client() as c:
+        dev_a = await _device(c, name=a_name); agent_a = await _with_session(c, dev_a)
+        dev_b = await _device(c, name=b_name); agent_b = await _with_session(c, dev_b)
+        for _ in range(50):
+            assert (await _post_ask(c, dev_a, _ask(agent_a, request_id=str(uuid.uuid4())))).status_code == 201
+        assert (await _post_ask(c, dev_a, _ask(agent_a, request_id=str(uuid.uuid4())))).status_code == 422  # A is full
+        assert (await _post_ask(c, dev_b, _ask(agent_b, request_id=str(uuid.uuid4())))).status_code == 201  # B is not
+        assert agent_permissions.OPEN_LIMIT == 50
+
+
+def test_the_list_bounds_are_the_real_values_not_the_ones_a_test_overrides():
+    """lens 5848 (low · test hole ⓓ): the tests above shrink RECENT_CAP / LIST_CAP with monkeypatch — this one reads the shipped values (PO 8787 · 8793: 100 newest + the waiting ones, at most 200)."""
+    from app.services import agent_permissions
+
+    assert agent_permissions.RECENT_CAP == 100 and agent_permissions.LIST_CAP == 200
+
+
+async def test_the_plaintext_decision_does_not_wait_for_a_REVOKED_sibling_setup(world):
+    """lens 5848 (low): the lock covers the live siblings; a revoked setup of the same Mac (it cannot report a card) is not waited for — a Mac that is installed again and again does not make every card lock a growing pile of dead rows."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    a_name, b_name = "d4424 mac 4972mi", "d4424 mac 4972mj"
+    mk = "mk-4972-rev-" + uuid.uuid4().hex[:8]
+    async with _client() as c:
+        dev_a = await _device(c, name=a_name); agent_a = await _with_session(c, dev_a)
+        await _device(c, name=b_name)
+        await _sql(f"UPDATE desktop_setups SET machine_key = '{mk}' WHERE device_name IN ('{a_name}','{b_name}')")
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now(), revoked_reason = 'replaced_by_new_setup' WHERE device_name = '{b_name}'")
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng)() as holder:
+                await holder.execute(text("SELECT id FROM desktop_setups WHERE device_name = :n FOR UPDATE"), {"n": b_name})  # the REVOKED sibling's row is held
+                r = await asyncio.wait_for(_post_ask(c, dev_a, _plain(agent_a)), 8)
+                assert r.status_code == 201, r.text
+                await holder.rollback()
+        finally:
+            await eng.dispose()

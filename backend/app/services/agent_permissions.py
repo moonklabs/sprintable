@@ -889,8 +889,10 @@ async def _sealed_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
 async def _lock_machine(db: AsyncSession, setup: DesktopSetup) -> None:
     """Serialize everything that reads or stands the sealed mark for ONE Mac: the mark is shared by `org_id + machine_key` (a sibling lane · a replaced setup), so the lock is on EVERY setup row of that machine — always taken in the same order (by id),
     so two siblings cannot wait for each other. (codex AC3 ① high: locking only this setup let setup A read «no mark» while sibling B committed its first sealed card — A's plaintext card then landed after the mark.) A setup with no machine key locks itself."""
-    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
-    await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, or_(*same_mac)).order_by(DesktopSetup.id).with_for_update())
+    # (lens 5848 · low) the lock covers the LIVE siblings and this setup only: a revoked setup cannot report a card (its token is gone), so there is nothing to wait for — and a Mac that is installed again and again would otherwise pile up
+    # revoked rows that every card then locks. The mark is still READ across revoked setups (`_sealed_mark`).
+    live_siblings = [and_(DesktopSetup.machine_key == setup.machine_key, DesktopSetup.revoked_at.is_(None))] if setup.machine_key is not None else []
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, or_(DesktopSetup.id == setup.id, *live_siblings)).order_by(DesktopSetup.id).with_for_update())
 
 
 async def _stand_sealed_mark(db: AsyncSession, setup: DesktopSetup, envelope: dict) -> None:
@@ -911,12 +913,13 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    # (lens 5848 · low) the setup rows are locked BEFORE this computer's request rows are touched (the purge below) — the project's one lock order is «setup row first, then the request rows»; an organization's delete (setup → its requests, by cascade) takes them the same way round
+    await _lock_machine(db, setup)
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
     await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
-    # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock, the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
+    # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock (taken above), the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
     # same moment: either order, no plaintext card is made AFTER the mark). The answer is ALWAYS 422, a re-send of a plaintext body included (no branch that tells the first from the second). No `detail`: not a word of the body comes back.
-    await _lock_machine(db, setup)
     if _plain_words(body) and not _network_first_stage(body) and await _sealed_mark(db, setup):
         raise DesktopRelayError(422, "sealed_required", "this computer sends sealed cards")
     q = select(AgentPermissionRequest).where(
