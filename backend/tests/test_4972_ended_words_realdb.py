@@ -156,12 +156,13 @@ async def test_the_migration_clears_what_was_already_over_once_and_leaves_open_a
         paired_id, der = await _register(c)
         await _pair(c, device["device_token"], der)
         answered, lapsed, open_, net, nfinal = _ask(agent), _ask(agent), _ask(agent), _net_first_stage(agent), _net_first_stage(agent)
-        for body in (answered, lapsed, open_, net, nfinal):
+        netw = {**_net_first_stage(agent), "workdir": "~/w"}  # (not the exact first-stage shape: it carries a folder — the one network row the migration's UPDATE selects)
+        for body in (answered, lapsed, open_, net, nfinal, netw):
             assert (await _post_ask(c, device, body)).status_code == 201
         # the old code kept the words of an ended row: put them back by hand (an ended row may carry them under either rule)
         await _sql(f"UPDATE agent_permission_requests SET state = 'answered', decision = 'allow' WHERE request_id = '{answered['request_id']}'")
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{lapsed['request_id']}'")
-        await _sql(f"UPDATE agent_permission_requests SET state = 'withdrawn', result_code = 'session_ended' WHERE request_id = '{nfinal['request_id']}'")
+        await _sql(f"UPDATE agent_permission_requests SET state = 'withdrawn', result_code = 'session_ended' WHERE request_id IN ('{nfinal['request_id']}', '{netw['request_id']}')")
         assert (await _row(answered["request_id"]))[1:4] == ("Bash", "npm install --save ••••(가림)", "~/w")
         await _sql(m._END_PENDING)
         await _sql(m._CLEAR_ENDED)
@@ -170,6 +171,7 @@ async def test_the_migration_clears_what_was_already_over_once_and_leaves_open_a
         assert (await _row(open_["request_id"]))[:4] == ("pending", "Bash", "npm install --save ••••(가림)", "~/w"), "an open card is not touched"
         assert (await _row(net["request_id"]))[:4] == ("pending", "SandboxNetwork", "network", None), "a pending network question is not touched"
         assert (await _row(nfinal["request_id"]))[:4] == ("withdrawn", "SandboxNetwork", "network", None), "an ended network question keeps its fixed words"
+        assert (await _row(netw["request_id"]))[:4] == ("withdrawn", "SandboxNetwork", "network", None), "…and when it also carried a folder: the folder goes, the fixed words stay"
         await _sql(m._CLEAR_ENDED)  # once more: nothing left to do, nothing breaks
         assert (await _row(answered["request_id"]))[0] == "answered"
 
