@@ -98,7 +98,7 @@ async def test_a_sealed_press_holds_no_word_and_its_header_must_be_its_own(world
                      {"ts": future, "expires_at": future + 120_000}, {"expires_at": now_ms() - 5_000}, {"expires_at": now_ms() + 3_600_000}):
             r = await _post(c, agent, {**_sealed_cmd(sid, phone, conv, key=key), "envelope": sealed_env(sid, key, **over)})
             assert r.status_code == 422 and r.json()["error"]["code"] == "envelope_header_mismatch", (over, r.text)
-        assert len(await _sql(fetch="SELECT id FROM desktop_commands WHERE kind = 'send_prompt'")) == 1  # none of them was kept
+        assert len(await _sql(fetch=f"SELECT id FROM desktop_commands WHERE kind = 'send_prompt' AND setup_id = '{sid}'")) == 1  # none of them was kept (this computer's rows only: another test file of the same CI shard leaves its own)
 
 
 async def test_one_road_never_both_never_neither(world):
@@ -120,7 +120,7 @@ async def test_one_road_never_both_never_neither(world):
         ):
             r = await _post(c, agent, bad)
             assert r.status_code == 422, (list(bad), r.text)
-        assert (await _sql(fetch="SELECT count(*) FROM desktop_commands WHERE kind = 'send_prompt'"))[0][0] == 0
+        assert (await _sql(fetch=f"SELECT count(*) FROM desktop_commands WHERE kind = 'send_prompt' AND setup_id = '{sid}'"))[0][0] == 0  # (this computer's rows only)
         # control: the plain road is as it was (the same four keys · nothing else)
         plain = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
         assert plain.status_code == 201
