@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import case, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1168,13 +1168,28 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     from app.models.member import Member
 
     now = _now()
-    rows = (await db.execute(
+    base = (
         select(AgentPermissionRequest, DesktopSetup)
         .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
         .where(AgentPermissionRequest.recipient_member_id == member_id, DesktopSetup.org_id == org_id)
         .order_by(AgentPermissionRequest.created_at.desc())
-        .limit(100)
-    )).all()
+    )
+    A = AgentPermissionRequest
+    if state is not None:
+        # story 4972 (push landing · PO): the state is chosen BEFORE the 100 are cut — the SQL form of `shown_state` below (a pending row past its window is
+        # «expired», read and never swept). Cut first, a person's waiting request is pushed out by 100 newer ended ones.
+        shown = {
+            "pending": and_(A.state == "pending", A.expires_at > now),
+            "expired": or_(A.state == "expired", and_(A.state == "pending", A.expires_at <= now)),
+        }.get(state, A.state == state)
+        rows = (await db.execute(base.where(shown).limit(100))).all()
+    else:
+        # no state: the newest 100 of everything — and every request still waiting or only just expired (the lists' own «still shown» window is ≤ 1 h = MAX_WINDOW),
+        # so a screen that reads the whole list cannot lose a waiting request to 100 newer ended ones
+        recent = (await db.execute(base.limit(100))).all()
+        live = (await db.execute(base.where(A.state == "pending", A.expires_at > now - MAX_WINDOW).limit(500))).all()
+        merged = {r.id: (r, s) for r, s in [*recent, *live]}
+        rows = sorted(merged.values(), key=lambda rs: rs[0].created_at, reverse=True)
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:
         return []

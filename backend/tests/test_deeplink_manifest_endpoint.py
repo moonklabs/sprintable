@@ -138,4 +138,5 @@ async def test_permission_request_released_to_the_inbox_approvals_tab_4972():
     assert entry["app"]["target"] == "permission_request"
     assert entry["app"]["parent_tab"] == "approvals"
     assert entry["app"]["target_promotion_pending"] is False
+    assert entry["app"]["return_policy"] == "synthesize_parent"  # (fallback_now would let a client drop the target and land on «지금»)
     assert entry["payload"]["required_payload"] == ["reference_id"]

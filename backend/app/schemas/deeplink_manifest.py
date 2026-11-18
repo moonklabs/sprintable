@@ -364,7 +364,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="agent.permission_request", target="permission_request", parent_tab=ParentTab.approvals,
                 target_promotion_pending=False,
-                return_policy=ReturnPolicy.fallback_now,
+                return_policy=ReturnPolicy.synthesize_parent,  # (a real target: the approvals root goes into history first — fallback_now is for target «now»)
             ),
             payload=DeepLinkPayloadFields(
                 org_id_included=True, project_id_included=False,

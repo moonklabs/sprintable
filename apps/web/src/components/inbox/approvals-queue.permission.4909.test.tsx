@@ -321,6 +321,32 @@ describe('ApprovalsQueue — 4972 push landing: `?request=<id>` opens that reque
     await mountQueue();
     expect(goneLine()?.textContent).toBe(koMessages.agentPermissions.requestGone);
   });
+  it('⭐[codex 1] a FAILED first permission read is not «the list was read»: no «gone» line over a request the list never answered about', async () => {
+    pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
+    searchRef.current = 'request=r1';
+    fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/agent-permission-requests'
+      ? new Response('{}', { status: 500 })
+      : url.endsWith('/remote-control')
+        ? new Response(JSON.stringify({ data: { enabled_at: null, enabled: true, can_change: false, owner_names: [], connected_setups: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+        : (globalThis.fetch as unknown as (u: string) => Promise<Response>)(url)));
+    await mountQueue();
+    expect(goneLine()).toBeNull();
+  });
+  it('⭐[codex 2] the approvals\' RETRY (the list is emptied and refilled) does not leave the person on the first approval: the notice\'s request is picked again — until the person moves', async () => {
+    gatesFail = true; permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })];
+    searchRef.current = 'tab=gates&request=r2';
+    await mountQueue();
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    gatesFail = false; pending = [lowGate('g1', '첫째 결재 항목')];
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateInboxRetry) || b.textContent?.includes('다시'));
+    expect(retry).toBeTruthy();
+    await act(async () => { (retry as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    await pickRow('g1'); // …and once the person moves, nothing takes the pick back
+    await settle();
+    expect(detail()?.textContent).toContain('첫째 결재 항목');
+  });
   it('the «gone» line waits for the first permission read — a request the list is still fetching is not called gone', async () => {
     pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
     searchRef.current = 'request=r1';

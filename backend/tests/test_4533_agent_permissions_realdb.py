@@ -19,6 +19,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG,
     OWNER,
     OWNER_TM,
+    ORG2,
     PLAIN,
     _addresses,
     _client,
@@ -394,3 +395,46 @@ async def test_only_the_recipient_with_their_own_paired_phone_answers_and_only_a
 
         mine = await c.post(f"{REQS}/{rid}/answer", json=_answer(owner_phone), headers=_person(OWNER))  # the real answer still goes
         assert mine.status_code == 200
+
+
+async def test_a_waiting_request_is_not_pushed_out_of_the_list_by_100_newer_ended_ones_4972(world):
+    """story 4972 (push landing · PO): the list is cut at 100 newest — a state filter was applied AFTER the cut, and the screen that reads the
+    whole list (no state) had no room reserved for what still waits. 101 newer requests past their window + ONE older waiting request:
+    the waiting one is in the whole list and is the whole `?state=pending` list (reverting either path goes RED)."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972pl")
+        agent = await _with_session(c, device)
+        _phone, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        old = await _post_ask(c, device, _ask(agent))
+        assert old.status_code == 201, old.text
+        for _ in range(101):
+            assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '2 hours' WHERE id <> '{old.json()['id']}' AND setup_id = "
+                   f"(SELECT setup_id FROM agent_permission_requests WHERE id = '{old.json()['id']}')")
+        whole = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert old.json()["id"] in [r["id"] for r in whole]  # (101 newer rows are ended by their clocks: the oldest one that waits is still there)
+        assert [r["id"] for r in (await c.get(REQS + "?state=pending", headers=_person(OWNER))).json()["requests"]] == [old.json()["id"]]
+        expired = (await c.get(REQS + "?state=expired", headers=_person(OWNER))).json()["requests"]
+        assert len(expired) == 100 and old.json()["id"] not in [r["id"] for r in expired]
+
+
+async def test_the_merged_waiting_list_stays_inside_the_recipient_and_the_org_4972(world):
+    """story 4972 (push landing · security point): the «still waiting» rows added to the whole list are cut by the SAME recipient and org
+    as the newest-100 query (both come from one base query). A waiting request of the owner is NOT in another member's list (whole · pending ·
+    expired) and, once its computer belongs to another org, not in the owner's list for this org either."""
+    async with _client() as c:
+        await _plain_member()
+        device = await _device(c, name="d4424 mac 4972sec")
+        agent = await _with_session(c, device)
+        _phone, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        made = await _post_ask(c, device, _ask(agent))
+        assert made.status_code == 201, made.text
+        rid = made.json()["id"]
+        assert [r["id"] for r in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]] == [rid]  # (the owner sees it)
+        for q in ("", "?state=pending", "?state=expired"):
+            assert (await c.get(REQS + q, headers=_person(PLAIN))).json()["requests"] == [], q  # another member of the org: nothing
+        await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = (SELECT setup_id FROM agent_permission_requests WHERE id = '{rid}')")
+        for q in ("", "?state=pending"):
+            assert (await c.get(REQS + q, headers=_person(OWNER))).json()["requests"] == [], q  # the computer is in another org now: not in this org's list
