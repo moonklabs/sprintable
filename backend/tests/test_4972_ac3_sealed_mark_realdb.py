@@ -299,3 +299,17 @@ async def test_a_removed_or_revoked_pin_is_no_receiver_that_stands_the_mark(worl
         # alive again: the mark stands
         await _sql(f"UPDATE remote_devices SET revoked_at = NULL WHERE id = '{phone_id}'")
         assert (await _post_ask(c, device, _sealed_to(agent, await _setup_id(name), phone_id))).status_code == 201 and await _mark(name) is not None
+
+
+def test_the_setup_lock_is_taken_before_the_mark_is_read_a_source_pin_for_the_race_that_cannot_be_asserted_in_order():
+    """The sealed card and the plaintext one at the same moment (the test above) can only be asserted as «either order, no error, shut afterwards» — which order happened cannot be seen.
+    What makes them one-at-a-time is the setup row's lock (`lock_setup`) taken BEFORE the mark is read; a mutant that drops the lock leaves that race test green. So the order is pinned in the source (honest: a source pin, not a race)."""
+    import inspect
+
+    from app.services import agent_permissions
+
+    src = inspect.getsource(agent_permissions.report_request)
+    assert "lock_setup" in src and "_sealed_mark(" in src
+    assert src.index("lock_setup") < src.index("_sealed_mark("), "the lock must come before the mark is read"
+    assert src.index("_sealed_mark(") < src.index("existing = "), "the plaintext refusal comes before the re-send shortcut (a plaintext re-send is always 422)"
+    assert "_stand_sealed_mark(" in src and src.index("_stand_sealed_mark(") > src.index("db.begin_nested()"), "the mark stands only after the row is made, in the same transaction"
