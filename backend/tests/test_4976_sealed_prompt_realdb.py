@@ -503,8 +503,14 @@ async def test_a_press_that_waited_on_the_switch_off_is_refused_once_the_switch_
             await holder.execute(text(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'"))  # … and turned the switch off (not committed yet)
             task = asyncio.create_task(enqueue_command(db, setup=setup, kind="send_prompt", payload={"session_key": "s-1", "conversation_id": str(conv), "envelope": sealed_env(sid, "k-wait")},
                                                       idempotency_key="b4:wait", requested_by=OWNER_TM))
-            await asyncio.sleep(1.0)
-            assert not task.done()  # it is waiting on the row (the test would prove nothing if it were not)
+            # a STATE signal, not a time: the press's backend is waiting on a lock (pg_stat_activity), seen within ten seconds — the test proves nothing if it never got there
+            for _ in range(100):
+                if (await _sql(fetch="SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"))[0][0] >= 1:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                pytest.fail("the press never waited on the row lock")
+            assert not task.done()  # it is waiting on the row
             await holder.commit()
             with pytest.raises(DesktopRelayError) as e:
                 await asyncio.wait_for(task, timeout=10)
