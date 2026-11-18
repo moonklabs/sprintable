@@ -310,9 +310,10 @@ async def test_a_terminal_only_card_without_a_tool_name_loses_its_summary_too(wo
         body = _ask(agent)
         del body["tool"], body["input_hash"]
         body["terminal_only"] = True
+        body["workdir"] = None  # (no folder: the SUMMARY alone is what makes the row «hold words» — with a folder the row was selected by that branch whatever the tool test said)
         made = await _post_ask(c, device, body)
         assert made.status_code == 201, made.text
-        assert (await _row(body["request_id"]))[1:4] == (None, "npm install --save ••••(가림)", "~/w"), "(a terminal-only row that did not read its tool: a summary and no tool)"
+        assert (await _row(body["request_id"]))[1:4] == (None, "npm install --save ••••(가림)", None), "(a terminal-only row that did not read its tool: a summary and no tool, no folder)"
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{body['request_id']}'")
         assert (await _post_ask(c, device, _ask(agent))).status_code == 201  # the next report ends it
         assert (await _row(body["request_id"]))[:4] == ("expired", None, None, None)
