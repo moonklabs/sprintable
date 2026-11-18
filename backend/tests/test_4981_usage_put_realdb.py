@@ -280,3 +280,71 @@ def test_16_source_pin_a_computers_reports_are_taken_one_at_a_time_by_an_advisor
     src = (pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / "desktop_usage.py").read_text(encoding="utf-8")
     assert 'pg_advisory_xact_lock(func.hashtext(f"desktop_usage:{setup.id}"))' in src
     assert src.index("pg_advisory_xact_lock") < src.index("DesktopSetup.id == setup.id")                  # before the row is read and before anything is counted
+
+
+async def test_17_a_usage_report_never_renews_the_streams_tick_the_5853_rule_still_refuses_a_dead_stream(world):
+    """Kadir 5854 ①: the report stamps `last_heard_at` only. A presence host whose stream died 30 min ago and which keeps sending numbers must still be refused a command (409), as before the report."""
+    from tests.test_4979_last_heard_realdb import _age, _cmd, _grant_command, _post, _setup
+
+    async with _client() as c:
+        device, agent, phone, conv = await _setup(c, "d4981 mac dead stream usage")
+        await _grant_command()
+        assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))).status_code == 200
+        await _age(device["setup_id"], used=1800, heard=5, presence=5)                                  # the stream's tick 30 min old; the computer itself fresh
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 409
+        before = await _sql(fetch=f"SELECT last_used_at FROM desktop_device_tokens WHERE setup_id = '{device['setup_id']}' AND revoked_at IS NULL")
+        assert (await _put(c, device, _entry())).status_code == 200
+        after = await _sql(fetch=f"SELECT last_used_at, last_heard_at FROM desktop_device_tokens WHERE setup_id = '{device['setup_id']}' AND revoked_at IS NULL")
+        assert after[0][0] == before[0][0]                                                               # the tick was NOT renewed
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text                           # …so a command is still refused
+
+
+async def test_18_the_report_stamps_only_the_token_it_came_with(world):
+    async with _client() as c:
+        d = await _device(c, "d4981 mac token")
+        await _sql(f"INSERT INTO desktop_device_tokens (id, setup_id, token_hash, issued_at) VALUES (gen_random_uuid(), '{d['setup_id']}', 'second-token-of-d', now())")
+        await _sql(f"UPDATE desktop_device_tokens SET last_heard_at = NULL WHERE setup_id = '{d['setup_id']}'")
+        assert (await _put(c, d, _entry())).status_code == 200
+        rows = {h: heard for h, heard in await _sql(fetch=f"SELECT token_hash, last_heard_at IS NOT NULL FROM desktop_device_tokens WHERE setup_id = '{d['setup_id']}' AND revoked_at IS NULL")}
+        assert rows.pop("second-token-of-d") is False and list(rows.values()) == [True]
+
+
+def test_19_source_pin_the_setup_is_read_with_a_row_lock_and_the_report_does_not_touch_the_tick():
+    import pathlib
+
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql
+
+    from app.models.desktop_setup import DesktopSetup
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / "desktop_usage.py").read_text(encoding="utf-8")
+    assert "with_for_update(key_share=True)" in src
+    assert "touch_heard(db, setup.id, token)" in src and "touch_device(" not in src.replace("`touch_device", "")
+    sql = str(select(DesktopSetup).with_for_update(key_share=True).compile(dialect=postgresql.dialect()))
+    assert "FOR NO KEY UPDATE" in sql                                                                    # what that call really renders (the mode the disconnect's UPDATE takes)
+
+
+async def test_20_a_disconnect_waits_for_a_usage_report_that_is_still_open_and_goes_through_when_it_ends(world):
+    """Kadir 5854 low, two real connections: the report's transaction holds the computer's row, so a disconnect cannot slip in between its read and its writes."""
+    from sqlalchemy import select, text, update
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_usage
+
+    async with _client() as c:
+        d = await _device(c, "d4981 mac lock")
+        async with async_session_factory() as a, async_session_factory() as b:
+            setup = (await a.execute(select(DesktopSetup).where(DesktopSetup.id == d["setup_id"]))).scalar_one()
+            report = desktop_usage.UsageReport.model_validate({"usage": [_entry()]})
+            await desktop_usage.apply_usage(a, setup, report)                                            # the report's transaction is OPEN (not committed)
+            await b.execute(text("SET LOCAL lock_timeout = '400ms'"))
+            with pytest.raises(DBAPIError):
+                await b.execute(update(DesktopSetup).where(DesktopSetup.id == d["setup_id"]).values(revoked_at=datetime.now(timezone.utc)))   # the disconnect has to wait → times out here
+            await b.rollback()
+            await a.commit()                                                                              # the report ends …
+            await b.execute(update(DesktopSetup).where(DesktopSetup.id == d["setup_id"]).values(revoked_at=datetime.now(timezone.utc)))        # … and the disconnect goes through
+            await b.commit()
+        assert len(await _rows(d["setup_id"])) == 1

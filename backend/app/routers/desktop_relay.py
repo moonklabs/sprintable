@@ -432,7 +432,10 @@ async def post_presence(
 
 
 @router.put("/relay/usage")
-async def put_usage(body: desktop_usage.UsageReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+async def put_usage(
+    body: desktop_usage.UsageReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+) -> dict:
     """story 4981 (연결 ③): the computer's agent usage — closed numbers its host read (whole percent per limit window · the reset time) or the word `unavailable` with its reason. The device is the token's own (`_device`); the body
     names no computer. Counted per VERIFIED device, before anything is written (429 `RATE_LIMITED`). An older report than the stored one (by the host's `seen_at`) is ignored; a closed computer is refused (409). Nothing of the body is logged."""
     from app.core.rate_limit import hit_person_limits
@@ -441,7 +444,7 @@ async def put_usage(body: desktop_usage.UsageReport, setup: DesktopSetup = Depen
     if retry is not None:
         raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
     try:
-        written = await desktop_usage.apply_usage(db, setup, body)
+        written = await desktop_usage.apply_usage(db, setup, body, x_desktop_device_token)
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)

@@ -187,6 +187,17 @@ async def touch_presence(db: AsyncSession, setup_id: uuid.UUID, token: str | Non
     return bool(res.rowcount)
 
 
+async def touch_heard(db: AsyncSession, setup_id: uuid.UUID, token: str | None = None) -> bool:
+    """story 4981 (Kadir 5854 ①): the device's own word that is NOT a stream tick or a report — it stamps `last_heard_at` of the token the request came with (`token`; None = every live token of the device) and NOTHING else:
+    not `last_used_at`. `last_used_at` is what the 5853 rule «no tick and no report for 400 s → refused» judges a presence host by, so a usage report must not renew it (a computer whose stream died would otherwise stay
+    «reachable» for as long as it kept sending numbers). Returns whether anything was written."""
+    where = [DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None)]
+    if token:
+        where.append(DesktopDeviceToken.token_hash == _hash(token))
+    res = await db.execute(update(DesktopDeviceToken).where(*where).values(last_heard_at=_now()))
+    return bool(res.rowcount)
+
+
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
     """An open stream asks again: a disconnect (device revoked · its token revoked · its confirming person's account gone — story #4767 — or removed from the
     organization — story #4769) ends it."""

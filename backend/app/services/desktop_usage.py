@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_relay import DesktopUsage
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError, touch_device
+from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError, touch_heard
 
 USAGE_LIMIT = "20/minute"  # per VERIFIED device (the device row, never a header), counted before anything is written — presence's frame; the host sends on change, coalesced, a few a minute at most
 MAX_WINDOWS = 4
@@ -87,11 +87,13 @@ def _windows_json(entry: UsageEntry, now: datetime) -> list[dict]:
     return out
 
 
-async def apply_usage(db: AsyncSession, setup: DesktopSetup, report: UsageReport) -> int:
+async def apply_usage(db: AsyncSession, setup: DesktopSetup, report: UsageReport, token: str | None = None) -> int:
     """The computer's report → the number of rows written (an older report writes none of its rows). Raises 409 `device_disconnected` for a closed computer."""
     # one report of a computer at a time (Kadir/codex: two racing reports could both count ≤ MAX_ACCOUNTS rows before either deletes — the row cap would not hold, and a row just written could be the one deleted)
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop_usage:{setup.id}"))))
-    fresh = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).execution_options(populate_existing=True))).scalar_one()
+    # the computer's row is read WITH A ROW LOCK (`with_for_update(key_share=True)` = PostgreSQL's FOR NO KEY UPDATE — the mode the disconnect's own UPDATE takes, so it waits for this transaction; the key itself is never touched, so
+    # no foreign key waits on it) — Kadir 5854 low: a disconnect committed between this read and the writes below would otherwise leave rows on a closed computer
+    fresh = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update(key_share=True).execution_options(populate_existing=True))).scalar_one()
     if fresh.revoked_at is not None:
         raise DesktopRelayError(409, DISCONNECTED_CODE, "this computer was disconnected")
     now = _now()
@@ -113,7 +115,7 @@ async def apply_usage(db: AsyncSession, setup: DesktopSetup, report: UsageReport
     for runtime, account in (await db.execute(select(DesktopUsage.runtime, DesktopUsage.account).where(DesktopUsage.setup_id == setup.id))).all():
         if (runtime, account) not in kept:
             await db.execute(delete(DesktopUsage).where(DesktopUsage.setup_id == setup.id, DesktopUsage.runtime == runtime, DesktopUsage.account == account))
-    await touch_device(db, setup.id)  # the computer spoke (even a report that was older: it was heard)
+    await touch_heard(db, setup.id, token)  # the computer spoke (even a report that was older: it was heard) — `last_heard_at` only, never `last_used_at` (see touch_heard)
     return written
 
 
