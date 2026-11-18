@@ -139,4 +139,8 @@ async def test_permission_request_released_to_the_inbox_approvals_tab_4972():
     assert entry["app"]["parent_tab"] == "approvals"
     assert entry["app"]["target_promotion_pending"] is False
     assert entry["app"]["return_policy"] == "synthesize_parent"  # (fallback_now would let a client drop the target and land on «지금»)
+    # 알려진 차이(PO 8781 · 지침 해석 — 코드 결함 아님): 이 엔트리의 target/parent_tab이 바뀌었는데 schema_version은 1 그대로 — 런타임 소비자가 0이고(폰은 번들 스냅샷만 · 대조용)
+    # 옛 폰은 이 type이 스냅샷에 없어 이미 기본 착지라서. MAJOR는 앞으로의 런타임 소비자 전체를 «지금» 탭으로 떨굼. 폰 번들 스냅샷(`lib/deeplinkManifest.snapshot.json`)은
+    # 서버 dev 배포 뒤 «스냅샷 갱신» PR에서 맞추고, 그 PR에서 이 항(아래 한 줄)을 지움.
+    assert resp.json()["schema_version"] == 1
     assert entry["payload"]["required_payload"] == ["reference_id"]
