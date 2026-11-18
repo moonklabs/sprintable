@@ -1000,6 +1000,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/relay/presence",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/sessions",
 "kind": "unknown"
