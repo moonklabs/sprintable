@@ -191,8 +191,13 @@ def _migration_sql(monkeypatch) -> str:
     assert (mod.revision, mod.down_revision) == ("0486", "0485")
     got: list[str] = []
     monkeypatch.setattr(mod.op, "execute", lambda sql: got.append(str(sql)))  # (alembic's `op` is one shared module: undone at the end of the test, or every later migration test would run nothing)
+    indexes: list[tuple] = []
+    monkeypatch.setattr(mod.op, "create_index", lambda name, table, cols, **kw: indexes.append((name, table, tuple(cols), str(kw.get("postgresql_where")))))
     mod.upgrade()
-    assert len(got) == 1
+    assert len(got) == 1  # the one scrub statement
+    assert [(n, t, c) for n, t, c, _w in indexes] == [("ix_desktop_commands_prompt_open_created", "desktop_commands", ("created_at",)),
+                                                      ("ix_desktop_commands_prompt_ended_created", "desktop_commands", ("created_at",))]
+    assert all("kind = 'send_prompt'" in w for *_x, w in indexes)
     return got[0]
 
 
@@ -503,14 +508,20 @@ async def test_a_press_that_waited_on_the_switch_off_is_refused_once_the_switch_
             await holder.execute(text(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'"))  # … and turned the switch off (not committed yet)
             task = asyncio.create_task(enqueue_command(db, setup=setup, kind="send_prompt", payload={"session_key": "s-1", "conversation_id": str(conv), "envelope": sealed_env(sid, "k-wait")},
                                                       idempotency_key="b4:wait", requested_by=OWNER_TM))
-            # a STATE signal, not a time: the press's backend is waiting on a lock (pg_stat_activity), seen within ten seconds — the test proves nothing if it never got there
-            for _ in range(100):
-                if (await _sql(fetch="SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"))[0][0] >= 1:
-                    break
-                await asyncio.sleep(0.1)
-            else:
-                pytest.fail("the press never waited on the row lock")
-            assert not task.done()  # it is waiting on the row
+            # a STATE signal, not a time: the press's OWN backend (it is the one running the `UPDATE desktop_setups`) is waiting on a lock (pg_stat_activity), seen within ten seconds — and if it never gets
+            # there the task is cancelled and awaited before the sessions close (codex 5850: another waiter in the database must not satisfy it · no task left running)
+            try:
+                for _ in range(100):
+                    if (await _sql(fetch="SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE 'UPDATE desktop_setups%'"))[0][0] >= 1:
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    pytest.fail("the press never waited on the row lock")
+                assert not task.done()  # it is waiting on the row
+            except BaseException:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise
             await holder.commit()
             with pytest.raises(DesktopRelayError) as e:
                 await asyncio.wait_for(task, timeout=10)
@@ -649,7 +660,60 @@ async def test_the_sweep_stamps_the_end_and_does_not_wait_for_a_row_that_is_held
 
 
 async def test_the_sweep_scrubs_a_finished_press_an_older_build_left_with_its_words(world):
-    """Kadir 5850 · low 6: the migration ran, then a server of the older build (still rolling out) ended a press and left its words — the same minute sweep takes it."""
+    """Kadir 5850 · low 6: the migration ran, then a server of the older build (still rolling out) ended a press and left its words — the same minute sweep takes it, in every finished state (done · failed ·
+    rejected), skips a row another transaction holds (no wait: Kadir's N12) and leaves the older-than-a-day ones to the migration."""
+    import asyncio
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.desktop_relay import DesktopCommand
+    from app.services.desktop_relay import purge_stale_prompts
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac w")
+        sid = await _setup_id("d4976 mac w")
+        ids = {}
+        for name, state, body in (
+            ("done_plain", "done", lambda: _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} left")),
+            ("done_sealed", "done", lambda: _sealed_cmd(sid, phone, conv)),
+            ("failed", "failed", lambda: _sealed_cmd(sid, phone, conv)),
+            ("rejected", "rejected", lambda: _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} rejected")),
+            ("held", "done", lambda: _sealed_cmd(sid, phone, conv)),
+            ("ancient", "done", lambda: _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} ancient")),
+        ):
+            ids[name] = (await _post(c, agent, body())).json()["command_id"]
+            await _sql(f"UPDATE desktop_commands SET state = '{state}' WHERE id = '{ids[name]}'")
+        ids["stop"] = (await _post(c, agent, {**_cmd("stop_session", phone), "idempotency_key": "stop-left"})).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE id = '{ids['stop']}'",
+                   f"UPDATE desktop_commands SET created_at = now() - interval '3 days' WHERE id = '{ids['ancient']}'")  # older than the sweep's day: the migration's, not this sweep's
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with async_sessionmaker(eng)() as holder, async_sessionmaker(eng)() as db:
+            await holder.execute(select(DesktopCommand.id).where(DesktopCommand.id == uuid.UUID(ids["held"])).with_for_update())  # another transaction holds one finished row
+            assert await asyncio.wait_for(purge_stale_prompts(db), timeout=4) == 4  # the four free ones (done plain · done sealed · failed · rejected); the held one is skipped, not waited for
+            await db.commit()
+            await holder.commit()
+        async with async_sessionmaker(eng)() as db:
+            assert await purge_stale_prompts(db) == 1  # the held one, now free
+            await db.commit()
+        async with async_sessionmaker(eng)() as db:
+            assert await purge_stale_prompts(db) == 0
+    finally:
+        await eng.dispose()
+    for name in ("done_plain", "done_sealed", "failed", "rejected", "held"):
+        assert set((await _row(ids[name]))[0]) == {"session_key", "conversation_id"}, name
+    assert (await _row(ids["stop"]))[0]["signed"]  # another kind: untouched
+    assert "text" in (await _row(ids["ancient"]))[0]  # the bound: the last day only (a deliberate limit — the older ones are the migration's)
+    assert MARKER not in json.dumps([r[0] for r in await _sql(fetch=f"SELECT payload FROM desktop_commands WHERE id <> '{ids['ancient']}'")])
+
+
+async def test_the_minute_sweep_reads_by_index_not_by_walking_the_table(world):
+    """Kadir 5850 · low 1: the two reads of the minute sweep walked the whole table each minute (77 / 85 ms on a million rows). Their REAL statements (captured as they run) are planned on a table of 200 000
+    rows — the older build's finished commands and a few open ones — and each reads `desktop_commands` through an index, not a sequential scan."""
+    from sqlalchemy import event, text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
 
@@ -657,24 +721,34 @@ async def test_the_sweep_scrubs_a_finished_press_an_older_build_left_with_its_wo
     from tests.test_4424_desktop_setup_realdb import _ASYNC
 
     async with _client() as c:
-        device, agent, phone, _der, conv = await _world(c, "d4976 mac w")
-        sid = await _setup_id("d4976 mac w")
-        left = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} left"))).json()["command_id"]
-        clean = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
-        stop = (await _post(c, agent, {**_cmd("stop_session", phone), "idempotency_key": "stop-left"})).json()["command_id"]
-        ancient = (await _post(c, agent, _cmd("send_prompt", phone, conv=conv, text=f"{MARKER} ancient"))).json()["command_id"]
-        await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE id IN ('{left}', '{clean}', '{stop}', '{ancient}')",
-                   f"UPDATE desktop_commands SET created_at = now() - interval '3 days' WHERE id = '{ancient}'")  # older than the sweep's day: the migration's, not this sweep's
+        device, agent, phone, _der, conv = await _world(c, "d4976 mac x")
+        sid = await _setup_id("d4976 mac x")
+        seed = (await _post(c, agent, _sealed_cmd(sid, phone, conv))).json()["command_id"]
+    # many rows of the kinds the sweep does not read, and of finished instructions older than a day; a handful of open ones — a real table's shape
+    await _sql(
+        "INSERT INTO desktop_commands (id, setup_id, device_seq, idempotency_key, kind, payload, state, requested_by, created_at) "
+        f"SELECT gen_random_uuid(), setup_id, 100000 + g, 'bulk-' || g, CASE WHEN g % 4 = 0 THEN 'stop_session' ELSE 'send_prompt' END, "
+        f"jsonb_build_object('session_key', 's-1', 'conversation_id', '{conv}'), CASE WHEN g % 20000 = 0 THEN 'queued' ELSE 'done' END, requested_by, now() - (g || ' seconds')::interval - interval '2 days' "
+        f"FROM desktop_commands, generate_series(1, 200000) g WHERE id = '{seed}'",
+        "ANALYZE desktop_commands",
+    )
     eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    seen: list[tuple[str, tuple]] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("UPDATE DESKTOP_COMMANDS") and "send_prompt" in repr(parameters):
+            seen.append((statement, parameters))
+
+    event.listen(eng.sync_engine, "before_cursor_execute", capture)
     try:
         async with async_sessionmaker(eng)() as db:
-            assert await purge_stale_prompts(db) == 2  # both finished instructions with words (the plain and the sealed); the stop is no instruction
-            await db.commit()
-        async with async_sessionmaker(eng)() as db:
-            assert await purge_stale_prompts(db) == 0
+            await purge_stale_prompts(db)
+            await db.rollback()
+        assert len(seen) == 2, [s[0][:60] for s in seen]  # the open ones and the finished leftovers
+        async with eng.connect() as conn:
+            for statement, params in seen:
+                plan = "\n".join(r[0] for r in (await conn.exec_driver_sql("EXPLAIN " + statement, params)).all())
+                assert "Seq Scan on desktop_commands" not in plan, plan
+                assert "ix_desktop_commands_prompt_" in plan, plan
     finally:
         await eng.dispose()
-    assert set((await _row(left))[0]) == {"session_key", "conversation_id"} and set((await _row(clean))[0]) == {"session_key", "conversation_id"}
-    assert (await _row(stop))[0]["signed"]  # another kind: untouched
-    assert "text" in (await _row(ancient))[0]  # the bound: the last day only (a deliberate limit — nothing scans the whole table every minute)
-    assert MARKER not in json.dumps([r[0] for r in await _sql(fetch=f"SELECT payload FROM desktop_commands WHERE id <> '{ancient}'")])

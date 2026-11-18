@@ -995,10 +995,12 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # envelope. Why a running old revision lives with it: it only drops words from rows that are OVER (the old code never reads the payload of a finished command again — a result is stored on the row, the conversation line was written when it went `done`), no schema
     # change (no CHECK on `payload`), open commands are not touched, nothing is renamed, dropped or added. Irreversible by design (the downgrade is a no-op). Row locks only, a few rows in dev (9, measured by the PO) and a table of recent commands in prod.
     cmds = [h for h in hits if h.startswith("0486_")]
-    assert len(cmds) == 1 and "op.execute(" in cmds[0], cmds
+    # …and the two partial INDEXES of the minute sweep (Kadir lens 5850): `create_index` lines on `desktop_commands` only — an index build is a brief write lock on a table of recent commands, nothing rewritten or altered
+    assert len(cmds) == 3 and sum("op.execute(" in h for h in cmds) == 1 and sum("create_index" in h for h in cmds) == 2, cmds
     up0486 = (_ROOT / "backend/alembic/versions/0486_desktop_prompt_ended_payload.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert "UPDATE desktop_commands" in up0486 and "kind = 'send_prompt'" in up0486 and "state IN ('done', 'failed', 'rejected')" in up0486, "only the finished instruction rows"
-    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0486), "0486 changes rows only: no schema change, no row deleted"
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0486), "0486 changes rows only: no column or table altered, no row deleted"
+    assert up0486.count("op.create_index(") == 2 and up0486.count('"desktop_commands"') == 2 and "postgresql_where" in up0486, "the two partial indexes, on `desktop_commands` only"
     hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"

@@ -1106,7 +1106,8 @@ async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, 
     )
     ended = res.rowcount or 0
     # (Kadir lens 5850 · low 6) a press an OLDER build of the server ended while this one was rolling out keeps its words — 0486 ran before that build stopped: the same sweep takes every finished
-    # instruction of the last day that still holds any (a press ends within minutes of its making, and the rollout is shorter than a day; the older ones are 0486's)
+    # instruction of the last day that still holds any (a press ends within minutes of its making, and the rollout is shorter than a day; the older ones are 0486's). Both reads start from a partial
+    # index of 0486 (open · ended instruction rows by `created_at`), so neither walks the whole table each minute (Kadir lens 5850: 77 / 85 ms on a million rows before).
     leftovers = (
         select(DesktopCommand.id)
         .where(DesktopCommand.kind == "send_prompt", DesktopCommand.state.in_(("done", "failed", "rejected")),

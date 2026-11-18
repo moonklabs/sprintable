@@ -170,6 +170,9 @@ class DesktopCommand(Base):
         Index("ix_desktop_commands_setup_state_seq", "setup_id", "state", "device_seq"),
         # story #4951 (0477): the person's pause between two «changed files» asks reads their last ask — only those rows are in this index
         Index("ix_desktop_commands_read_changes_by", "requested_by", "created_at", postgresql_where=text("kind = 'read_changes'")),
+        # story 4976 (0486): the minute sweep of instruction copies reads the open ones older than ten minutes and the finished ones of the last day — one partial index each
+        Index("ix_desktop_commands_prompt_open_created", "created_at", postgresql_where=text("kind = 'send_prompt' AND state IN ('queued', 'delivered', 'acked')")),
+        Index("ix_desktop_commands_prompt_ended_created", "created_at", postgresql_where=text("kind = 'send_prompt' AND state IN ('done', 'failed', 'rejected')")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
