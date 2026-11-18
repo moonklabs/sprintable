@@ -23,7 +23,7 @@ interface ParticipantLike { member_id?: unknown; type?: unknown; resolved?: unkn
 /**
  * the id of the person's direct conversation with their ONE agent, or null (no agent DM · DMs with two or more different agents · a page that is not the whole list).
  * With several DMs of the same agent: the one with the newest message (its latest message's time, else the room's `updated_at`; equal or unreadable times keep the list's own order — the first one).
- * A room is a candidate only while it is LIVE: not `resolved` (closing a room moves its `updated_at`, so it could otherwise win «the one used last»), the person is in it, and its agent is still there
+ * A room is a candidate only while it is LIVE: `open` (a `status` that is anything else — resolved, the legacy deleted state — is out; closing a room moves its `updated_at`, so it could otherwise win «the one used last»), the person is in it, and its agent is still there
  * (`departed` or an unresolved member is not an agent the person can be said to have). codex 4980: the list serves `status`, `resolved` and `departed`.
  */
 export function soleAgentDm(items: unknown, selfMemberId: string, total: unknown): string | null {
@@ -35,7 +35,7 @@ export function soleAgentDm(items: unknown, selfMemberId: string, total: unknown
   for (const raw of items) {
     const c = raw as { id?: unknown; type?: unknown; status?: unknown; participants?: unknown; updated_at?: unknown; latest_message?: { created_at?: unknown } | null } | null;
     if (!c || typeof c.id !== 'string' || c.type !== 'dm' || !Array.isArray(c.participants)) continue;
-    if (c.status === 'resolved') continue; // a closed room is not where an instruction goes
+    if (typeof c.status === 'string' && c.status !== 'open') continue; // only an OPEN room is where an instruction goes (resolved · the old deleted state · anything not known)
     const people = c.participants as ParticipantLike[];
     if (!people.some((p) => p && p.member_id === selfMemberId)) continue; // the person is in it (the list is theirs; a room that does not say so is not read as theirs)
     const others = people.filter((p) => p && p.member_id !== selfMemberId);

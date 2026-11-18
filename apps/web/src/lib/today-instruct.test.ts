@@ -85,6 +85,8 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     const closed = when('c-closed', 'a1', { updated_at: '2026-11-18T12:00:00Z', status: 'resolved' });
     expect(soleAgentDm([open, closed], ME, 2)).toBe('c-open');
     expect(soleAgentDm([closed], ME, 1)).toBeNull(); // only a closed room: handed over as before
+    expect(soleAgentDm([when('c-del', 'a1', { status: 'deleted', updated_at: '2026-11-18T13:00:00Z' }), open], ME, 2)).toBe('c-open'); // the legacy deleted state
+    expect(soleAgentDm([when('c-odd', 'a1', { status: 'archived' })], ME, 1)).toBeNull(); // a state not known is not «open»
     expect(soleAgentDm([when('c-open2', 'a1', { status: 'open' })], ME, 1)).toBe('c-open2');
   });
 
