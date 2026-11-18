@@ -913,11 +913,16 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
-    # (lens 5848 · low) the setup rows are locked BEFORE this computer's request rows are touched (the purge below) — the project's one lock order is «setup row first, then the request rows»; an organization's delete (setup → its requests, by cascade) takes them the same way round
-    await _lock_machine(db, setup)
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
     await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
+    # LOCK ORDER (codex delta on lens 5848 · medium): request rows first, then setup rows — the order `answer_request` takes (it locks the request, then `enqueue_command` updates the setup row). Taking the setup rows BEFORE this computer's
+    # request rows (the purge above) would be the reverse and could deadlock with an answer that lands just before the window ends. (An organization's delete runs the other way round — setup → its requests by cascade — and did so before this story.)
+    await _lock_machine(db, setup)
+    # (codex delta on lens 5848 · medium) a request that authenticated BEFORE its setup was revoked reaches this point after the revocation: under the lock the setup is read again — a revoked one takes no card (it is outside every live sibling's lock set, so a
+    # card of it could stand a mark a new setup of the same Mac never read). The token check is a read without a lock; this is the fence.
+    if (await db.execute(select(DesktopSetup.revoked_at).where(DesktopSetup.id == setup.id))).scalar_one_or_none() is not None:
+        raise DesktopRelayError(401, "DEVICE_TOKEN_INVALID", "a valid device token is required")
     # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock (taken above), the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
     # same moment: either order, no plaintext card is made AFTER the mark). The answer is ALWAYS 422, a re-send of a plaintext body included (no branch that tells the first from the second). No `detail`: not a word of the body comes back.
     if _plain_words(body) and not _network_first_stage(body) and await _sealed_mark(db, setup):

@@ -310,7 +310,8 @@ def test_the_setup_lock_is_taken_before_the_mark_is_read_a_source_pin_for_the_ra
 
     src = inspect.getsource(agent_permissions.report_request)
     assert "_sealed_mark(" in src
-    assert "purge_open_cards(" in src and src.index("_lock_machine(") < src.index("purge_open_cards("), "the setup rows are locked BEFORE the request rows are touched (lens 5848: the project's one lock order)"
+    assert "purge_open_cards(" in src and src.index("purge_open_cards(") < src.index("_lock_machine("), "the request rows (the purge) come BEFORE the setup rows: the order answer_request takes (request → setup) — the reverse could deadlock with an answer near the window's end"
+    assert src.index("_lock_machine(") < src.index("revoked_at") < src.index("_sealed_mark("), "the setup is read again under the lock, before the mark is read: a request that authenticated before its setup was revoked takes no card"
     lock_src = inspect.getsource(agent_permissions._lock_machine)
     assert ".order_by(DesktopSetup.id)" in lock_src and ".with_for_update()" in lock_src, "the lock takes the rows in ONE order (by id) — the order is what keeps two siblings from waiting for each other"
     assert "revoked_at.is_(None)" in lock_src, "the lock covers the LIVE siblings (a revoked setup cannot report)"
@@ -435,3 +436,33 @@ async def test_the_plaintext_decision_does_not_wait_for_a_REVOKED_sibling_setup(
                 await holder.rollback()
         finally:
             await eng.dispose()
+
+
+async def test_a_request_that_authenticated_before_its_setup_was_revoked_takes_no_card_and_stands_no_mark(world):
+    """codex delta on lens 5848 (medium): the token check is a read without a lock; the setup of an in-flight request can be revoked after it. Under the lock the setup is read again — a revoked setup refuses (401) and its sealed card does not stand a mark."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import agent_permissions
+    from app.services.desktop_relay import DesktopRelayError
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    name = "d4424 mac 4972mk"
+    async with _client() as c:
+        dev, agent, p1 = await _sealed_computer(c, name)
+        sid = await _setup_id(name)
+        body = agent_permissions.PermissionRequestReport(**_sealed_to(agent, sid, p1))
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng)() as db:
+                setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == sid))).scalar_one()  # «authenticated»: the row is in hand and live
+                await _sql(f"UPDATE desktop_setups SET revoked_at = now(), revoked_reason = 'replaced_by_new_setup' WHERE id = '{sid}'")  # the revocation commits AFTER the authentication
+                with pytest.raises(DesktopRelayError) as e:
+                    await agent_permissions.report_request(db, setup, body)
+                assert e.value.status == 401
+                await db.rollback()
+        finally:
+            await eng.dispose()
+        assert await _mark(name) is None, "a revoked setup's card stands no mark"
