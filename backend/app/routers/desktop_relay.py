@@ -419,7 +419,7 @@ async def post_presence(
 ) -> dict:
     """story 4979 (PO 11-18): the computer's own «I am here», sent every ~60 s by a host that has this line. No body. The device is the token's own device (`_device`) — a presence can never stamp another device — and the
     UPDATE names the very token the request came with. Counted per VERIFIED device (never per an unverified header — the 4828 trap): over PRESENCE_LIMIT a request is answered 429 before anything is written. What it writes:
-    `last_heard_at` · `last_presence_at` · `last_used_at` of that token, only when the last presence is older than a few seconds (one UPDATE; a flood writes nothing). It wakes nothing and touches no session.
+    `last_heard_at` · `last_presence_at` of that token — NOT `last_used_at` (the old rule that decides whether a command is accepted stays exactly as it was) — only when the last presence is older than a few seconds (one UPDATE; a flood writes nothing). It wakes nothing and touches no session.
     Answers `{ok: true}` whether or not it wrote."""
     from app.core.rate_limit import hit_person_limits
 

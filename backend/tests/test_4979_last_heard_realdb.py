@@ -65,10 +65,12 @@ async def test_01_presence_stamps_the_three_times_and_only_the_devices_own(world
         a = await _device(c, name="d4979 mac A")
         b = await _device(c, name="d4979 mac B")
         before = await _row(b["setup_id"])
+        used_before = (await _row(a["setup_id"]))[0]
         r = await c.post("/api/v2/desktop/relay/presence", headers=_tok(a["device_token"]))
         assert r.status_code == 200 and r.json() == {"ok": True}
         row = await _row(a["setup_id"])
-        assert row[0] is not None and row[1] is not None and row[2] is not None          # last_used_at · last_heard_at · last_presence_at
+        assert row[1] is not None and row[2] is not None                                    # last_heard_at · last_presence_at
+        assert row[0] == used_before                                                        # last_used_at is NOT touched by a presence (Kadir 5851 ① — the server's «may a command go» rule reads it)
         assert await _row(b["setup_id"]) == before                                          # another device's times are not touched by this token
 
 
@@ -87,9 +89,12 @@ async def test_03_a_presence_right_after_another_writes_nothing(world):
         r = await c.post("/api/v2/desktop/relay/presence", headers=_tok(d["device_token"]))
         assert r.status_code == 200 and r.json() == {"ok": True}                            # the same answer …
         assert await _row(d["setup_id"]) == first                                           # … and not one write (a flood costs no write load)
-        await _age(d["setup_id"], presence=30)                                              # past the gap: written again
-        assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(d["device_token"]))).status_code == 200
-        assert (await _row(d["setup_id"]))[2] != first[2]
+        for secs, writes in ((5, False), (15, True)):                                       # the gap is 10 s: 5 s ago → nothing is written · 15 s ago → written
+            await _age(d["setup_id"], presence=secs)
+            before = await _row(d["setup_id"])
+            assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(d["device_token"]))).status_code == 200
+            after = await _row(d["setup_id"])
+            assert (after[2] != before[2]) is writes, (secs, before, after)
 
 
 async def test_04_the_servers_own_tick_is_not_the_computer_speaking(world):
@@ -147,12 +152,14 @@ async def test_07_a_host_with_presence_is_disconnected_after_150s_of_its_OWN_sil
         assert (await _view(c, agent))["state"] != "unknown"
 
 
-async def test_08_the_presence_rule_lapses_after_a_day_back_to_the_old_one(world):
+async def test_08_the_presence_rule_lapses_after_15_minutes_back_to_the_old_one(world):
     async with _client() as c:
         device, agent, _phone, _conv = await _setup(c, "d4979 mac lapse")
         await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))
-        await _age(device["setup_id"], used=5, heard=200, presence=86400 + 60)               # presence is a day old: an older host again
-        assert (await _view(c, agent))["state"] != "unknown"                                 # old rule: last_used_at fresh = connected
+        await _age(device["setup_id"], used=5, heard=200, presence=600)                      # presence 10 min old: still a presence host → its own silence (200 s) shows it disconnected
+        assert (await _view(c, agent))["state"] == "unknown"
+        await _age(device["setup_id"], used=5, heard=200, presence=960)                      # 16 min old: an older host again → the old rule: last_used_at fresh = connected
+        assert (await _view(c, agent))["state"] != "unknown"
 
 
 async def test_09_only_what_is_shown_changes_a_command_is_still_judged_by_the_old_rule(world):
@@ -222,3 +229,47 @@ async def test_12_presence_is_counted_per_verified_device_and_stamps_only_its_ow
         rows = await _sql(fetch=f"SELECT token_hash, last_presence_at IS NOT NULL FROM desktop_device_tokens WHERE setup_id = '{b['setup_id']}' AND revoked_at IS NULL")
         stamped = {h: s for h, s in rows}
         assert stamped.pop("second-token-of-b") is False and list(stamped.values()) == [True]
+
+
+async def test_13_a_presence_alone_does_not_make_a_computer_take_commands(world):
+    async with _client() as c:
+        device, agent, phone, conv = await _setup(c, "d4979 mac presence only")
+        await _grant_command()
+        await _age(device["setup_id"], used=300, heard=300, presence=-1)                      # no stream and no report for 5 min: refused (409) as before
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 409
+        assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))).status_code == 200
+        v = await _view(c, agent)
+        assert v["state"] != "unknown"                                                       # SHOWN: the computer itself just said it is here
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text                # … but a COMMAND is still judged by the old rule (last_used_at): a presence is not a stream
+
+
+async def test_14_a_revoked_token_is_never_stamped_and_a_revoked_computer_is_never_shown_connected(world):
+    from datetime import timedelta
+
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import _shown_reachable
+    from app.services.desktop_relay import touch_presence
+
+    async with _client() as c:
+        d = await _device(c, name="d4979 mac revoked")
+        sid = uuid.UUID(d["setup_id"])
+        await _sql(f"INSERT INTO desktop_device_tokens (id, setup_id, token_hash, issued_at, revoked_at) VALUES (gen_random_uuid(), '{sid}', 'revoked-token-of-d', now(), now())")
+        async with async_session_factory() as s:
+            await touch_presence(s, sid, None)                                                # no token named: every LIVE token of the device
+            await s.commit()
+        rows = {h: p for h, p in await _sql(fetch=f"SELECT token_hash, last_presence_at IS NOT NULL FROM desktop_device_tokens WHERE setup_id = '{sid}'")}
+        assert rows.pop("revoked-token-of-d") is False and list(rows.values()) == [True]      # the revoked row is left alone
+        async with async_session_factory() as s:
+            connected, heard = await _shown_reachable(s, {sid}, datetime.now(timezone.utc))
+        assert sid in connected and heard[sid] is not None
+        # a REVOKED token's fresh times are nobody's word: the live token has been silent 10 min while the revoked row says «just now» → still not connected
+        await _sql(f"UPDATE desktop_device_tokens SET last_heard_at = now(), last_presence_at = now(), last_used_at = now() WHERE setup_id = '{sid}' AND revoked_at IS NOT NULL")
+        await _sql(f"UPDATE desktop_device_tokens SET last_heard_at = now() - interval '600 seconds', last_presence_at = now() - interval '600 seconds', last_used_at = now() - interval '600 seconds' WHERE setup_id = '{sid}' AND revoked_at IS NULL")
+        async with async_session_factory() as s:
+            connected, _heard = await _shown_reachable(s, {sid}, datetime.now(timezone.utc))
+        assert sid not in connected
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")         # the computer itself is closed
+        async with async_session_factory() as s:
+            connected, heard = await _shown_reachable(s, {sid}, datetime.now(timezone.utc) + timedelta(seconds=0))
+        assert connected == set() and heard == {}                                              # never shown as connected, whatever its times say
