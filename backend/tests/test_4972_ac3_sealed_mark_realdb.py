@@ -211,15 +211,16 @@ async def test_the_open_limit_refuses_the_card_past_it_with_a_fixed_word_and_giv
     async with _client() as c:
         device = await _device(c, name=name)
         agent = await _with_session(c, device)
+        assert agent_permissions.OPEN_LIMIT == 50  # PO 8787: measured on dev (at most 11 open at once per computer, 30 days) → 50
         ids = []
-        for _ in range(agent_permissions.OPEN_LIMIT):
+        for _ in range(50):  # (the LITERAL number: a changed constant must not make the test follow it)
             body = _ask(agent, request_id=str(uuid.uuid4()))
             ids.append(body["request_id"])
             assert (await _post_ask(c, device, body)).status_code == 201
         over = await _post_ask(c, device, _ask(agent, request_id=str(uuid.uuid4())))
         assert over.status_code == 422 and over.json()["error"]["code"] == "open_limit" and "detail" not in over.json()["error"], over.text
-        assert str(agent_permissions.OPEN_LIMIT) not in over.text and "Bash" not in over.text  # no count · no word of the card
-        assert await _count(name) == agent_permissions.OPEN_LIMIT
+        assert "50" not in over.text and "Bash" not in over.text  # no count · no word of the card
+        assert await _count(name) == 50
         # the same request again at the limit is its own row (200), not a new one
         assert (await _post_ask(c, device, _ask(agent, request_id=ids[0]))).status_code == 200
         # one passes its window → its place is free; one withdrawn → free
@@ -282,3 +283,19 @@ async def test_the_migration_is_additive_nothing_gets_a_mark_at_deploy_and_the_t
     assert cols == [("YES",)]
     assert (await _sql(fetch="SELECT count(*) FROM desktop_setups WHERE sealed_cards_at IS NOT NULL"))[0][0] == 0
     assert (await _sql(fetch="SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_desktop_setups_sealed_cards_one_way'"))[0][0] == 1
+
+
+async def test_a_removed_or_revoked_pin_is_no_receiver_that_stands_the_mark(world):
+    name = "d4424 mac 4972mb"
+    async with _client() as c:
+        device, agent, phone_id = await _sealed_computer(c, name)
+        # the pairing is removed (the computer's own report of its pins dropped it): a card sealed to that phone is taken, the mark does not stand
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE remote_device_id = '{phone_id}'")
+        assert (await _post_ask(c, device, _sealed_to(agent, await _setup_id(name), phone_id))).status_code == 201 and await _mark(name) is None
+        # the phone's key is revoked: same
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = NULL WHERE remote_device_id = '{phone_id}'")
+        await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone_id}'")
+        assert (await _post_ask(c, device, _sealed_to(agent, await _setup_id(name), phone_id))).status_code == 201 and await _mark(name) is None
+        # alive again: the mark stands
+        await _sql(f"UPDATE remote_devices SET revoked_at = NULL WHERE id = '{phone_id}'")
+        assert (await _post_ask(c, device, _sealed_to(agent, await _setup_id(name), phone_id))).status_code == 201 and await _mark(name) is not None
