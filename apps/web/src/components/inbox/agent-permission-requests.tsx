@@ -111,6 +111,8 @@ export function useAgentPermissionRequests() {
   }, [hasLines]);
   // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
   const [stale, setStale] = useState(false);
+  // story 4972 (codex 1): «the list was READ» = one read ANSWERED (a failed first read keeps `[]` on screen but is not an answer: a notice's request is not «gone» then)
+  const [readOk, setReadOk] = useState(false);
   // story 4949 (codex round 5): a change frame for a request means its question is no longer what the lines were shown for — they go at once, before any read, even for a request answered HERE (whose read is held back)
   const [linesGone, setLinesGone] = useState<ReadonlySet<string>>(new Set());
   const readFor = useRef(-1);
@@ -161,6 +163,7 @@ export function useAgentPermissionRequests() {
         appliedSeq.current = seq;
         setRequests((prev) => list ?? prev ?? []);
         setStale(list === null);
+        if (list) setReadOk(true);
         // story #4596 AC1: a card answered here leaves at the first read made after its answer that no longer lists it — a page kept
         // open through many answers never holds them (a failed read keeps what was shown)
         if (list) setAnswers((m) => afterRead(m, list, started));
@@ -198,7 +201,8 @@ export function useAgentPermissionRequests() {
     </div>
   ) : null;
 
-  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision), onOpen: open };
+  // story 4972 (push landing): «the first read has answered» — a notice's request that is not in the list is only «gone» after that
+  return { loaded: readOk, shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision), onOpen: open };
 }
 
 export function AgentPermissionRequests() {

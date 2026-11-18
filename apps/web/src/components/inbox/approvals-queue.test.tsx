@@ -25,6 +25,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
 }));
 
 // story 4950 — the copy entry says a refused copy in words (a toast): the test sees the toast call (no provider draws it here)

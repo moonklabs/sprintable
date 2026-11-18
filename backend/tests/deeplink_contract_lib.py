@@ -394,6 +394,8 @@ TARGET_ROUTE_GLOBS: dict[str, tuple[str, ...]] = {
     "team_member_detail": ("(authenticated)/organization/workforce/[id]/page.tsx",),
     "doc_detail": ("(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx",),
     "story_detail": ("(authenticated)/[ws]/[proj]/flow/page.tsx",),
+    # story 4972 (push landing): the inbox's 결재함 tab (`/inbox?tab=gates&request=<id>`) — the request's card opens there
+    "permission_request": ("(authenticated)/inbox/page.tsx",),
 }
 
 

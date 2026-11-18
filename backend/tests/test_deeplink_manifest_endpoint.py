@@ -120,3 +120,27 @@ async def test_task_completed_promoted_to_story_detail_semantic_target():
     assert not task_entry["app"]["target"].startswith("/")
     assert task_entry["app"]["target_promotion_pending"] is True
     assert "story_id" in task_entry["payload"]["required_payload"]
+
+
+@pytest.mark.anyio
+async def test_permission_request_released_to_the_inbox_approvals_tab_4972():
+    """story 4972 (push landing): `agent.permission_request` is no longer a «지금» fallback — the inbox's 결재함 tab opens the
+    request's card from `/inbox?tab=gates&request=<reference_id>`, so the entry names that screen and is NOT promotion-pending
+    (the target-exists contract then checks the inbox page really is there). Putting it back on «now» goes RED here."""
+    app.dependency_overrides[get_current_user] = _override_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/v2/deeplink-manifest")
+    finally:
+        app.dependency_overrides.clear()
+
+    entry = next(e for e in resp.json()["entries"] if e["app"]["type"] == "agent.permission_request")
+    assert entry["app"]["target"] == "permission_request"
+    assert entry["app"]["parent_tab"] == "approvals"
+    assert entry["app"]["target_promotion_pending"] is False
+    assert entry["app"]["return_policy"] == "synthesize_parent"  # (fallback_now would let a client drop the target and land on «지금»)
+    # 알려진 차이(PO 8781 · 지침 해석 — 코드 결함 아님): 이 엔트리의 target/parent_tab이 바뀌었는데 schema_version은 1 그대로 — 런타임 소비자가 0이고(폰은 번들 스냅샷만 · 대조용)
+    # 옛 폰은 이 type이 스냅샷에 없어 이미 기본 착지라서. MAJOR는 앞으로의 런타임 소비자 전체를 «지금» 탭으로 떨굼. 폰 번들 스냅샷(`lib/deeplinkManifest.snapshot.json`)은
+    # 서버 dev 배포 뒤 «스냅샷 갱신» PR에서 맞추고, 그 PR에서 이 항(아래 한 줄)을 지움.
+    assert resp.json()["schema_version"] == 1
+    assert entry["payload"]["required_payload"] == ["reference_id"]

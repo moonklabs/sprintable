@@ -282,6 +282,93 @@ describe('ApprovalsQueue — 4909 2d-2 the «에이전트 권한 요청» sectio
   });
 });
 
+describe('ApprovalsQueue — 4972 push landing: `?request=<id>` opens that request\'s card', () => {
+  const goneLine = () => container.querySelector('[data-testid="permission-request-gone"]');
+  const narrow = () => vi.stubGlobal('matchMedia', (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
+  it('⭐wide: the notice\'s request is the picked row (not the first approval), once the list has it — and the person\'s own pick afterwards is not taken back', async () => {
+    pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })];
+    searchRef.current = 'tab=gates&request=r2';
+    await mountQueue();
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    expect(detail()?.textContent).not.toContain('첫째 결재 항목');
+    expect(goneLine()).toBeNull();
+    await pickRow('g1');
+    expect(detail()?.textContent).toContain('첫째 결재 항목'); // landed once: not pulled back to r2
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')).toBeNull();
+    // …not even when the request leaves the list and comes back on later reads (the guard is what holds the person's pick, not the effect's deps)
+    permissionList = [perm('r1')]; await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })]; await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(rowsIn('perm').length).toBe(2);
+    expect(detail()?.textContent).toContain('첫째 결재 항목');
+  });
+  it('⭐narrow: the card\'s SHEET is up on landing (a plain list visit leaves it down) — the sealed card needs no PIN to be looked at', async () => {
+    narrow(); pending = []; permissionList = [perm('r1')];
+    await mountQueue();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')).toBeNull(); // no request id: the sheet stays down
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    searchRef.current = 'request=r1';
+    await mountQueue();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Dev · MacBook');
+  });
+  it('⭐a request the list does not have (ended · not this person\'s) is ONE line above the list — no sheet, the first approval stays picked; with no approvals at all the line sits over the «nothing here» block', async () => {
+    narrow(); pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
+    searchRef.current = 'tab=gates&request=gone-1';
+    await mountQueue();
+    expect(goneLine()?.textContent).toBe(koMessages.agentPermissions.requestGone);
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    pending = []; permissionList = [];
+    await mountQueue();
+    expect(goneLine()?.textContent).toBe(koMessages.agentPermissions.requestGone);
+  });
+  it('⭐[codex 1] a FAILED first permission read is not «the list was read»: no «gone» line over a request the list never answered about', async () => {
+    pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
+    searchRef.current = 'request=r1';
+    fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/agent-permission-requests'
+      ? new Response('{}', { status: 500 })
+      : url.endsWith('/remote-control')
+        ? new Response(JSON.stringify({ data: { enabled_at: null, enabled: true, can_change: false, owner_names: [], connected_setups: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+        : (globalThis.fetch as unknown as (u: string) => Promise<Response>)(url)));
+    await mountQueue();
+    expect(goneLine()).toBeNull();
+  });
+  it('⭐[codex 2] the approvals\' RETRY (the list is emptied and refilled) does not leave the person on the first approval: the notice\'s request is picked again — until the person moves', async () => {
+    gatesFail = true; permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })];
+    searchRef.current = 'tab=gates&request=r2';
+    await mountQueue();
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    gatesFail = false; pending = [lowGate('g1', '첫째 결재 항목')];
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateInboxRetry) || b.textContent?.includes('다시'));
+    expect(retry).toBeTruthy();
+    await act(async () => { (retry as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    expect(detail()?.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    await pickRow('g1'); // …and once the person moves, nothing takes the pick back
+    await settle();
+    expect(detail()?.textContent).toContain('첫째 결재 항목');
+  });
+  it('⭐[codex 2 · narrow] the retry on a narrow screen: the notice\'s request is picked again and its SHEET is still the one up (not the first approval)', async () => {
+    narrow(); gatesFail = true; permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })];
+    searchRef.current = 'tab=gates&request=r2';
+    await mountQueue();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    gatesFail = false; pending = [lowGate('g1', '첫째 결재 항목')];
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateInboxRetry));
+    expect(retry).toBeTruthy();
+    await act(async () => { (retry as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    expect(document.body.textContent).not.toContain('첫째 결재 항목 자세히');
+  });
+  it('the «gone» line waits for the first permission read — a request the list is still fetching is not called gone', async () => {
+    pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
+    searchRef.current = 'request=r1';
+    fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/agent-permission-requests' ? new Promise<Response>(() => {}) : url.endsWith('/remote-control') ? new Response(JSON.stringify({ data: { enabled_at: null, enabled: true, can_change: false, owner_names: [], connected_setups: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } }) : (globalThis.fetch as unknown as (u: string) => Promise<Response>)(url)));
+    await mountQueue();
+    expect(goneLine()).toBeNull();
+  });
+});
+
 describe('ApprovalsQueue — 4909 2d-2 the «remote control is off» line stays on the screen', () => {
   const offLine = () => container.querySelector('[data-testid="agent-permission-remote-off"]');
   it('⭐it sits above the list (the old group drew it above its rows) — with approvals, with none, and not at all while remote control is on', async () => {
