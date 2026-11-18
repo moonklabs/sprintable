@@ -362,3 +362,24 @@ async def test_taking_a_pair_off_does_not_end_the_look_only_card_of_a_person_who
             assert await _end_cards_without_phone(s, {sid}) == 0  # (what a pair removal on this computer runs)
             await s.commit()
         assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "nobody lost a phone: the card and its words stay"
+
+
+async def test_a_phone_lost_BEFORE_the_card_was_made_is_no_reason_to_end_it_when_another_pair_comes_off_later(world):
+    """codex 3rd review (medium): `lost_a_pair` matched any retained historical removal — a plain card made AFTER a person lost their phone could be ended by an unrelated removal on the same computer. The loss must be one the card lived through."""
+    from tests.test_4533_agent_permissions_realdb import PHONES
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import _end_cards_without_phone
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewf")
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        await _pair(c, device["device_token"], der1)
+        assert (await c.delete(f"{PHONES}/{p1}", headers=_person(OWNER))).status_code in (200, 204)  # the person LOSES their phone (before any card)
+        body = _ask(agent)  # …and then a plain card is made (no phone: look-only)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        sid = (await _sql(fetch="SELECT id FROM desktop_setups WHERE device_name = 'd4424 mac 4972ewf'"))[0][0]
+        async with async_session_factory() as s:
+            assert await _end_cards_without_phone(s, {sid}) == 0  # an unrelated pair comes off this computer later
+            await s.commit()
+        assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "the loss came before the card: the card stays"

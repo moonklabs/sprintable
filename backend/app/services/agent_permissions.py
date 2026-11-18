@@ -1144,6 +1144,7 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], 
     lost_a_pair = exists(
         select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
         .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_not(None),
+               RemoteDevicePairing.removed_at >= AgentPermissionRequest.created_at,  # (codex 3rd: a loss that came BEFORE the card was made is no reason to end it later — the loss must be one the card lived through)
                RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id)
     )
     ended = (await db.execute(
