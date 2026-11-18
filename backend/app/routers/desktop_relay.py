@@ -151,7 +151,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                         reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
                         reactivated_marks.clear()
                         if now - last_beat >= _HEARTBEAT_SEC:
-                            await relay.touch_device(s, setup_id)
+                            await relay.touch_device(s, setup_id, heard=False)  # story 4979: the SERVER's own tick — keeps `last_used_at` as it always did, is NOT the computer speaking
                         await s.commit()
                 if terminal is not None:  # the session is closed (rolled back, as before: nothing was written); the stream ends with its frame
                     yield terminal
@@ -410,6 +410,25 @@ async def get_device_sessions(
 
 
 # ── story #4533 (B-2) — permission requests up · the device's phone pairs (contract §9 ① · §10 ②) ───────────────────────────
+
+
+@router.post("/relay/presence")
+async def post_presence(
+    setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+) -> dict:
+    """story 4979 (PO 11-18): the computer's own «I am here», sent every ~60 s by a host that has this line. No body. The device is the token's own device (`_device`) — a presence can never stamp another device — and the
+    UPDATE names the very token the request came with. Counted per VERIFIED device (never per an unverified header — the 4828 trap): over PRESENCE_LIMIT a request is answered 429 before anything is written. What it writes:
+    `last_heard_at` · `last_presence_at` · `last_used_at` of that token, only when the last presence is older than a few seconds (one UPDATE; a flood writes nothing). It wakes nothing and touches no session.
+    Answers `{ok: true}` whether or not it wrote."""
+    from app.core.rate_limit import hit_person_limits
+
+    retry = hit_person_limits("desktop-presence", str(setup.id), relay.PRESENCE_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    await relay.touch_presence(db, setup.id, x_desktop_device_token)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/relay/permission-requests")

@@ -165,6 +165,10 @@ def _pick_session(sessions) -> DesktopSession:
     return sorted(sessions, key=lambda r: (r.state != "stopped", r.state_at), reverse=True)[0]
 
 
+def _iso(at: datetime | None) -> str | None:
+    return at.isoformat() if at is not None else None
+
+
 def _shown_state(pick: DesktopSession, reachable: bool) -> str:
     """a stopped session keeps its word; a live one whose computer is no longer heard reads `unknown` (the computer was lost)"""
     return pick.state if pick.state == "stopped" or reachable else "unknown"
@@ -201,7 +205,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
                        agent_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> dict:
     from app.models.agent_permission import AgentPermissionRequest
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
 
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
@@ -222,6 +226,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
     bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
     view.update({"bound_setup_id": str(bound["setup_id"]) if bound else None, "bound_device_name": bound["device_name"] if bound else None})
+    view["last_heard_at"] = None  # story 4979: the last time the picked computer ITSELF spoke (only its own words — not the server's tick); null until one session is picked
     if not setups:
         return view
     sessions = (await db.execute(
@@ -232,7 +237,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     pick = _pick_session(sessions)
     setup = next(s for s in setups if s.id == pick.setup_id)
     now = _now()
-    reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
+    connected, heard = await _shown_reachable(db, {pick.setup_id}, now)  # story 4979: what is SHOWN (a presence-sending host: 150 s of its own silence; any other: the old 90 s rule)
+    reachable = pick.setup_id in connected
+    view["last_heard_at"] = _iso(heard.get(pick.setup_id))
     state = _shown_state(pick, reachable)
     view.update({**_picked_view(pick, setup, state), "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup)})
     from app.services.desktop_changes import may_read
@@ -275,7 +282,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
     web can link to it — never someone else's. Returns `(rows, total)` — `total` before the `limit` cut.
     """
     from app.models.member import AgentProjectProfile, Member
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
     from app.services.project_auth import accessible_project_ids_in_org
 
     project_ids = await accessible_project_ids_in_org(db, user_id, org_id)
@@ -317,7 +324,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
                 sessions_of[r.agent_member_id].append(r)
     picks = {i: _pick_session(rs) for i, rs in sessions_of.items() if rs}
     now = _now()
-    reachable = await _reachable(db, {p.setup_id for p in picks.values()}, now)
+    reachable, heard_at = await _shown_reachable(db, {p.setup_id for p in picks.values()}, now)  # story 4979 (what is SHOWN)
     bound = await bound_devices(db, org_id=org_id, member_ids=agent_ids)
     # the person's own direct conversation with each agent (one read): both are participants of a `dm` of this org — newest wins
     from sqlalchemy.orm import aliased
@@ -353,6 +360,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             # story #4931: the computer that session runs on is the reader's own (`confirmed_by` = the reader) — the one rule `can_command` already uses for «whoever confirmed the device».
             # A question that stands at a terminal can only be answered by the person at THAT Mac, so the home counts a wait only when this is true. No session → false; a setup nobody confirmed → false.
             "device_is_mine": False,
+            "last_heard_at": None,  # story 4979
         }
         pick = picks.get(a.id)
         if pick is not None:
@@ -360,6 +368,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             full = _picked_view(pick, picked_setup, _shown_state(pick, pick.setup_id in reachable))
             row.update({k: full[k] for k in ("setup_id", "device_name", "state", "activity", "state_at", "limit", "first_screen")})
             row["device_is_mine"] = picked_setup.confirmed_by is not None and picked_setup.confirmed_by == user_id
+            row["last_heard_at"] = _iso(heard_at.get(pick.setup_id))
         out.append(row)
     return out, total
 
@@ -587,14 +596,14 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     heard from, whether the person may command, and the projects the computer says it has a folder for that the person can open — ids
     and names, never a path. A computer that has said nothing lists none (the phone then says «start it at the Mac»)."""
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.agent_permissions import _shown_reachable, paired_phone
 
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id) \
             or not await may_converse(db, member_id=member_id, user_id=user_id, agent_id=agent_id):  # story 4714: no conversation to open = no start offered
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
     agent = await _agent(db, org_id, agent_id)
     setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
-    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    reachable, heard_at = await _shown_reachable(db, {s.id for s in setups}, _now())  # story 4979: what the phone is SHOWN (its own refusal of a start follows it)
     from app.services.desktop_computers import computer_index
 
     computer_of = await computer_index(db, org_id)  # story 4734: the computer each entry's setup belongs to — an ADDED id; the entry stays one per setup
@@ -604,7 +613,7 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
             continue
         computers.append({
             "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
-            "device_name": setup.device_name, "reachable": setup.id in reachable,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "last_heard_at": _iso(heard_at.get(setup.id)),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
             "projects": await _openable_startable_projects(db, setup, agent_id, user_id=user_id, org_id=org_id),
         })
@@ -632,7 +641,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
 
     setups = (await db.execute(
         select(DesktopSetup)
@@ -643,7 +652,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
         .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
     )).scalars().all()
-    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    reachable, heard_at = await _shown_reachable(db, {s.id for s in setups}, _now())  # story 4979: what the phone is SHOWN
     from app.services.desktop_computers import computer_index
 
     computer_of = await computer_index(db, org_id)  # story 4734: an ADDED id per entry (the entry stays one per setup — the phone shell reads it by `setup_id`)
@@ -691,7 +700,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
         agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
         computers.append({
             "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
-            "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "last_heard_at": _iso(heard_at.get(setup.id)), "agents": agents,
             # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
             "computer_press": "computer_press" in (setup.capabilities or []),
             # story 4714: agents of this computer the person can see but not talk to (the agent's message policy) were left out; when that is why the list
