@@ -174,6 +174,13 @@ async def test_09_the_gate_follows_the_shown_rule_a_silent_presence_host_is_refu
         await _age(device["setup_id"], heard=100)                                            # two beats late at most: connected → accepted
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
         assert r.status_code == 201, r.text
+        # the silence limit is exactly 150 s (Kadir 5853 · a 150→160 mutant used to survive: the test saw 100 and 200 only)
+        await _age(device["setup_id"], used=5, heard=149)
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 201
+        await _age(device["setup_id"], used=5, heard=151)
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text
+        await _age(device["setup_id"], used=5, heard=100)
         # an older host (no presence): the old rule exactly — last_used_at within 90 s accepts, past it refuses
         await _age(device["setup_id"], used=300, heard=300, presence=-1)
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
@@ -267,6 +274,7 @@ async def test_14_a_revoked_token_is_never_stamped_and_a_revoked_computer_is_nev
             await s.commit()
         rows = {h: p for h, p in await _sql(fetch=f"SELECT token_hash, last_presence_at IS NOT NULL FROM desktop_device_tokens WHERE setup_id = '{sid}'")}
         assert rows.pop("revoked-token-of-d") is False and list(rows.values()) == [True]      # the revoked row is left alone
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() WHERE setup_id = '{sid}' AND revoked_at IS NULL")   # its stream was just ticked (a presence host counts only with a ticked stream too — Kadir 5853 ①)
         async with async_session_factory() as s:
             connected, heard = await _shown_reachable(s, {sid}, datetime.now(timezone.utc))
         assert sid in connected and heard[sid] is not None
@@ -298,3 +306,31 @@ async def test_15_the_admin_device_sessions_view_and_the_permission_list_follow_
         await _age(device["setup_id"], heard=100)
         listed = (await c.get(REQS, headers=_person(OWNER), params={"state": "pending"})).json()["requests"]
         assert [v["answerable"] for v in listed] == [True]
+
+
+async def test_16_a_presence_host_whose_stream_is_dead_for_good_is_refused_not_kept_connected_on_presence_alone(world):
+    """Kadir 5853 ①: the stream's tick (last_used_at) 30 min old, the computer itself fresh on presence — «connected · working» with every command a 201 that sits `queued` with no expiry."""
+    async with _client() as c:
+        device, agent, phone, conv = await _setup(c, "d4979 mac dead stream")
+        await _grant_command()
+        assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))).status_code == 200
+        await _age(device["setup_id"], used=1800, heard=5, presence=5)
+        assert (await _view(c, agent))["state"] == "unknown"                                  # SHOWN disconnected: the strip says what the gates say
+        queued_before = len(await _commands(device["setup_id"]))
+        for kind in ("send_prompt", "stop_session", "end_session"):
+            body = _cmd(kind, phone, conv=conv)
+            r = await _post(c, agent, body)
+            assert r.status_code == 409 and "device_unreachable" in r.text, (kind, r.text)
+        assert len(await _commands(device["setup_id"])) == queued_before                          # nothing was queued: every refusal came before the row
+        # a reconnect gap under 400 s stays «queued, delivered when the stream is back» (the 5853 intent) · past it the refusal of 5851 returns
+        await _age(device["setup_id"], used=390, heard=5, presence=5)
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 201
+        await _age(device["setup_id"], used=410, heard=5, presence=5)
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text
+        await _age(device["setup_id"], used=-1, heard=5, presence=5)                         # a stream that was NEVER ticked (NULL) is no stream: presence alone does not make a computer reachable
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text
+        # an older host (no presence) is untouched by the new clause: the old 90 s rule on last_used_at, nothing more
+        await _age(device["setup_id"], used=10, heard=1800, presence=-1)
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 201

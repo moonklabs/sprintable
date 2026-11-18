@@ -46,6 +46,10 @@ UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second he
 # story 4979 (PO 11-18): a device that sends `presence` every 60 s is «disconnected» once it has been silent this long (two missed beats and a margin) — measured: the 90 s rule on the SERVER's tick showed «connected» for up to
 # 5 min 20 s after a computer fell silent. A device counts as presence-aware only while its last presence is this young; an older host version (no presence) keeps the 90 s rule on `last_used_at`.
 PRESENCE_UNKNOWN_AFTER = timedelta(seconds=150)
+# story 4979 gate alignment (Kadir 5853 ①): a presence host is connected only while its STREAM has also been ticked within this long. Without it a host whose stream is dead for good (a proxy that lets the POSTs through and blocks the
+# event stream · the two-stream limit · a long reconnect back-off) is shown «connected · working» on presence alone, and a command is accepted and sits `queued` with no expiry for as long as it stays that way. 400 s = the stream's lifetime
+# 5 min 20 s (320 s) + 80 s for the reopen — a reconnect gap under it is still «queued, delivered when the stream is back»; past it a command is refused (409 device_unreachable) like before presence existed.
+PRESENCE_STREAM_TICK_MAX = timedelta(seconds=400)
 # How long a last presence still makes a device «presence-aware» (Kadir 5851 ②: a day let a host that went back to an older version flip between «connected» and «disconnected» for a day). The number is the longest a half-open
 # connection can keep the SERVER's tick-stamped `last_used_at` fresh after a computer fell silent — the stream's lifetime 5 min 20 s + the 90 s rule = ≈ 6 min 50 s (measured 11-18) — doubled and rounded: 15 minutes. Past it the old
 # rule judges, and by then it says «not heard» on its own; a host that really sends presence is never that quiet (it sends one at every connect, then every 60 s).
