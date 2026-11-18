@@ -482,22 +482,22 @@ async def test_the_purge_of_a_report_does_not_wait_for_a_request_row_another_tra
 
     name = "d4424 mac 4972ml"
     async with _client() as c:
-        dev = await _device(c, name=name)
-        agent = await _with_session(c, dev)
-        first = _ask(agent, request_id=str(uuid.uuid4()))
+        dev, agent, p1 = await _sealed_computer(c, name)
+        sid = await _setup_id(name)
+        first = _sealed_to(agent, sid, p1)  # a SEALED card holds an envelope — «words» the purge ends (a plain card with no preview holds none)
         assert (await _post_ask(c, dev, first)).status_code == 201
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 minute' WHERE request_id = '{first['request_id']}'")
         eng = create_async_engine(_ASYNC, poolclass=NullPool)
         try:
             async with async_sessionmaker(eng)() as holder:
                 await holder.execute(text("SELECT id FROM agent_permission_requests WHERE request_id = :r FOR UPDATE"), {"r": first["request_id"]})
-                r = await asyncio.wait_for(_post_ask(c, dev, _ask(agent, request_id=str(uuid.uuid4()))), 8)  # the report does not wait for the held row
+                r = await asyncio.wait_for(_post_ask(c, dev, _sealed_to(agent, sid, p1)), 8)  # the report does not wait for the held row
                 assert r.status_code == 201, r.text
                 state = (await _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE request_id = '{first['request_id']}'"))[0][0]
                 assert state == "pending", "the held row was left as it was"
                 await holder.rollback()
         finally:
             await eng.dispose()
-        assert (await _post_ask(c, dev, _ask(agent, request_id=str(uuid.uuid4())))).status_code == 201
+        assert (await _post_ask(c, dev, _sealed_to(agent, sid, p1))).status_code == 201
         state = (await _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE request_id = '{first['request_id']}'"))[0][0]
         assert state == "expired", "the next report purged it"
