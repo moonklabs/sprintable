@@ -347,6 +347,19 @@ describe('ApprovalsQueue — 4972 push landing: `?request=<id>` opens that reque
     await settle();
     expect(detail()?.textContent).toContain('첫째 결재 항목');
   });
+  it('⭐[codex 2 · narrow] the retry on a narrow screen: the notice\'s request is picked again and its SHEET is still the one up (not the first approval)', async () => {
+    narrow(); gatesFail = true; permissionList = [perm('r1'), perm('r2', { agent_name: 'Writer', tool: 'Edit' })];
+    searchRef.current = 'tab=gates&request=r2';
+    await mountQueue();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    gatesFail = false; pending = [lowGate('g1', '첫째 결재 항목')];
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateInboxRetry));
+    expect(retry).toBeTruthy();
+    await act(async () => { (retry as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+    expect(document.body.querySelector('[data-testid="agent-permission-card"]')?.textContent).toContain('Writer · MacBook');
+    expect(document.body.textContent).not.toContain('첫째 결재 항목 자세히');
+  });
   it('the «gone» line waits for the first permission read — a request the list is still fetching is not called gone', async () => {
     pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];
     searchRef.current = 'request=r1';
