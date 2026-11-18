@@ -840,12 +840,10 @@ async def device_sessions_view(
 
     story #4554 ④: «heard from» counts the device's live token only — a disconnected device (its token revoked) is silent at once,
     not for the 90 seconds its last heartbeat would have covered. ①: live rows first, newest first, `limit` of them."""
+    from app.services.agent_permissions import _reachable
+
     now = now or _now()
-    last_heard = (await db.execute(
-        select(func.max(DesktopDeviceToken.last_used_at))
-        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
-    )).scalar_one_or_none()
-    silent = last_heard is None or now - last_heard > UNKNOWN_AFTER
+    silent = setup_id not in await _reachable(db, {setup_id}, now)  # story 4979: the same rule as everywhere (a presence host: 150 s of its own silence; any other: `last_used_at` within UNKNOWN_AFTER)
     rows = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup_id)
         .order_by((DesktopSession.state == "stopped").asc(), DesktopSession.state_at.desc(), DesktopSession.created_at.desc())

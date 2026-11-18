@@ -1270,15 +1270,10 @@ async def host_added(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUI
 
 
 async def _reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> set[uuid.UUID]:
-    if not setup_ids:
-        return set()
-    rows = (await db.execute(
-        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at))
-        .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
-        .where(DesktopDeviceToken.setup_id.in_(setup_ids), DesktopDeviceToken.revoked_at.is_(None), DesktopSetup.revoked_at.is_(None))
-        .group_by(DesktopDeviceToken.setup_id)
-    )).all()
-    return {sid for sid, last in rows if last is not None and now - last <= UNKNOWN_AFTER}
+    """story 4979 (gate alignment): the computers a command, a clock press, a changed-files read, a pairing and an answer may go to — and the SAME computers a person is shown as connected (`_shown_reachable`: ONE rule, so
+    the screen and the server never say different things). A computer whose host sends presence: connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) — a command is refused for one that has been silent longer
+    (never queued into a dead stream), and accepted for one that has said it is here even while its stream is reconnecting. Any other computer: the old rule (`last_used_at` within UNKNOWN_AFTER, 90 s)."""
+    return (await _shown_reachable(db, setup_ids, now))[0]
 
 
 async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> tuple[set[uuid.UUID], dict[uuid.UUID, datetime | None]]:
@@ -1286,7 +1281,7 @@ async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: dat
 
     A computer whose host sends `presence` (its last presence is younger than PRESENCE_AWARE_WINDOW) is connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) — `last_heard_at` is stamped only by what the device
     sends, so a stream whose peer is gone (the server's own tick keeps `last_used_at` fresh) is no longer «connected» for minutes. A computer whose host sends no presence (an older version) keeps the old rule exactly:
-    `last_used_at` within UNKNOWN_AFTER (90 s). Used ONLY for what a person is shown (state · «connected» · «last seen»); `_reachable` (the old rule) still judges whether a command is accepted.
+    `last_used_at` within UNKNOWN_AFTER (90 s). Also what `_reachable` returns (the same rule everywhere); `_reachable` is now this same rule (story 4979 gate alignment — before it, the old rule alone judged whether a command is accepted).
     Returns `(connected, last_heard_at by setup)` — a setup with no token row is in neither."""
     if not setup_ids:
         return set(), {}

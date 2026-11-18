@@ -162,18 +162,24 @@ async def test_08_the_presence_rule_lapses_after_15_minutes_back_to_the_old_one(
         assert (await _view(c, agent))["state"] != "unknown"
 
 
-async def test_09_only_what_is_shown_changes_a_command_is_still_judged_by_the_old_rule(world):
+async def test_09_the_gate_follows_the_shown_rule_a_silent_presence_host_is_refused_not_trapped_in_a_dead_stream(world):
     async with _client() as c:
         device, agent, phone, conv = await _setup(c, "d4979 mac gate")
         await _grant_command()
         await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))
-        await _age(device["setup_id"], used=5, heard=200)                                    # shown disconnected …
+        await _age(device["setup_id"], used=5, heard=200)                                    # half-open: the server's tick keeps last_used_at fresh, the computer itself has been silent 200 s → SHOWN disconnected …
         assert (await _view(c, agent))["state"] == "unknown"
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
-        assert r.status_code == 201, r.text                                                  # … but the server still ACCEPTS the command (its rule is unchanged: last_used_at within 90 s)
-        await _age(device["setup_id"], used=300)
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text                # … and a command is REFUSED (before the alignment: accepted, queued into the dead stream for up to 5 min 20 s)
+        await _age(device["setup_id"], heard=100)                                            # two beats late at most: connected → accepted
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
-        assert r.status_code == 409 and "device_unreachable" in r.text, r.text                # and refuses past 90 s exactly as before
+        assert r.status_code == 201, r.text
+        # an older host (no presence): the old rule exactly — last_used_at within 90 s accepts, past it refuses
+        await _age(device["setup_id"], used=300, heard=300, presence=-1)
+        r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
+        assert r.status_code == 409 and "device_unreachable" in r.text, r.text
+        await _age(device["setup_id"], used=10)
+        assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 201
 
 
 async def test_10_the_phone_lists_follow_the_shown_rule_and_carry_last_heard(world):
@@ -210,7 +216,9 @@ def test_11_source_pin_the_servers_tick_is_marked_not_heard_and_the_phone_views_
     assert router.count("touch_device(") == 5 and router.count("heard=False") == 1          # every other call keeps the default (a device-originated stamp)
     cmds = (root / "services" / "desktop_commands.py").read_text(encoding="utf-8")
     assert cmds.count("_shown_reachable(") == 4                                              # the session view · the overview · the agent's startable · the phone's computers
-    assert cmds.replace("_shown_reachable(", "").count("_reachable(db") == 2                                                  # the refusal of a command (twice) stays on the old rule — and desktop_clock.py is untouched (its own gate and flag)
+    assert cmds.replace("_shown_reachable(", "").count("_reachable(db") == 2
+    perms = (root / "services" / "agent_permissions.py").read_text(encoding="utf-8")
+    assert "return (await _shown_reachable(db, setup_ids, now))[0]" in perms               # story 4979 gate alignment: `_reachable` IS the shown rule (one rule for every gate and every screen)                                                  # the refusal of a command (twice) stays on the old rule — and desktop_clock.py is untouched (its own gate and flag)
 
 async def test_12_presence_is_counted_per_verified_device_and_stamps_only_its_own_token(world):
     async with _client() as c:
@@ -231,17 +239,16 @@ async def test_12_presence_is_counted_per_verified_device_and_stamps_only_its_ow
         assert stamped.pop("second-token-of-b") is False and list(stamped.values()) == [True]
 
 
-async def test_13_a_presence_alone_does_not_make_a_computer_take_commands(world):
+async def test_13_a_host_that_says_it_is_here_takes_commands_even_while_its_stream_reconnects(world):
     async with _client() as c:
         device, agent, phone, conv = await _setup(c, "d4979 mac presence only")
         await _grant_command()
-        await _age(device["setup_id"], used=300, heard=300, presence=-1)                      # no stream and no report for 5 min: refused (409) as before
+        await _age(device["setup_id"], used=300, heard=300, presence=-1)                      # no stream, no report, no presence for 5 min: refused as before
         assert (await _post(c, agent, _cmd("send_prompt", phone, conv=conv))).status_code == 409
         assert (await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))).status_code == 200
-        v = await _view(c, agent)
-        assert v["state"] != "unknown"                                                       # SHOWN: the computer itself just said it is here
+        assert (await _view(c, agent))["state"] != "unknown"                                 # SHOWN connected: the computer itself just said it is here
         r = await _post(c, agent, _cmd("send_prompt", phone, conv=conv))
-        assert r.status_code == 409 and "device_unreachable" in r.text, r.text                # … but a COMMAND is still judged by the old rule (last_used_at): a presence is not a stream
+        assert r.status_code == 201, r.text                                                   # … and a command goes to it (it is alive; the command waits for its stream to be back)
 
 
 async def test_14_a_revoked_token_is_never_stamped_and_a_revoked_computer_is_never_shown_connected(world):
@@ -273,3 +280,21 @@ async def test_14_a_revoked_token_is_never_stamped_and_a_revoked_computer_is_nev
         async with async_session_factory() as s:
             connected, heard = await _shown_reachable(s, {sid}, datetime.now(timezone.utc) + timedelta(seconds=0))
         assert connected == set() and heard == {}                                              # never shown as connected, whatever its times say
+
+
+async def test_15_the_admin_device_sessions_view_and_the_permission_list_follow_the_same_rule(world):
+    from tests.test_4533_agent_permissions_realdb import REQS, _ask, _post_ask
+
+    async with _client() as c:
+        device, agent, _phone, _conv = await _setup(c, "d4979 mac same rule")
+        await c.post("/api/v2/desktop/relay/presence", headers=_tok(device["device_token"]))
+        ask = (await _post_ask(c, device, _ask(agent))).json()
+        assert ask["state"] == "pending"
+        await _age(device["setup_id"], used=5, heard=200)                                    # half-open: tick fresh, computer silent 200 s
+        sess = (await c.get(f"/api/v2/desktop/setups/{device['setup_id']}/sessions", headers=_person(OWNER))).json()["sessions"]
+        assert sess and all(x["activity"] == "unknown" for x in sess if x["state"] != "stopped")      # the admin's device view says the same as the chat strip
+        listed = (await c.get(REQS, headers=_person(OWNER), params={"state": "pending"})).json()["requests"]
+        assert [v["answerable"] for v in listed] == [False]                                  # the card's button follows the gate (and the gate the shown rule)
+        await _age(device["setup_id"], heard=100)
+        listed = (await c.get(REQS, headers=_person(OWNER), params={"state": "pending"})).json()["requests"]
+        assert [v["answerable"] for v in listed] == [True]
