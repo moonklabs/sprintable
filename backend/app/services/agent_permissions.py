@@ -1079,7 +1079,8 @@ _OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeo
 # is not in this change: its result line still names it.)
 def _is_net_question():
     # (codex: `tool` is nullable — a terminal-only row may lack it; `NOT (… tool = 'X')` would then be NULL and the row would never match a WHERE) so the comparison is made on COALESCE(tool, ''): always true or false
-    return and_(AgentPermissionRequest.runtime == "claude", func.coalesce(AgentPermissionRequest.tool, "") == SANDBOX_NET_TOOL)
+    # (카디르 5849 lens · low) the exception is for the FIXED vocabulary — the tool name AND `summary = 'network'`: a computer that does not seal yet (an older build) can send a plain card with that tool name and any summary (an address)
+    return and_(AgentPermissionRequest.runtime == "claude", func.coalesce(AgentPermissionRequest.tool, "") == SANDBOX_NET_TOOL, func.coalesce(AgentPermissionRequest.summary, "") == "network")
 
 
 def _ended_words() -> dict:
@@ -1093,7 +1094,7 @@ def _ended_words() -> dict:
 
 def _end_words_of(row: AgentPermissionRequest) -> None:
     """the same on a row in hand (the answer · the withdrawal)"""
-    if not (row.runtime == "claude" and row.tool == SANDBOX_NET_TOOL):
+    if not (row.runtime == "claude" and row.tool == SANDBOX_NET_TOOL and row.summary == "network"):
         row.tool, row.summary = None, None
     row.workdir = None
 
@@ -1147,9 +1148,14 @@ async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], 
                RemoteDevicePairing.removed_at >= AgentPermissionRequest.created_at,  # (codex 3rd: a loss that came BEFORE the card was made is no reason to end it later — the loss must be one the card lived through)
                RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id)
     )
+    # (카디르 5849 lens · medium) `SKIP LOCKED` + update by id, as the purge does: a phone's revocation takes the PHONE row first and then waits here for the request rows; an answer takes the REQUEST row first and then the phone row —
+    # waiting for a request row somebody holds closes that circle. A row held right now is being answered (or ended) by someone else; the window ends it otherwise.
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, and_(_holds_plain_words(), lost_a_pair)), ~has_phone)
+           .with_for_update(skip_locked=True, of=AgentPermissionRequest))
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, and_(_holds_plain_words(), lost_a_pair)), ~has_phone)
+        .where(AgentPermissionRequest.id.in_(due))
         .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)

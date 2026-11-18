@@ -157,12 +157,16 @@ async def test_the_migration_clears_what_was_already_over_once_and_leaves_open_a
         await _pair(c, device["device_token"], der)
         answered, lapsed, open_, net, nfinal = _ask(agent), _ask(agent), _ask(agent), _net_first_stage(agent), _net_first_stage(agent)
         netw = {**_net_first_stage(agent), "workdir": "~/w"}  # (not the exact first-stage shape: it carries a folder — the one network row the migration's UPDATE selects)
-        for body in (answered, lapsed, open_, net, nfinal, netw):
+        neta = {**_net_first_stage(agent), "summary": "curl https://example.invalid/?k=1"}  # (카디르 5849: the tool name with an ADDRESS as summary — an older build that does not seal yet)
+        prev = _ask(agent)
+        for body in (answered, lapsed, open_, net, nfinal, netw, neta, prev):
             assert (await _post_ask(c, device, body)).status_code == 201
         # the old code kept the words of an ended row: put them back by hand (an ended row may carry them under either rule)
         await _sql(f"UPDATE agent_permission_requests SET state = 'answered', decision = 'allow' WHERE request_id = '{answered['request_id']}'")
         await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{lapsed['request_id']}'")
         await _sql(f"UPDATE agent_permission_requests SET state = 'withdrawn', result_code = 'session_ended' WHERE request_id IN ('{nfinal['request_id']}', '{netw['request_id']}')")
+        await _sql(f"UPDATE agent_permission_requests SET state = 'answered', decision = 'allow' WHERE request_id = '{neta['request_id']}'")
+        await _sql(f"UPDATE agent_permission_requests SET state = 'answered', decision = 'allow', tool = NULL, summary = NULL, workdir = NULL, preview = '{{\"op\": \"edit\"}}'::jsonb WHERE request_id = '{prev['request_id']}'")  # an ended row with a preview and no other word
         assert (await _row(answered["request_id"]))[1:4] == ("Bash", "npm install --save ••••(가림)", "~/w")
         await _sql(m._END_PENDING)
         await _sql(m._CLEAR_ENDED)
@@ -172,6 +176,8 @@ async def test_the_migration_clears_what_was_already_over_once_and_leaves_open_a
         assert (await _row(net["request_id"]))[:4] == ("pending", "SandboxNetwork", "network", None), "a pending network question is not touched"
         assert (await _row(nfinal["request_id"]))[:4] == ("withdrawn", "SandboxNetwork", "network", None), "an ended network question keeps its fixed words"
         assert (await _row(netw["request_id"]))[:4] == ("withdrawn", "SandboxNetwork", "network", None), "…and when it also carried a folder: the folder goes, the fixed words stay"
+        assert (await _row(neta["request_id"]))[:4] == ("answered", None, None, None), "an ADDRESS under the network tool name is a word of the person's: it goes"
+        assert (await _sql(fetch=f"SELECT preview IS NULL FROM agent_permission_requests WHERE request_id = '{prev['request_id']}'"))[0][0] is True, "an ended row keeps no preview"
         await _sql(m._CLEAR_ENDED)  # once more: nothing left to do, nothing breaks
         assert (await _row(answered["request_id"]))[0] == "answered"
 
@@ -383,3 +389,120 @@ async def test_a_phone_lost_BEFORE_the_card_was_made_is_no_reason_to_end_it_when
             assert await _end_cards_without_phone(s, {sid}) == 0  # an unrelated pair comes off this computer later
             await s.commit()
         assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "the loss came before the card: the card stays"
+
+
+async def test_a_network_tool_card_with_an_address_as_summary_loses_it_when_answered(world):
+    """카디르 5849 (low): the exception is the FIXED words only — the tool name AND summary «network»"""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewg")
+        agent = await _with_session(c, device)
+        paired_id, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        body = {**_net_first_stage(agent), "summary": "curl https://example.invalid/?k=1"}
+        assert (await _post_ask(c, device, body)).status_code == 201
+        [view] = [r for r in (await c.get(REQS, headers=_person(OWNER))).json()["requests"] if r["request_id"] == body["request_id"]]
+        assert (await c.post(f"{REQS}/{view['id']}/answer", json=_answer(paired_id), headers=_person(OWNER))).status_code == 200
+        assert await _row(body["request_id"]) == ("answered", None, None, None, True)
+        # …and the same under the window's end (the purge's statement path, not the answer's row in hand)
+        late = {**_net_first_stage(agent), "summary": "curl https://example.invalid/?k=2"}
+        assert (await _post_ask(c, device, late)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{late['request_id']}'")
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+        assert (await _row(late["request_id"]))[:4] == ("expired", None, None, None)
+
+
+async def test_a_card_that_holds_only_a_folder_ends_with_its_window_and_the_folder_goes(world):
+    """카디르 5849 (low · test): `_holds_plain_words` — the workdir branch alone selects a row (a terminal-only card that read neither tool nor summary)"""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewh")
+        agent = await _with_session(c, device)
+        body = _ask(agent)
+        del body["tool"], body["summary"], body["input_hash"]
+        body["terminal_only"] = True
+        assert (await _post_ask(c, device, body)).status_code == 201, "(a terminal-only card with a folder only)"
+        assert (await _row(body["request_id"]))[1:4] == (None, None, "~/w")
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{body['request_id']}'")
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+        assert (await _row(body["request_id"]))[:4] == ("expired", None, None, None)
+
+
+async def test_a_codex_card_that_uses_the_network_tool_name_keeps_nothing(world):
+    """카디르 5849 (E8/E15 survivors): the exception is for the claude runtime only"""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewi")
+        agent = await _with_session(c, device)
+        body = {**_net_first_stage(agent), "runtime": "codex"}
+        made = await _post_ask(c, device, body)
+        assert made.status_code == 201, made.text
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '5 minutes' WHERE request_id = '{body['request_id']}'")
+        assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+        assert (await _row(body["request_id"]))[:4] == ("expired", None, None, None), "not the claude network question: its words go"
+
+
+async def test_taking_a_pair_off_does_not_end_the_card_of_ANOTHER_person_who_has_no_phone(world):
+    """카디르 5849 (low · test E12): `lost_a_pair` is about the card's own recipient"""
+    from tests.test_4533_agent_permissions_realdb import PHONES
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewj")
+        agent = await _with_session(c, device)
+        other = await _plain_member()
+        body = _ask(agent)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET recipient_member_id = '{other}' WHERE request_id = '{body['request_id']}'")  # the card is the OTHER person's (no phone of theirs on this computer)
+        p1, der1 = await _register(c, label="one")
+        await _pair(c, device["device_token"], der1)
+        assert (await c.delete(f"{PHONES}/{p1}", headers=_person(OWNER))).status_code in (200, 204)  # the OWNER loses their phone on this computer
+        assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "the other person lost nothing: their card stays"
+
+
+async def test_taking_a_pair_off_one_computer_does_not_end_a_card_on_another_computer(world):
+    """카디르 5849 (low · test E13): `lost_a_pair` is about THIS computer"""
+    from tests.test_4533_agent_permissions_realdb import PHONES
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import _end_cards_without_phone
+
+    async with _client() as c:
+        dev_x = await _device(c, name="d4424 mac 4972ewk")
+        dev_y = await _device(c, name="d4424 mac 4972ewl")
+        agent_y = await _with_session(c, dev_y)
+        p1, der1 = await _register(c, label="one")
+        await _pair(c, dev_x["device_token"], der1)  # the phone is paired with X only
+        body = _ask(agent_y)  # a plain card on Y (no phone of the person's there)
+        assert (await _post_ask(c, dev_y, body)).status_code == 201
+        sid_x = dev_x["setup_id"]
+        sid_y = dev_y["setup_id"]
+        assert (await c.delete(f"{PHONES}/{p1}/pairs/{sid_x}", headers=_person(OWNER))).status_code == 200  # the person loses their phone on X, AFTER Y's card was made
+        async with async_session_factory() as s:
+            assert await _end_cards_without_phone(s, {uuid.UUID(str(sid_y))}) == 0
+            await s.commit()
+        assert (await _row(body["request_id"]))[:2] == ("pending", "Bash"), "the loss was on X: Y's card stays"
+
+
+async def test_revoking_a_phone_and_an_answer_shaped_transaction_never_wait_for_each_other(world):
+    """카디르 5849 (medium · probe Z4): a phone's revocation takes the PHONE row first and then waits here for request rows; an answer takes the REQUEST row first and then the phone row — waiting for a held request row closes the circle. With SKIP LOCKED the revocation does not wait."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from tests.test_4533_agent_permissions_realdb import PHONES
+
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972ewm")
+        agent = await _with_session(c, device)
+        p1, der1 = await _register(c, label="one")
+        await _pair(c, device["device_token"], der1)
+        body = _ask(agent)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        eng, holder = await _two_connections()
+        try:
+            await holder.execute(text("SELECT id FROM agent_permission_requests WHERE request_id = :r FOR UPDATE"), {"r": body["request_id"]})  # the answer path: the request row first
+            revoke = asyncio.create_task(c.delete(f"{PHONES}/{p1}", headers=_person(OWNER)))
+            await asyncio.sleep(0.8)  # the revocation holds the phone row now (and, without SKIP LOCKED, waits for the request row)
+            await asyncio.wait_for(holder.execute(text("UPDATE remote_devices SET last_used_at = now() WHERE id = :p"), {"p": p1}), 8)  # …then the phone row
+            await holder.commit()
+            r = await asyncio.wait_for(revoke, 8)
+            assert r.status_code in (200, 204), r.text
+        finally:
+            await holder.rollback()
+            await eng.dispose()
