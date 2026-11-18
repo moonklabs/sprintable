@@ -198,7 +198,8 @@ export function useAgentPermissionRequests() {
     </div>
   ) : null;
 
-  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision), onOpen: open };
+  // story 4972 (push landing): «the first read has answered» — a notice's request that is not in the list is only «gone» after that
+  return { loaded: requests !== null, shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision), onOpen: open };
 }
 
 export function AgentPermissionRequests() {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -259,6 +259,11 @@ export function ApprovalsQueue() {
   // 2d-2 — the «에이전트 권한 요청» section: the SAME hook the standalone group used (one reader on this screen = one SSE subscription + one 15 s clock; the old block on the inbox tab is gone).
   // The web only looks at these (the phone app answers), so a row here has no menu and deciding one never moves the detail (`advanceAfterDecided` below only walks the approvals).
   const perm = useAgentPermissionRequests();
+  // story 4972 (push landing): a permission-request notice opens `/inbox?tab=gates&request=<id>` — that request's card is picked (and, narrow, its sheet is up) ONCE the list has it; a request the list does not have after the first read (ended ·
+  // not this person's) is one line above the list instead of a sheet. Handled once per id: the person's own picks afterwards are never taken back.
+  const wantedId = useSearchParams()?.get('request') ?? null;
+  const [landed, setLanded] = useState<string | null>(null);
+  const wantedRow = wantedId ? perm.shown.find((r) => r.id === wantedId) ?? null : null;
   const tPerm = useTranslations('agentPermissions');
   const permKeyOf = (r: PermissionRequest) => `perm:${r.id}`;
   // the requests take part in the pick only once the approvals have loaded: whichever read answered first must not decide the first pick (the first approval comes first whenever there is one)
@@ -270,6 +275,15 @@ export function ApprovalsQueue() {
   // what the person is looking at right now — read when a request finishes (it may finish after they picked another row)
   const selectedKeyRef = useRef<string | null>(selectedKey);
   useEffect(() => { selectedKeyRef.current = selectedKey; });
+  useEffect(() => {
+    if (!wantedId || landed === wantedId || loading || !wantedRow) return;
+    setLanded(wantedId);
+    select(permKeyOf(wantedRow));
+    if (!wide) setSheetOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedId, landed, loading, wantedRow?.id]);
+  const requestGone = wantedId !== null && !loading && perm.loaded && wantedRow === null && landed !== wantedId;
+  const goneLine = requestGone ? <p className="mb-3 text-sm text-muted-foreground" data-testid="permission-request-gone">{tPerm('requestGone')}</p> : null;
   // a request was decided here: if its detail is on screen, the detail moves to the NEXT request of the same section that is still undecided (the decided row stays in the list, marked «승인 완료» / «반려됨»,
   // and can be picked again for the undo line). Nothing to move to → the detail stays.
   const sectionsRef = useRef({ hand: handItems, held: heldItems });
@@ -523,12 +537,13 @@ export function ApprovalsQueue() {
       </Button>
     </div>
   );
-  if (loadFailed && !hasPerm) return <>{perm.offLine}{loadErrorBlock}</>;
+  if (loadFailed && !hasPerm) return <>{perm.offLine}{goneLine}{loadErrorBlock}</>;
 
   if (items.length === 0 && !loadFailed && !hasPerm) {
     return (
       <>
         {perm.offLine}
+        {goneLine}
         <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
         </div>
@@ -1020,6 +1035,7 @@ export function ApprovalsQueue() {
   return (
     <>
       {perm.offLine}
+      {goneLine}
       {loadFailed ? <div className="mb-3">{loadErrorBlock}</div> : null}
       <ListDetailShell
         testId="gates-screen"

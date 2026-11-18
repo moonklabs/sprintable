@@ -7958,6 +7958,7 @@
   },
   "agentPermissions": {
     "groupTitle": "Agent permission requests",
+    "requestGone": "The request you opened from the notification has already ended or isn't visible to this account",
     "chip": "Permission request",
     "net": {
       "askLine": "Press [Allow…] to see where it wants to connect — you decide after seeing it",
