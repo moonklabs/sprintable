@@ -112,7 +112,7 @@ describe('soleAgentDm — the one direct conversation with an agent', () => {
     for (const bad of [null, { id: 1 }, 'x', { id: 'z' }, { id: 'z', type: 'dm' }, { id: 'z', type: 'dm', status: 'open' }, { id: 'z', type: 'dm', participants: [] }, { id: 'z', type: 'dm', status: 'open', participants: [] }, { id: 'z', type: 'dm', status: 'open', participants: 'nope' }, { id: 'z', type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: 'a1', type: 'agent' }] }, { id: 'z', type: 'dm', status: 5, participants: [] }]) {
       expect(soleAgentDm([good, bad], ME, 2)).toBeNull();
     }
-    expect(soleAgentDm([good, when('c-up', 'a1', { status: 'OPEN' })], ME, 2)).toBe('c1'); // status is compared exactly: anything but «open» is not a candidate
+    expect(soleAgentDm([when('c-up', 'a1', { status: 'OPEN', updated_at: '2026-11-18T23:00:00Z' }), good], ME, 2)).toBe('c1'); // status is compared exactly: anything but «open» is not a candidate
     // …while a readable room of another kind, or a closed one, is simply not a candidate
     expect(soleAgentDm([good, { id: 'g', type: 'group', participants: [] }, when('r', 'a1', { status: 'resolved' })], ME, 3)).toBe('c1');
   });
