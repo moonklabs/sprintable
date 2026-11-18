@@ -79,6 +79,7 @@ class _FakeDb:
 
     async def execute(self, stmt):
         self.statements.append(stmt)
+        return SimpleNamespace(rowcount=0)  # a real session answers every statement with a result (`forget_prompts` reads its `rowcount`)
 
 
 A, B, C = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
