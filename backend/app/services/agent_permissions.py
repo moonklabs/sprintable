@@ -913,12 +913,12 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    # LOCK ORDER (lens 5848 · codex deltas): the setup rows FIRST (the order an organization's delete takes: setup → its requests by cascade), and the purge below takes NO wait on a request row somebody else holds
+    # (`SKIP LOCKED`) — so this report never waits for a request row while it holds the setup rows. `answer_request` takes request → setup; with this report waiting for no request row, the two cannot wait for each other.
+    await _lock_machine(db, setup)
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
     await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
-    # LOCK ORDER (codex delta on lens 5848 · medium): request rows first, then setup rows — the order `answer_request` takes (it locks the request, then `enqueue_command` updates the setup row). Taking the setup rows BEFORE this computer's
-    # request rows (the purge above) would be the reverse and could deadlock with an answer that lands just before the window ends. (An organization's delete runs the other way round — setup → its requests by cascade — and did so before this story.)
-    await _lock_machine(db, setup)
     # (codex delta on lens 5848 · medium) a request that authenticated BEFORE its setup was revoked reaches this point after the revocation: under the lock the setup is read again — a revoked one takes no card (it is outside every live sibling's lock set, so a
     # card of it could stand a mark a new setup of the same Mac never read). The token check is a read without a lock; this is the fence.
     if (await db.execute(select(DesktopSetup.revoked_at).where(DesktopSetup.id == setup.id))).scalar_one_or_none() is not None:
@@ -1077,9 +1077,14 @@ async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, set
     without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
     now = now or _now()
     scope = [AgentPermissionRequest.setup_id == setup_id] if setup_id is not None else []
+    # `SKIP LOCKED`: a request row held by another transaction (an answer landing at the end of its window · an organization's delete) is left for the next report / the minute job — the purge never WAITS on a request row, so a report
+    # that holds its computer's setup rows cannot be one side of a deadlock with a path that takes a request row first
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+           .with_for_update(skip_locked=True))
     ended = (await db.execute(
         update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, _OPEN_WORDS, *scope)
+        .where(AgentPermissionRequest.id.in_(due))
         .values(state="expired", result_code="expired", envelope=None, preview=None,
                 input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash))
         .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)

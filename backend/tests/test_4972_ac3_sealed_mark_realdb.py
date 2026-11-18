@@ -310,7 +310,9 @@ def test_the_setup_lock_is_taken_before_the_mark_is_read_a_source_pin_for_the_ra
 
     src = inspect.getsource(agent_permissions.report_request)
     assert "_sealed_mark(" in src
-    assert "purge_open_cards(" in src and src.index("purge_open_cards(") < src.index("_lock_machine("), "the request rows (the purge) come BEFORE the setup rows: the order answer_request takes (request → setup) — the reverse could deadlock with an answer near the window's end"
+    assert "purge_open_cards(" in src and src.index("_lock_machine(") < src.index("purge_open_cards("), "the setup rows come FIRST (the order an organization's delete takes) — and the purge waits for no request row (SKIP LOCKED, pinned below)"
+    purge_src = inspect.getsource(agent_permissions.purge_open_cards)
+    assert "skip_locked=True" in purge_src, "the purge never waits on a request row somebody else holds (a report holds the setup rows while it purges)"
     assert src.index("_lock_machine(") < src.index("revoked_at") < src.index("_sealed_mark("), "the setup is read again under the lock, before the mark is read: a request that authenticated before its setup was revoked takes no card"
     lock_src = inspect.getsource(agent_permissions._lock_machine)
     assert ".order_by(DesktopSetup.id)" in lock_src and ".with_for_update()" in lock_src, "the lock takes the rows in ONE order (by id) — the order is what keeps two siblings from waiting for each other"
@@ -466,3 +468,36 @@ async def test_a_request_that_authenticated_before_its_setup_was_revoked_takes_n
         finally:
             await eng.dispose()
         assert await _mark(name) is None, "a revoked setup's card stands no mark"
+
+
+async def test_the_purge_of_a_report_does_not_wait_for_a_request_row_another_transaction_holds_and_gets_it_the_next_time(world):
+    """codex deltas on lens 5848 (medium · lock order): a report holds its computer's setup rows; the purge it runs must not WAIT on a request row held by an answer (request → setup) or an organization's delete — the held row is left for the next report."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    name = "d4424 mac 4972ml"
+    async with _client() as c:
+        dev = await _device(c, name=name)
+        agent = await _with_session(c, dev)
+        first = _ask(agent, request_id=str(uuid.uuid4()))
+        assert (await _post_ask(c, dev, first)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 minute' WHERE request_id = '{first['request_id']}'")
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(eng)() as holder:
+                await holder.execute(text("SELECT id FROM agent_permission_requests WHERE request_id = :r FOR UPDATE"), {"r": first["request_id"]})
+                r = await asyncio.wait_for(_post_ask(c, dev, _ask(agent, request_id=str(uuid.uuid4()))), 8)  # the report does not wait for the held row
+                assert r.status_code == 201, r.text
+                state = (await _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE request_id = '{first['request_id']}'"))[0][0]
+                assert state == "pending", "the held row was left as it was"
+                await holder.rollback()
+        finally:
+            await eng.dispose()
+        assert (await _post_ask(c, dev, _ask(agent, request_id=str(uuid.uuid4())))).status_code == 201
+        state = (await _sql(fetch=f"SELECT state FROM agent_permission_requests WHERE request_id = '{first['request_id']}'"))[0][0]
+        assert state == "expired", "the next report purged it"
