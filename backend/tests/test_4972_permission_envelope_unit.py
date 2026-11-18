@@ -57,9 +57,12 @@ def test_the_body_size_limit_is_the_kinds_and_is_judged_before_decoding():
     check_envelope(good(kind="approval_card", ct=b64(16 * 1024 + 16)))
     with pytest.raises(ValueError):
         check_envelope(good(kind="approval_card", ct=b64(16 * 1024 + 17)))  # a card is small
-    check_envelope(good(kind="send_prompt", ct=b64(256 * 1024 + 16)))  # another kind keeps the general cap
+    check_envelope(good(kind="chat_line", ct=b64(256 * 1024 + 16)))  # another kind keeps the general cap
     with pytest.raises(ValueError):
-        check_envelope(good(kind="send_prompt", ct=b64(256 * 1024 + 17)))
+        check_envelope(good(kind="chat_line", ct=b64(256 * 1024 + 17)))
+    check_envelope(good(kind="send_prompt", ct=b64(8 * 1024 + 16)))  # story 4976: an instruction into the running turn is a few KiB at most
+    with pytest.raises(ValueError):
+        check_envelope(good(kind="send_prompt", ct=b64(8 * 1024 + 17)))
     with pytest.raises(ValueError, match="too long"):
         check_envelope(good(ct="A" * 5_000_000))  # refused on its length, not after decoding 5 MB
 

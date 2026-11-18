@@ -880,7 +880,16 @@ async def changes_purge(
                 orphans = await end_orphan_cards(session)
         except Exception as exc:
             logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
-        return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans})
+        # story 4976: the same minute job ends an instruction copy that is still open long after its 120 seconds (own savepoint: a failure here takes nothing else with it)
+        prompts: int | None = None
+        try:
+            async with session.begin_nested():
+                from app.services.desktop_relay import purge_stale_prompts
+
+                prompts = await purge_stale_prompts(session)
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · stale prompts): %s", type(exc).__name__)
+        return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

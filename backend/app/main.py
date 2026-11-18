@@ -344,6 +344,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 _CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
+# story 4976: a phone's instruction into a running turn (the words are in the body — plain, or as the envelope) is never sent back in a refusal
+_DESKTOP_COMMAND_PATH = re.compile(r"/api/v2/agents/[^/]+/desktop-commands")
 # story 4825 (AC6): on the desktop app's own server (embedded install) nothing under /api/v2/auth/ sends back what was typed — a password in any auth body (the owner's new password, a sign-in) is not echoed
 # by a refusal. Keyed on the embedded switch, so a hosted deployment's answers are exactly as before.
 _AUTH_PATH_PREFIX = "/api/v2/auth/"
@@ -371,6 +373,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         or (request.method == "POST" and request.url.path.rstrip("/") == "/api/v2/events")
         # story 4949 (security lens): a refused permission report (a preview line over the bound · a character it may not carry) would carry the masked file lines back in `input`
         or (request.method == "POST" and request.url.path.rstrip("/") == "/api/v2/desktop/relay/permission-requests")
+        or (request.method == "POST" and _DESKTOP_COMMAND_PATH.fullmatch(request.url.path.rstrip("/")) is not None)
     ):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
