@@ -190,10 +190,12 @@ def _migration_sql(monkeypatch) -> str:
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     assert (mod.revision, mod.down_revision) == ("0486", "0485")
     got: list[str] = []
-    monkeypatch.setattr(mod.op, "execute", lambda sql: got.append(str(sql)))  # (alembic's `op` is one shared module: undone at the end of the test, or every later migration test would run nothing)
+    order: list[str] = []
+    monkeypatch.setattr(mod.op, "execute", lambda sql: (got.append(str(sql)), order.append("scrub")))  # (alembic's `op` is one shared module: undone at the end of the test, or every later migration test would run nothing)
     indexes: list[tuple] = []
-    monkeypatch.setattr(mod.op, "create_index", lambda name, table, cols, **kw: indexes.append((name, table, tuple(cols), str(kw.get("postgresql_where")))))
+    monkeypatch.setattr(mod.op, "create_index", lambda name, table, cols, **kw: (indexes.append((name, table, tuple(cols), str(kw.get("postgresql_where")))), order.append("index")))
     mod.upgrade()
+    assert order == ["index", "index", "scrub"], order  # the indexes first, the scrub after (Kadir 5850: the other order can deadlock with a running transaction of the older build)
     assert len(got) == 1  # the one scrub statement
     assert [(n, t, c) for n, t, c, _w in indexes] == [("ix_desktop_commands_prompt_open_created", "desktop_commands", ("created_at",)),
                                                       ("ix_desktop_commands_prompt_ended_created", "desktop_commands", ("created_at",))]

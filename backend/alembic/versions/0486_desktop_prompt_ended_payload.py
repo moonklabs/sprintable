@@ -25,6 +25,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # the two indexes FIRST, the scrub after (Kadir 5850: the other order lets the index build wait on a running transaction of the older build that holds rows the scrub just emptied — a deadlock, 40P01)
+    op.create_index(
+        "ix_desktop_commands_prompt_open_created", "desktop_commands", ["created_at"],
+        postgresql_where=sa.text("kind = 'send_prompt' AND state IN ('queued', 'delivered', 'acked')"),
+    )
+    op.create_index(
+        "ix_desktop_commands_prompt_ended_created", "desktop_commands", ["created_at"],
+        postgresql_where=sa.text("kind = 'send_prompt' AND state IN ('done', 'failed', 'rejected')"),
+    )
     op.execute(
         """
         UPDATE desktop_commands
@@ -33,14 +42,6 @@ def upgrade() -> None:
            AND state IN ('done', 'failed', 'rejected')
            AND (payload ? 'text' OR payload ? 'signed' OR payload ? 'envelope')
         """
-    )
-    op.create_index(
-        "ix_desktop_commands_prompt_open_created", "desktop_commands", ["created_at"],
-        postgresql_where=sa.text("kind = 'send_prompt' AND state IN ('queued', 'delivered', 'acked')"),
-    )
-    op.create_index(
-        "ix_desktop_commands_prompt_ended_created", "desktop_commands", ["created_at"],
-        postgresql_where=sa.text("kind = 'send_prompt' AND state IN ('done', 'failed', 'rejected')"),
     )
 
 
