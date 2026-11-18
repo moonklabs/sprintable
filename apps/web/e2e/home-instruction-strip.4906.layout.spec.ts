@@ -69,7 +69,7 @@ async function open(page: Page, vp: { width: number; height: number }, launcher:
   await page.route('http://preview.test/**', (route) => {
     const url = new URL(route.request().url());
     // the real send path (lib/today-instruct): the person's conversations hold exactly ONE agent DM, and the server refuses the message → the real failure line is drawn
-    if (url.pathname.startsWith('/api/conversations') && route.request().method() === 'GET') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'dm-1', type: 'dm', participants: [{ member_id: 'me-1', type: 'human' }, { member_id: 'ag-1', type: 'agent' }] }], total: 1 }) });
+    if (url.pathname.startsWith('/api/conversations') && route.request().method() === 'GET') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'dm-1', type: 'dm', status: 'open', participants: [{ member_id: 'me-1', type: 'human' }, { member_id: 'ag-1', type: 'agent' }] }], total: 1 }) });
     if (url.pathname.endsWith('/messages') && route.request().method() === 'POST') return route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
     if (url.pathname !== '/') return route.fulfill({ status: 404, body: '{}' });
     return route.fulfill({
