@@ -827,7 +827,12 @@ async def note_capabilities(db: AsyncSession, setup: DesktopSetup, says: dict[st
     `capabilities` when said, taken out again when a list comes without it; the other words are left as they are"""
     have = [c for c in (setup.capabilities or []) if isinstance(c, str)]
     want = sorted(({*have} | {w for w, k in says.items() if k}) - {w for w, k in says.items() if not k})
+    if says.get(SEALED_PROMPT) is True and setup.sealed_prompts_at is None:
+        # story 4976 (A5): the computer says it opens a sealed instruction → its mark stands (one way: the first time kept; a later list without the word takes the capability out but not the mark). The same statement
+        # every time (COALESCE keeps the first) — so a repeated list changes nothing and costs one cheap write only until the mark stands. Under the machine lock a plaintext instruction of the same Mac takes (create_command).
+        await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id, DesktopSetup.sealed_prompts_at.is_(None)).values(sealed_prompts_at=func.now()))
     if want == have and setup.capabilities is not None:
+        await db.flush()
         return
     if not want and setup.capabilities is None:
         return

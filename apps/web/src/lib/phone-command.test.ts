@@ -399,3 +399,61 @@ describe('[4976 A3] a sealed instruction — the words never leave the phone app
     expect(r.kind).toBe('unknown');
   });
 });
+
+describe('[4976 A5] a plain instruction the closed road refuses — the shell\'s pin and the server both say «sealed only»', () => {
+  const MARK = 'MK4976a5words';
+  const ENV = { v: 1, kind: 'send_prompt', setup_id: 'setup', session_key: 's-9', command_id: 'idem-1', from: 'k-1', ct: 'AAAA' };
+  const sealedAnswer: PhoneAnswer = { id: 'w', ok: true, sealed: true, envelope: ENV, phone_key_id: 'k-1', session_key: 's-9', conversation_id: CONV };
+  const CAPS: PhoneAnswer = { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+  const refused: PhoneAnswer = { id: 'p', ok: false, code: 'sealed_required' };
+  // the server's word said «this computer does not open a sealed one» (or this page did not ask): the PLAIN road first
+  const plainTyped = { agentId: AGENT, kind: 'send_prompt' as const, text: `run ${MARK}`, conversationId: CONV };
+  const shell = (caps: PhoneAnswer, signs: PhoneAnswer[]) => {
+    let i = 0;
+    const phoneCall = vi.fn(async (type: string, _args?: unknown) => (type === 'shell.caps' ? caps : signs[Math.min(i++, signs.length - 1)]!));
+    let k = 0;
+    return { phoneCall, sendMessage: vi.fn(async () => true), newKey: () => `idem-${++k}`, wait: async () => {} } as unknown as CommandDeps & { phoneCall: typeof phoneCall; sendMessage: ReturnType<typeof vi.fn> };
+  };
+  const signSealedFlags = (d: { phoneCall: ReturnType<typeof vi.fn> }) => d.phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').map((c) => (c[1] as { sealed?: boolean }).sealed);
+
+  it('the shell refuses the plain signature (`sealed_required`: its pin says the computer opens sealed ones) → the words go the SEALED road once, and nothing else', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: null })]);
+    const d = shell(CAPS, [refused, sealedAnswer]);
+    await expect(commandOnPhone(plainTyped, d)).resolves.toEqual({ kind: 'sent_now' });
+    expect(signSealedFlags(d)).toEqual([undefined, true]);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body).not.toHaveProperty('text'); expect(body).not.toHaveProperty('signed'); expect(body.envelope).toEqual(ENV);
+    expect(calls.map((c) => String(c.init?.body ?? '')).join('')).not.toContain(MARK);
+    expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('…and when the sealed road cannot be taken either (a shell that cannot seal · refused again · the turn ended) the press ends with its own line — never a plain post, never a chat message', async () => {
+    for (const [caps, signs, want] of [
+      [{ id: 'c', ok: false, code: 'bad_request' } as PhoneAnswer, [refused], 'sealed_not_taken'],                                    // an old shell does not know the question
+      [CAPS, [refused, { id: 'w', ok: false, code: 'host_not_pinned' } as PhoneAnswer], 'sealed_not_taken'],                          // a pairing fact: the plain road is shut here (the shell just said so)
+      [CAPS, [refused, refused], 'failed'],                                                                                           // (a sealed call is never answered `sealed_required`: an unknown refusal is «failed», nothing posted)
+      [CAPS, [refused, { id: 'w', ok: false, code: 'not_working' } as PhoneAnswer], 'sealed_not_taken'],
+      [CAPS, [refused, { id: 'w', ok: false, code: 'vault_unavailable' } as PhoneAnswer], 'failed'],
+    ] as const) {
+      const calls = server(json(201, { command_id: CMD, state: 'queued' }));
+      const d = shell(caps, [...signs]);
+      await expect(commandOnPhone(plainTyped, d)).resolves.toEqual({ kind: want });
+      expect(calls.length, `${JSON.stringify(signs)}: nothing posted`).toBe(0);
+      expect(d.sendMessage).not.toHaveBeenCalled();
+    }
+  });
+
+  it('the server answers a plain post 422 `sealed_required` (an old shell · a page that did not know) → «sealed_not_taken»: nothing was made, the words stay; the answer is not turned into a chat message', async () => {
+    server(json(422, { error: { code: 'sealed_required' } }));
+    const d = shell({ id: 'c', ok: false, code: 'bad_request' }, [{ id: 'p', ok: true, signed: 'SIGNED', phone_key_id: 'k-1', session_key: 's-9', text: `run ${MARK}` } as PhoneAnswer]);
+    await expect(commandOnPhone(plainTyped, d)).resolves.toEqual({ kind: 'sealed_not_taken' });
+    expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('only an instruction asks the sealed road after a refusal: a stop that is refused is as before', async () => {
+    server(json(201, { command_id: CMD, state: 'queued' }));
+    const d = shell(CAPS, [refused]);
+    await expect(commandOnPhone({ agentId: AGENT, kind: 'stop_session' as const }, d)).resolves.toEqual({ kind: 'failed' });
+    expect(d.phoneCall.mock.calls.some((c) => c[0] === 'shell.caps')).toBe(false);
+  });
+});

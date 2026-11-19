@@ -457,13 +457,24 @@ async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: 
     )).first() is not None
 
 
+async def _sealed_prompt_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """story 4976 (A5): has this computer said it opens a sealed instruction? — its own mark, or the mark of any setup of the same Mac in the same organization (`org_id + machine_key`, revoked ones included: a replaced setup
+    keeps its mark, so a new setup_id does not open a plaintext window). A setup with no `machine_key` reads its own mark only. (Same reading as the card mark: agent_permissions._sealed_mark.)"""
+    from sqlalchemy import exists, or_
+
+    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
+    return bool((await db.execute(
+        select(exists().where(DesktopSetup.org_id == setup.org_id, DesktopSetup.sealed_prompts_at.is_not(None), or_(*same_mac)))
+    )).scalar())
+
+
 async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                          org_id: uuid.UUID, agent_id: uuid.UUID, body: CommandRequest) -> tuple[DesktopCommand | None, str]:
     """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working (an end on one that has
     stopped). A stop on a turn a macOS window holds is refused with its own closed reason (409 `system_wait_end_only`) — never an
     «already stopped», never an end of the session behind the person's back (story #4599 · PO 12:40Z ④ · 14:18Z)."""
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.agent_permissions import _lock_machine, _reachable, paired_phone
     from app.services.desktop_relay import enqueue_command
 
     if body.kind == "send_prompt" and body.envelope is None and (body.text is None or body.conversation_id is None):
@@ -502,6 +513,13 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    # story 4976 (A5 · AC4): a computer that has said it opens a sealed instruction takes no PLAINTEXT one — the words only ever pass the server as an envelope. The decision is made under the machine's lock (the one a report of
+    # its capabilities stands the mark under: both write the setup rows, so a plaintext instruction and the mark's standing are one after the other — no plaintext command is made AFTER the mark). Always 422 with a fixed sentence and
+    # no `detail`: not a word of the body comes back (an old shell's plain press included — it learns only that this computer wants the sealed road).
+    if body.kind == "send_prompt" and body.envelope is None:
+        await _lock_machine(db, setup)
+        if await _sealed_prompt_mark(db, setup):
+            raise DesktopRelayError(422, "sealed_required", "this computer takes sealed instructions")
     # story #4599 (PO 12:40Z ④ · 14:18Z): a stop while a macOS window holds the turn is refused with its own closed reason — the
     # session is not stopped, it is frozen in that window (an Esc cannot reach it), and a stop is never turned into an end of the
     # session behind the person's back. Asked BEFORE the «not working» line below: that line would answer «already_stopped», a false

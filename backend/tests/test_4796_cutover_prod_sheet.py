@@ -1006,7 +1006,19 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     files = [h for h in hits if h.startswith("0488_")]
     assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in files) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in files), files
     assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in files), files
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_"))]
+    # story 4976 (A5): 0489 is FOUR lines of upgrade() the reading lists: ONE data `UPDATE` (the backfill: a computer whose capabilities already hold `sealed_prompt` gets `sealed_prompts_at = now()`; restricted by `capabilities @>` to those rows, row locks only —
+    # a few computers), the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_prompts_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds
+    # (`sealed_prompts_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never names the column, so every UPDATE it makes to a `desktop_setups` row leaves the value as it was
+    # (`NEW.sealed_prompts_at IS DISTINCT FROM OLD.sealed_prompts_at` is false → the function raises nothing and returns the row); the check is one comparison per updated row; nothing existing is altered, dropped or renamed.
+    sealed_prompts = [h for h in hits if h.startswith("0489_")]
+    assert len(sealed_prompts) == 4, sealed_prompts
+    assert sum("UPDATE desktop_setups SET sealed_prompts_at = now() WHERE capabilities @>" in h for h in sealed_prompts) == 1, sealed_prompts
+    assert any("DROP TRIGGER IF EXISTS trg_desktop_setups_sealed_prompts_one_way ON desktop_setups" in h for h in sealed_prompts), sealed_prompts
+    assert not any(k in h for h in sealed_prompts for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "DELETE")), "no column dropped or retyped, nothing deleted"
+    up0489 = (_ROOT / "backend/alembic/versions/0489_desktop_setups_sealed_prompts.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|drop_column|alter_column|rename_", up0489), "0489's upgrade() adds a column, one bounded UPDATE, a function and a trigger — nothing dropped or retyped"
+    assert len(re.findall(r"\bUPDATE\s+\w+\s+SET\b", up0489)) == 1 and "capabilities @>" in up0489, "the one data statement is the bounded backfill"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
