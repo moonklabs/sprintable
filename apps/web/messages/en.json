@@ -7837,6 +7837,48 @@
     },
     "phoneSessions": {
       "title": "Session management",
+      "usage": {
+        "button": "Usage",
+        "title": "Account usage on {device}",
+        "lead": "The values it last reported",
+        "titleNoDevice": "Account usage on this computer",
+        "loading": "Reading the usage",
+        "failed": "Could not load the usage",
+        "retry": "Read again",
+        "close": "Close",
+        "remoteOff": "Remote control is off, so the usage cannot be shown",
+        "noComputer": "This agent does not run on a computer yet",
+        "empty": "No values reported yet — they show up once the agent starts working",
+        "disconnected": "This computer is disconnected right now",
+        "account": "{runtime} · account {n}",
+        "window": {
+          "five_hour": "5-hour limit",
+          "seven_day": "Weekly limit",
+          "min": "{n}-min limit",
+          "hour": "{n}-hour limit",
+          "day": "{n}-day limit",
+          "unknown": "Other limit"
+        },
+        "stale": "Reset already · new numbers come with the next session",
+        "percent": "{n}%",
+        "percentAria": "{name}: {n}% used",
+        "resets": {
+          "min": "Resets in {n} min",
+          "hour": "Resets in {n} h",
+          "day": "Resets in {n} d",
+          "unknown": "Reset time unknown"
+        },
+        "seen": {
+          "now": "Last seen just now",
+          "min": "Last seen {n} min ago",
+          "hour": "Last seen {n} h ago",
+          "day": "Last seen {n} d ago"
+        },
+        "why": {
+          "api_key": "Usage is not available",
+          "not_read": "This computer has not read the usage yet"
+        }
+      },
       "endAll": "End all sessions",
       "endAllCount": "{n, plural, one {Ends {k} of # agent} other {Ends {k} of # agents}}",
       "endAllNone": "There is no agent on this computer you can end right now",

@@ -7837,6 +7837,48 @@
     },
     "phoneSessions": {
       "title": "세션 관리",
+      "usage": {
+        "button": "사용량",
+        "title": "{device}의 계정 사용량",
+        "lead": "마지막으로 알려 준 값이에요",
+        "titleNoDevice": "이 컴퓨터의 계정 사용량",
+        "loading": "사용량을 읽고 있어요",
+        "failed": "사용량을 불러오지 못했어요",
+        "retry": "다시 읽기",
+        "close": "닫기",
+        "remoteOff": "원격 제어가 꺼져 있어 사용량을 볼 수 없어요",
+        "noComputer": "이 에이전트가 쓰는 컴퓨터가 아직 없어요",
+        "empty": "아직 알려 준 값이 없어요 — 에이전트가 일하기 시작하면 보여요",
+        "disconnected": "지금은 이 컴퓨터와 연결이 끊겨 있어요",
+        "account": "{runtime} · 계정 {n}",
+        "window": {
+          "five_hour": "5시간 한도",
+          "seven_day": "일주일 한도",
+          "min": "{n}분 한도",
+          "hour": "{n}시간 한도",
+          "day": "{n}일 한도",
+          "unknown": "다른 한도"
+        },
+        "stale": "풀렸어요 · 새 숫자는 다음 세션 때",
+        "percent": "{n}%",
+        "percentAria": "{name} · {n}% 사용",
+        "resets": {
+          "min": "{n}분 뒤 풀려요",
+          "hour": "{n}시간 뒤 풀려요",
+          "day": "{n}일 뒤 풀려요",
+          "unknown": "풀리는 때는 몰라요"
+        },
+        "seen": {
+          "now": "마지막으로 본 지 방금 전",
+          "min": "마지막으로 본 지 {n}분 전",
+          "hour": "마지막으로 본 지 {n}시간 전",
+          "day": "마지막으로 본 지 {n}일 전"
+        },
+        "why": {
+          "api_key": "사용량을 알 수 없어요",
+          "not_read": "이 컴퓨터가 아직 사용량을 읽지 않았어요"
+        }
+      },
       "endAll": "모든 세션 종료",
       "endAllCount": "{n}개 중 {k}개의 에이전트를 끝내요",
       "endAllNone": "지금 이 컴퓨터에서 끝낼 수 있는 에이전트가 없어요",
