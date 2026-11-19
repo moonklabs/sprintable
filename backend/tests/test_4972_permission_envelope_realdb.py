@@ -377,10 +377,28 @@ async def test_the_downgrade_of_0480_leaves_a_sealed_terminal_only_row_that_0479
         del body["input_hash"]
         body["terminal_only"] = True
         assert (await _post_ask(c, device, body)).status_code == 201
-    # what downgrade() does to such a row, then 0479's rule over it: it holds
-    await _sql(m._DOWNGRADE_SQL)
-    bad = (await _sql(fetch=f"SELECT count(*) FROM agent_permission_requests WHERE NOT ({m._OLD_RULE})"))[0][0]
-    assert bad == 0
+    # what downgrade() does to such a row, then 0479's rule over it: it holds. HERMETIC: the table is shared with every other test (a row another file left — e.g. an ended plain row whose words
+    # were released, legal under 0484's rule and not under 0479's — must not decide this test), so the UPDATE runs in a transaction that is rolled back and the rule is asked of THIS test's row only.
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    try:
+        async with eng.connect() as conn:
+            trans = await conn.begin()
+            try:
+                await conn.execute(text(m._DOWNGRADE_SQL))
+                bad = (await conn.execute(text(f"SELECT count(*) FROM agent_permission_requests WHERE request_id = '{body['request_id']}' AND NOT ({m._OLD_RULE})"))).scalar_one()
+                assert bad == 0
+                mine = (await conn.execute(text(f"SELECT count(*) FROM agent_permission_requests WHERE request_id = '{body['request_id']}'"))).scalar_one()
+                assert mine == 1, "(the row of this test is the one that was asked)"
+            finally:
+                await trans.rollback()
+    finally:
+        await eng.dispose()
 
 
 async def test_a_snapshot_that_no_longer_lists_the_last_phone_ends_the_sealed_cards(world):
@@ -461,6 +479,9 @@ async def test_the_real_downgrade_and_upgrade_of_0480_run_and_keep_a_sealed_term
             trans = await conn.begin()
             try:
                 before = norm((await conn.execute(q_def)).scalar_one())
+                # HERMETIC: `downgrade()` VALIDATEs 0479's rule over the WHOLE shared table — a row another test file left (e.g. an ended plain row whose words were released: legal under 0484, not under 0479) would
+                # fail it. Inside this transaction (rolled back below) only this test's row is kept; nothing of the others is touched for real.
+                await conn.execute(text(f"DELETE FROM agent_permission_requests WHERE request_id <> '{body['request_id']}'"))
                 await conn.run_sync(run, m.downgrade)
                 down = norm((await conn.execute(q_def)).scalar_one())
                 assert "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" in down and "terminal_onlyAND(input_hashISNULL)AND(NOTsealed)" not in before, "0479's rule is back (NOT sealed on the terminal-only branch too)"
