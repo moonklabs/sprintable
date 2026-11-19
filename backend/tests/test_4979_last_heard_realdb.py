@@ -222,7 +222,7 @@ def test_11_source_pin_the_servers_tick_is_marked_not_heard_and_the_phone_views_
     assert "await relay.touch_device(s, setup_id, heard=False)" in router                  # the 30 s tick inside the stream is the SERVER, not the computer
     assert router.count("touch_device(") == 5 and router.count("heard=False") == 1          # every other call keeps the default (a device-originated stamp)
     cmds = (root / "services" / "desktop_commands.py").read_text(encoding="utf-8")
-    assert cmds.count("_shown_reachable(") == 4                                              # the session view · the overview · the agent's startable · the phone's computers
+    assert cmds.count("_shown_reachable(") == 5                                              # the session view · the overview · the agent's startable · the phone's computers · the usage read (story 4981)
     assert cmds.replace("_shown_reachable(", "").count("_reachable(db") == 2
     perms = (root / "services" / "agent_permissions.py").read_text(encoding="utf-8")
     assert "return (await _shown_reachable(db, setup_ids, now))[0]" in perms               # story 4979 gate alignment: `_reachable` IS the shown rule (one rule for every gate and every screen)                                                  # the refusal of a command (twice) stays on the old rule — and desktop_clock.py is untouched (its own gate and flag)

@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,6 +119,19 @@ async def apply_usage(db: AsyncSession, setup: DesktopSetup, report: UsageReport
     return written
 
 
-def row_view(row: DesktopUsage) -> dict:
-    """one stored row as the (later) reader will see it — the closed shape only"""
-    return {"runtime": row.runtime, "account": row.account, "state": row.state, "why": row.why, "windows": row.windows, "seen_at": row.seen_at.isoformat()}
+def row_view(row: DesktopUsage) -> dict | None:
+    """one stored row as a reader sees it — judged AGAIN by the very model the door uses (Kadir 5854 · PR 3 condition): the table's CHECK holds the outer shape only, so a row written by anything but the door (a direct SQL
+    write, a migration slip) could carry an odd element in `windows`. The row is read through `UsageEntry`; one that does not pass is LEFT OUT (never returned, never a 500), and what is returned is built from the model's
+    own fields — not from the stored JSON — so no extra key can ride along. Returns None for a row that does not pass."""
+    try:
+        e = UsageEntry.model_validate({
+            "runtime": row.runtime, "account": row.account, "seen_at": row.seen_at, "state": row.state, "why": row.why,
+            "windows": row.windows if isinstance(row.windows, list) else None,
+        })
+    except ValidationError:
+        return None
+    return {
+        "runtime": e.runtime, "account": e.account, "state": e.state, "why": e.why,
+        "windows": [{"kind": w.kind, "minutes": w.minutes, "used_percent": w.used_percent, "resets_at": w.resets_at.astimezone(timezone.utc).isoformat() if w.resets_at is not None else None} for w in e.windows],
+        "seen_at": e.seen_at.astimezone(timezone.utc).isoformat(),
+    }

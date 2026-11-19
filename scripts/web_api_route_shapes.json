@@ -346,6 +346,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/agents/{}/desktop-usage",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/agents/{}/message-policy",
 "kind": "object"
 },
