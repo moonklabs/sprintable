@@ -115,25 +115,31 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
 
   // story 4976 A3: an instruction goes SEALED when this shell says it can (`shell.caps` — read, never guessed from a version) AND the computer says its app opens one (`sealed_prompt` of the session view — the card-sealing mark says nothing about it): the words are sealed on the phone to the computer and the web posts the envelope, never the words.
   // The press's own key is made FIRST — the shell seals it into the envelope's header (the server compares it with the key posted). An older shell does not know the question: the plain road, as before.
-  if (prompt && input.computerOpensSealed === true) {
+  // the sealed road as one step (story 4976 A5 asks it a second time): an outcome, or `null` = «not possible for this computer (a pairing fact) — go the plain road»
+  const trySealed = async (): Promise<CommandOutcome | null> => {
+    if (input.kind !== 'send_prompt') return null; // (only an instruction is sealed; narrows `input` inside this closure)
     const caps = await deps.phoneCall('shell.caps', {}).catch(() => null);
     const can = !!caps && caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { sealed_prompt?: unknown }).sealed_prompt === 1;
-    if (can) {
-      const key = deps.newKey();
-      const sealed = await deps.phoneCall('command.sign', { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId, sealed: true, idempotency_key: key });
-      if (sealed.ok) {
-        if (sealed.sealed !== true || !sealed.envelope || typeof sealed.envelope !== 'object' || Array.isArray(sealed.envelope) || typeof sealed.phone_key_id !== 'string'
-          || typeof sealed.session_key !== 'string' || sealed.conversation_id !== input.conversationId) return { kind: 'failed' };
-        // no `text`, no `signed` in what is posted — and the web keeps no copy of the words for another road
-        return post(input.agentId, {
-          verb: 'send', key, sealed: true,
-          body: { kind: 'send_prompt', session_key: sealed.session_key, conversation_id: input.conversationId, envelope: sealed.envelope, phone_key_id: sealed.phone_key_id },
-        }, deps);
-      }
-      const code = sealed.code ?? '';
-      if (code === 'not_working' || code === 'no_session') return { kind: 'sealed_not_taken' }; // never «sent as a message» for a sealed instruction
-      if (!SEAL_NOT_POSSIBLE.has(code)) return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome; // a vault that does not answer is «failed» (try again), never a quiet drop to the plain road
+    if (!can) return null;
+    const key = deps.newKey();
+    const sealed = await deps.phoneCall('command.sign', { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId, sealed: true, idempotency_key: key });
+    if (sealed.ok) {
+      if (sealed.sealed !== true || !sealed.envelope || typeof sealed.envelope !== 'object' || Array.isArray(sealed.envelope) || typeof sealed.phone_key_id !== 'string'
+        || typeof sealed.session_key !== 'string' || sealed.conversation_id !== input.conversationId) return { kind: 'failed' };
+      // no `text`, no `signed` in what is posted — and the web keeps no copy of the words for another road
+      return post(input.agentId, {
+        verb: 'send', key, sealed: true,
+        body: { kind: 'send_prompt', session_key: sealed.session_key, conversation_id: input.conversationId, envelope: sealed.envelope, phone_key_id: sealed.phone_key_id },
+      }, deps);
     }
+    const code = sealed.code ?? '';
+    if (code === 'not_working' || code === 'no_session') return { kind: 'sealed_not_taken' }; // never «sent as a message» for a sealed instruction
+    if (!SEAL_NOT_POSSIBLE.has(code)) return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome; // a vault that does not answer is «failed» (try again), never a quiet drop to the plain road
+    return null;
+  };
+  if (prompt && input.computerOpensSealed === true) {
+    const done = await trySealed();
+    if (done) return done;
   }
 
   const signed = await deps.phoneCall('command.sign', prompt
@@ -142,6 +148,9 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   if (!signed.ok) {
     const code = signed.code ?? '';
     if (code === 'not_working' || code === 'no_session') return notWorking(prompt ? input.text : '');
+    // story 4976 (A5 · AC4b): the shell holds a pin that says this computer OPENS sealed instructions although the server's word (or this page's) said otherwise — it signs no plain instruction for it. The words go the sealed road once (a shell
+    // that can seal is asked again; one that cannot, or that is refused again, ends the press with its own line — never the plain road, never a chat message)
+    if (prompt && code === 'sealed_required') return (await trySealed()) ?? { kind: 'sealed_not_taken' };
     return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome;
   }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string' || typeof signed.session_key !== 'string') return { kind: 'failed' };
@@ -205,6 +214,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
+    if (code === 'sealed_required') return { kind: 'sealed_not_taken' }; // story 4976 (A5): the computer takes sealed instructions only — nothing was made; what was written is still here (the words are never posted another way for it)
     return { kind: 'failed' }; // another 4xx: refused before anything was made
   }
   let made: { command_id?: string; state?: string };
