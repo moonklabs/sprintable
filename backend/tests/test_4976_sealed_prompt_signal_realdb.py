@@ -57,3 +57,16 @@ async def test_the_word_is_the_boolean_true_and_nothing_else(world):
             r = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "sealed_prompt": bad}, headers=tok)
             assert r.status_code == 422, (bad, r.text)
         assert await _caps(devs[0][0]["setup_id"]) in (None, [])
+
+
+async def test_a_computer_not_heard_says_nothing_about_it_not_even_its_last_word(world):
+    """Kadir 5858 (B8): the view tells `sealed_prompt` only while the computer is heard (the same gate as `instruct_now`) — a quiet computer reads null, never a stale true (and never a made-up false)."""
+    async with _client() as c:
+        _phone, devs = await _computer(c, 1, says_press=False)
+        (d, _a) = devs[0]
+        agent = d["agents"][0]["member_id"]
+        assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "sealed_prompt": True}, headers=_tok(d["device_token"]))).status_code == 200
+        assert (await _view(c, agent))["sealed_prompt"] is True, "heard: the word is told"
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{d['setup_id']}'")
+        assert (await _view(c, agent))["sealed_prompt"] is None, "not heard: not said"
+
