@@ -203,6 +203,8 @@ def _picked_view(pick: DesktopSession, setup: DesktopSetup, state: str) -> dict:
         **widened_fields(pick, silent=not heard),
         # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
         "instruct_now": pick.instruct_now if heard else None,
+        # story 4976 (A3 · Kadir 871 ⓓ): whether this computer's app OPENS a sealed instruction (it said so with its startable list) — told only while the device is heard (the same gate); a sealed instruction is made only for a Mac that says true
+        "sealed_prompt": ("sealed_prompt" in (setup.capabilities or [])) if heard else None,
     }
 
 
@@ -219,7 +221,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None, "sealed_prompt": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),

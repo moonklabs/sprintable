@@ -615,7 +615,7 @@ async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Dep
         narrowed, dropped = await relay.accessible_startable(db, setup, body)
         n, applied, held = await relay.replace_startable(db, setup, narrowed)
         if applied:  # story #4734 (B): a report a newer one has already covered says nothing about what the computer takes NOW
-            await relay.note_computer_press(db, setup, body.computer_press is True)
+            await relay.note_capabilities(db, setup, {relay.COMPUTER_PRESS: body.computer_press is True, relay.SEALED_PROMPT: body.sealed_prompt is True})  # story 4976 (A3): …and whether this Mac opens a sealed instruction
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
