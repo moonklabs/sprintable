@@ -18,6 +18,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { beginFlow, endFlow, groupForPress, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
+import { AgentUsageSheet } from '@/components/desktop/agent-usage-sheet'; // story 4981 (PR 4): the card's «사용량» sheet
 import { checkPress, editClock, pressClock, readClock, type ClockAction, type ClockEditFields, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
@@ -187,6 +188,8 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   const [readState, setReadState] = useState<{ setup: string; read: ClockRead } | null>(null);
   const read: ClockRead | null = readState !== null && readState.setup === computer.setup_id ? readState.read : null;
   const [hidden, setHidden] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false); // story 4981 (PR 4): the «사용량» sheet of this computer
+  const usageAgent = computer.agents[0]?.agent_member_id ?? null; // the usage read is by agent (the server's check is the agent session's own): any agent of this computer names it
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<Line>(null);
   // story 4734 (B): the card is the COMPUTER's (its setups together); the setup named for the card itself is the first reachable one and may change between two reads — what is held, is held by the computer
@@ -375,10 +378,14 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
 
   return (
     <Card className="break-keep space-y-3 p-4" data-testid="phone-session-card" data-setup={computer.setup_id}>
-      <header>
-        <p className="text-sm font-semibold text-foreground">{device}</p>
-        <p className="text-xs text-muted-foreground">{t('title')}</p>
+      <header className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{device}</p>
+          <p className="text-xs text-muted-foreground">{t('title')}</p>
+        </div>
+        {usageAgent ? <Button variant="outline" size="sm" className="min-h-11" onClick={() => setUsageOpen(true)} data-testid="phone-sessions-usage">{t('usage.button')}</Button> : null}
       </header>
+      {usageAgent ? <AgentUsageSheet agentId={usageAgent} open={usageOpen} onOpenChange={setUsageOpen} /> : null}
       {elsewhere ? <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-elsewhere">{elsewhere === 'mac' ? t('elsewhere.mac') : t('elsewhere.phone')}</p> : null}
 
       {view?.mode === 'panel' ? (

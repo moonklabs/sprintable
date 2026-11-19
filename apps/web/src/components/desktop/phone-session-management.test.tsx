@@ -27,6 +27,7 @@ const KEYID = 'p-1';
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 interface World {
+  usage?: unknown;
   startable?: unknown; clock?: Response | unknown; post?: Response; poll?: Response; remote?: boolean; reachable?: boolean; supported?: boolean;
   view?: Record<string, unknown> | null; running?: boolean; outs?: unknown[];
 }
@@ -45,6 +46,7 @@ function server() {
     if (url.startsWith('/api/desktop/startable')) {
       return json(world.startable ?? { remote_control: world.remote !== false, computers: [{ setup_id: SETUP, device_name: '윤재의 맥북', reachable: world.reachable !== false, agents: agents(world.running !== false) }] });
     }
+    if (url.endsWith('/desktop-usage')) return json(world.usage ?? { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '작업용 맥북', connected: true, usage: [] }); // story 4981 (PR 4): the «사용량» sheet's read
     if (url.includes('/clock/commands/')) return world.poll ? world.poll.clone() : json({ command_id: CMD, state: 'done', result_code: 'ok' }); // a Response body can be read once: every look gets its own
     if (url.includes('/clock?phone_key_id=')) {
       if (typeof world.clock === 'function') return (world.clock as () => Promise<Response> | Response)();
@@ -1241,5 +1243,30 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     await flush();
     expect(all('phone-session-card')).toHaveLength(1);
     expect(byId('phone-sessions-check')).not.toBeNull();
+  });
+});
+
+describe('[4981 PR 4] the card\'s «사용량»', () => {
+  it('a button on the computer\'s card opens the sheet — read for the computer\'s FIRST agent, only when pressed — with the bars of what its host reported', async () => {
+    world.usage = { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '윤재의 맥북', connected: true, usage: [{ runtime: 'claude', account: 'a1b2c3d4e5f6', state: 'windows', why: null, seen_at: new Date(Date.now() - 120_000).toISOString(), windows: [{ kind: 'five_hour', minutes: 300, used_percent: 63, resets_at: new Date(Date.now() + 2 * 3_600_000).toISOString() }] }] };
+    await screen();
+    expect(calls.some((c) => c.url.endsWith('/desktop-usage'))).toBe(false);                        // nothing is asked until the button is pressed
+    const button = byId('phone-sessions-usage');
+    expect(button?.textContent).toBe(koMessages.desktop.phoneSessions.usage.button);
+    await press(button);
+    expect(calls.filter((c) => c.url.endsWith('/desktop-usage')).map((c) => c.url)).toEqual([`/api/agents/${AGENT}/desktop-usage`]);
+    expect(document.body.querySelector('[data-testid="agent-usage-percent"]')?.textContent).toBe('63%');
+    expect(document.body.querySelector('[data-testid="agent-usage-seen"]')?.textContent).toBe('마지막으로 본 지 2분 전');
+  });
+
+  it('the card of a computer whose app is too old to speak `clock` has no buttons at all (the old-app card is unchanged)', async () => {
+    world.supported = false;
+    await screen();
+    expect(byId('phone-sessions-usage')).toBeNull();
+  });
+
+  it('English: the button and the sheet are in en', async () => {
+    await screen({ locale: 'en' });
+    expect(byId('phone-sessions-usage')?.textContent).toBe(enMessages.desktop.phoneSessions.usage.button);
   });
 });
