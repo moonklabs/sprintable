@@ -100,7 +100,7 @@ RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "native", "refund-policy", "set-password", "today", "unsubscribe",
     "flow", "goals", "hypotheses", "work-list",
     # story 4714 — the phone app's landing and start screen (new top-level web routes)
-    "phone-landing", "phone-start",
+    "phone-landing", "phone-start", "phone-files",  # story 4983 (P5): the phone app's folder list
     # story 4886 — the web design-system showcase page (new top-level route, internal reference)
     "design-system",
     # story 4915 — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (new top-level web route)
