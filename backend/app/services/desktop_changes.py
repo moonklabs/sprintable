@@ -226,6 +226,22 @@ class ReadRequest(BaseModel):
     session_key: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
 
 
+async def take_limit_locks(db: AsyncSession, setup: DesktopSetup, user_id: uuid.UUID, *, road: str) -> None:
+    """The ONE lock order of every «one at a time» limit of a read road (story 4983: the files road calls this, it does not write it again): the physical computer's advisory key, THEN the person's, taken in this order
+    and never the other, so two asks at once — even for different lines of the same computer, or from one person to two computers — cannot both pass (Kadir 4951 r1 #5 · #6). `road` names the road (`changes`, `files`):
+    a road's limits are its own."""
+    machine = f"{setup.org_id}:{setup.machine_key}" if setup.machine_key else str(setup.id)
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"{road}-machine:{machine}"})
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"{road}-person:{user_id}"})
+
+
+def lines_of_machine(setup: DesktopSetup):
+    """the lines (setups) that are the same physical computer — a list of ids or a subquery the «open reads» count runs over"""
+    if not setup.machine_key:
+        return [setup.id]
+    return select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, DesktopSetup.machine_key == setup.machine_key, DesktopSetup.revoked_at.is_(None))
+
+
 async def create_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID, body: ReadRequest) -> tuple[uuid.UUID, datetime]:
     """→ (the command's id, when the read ends). The caller commits."""
     from app.services import remote_control
@@ -248,16 +264,14 @@ async def create_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.U
     await purge_expired(db, now=now)
     # the limits are counted under two advisory locks taken in ONE order (the physical computer, then the person), so two asks at once — even for different lines of the same
     # computer, or from one person to two computers — cannot both pass (Kadir 4951 r1 #5 · #6)
-    machine = f"{setup.org_id}:{setup.machine_key}" if setup.machine_key else str(setup.id)
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"changes-machine:{machine}"})
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"changes-person:{user_id}"})
+    await take_limit_locks(db, setup, user_id, road="changes")
     # the person's pause reads their last ASK (the command rows stay after a list is read — the read row does not): reading a list does not reset it
     last = (await db.execute(
         select(func.max(DesktopCommand.created_at)).where(DesktopCommand.kind == "read_changes", DesktopCommand.requested_by == member_id)
     )).scalar_one()
     if last is not None and now - last < PER_PERSON_INTERVAL:
         raise DesktopRelayError(429, "changes_too_fast", "wait a moment before asking again", detail={"retry_after": 3})
-    lines = select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, DesktopSetup.machine_key == setup.machine_key, DesktopSetup.revoked_at.is_(None)) if setup.machine_key else [setup.id]
+    lines = lines_of_machine(setup)
     busy = (await db.execute(
         select(func.count()).select_from(DesktopChangesRead)
         .join(DesktopCommand, DesktopCommand.id == DesktopChangesRead.command_id)
@@ -384,7 +398,7 @@ async def reject_stale_commands(db: AsyncSession, commands: list[DesktopCommand]
     now = now or _now()
     keep: list[DesktopCommand] = []
     for c in commands:
-        if c.kind == "read_changes" and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:
+        if c.kind in ("read_changes", "file_list") and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:  # (story 4983: a files request waits no longer than a changed-files read)
             c.state, c.result_code, c.finished_at = "rejected", "expired", now
         else:
             keep.append(c)

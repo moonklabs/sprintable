@@ -6,7 +6,7 @@ two together (one changed alone → RED)."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,7 +17,8 @@ from app.core.database import Base
 # story #4733 (0459 · S2 · design 4733-phone-clock-design-1020.md): `clock` — a person's signed clock-out / clock-in of one whole computer from the phone;
 # the word is one, the choice (out_open · out_submit · out_cancel · in) is the payload's `action` (so a new action needs no migration)
 # story #4951 (0477 · ①a): `read_changes` — the computer's pairing person asks for the LIST of changed files of one session's folder (names · status word · line counts, never content); payload exactly {session_key}
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes")
+# story 4983 (0488 · P5): `file_list` — a person's SEALED request to list a folder of a project on their own computer; payload exactly {project_id, envelope} (no session, no path — the computer maps the project to a folder of its own)
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -268,6 +269,30 @@ class DesktopChangesRead(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # the last look at this pending read (one per second per read)
+
+
+class DesktopFileRead(Base):
+    """story 4983 (0488 · P5): one short-lived request to LIST a folder of a project on a person's own computer. Who asked (`viewer_id`), which computer (`setup_id`), which project and the press's own key are fixed when
+    the row is made; the computer's SEALED answer (`payload` = {"envelope": …} — the server cannot open it: no name, no path, no word of what the folder holds) is written once and is deleted the moment the viewer reads
+    it, at `expires_at` (asked + 10 minutes), with its command, and when its computer is disconnected / its pairing person's account is closed / the organization's remote control is turned off. Never logged."""
+
+    __tablename__ = "desktop_file_reads"
+    __table_args__ = (
+        CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_file_reads_written"),
+        Index("ix_desktop_file_reads_expires_at", "expires_at"),
+        Index("ix_desktop_file_reads_setup_created", "setup_id", "created_at"),
+    )
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_commands.id", ondelete="CASCADE"), primary_key=True)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # the project the request was asked for: the answer's header must name it
+    press_key: Mapped[str] = mapped_column(String(100), nullable=False)  # the press's own key: the answer's header `command_id` must be it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopChangesAudit(Base):

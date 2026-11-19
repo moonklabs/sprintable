@@ -879,6 +879,9 @@ async def changes_purge(
             await session.rollback()
         from app.services.desktop_changes import purge_audit, purge_expired
         purged = await purge_expired(session)  # (the session commits at the end of the request, as the other sweeps rely on)
+        from app.services.desktop_files import purge_expired as purge_expired_files
+
+        files_purged = await purge_expired_files(session)  # story 4983 — a sealed files answer nobody came back to read goes at its end too
         audit = await purge_audit(session)  # the audit lines past their 90 days
         # story 4972 (카디르 lens M1): the same minute job also lets go of the words of a permission request whose window passed (no new scheduler job: one more cron is one more
         # thing to set up by hand on dev and prod)
@@ -892,7 +895,7 @@ async def changes_purge(
                 orphans = await end_orphan_cards(session)
         except Exception as exc:
             logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
-        return _ok({"purged": purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts})
+        return _ok({"purged": purged, "files_purged": files_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

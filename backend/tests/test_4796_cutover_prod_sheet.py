@@ -1001,7 +1001,12 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert "UPDATE desktop_commands" in up0486 and "kind = 'send_prompt'" in up0486 and "state IN ('done', 'failed', 'rejected')" in up0486, "only the finished instruction rows"
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0486), "0486 changes rows only: no column or table altered, no row deleted"
     assert up0486.count("op.create_index(") == 2 and up0486.count('"desktop_commands"') == 2 and "postgresql_where" in up0486, "the two partial indexes, on `desktop_commands` only"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_"))]
+    # story 4983: 0488 is the same shape as 0477 — one more word in the command-kind CHECK (`file_list`: dropped and made again; an old revision never writes the new word, every value it does write still passes), one new table with its
+    # two indexes and one partial index on `desktop_commands`; nothing existing is altered, backfilled or locked for long. The reading lists exactly those lines: the CHECK swap and index builds, nothing else.
+    files = [h for h in hits if h.startswith("0488_")]
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in files) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in files), files
+    assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in files), files
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

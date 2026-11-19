@@ -1050,6 +1050,14 @@ class ReadChangesPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
 
 
+class FileListPayload(_Payload):
+    """story 4983 (P5): a person's sealed request to list a folder of a project of this computer — exactly {project_id, envelope}. No session, no folder, no path, nothing readable: the computer maps the project to a folder of
+    its own and opens the envelope itself (the shape of an envelope is `envelope_shape.check_envelope`'s, judged where the person asks)."""
+
+    project_id: uuid.UUID
+    envelope: dict
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
@@ -1058,6 +1066,7 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "end_session": EndSessionPayload,
     "clock": ClockPayload,
     "read_changes": ReadChangesPayload,
+    "file_list": FileListPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -1221,7 +1230,7 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         .limit(100)
     )).scalars().all()
     now = _now()
-    if any(r.kind == "read_changes" for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered
+    if any(r.kind in ("read_changes", "file_list") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too)
         from app.services.desktop_changes import reject_stale_commands
 
         rows = await reject_stale_commands(db, rows, now=now)
