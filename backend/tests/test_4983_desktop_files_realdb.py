@@ -152,7 +152,7 @@ async def test_04_who_may_ask_the_computers_pairing_person_who_can_open_the_proj
         r = await _ask(c, uuid.uuid4(), _body(sid, project, phone))
         assert r.status_code == 403 and r.json()["error"]["code"] == "not_allowed_to_read_files", "a computer that is no one's looks like a computer that is not yours"
         r = await _ask(c, sid, _body(sid, uuid.uuid4(), phone))
-        assert r.status_code == 404 and r.json()["error"]["code"] == "project_not_found"
+        assert r.status_code == 404 and "project_not_found" in r.text
         r = await _ask(c, sid, _body(sid, project, str(uuid.uuid4())))
         assert r.status_code == 409 and r.json()["error"]["code"] == "phone_not_paired"
         assert [x for x in await _commands(sid) if x[0] == "file_list"] == []

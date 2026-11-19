@@ -220,7 +220,7 @@ def test_11_source_pin_the_servers_tick_is_marked_not_heard_and_the_phone_views_
     root = pathlib.Path(__file__).resolve().parents[1] / "app"
     router = (root / "routers" / "desktop_relay.py").read_text(encoding="utf-8")
     assert "await relay.touch_device(s, setup_id, heard=False)" in router                  # the 30 s tick inside the stream is the SERVER, not the computer
-    assert router.count("touch_device(") == 5 and router.count("heard=False") == 1          # every other call keeps the default (a device-originated stamp)
+    assert router.count("touch_device(") == 6 and router.count("heard=False") == 1          # every other call keeps the default (a device-originated stamp; 6 with story 4983's `put_files`, the sibling of `put_changes`)
     cmds = (root / "services" / "desktop_commands.py").read_text(encoding="utf-8")
     assert cmds.count("_shown_reachable(") == 5                                              # the session view · the overview · the agent's startable · the phone's computers · the usage read (story 4981)
     assert cmds.replace("_shown_reachable(", "").count("_reachable(db") == 2

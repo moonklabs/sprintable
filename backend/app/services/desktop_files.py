@@ -100,14 +100,13 @@ async def create_list(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.U
     from app.services.agent_permissions import _reachable, paired_phone
     from app.services.desktop_commands import org_role
     from app.services.desktop_relay import enqueue_command
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
 
     setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
     denied = DesktopRelayError(403, "not_allowed_to_read_files", "only the person who paired this computer can look at its files")
     if setup is None or not may_read(setup, user_id) or await org_role(db, org_id, user_id) is None:
         raise denied  # one answer for «no such computer» and «not yours»
-    if not await has_project_access(db, user_id, body.project_id, org_id):
-        raise DesktopRelayError(404, "project_not_found", "no such project")
+    await require_project_access(db, user_id, body.project_id, org_id, not_found_detail={"code": "project_not_found", "message": "no such project"})  # the one judge of project access (404, never «forbidden»)
     # the press again (the same key): the first command comes back, whatever the computer or the switch say now — a second command would put the question to the computer twice
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id, DesktopCommand.idempotency_key == f"files:{member_id}:{body.idempotency_key}")

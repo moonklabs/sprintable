@@ -11,7 +11,7 @@ import { GET } from './[commandId]/route';
 
 const COMPUTER = '22222222-3333-4444-8555-666666666666';
 const COMMAND = '33333333-4444-4555-8666-777777777777';
-const post = (body: unknown, search = '') => new Request(`http://localhost:3000/api/desktop/computers/${COMPUTER}/files${search}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const post = (body: unknown, search = '') => { const text = JSON.stringify(body); return new Request(`http://localhost:3000/api/desktop/computers/${COMPUTER}/files${search}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': String(new TextEncoder().encode(text).length) }, body: text }); };
 const get = (search = '') => new Request(`http://localhost:3000/api/desktop/computers/${COMPUTER}/files/${COMMAND}${search}`);
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const params2 = (id: string, commandId: string) => ({ params: Promise.resolve({ id, commandId }) });
@@ -43,7 +43,8 @@ describe('POST /api/desktop/computers/[id]/files', () => {
 
   it('a body that is not an object is 422 and a non-UUID computer is 404 — neither calls the server', async () => {
     expect((await POST(post([1]), params(COMPUTER))).status).toBe(422);
-    expect((await POST(new Request('http://localhost:3000/x', { method: 'POST', body: 'not json' }), params(COMPUTER))).status).toBe(422);
+    expect((await POST(new Request('http://localhost:3000/x', { method: 'POST', headers: { 'Content-Length': '8' }, body: 'not json' }), params(COMPUTER))).status).toBe(422);
+    expect((await POST(new Request('http://localhost:3000/x', { method: 'POST', body: '{}' }), params(COMPUTER))).status).toBe(411);
     expect((await POST(post({}), params('../etc'))).status).toBe(404);
     expect(proxy).not.toHaveBeenCalled();
   });
