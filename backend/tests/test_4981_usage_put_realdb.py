@@ -348,3 +348,45 @@ async def test_20_a_disconnect_waits_for_a_usage_report_that_is_still_open_and_g
             await b.execute(update(DesktopSetup).where(DesktopSetup.id == d["setup_id"]).values(revoked_at=datetime.now(timezone.utc)))        # … and the disconnect goes through
             await b.commit()
         assert len(await _rows(d["setup_id"])) == 1
+
+
+async def test_21_a_request_that_read_the_computer_while_it_was_open_is_refused_when_the_disconnect_committed_before_its_report(world):
+    """Kadir 5854 low (a): the request's own session read the computer (open), a disconnect then COMMITTED, and only after that the report is applied in that same open transaction —
+    the service must judge the computer as it is NOW (the row re-read), never the `revoked_at` the request saw earlier. Nothing is written, and the computer is not counted as heard."""
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_usage
+    from app.services.desktop_relay import DesktopRelayError
+
+    async with _client() as c:
+        d = await _device(c, "d4981 mac open then closed")
+        await _sql(f"UPDATE desktop_device_tokens SET last_heard_at = NULL WHERE setup_id = '{d['setup_id']}'")
+        async with async_session_factory() as s:
+            setup = (await s.execute(select(DesktopSetup).where(DesktopSetup.id == d["setup_id"]))).scalar_one()
+            assert setup.revoked_at is None                                                                # what the request saw while the computer was open
+            await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{d['setup_id']}'")        # the disconnect commits (another connection)
+            report = desktop_usage.UsageReport.model_validate({"usage": [_entry()]})
+            with pytest.raises(DesktopRelayError) as e:
+                await desktop_usage.apply_usage(s, setup, report, d["device_token"])
+            assert e.value.status == 409 and e.value.code == "device_disconnected"
+            await s.rollback()
+        assert await _rows(d["setup_id"]) == []
+        assert (await _sql(fetch=f"SELECT last_heard_at IS NULL FROM desktop_device_tokens WHERE setup_id = '{d['setup_id']}' AND revoked_at IS NULL"))[0][0] is True   # …and it was not counted as heard
+
+
+async def test_22_a_usage_report_never_stamps_last_presence_at(world):
+    """Kadir 5854 low (b): a report is the computer speaking (`last_heard_at`) but it is NOT a presence — `last_presence_at` is what makes the 5853 rule apply to a host, so only the host's own presence call may set it."""
+    async with _client() as c:
+        d = await _device(c, "d4981 mac no presence")
+        sid = d["setup_id"]
+        await _sql(f"UPDATE desktop_device_tokens SET last_presence_at = NULL, last_heard_at = NULL WHERE setup_id = '{sid}' AND revoked_at IS NULL")
+        assert (await _put(c, d, _entry())).status_code == 200
+        heard, presence = (await _sql(fetch=f"SELECT last_heard_at IS NOT NULL, last_presence_at IS NULL FROM desktop_device_tokens WHERE setup_id = '{sid}' AND revoked_at IS NULL"))[0]
+        assert heard is True and presence is True                                                            # heard — yes; presence — still none
+        await _sql(f"UPDATE desktop_device_tokens SET last_presence_at = now() - interval '1 hour' WHERE setup_id = '{sid}' AND revoked_at IS NULL")
+        before = (await _sql(fetch=f"SELECT last_presence_at FROM desktop_device_tokens WHERE setup_id = '{sid}' AND revoked_at IS NULL"))[0][0]
+        assert (await _put(c, d, _entry(), _word(runtime="codex", account="cccccccccccc"))).status_code == 200
+        assert (await _sql(fetch=f"SELECT last_presence_at FROM desktop_device_tokens WHERE setup_id = '{sid}' AND revoked_at IS NULL"))[0][0] == before   # an old presence is not renewed by a report
+

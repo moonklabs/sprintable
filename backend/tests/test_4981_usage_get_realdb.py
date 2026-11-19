@@ -216,3 +216,23 @@ async def test_14_odd_rows_that_sort_first_do_not_hide_the_good_ones_behind_the_
                        f"'[{{\"kind\": \"five_hour\", \"minutes\": 300, \"used_percent\": 1, \"resets_at\": null, \"extra\": 1}}]', now() - interval '1 hour')")  # (older than the good ones, so the door's own row cap keeps those)
         usage = (await _read(c, agent)).json()["usage"]
         assert [u["account"] for u in usage] == ["zzgoodaccount1", "zzgoodaccount2"]                   # both good rows come back
+
+
+async def test_15_the_read_takes_at_most_sixty_four_rows_of_a_table_that_holds_seventy(world):
+    """Kadir 5855 / PO: the read is bounded at the SQL — seventy rows written straight into the table (not through the door) are never all read. (a) seventy good rows → the answer is cut to the door's eight; (b) the bound itself is pinned:
+    with sixty-six odd rows that sort first, the good rows past the sixty-fourth are not read at all (the documented limit — a table the door never writes cannot make this read grow)."""
+    async with _client() as c:
+        device, agent = await _computer(c, "d4981 mac seventy")
+        sid = device["setup_id"]
+        good = "'[{\"kind\": \"five_hour\", \"minutes\": 300, \"used_percent\": 5, \"resets_at\": null}]'"
+        odd = "'[{\"kind\": \"five_hour\", \"minutes\": 300, \"used_percent\": 1, \"resets_at\": null, \"extra\": 1}]'"
+        await _sql("INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) "
+                   f"SELECT '{sid}', 'claude', 'acct' || lpad(g::text, 6, '0'), 'windows', NULL, {good}::jsonb, now() FROM generate_series(1, 70) g")
+        assert len((await _read(c, agent)).json()["usage"]) == 8                                           # (a) seventy rows → at most eight come back
+        await _sql(f"DELETE FROM desktop_usage WHERE setup_id = '{sid}'")
+        await _sql("INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) "
+                   f"SELECT '{sid}', 'claude', 'aaodd' || lpad(g::text, 6, '0'), 'windows', NULL, {odd}::jsonb, now() FROM generate_series(1, 66) g")
+        await _sql("INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) "
+                   f"SELECT '{sid}', 'claude', 'zzgood' || lpad(g::text, 6, '0'), 'windows', NULL, {good}::jsonb, now() FROM generate_series(1, 4) g")
+        assert (await _read(c, agent)).json()["usage"] == []                                               # (b) 66 odd rows sort first: only the first 64 rows are read, so the four good ones behind them are not
+
