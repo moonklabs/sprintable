@@ -6,8 +6,11 @@ different commitment — from anyone — ends the offer for good, and that burn 
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -79,6 +82,24 @@ async def _burned_of(c, device, offer_id):
 async def _frames(c, device, name):
     text = (await c.get(f"{REL}/stream", headers=_tok(device["device_token"]))).text
     return [json.loads(line[6:]) for block in text.split("\n\n") if block.startswith(f"event: {name}") for line in block.split("\n") if line.startswith("data: ")]
+
+
+async def _frames_until(c, device, name, *, count=1, within=20.0):
+    """The frames a computer is TOLD, read until at least `count` are there — not through one 0.3-second stream window.
+    `_short_stream` gives every read its own 0.3 s connection; on a loaded runner the connection can be slow enough that its lifespan is over before its first pass, and it then says
+    `lifespan_reconnect` and ends with NO frame (nothing was sent on it — the next connection tells the same frames again: each connection is told every frame of the offers it has).
+    A positive expectation therefore reads again, each read a whole snapshot, until the frames are there or `within` seconds have passed (then the last snapshot is returned, so the
+    assertion shows what was really told); an expectation of NOTHING still reads once (`_frames`)."""
+    end = time.monotonic() + within
+    while True:
+        got = await _frames(c, device, name)
+        if len(got) >= count or time.monotonic() >= end:
+            return got
+        await asyncio.sleep(0.05)
+
+
+async def _burned_until(c, device, offer_id, *, within=20.0):
+    return [f for f in await _frames_until(c, device, "pairing_burned", count=1, within=within) if f["offer_id"] == offer_id]
 
 
 @pytest.fixture(autouse=True)
@@ -417,7 +438,7 @@ async def test_12_an_ended_offer_is_told_to_the_computer_once_and_a_registration
         o1, _ = await _register_offer(c, device)
         assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
         assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id, commit=_b(32, b"d")), headers=_person(OWNER))).status_code == 409
-        assert await _frames(c, device, "pairing_burned") == [{"offer_id": o1, "reason": "second_commit"}]
+        assert await _frames_until(c, device, "pairing_burned") == [{"offer_id": o1, "reason": "second_commit"}]
         assert await _frames(c, device, "pairing_commit") == [] and await _frames(c, device, "pairing_reveal") == []  # nothing else of a dead offer
         # the registration again: the real state, not «registered»
         again = await c.post(f"{REL}/pairing-sessions", json={"offer_id": o1, "expires_at": _exp()}, headers=_tok(device["device_token"]))
@@ -427,7 +448,7 @@ async def test_12_an_ended_offer_is_told_to_the_computer_once_and_a_registration
         u2 = f"{PHONE}/pairing-sessions/{o2}"
         assert (await c.post(f"{u2}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
         assert (await c.post(f"{u2}/close", json={"setup_id": device["setup_id"]}, headers=_person(OWNER))).status_code == 200
-        assert await _burned_of(c, device, o2) == [{"offer_id": o2, "reason": "phone_declined"}]
+        assert await _burned_until(c, device, o2) == [{"offer_id": o2, "reason": "phone_declined"}]
         for kind in ("second_reveal", "key_mismatch"):
             o, _ = await _register_offer(c, device)
             u = f"{PHONE}/pairing-sessions/{o}"
@@ -438,7 +459,7 @@ async def test_12_an_ended_offer_is_told_to_the_computer_once_and_a_registration
                 assert (await c.post(f"{u}/reveal", json=_reveal_body(device, spki, label="other"), headers=_person(OWNER))).status_code == 409
             else:
                 assert (await c.post(f"{u}/reveal", json=_reveal_body(device, _b(91, b"k")), headers=_person(OWNER))).status_code == 409
-            assert await _burned_of(c, device, o) == [{"offer_id": o, "reason": kind}]
+            assert await _burned_until(c, device, o) == [{"offer_id": o, "reason": kind}]
         # the computer's own closing and its own newer QR are its own acts: not told back
         o3, _ = await _register_offer(c, device)
         assert (await c.post(f"{REL}/pairing-sessions/{o3}/close", headers=_tok(device["device_token"]))).status_code == 200
@@ -624,3 +645,38 @@ async def test_19_the_phones_own_decline_ends_a_receipted_offer_and_a_dead_offer
         body = (await c.get(state, headers=_person(OWNER))).json()
         assert body == {"state": "burned", "n_m": None, "sig": None, "confirmed_sig": None}, "a dead offer shows no receipt (nothing is carried on it)"
         assert (await c.post(up, json={"sig": RECEIPT}, headers=_tok(device["device_token"]))).status_code == 200  # the same bytes again: stored already
+
+
+async def test_20_a_stream_that_ends_before_its_first_pass_says_nothing_and_the_frame_is_still_there_for_the_next_read(world, monkeypatch):
+    """The failure the CI showed once for test_12 (a burned offer read as `[]`), made certain: a connection whose lifespan is already over when its first pass comes ends with
+    `lifespan_reconnect` and NO frame — the frame was not marked as told, so a read that goes on finds it. (`_frames_until` is what a positive expectation uses.)"""
+    from app.routers import desktop_relay as router_mod
+
+    async with _client() as c:
+        device, phone_id, _spki = await _ready(c)
+        o1, _ = await _register_offer(c, device)
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id), headers=_person(OWNER))).status_code == 202
+        assert (await c.post(f"{PHONE}/pairing-sessions/{o1}/commit", json=_commit_body(device, phone_id, commit=_b(32, b"d")), headers=_person(OWNER))).status_code == 409
+        with monkeypatch.context() as m:
+            m.setattr(router_mod, "_LIFESPAN_SEC", -5.0)  # every connection is over before its first pass: the window «missed»
+            assert await _frames(c, device, "pairing_burned") == [], "the slow connection said nothing"
+            assert await _frames_until(c, device, "pairing_burned", within=0.3) == [], "and a retry that has no time says nothing either"
+        # the same frame, not lost: a connection with its window reads it
+        assert await _frames_until(c, device, "pairing_burned") == [{"offer_id": o1, "reason": "second_commit"}]
+
+
+async def test_21_frames_until_reads_again_until_the_snapshot_has_enough_frames_and_gives_up_after_its_time(monkeypatch):
+    calls = []
+    answers = [[], [], [{"a": 1}, {"a": 2}]]
+
+    async def fake(c, device, name):
+        calls.append(name)
+        return answers.pop(0) if answers else []
+
+    monkeypatch.setattr(sys.modules[__name__], "_frames", fake)
+    assert await _frames_until(None, None, "pairing_burned", count=2, within=5.0) == [{"a": 1}, {"a": 2}] and len(calls) == 3, "it read again until a snapshot had two frames"
+    calls.clear()
+    answers[:] = [[{"a": 9}]] * 100
+    t0 = time.monotonic()
+    assert await _frames_until(None, None, "pairing_burned", count=2, within=0.2) == [{"a": 9}], "with too few coming it stops after its time and returns what was told"
+    assert 0.2 <= time.monotonic() - t0 < 2.0 and len(calls) >= 2
