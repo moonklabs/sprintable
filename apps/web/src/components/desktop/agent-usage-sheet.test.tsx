@@ -141,6 +141,33 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     }
   });
 
+  it('a seen time further than a minute in the FUTURE says nothing (the strip\'s rule) — the numbers are still drawn', async () => {
+    const { d } = deps([json(200, answer([row({ seen_at: iso(10 * 60_000) })]))]);
+    await render(d);
+    expect(q('[data-testid="agent-usage-seen"]')).toBeNull(); expect(text('[data-testid="agent-usage-percent"]')).toBe('63%');
+  });
+
+  it('a far reset (further than a timer can wait) is NOT shown as passed when the timer\'s ceiling is reached; and closing the sheet clears the reset timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const long = new Map<unknown, number>(); const cleared = new Set<unknown>();      // the reset timers (days long) — the dialog\'s own timers are short
+      const realSet = globalThis.setTimeout; const realClear = globalThis.clearTimeout;
+      vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => { const id = realSet(fn, ms, ...rest); if ((ms ?? 0) > 1e8) long.set(id, ms ?? 0); return id; }) as typeof setTimeout);
+      vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id?: Parameters<typeof clearTimeout>[0]) => { cleared.add(id); return realClear(id); }) as typeof clearTimeout);
+      let nowMs = NOW;
+      const d: UsageDeps = { fetch: async () => json(200, answer([row({ windows: [win({ used_percent: 63, resets_at: iso(40 * 24 * 3_600_000) })] })])), now: () => nowMs };
+      const mount = async (open: boolean) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentUsageSheet agentId="a-1" open={open} onOpenChange={() => {}} deps={d} /></NextIntlClientProvider>); }); for (let i = 0; i < 12; i++) await act(async () => { await Promise.resolve(); }); };
+      await mount(true);
+      expect([...long.values()], 'a reset 40 days away is waited for in one timer cut at the ceiling').toEqual([2 ** 31 - 1]);
+      nowMs = NOW + 2 ** 31;                                                                   // the ceiling of one timer (≈ 24.8 days) has passed — the reset is still 15 days away
+      await act(async () => { await vi.advanceTimersByTimeAsync(2 ** 31); });
+      expect(q('[data-testid="agent-usage-stale"]')).toBeNull(); expect(text('[data-testid="agent-usage-percent"]')).toBe('63%');
+      expect(long.size, 'the next wait was set from the real time').toBe(2);
+      await mount(false);
+      expect([...long.keys()].every((id) => cleared.has(id)), 'every reset timer is cleared once the sheet is closed').toBe(true);
+    } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
+  });
+
   it('a closed sheet reads NOTHING; opening reads once', async () => {
     const { d, calls } = deps([json(200, answer([row()]))]);
     await render(d, 'ko', false);

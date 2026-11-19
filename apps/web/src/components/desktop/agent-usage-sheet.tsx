@@ -71,13 +71,14 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
     const d = deps ?? defaultDeps();
     const next = nextReset(view, now);
     if (next === null) return;
-    const id = setTimeout(() => setClock({ run: shown.run, at: Math.max(next, d.now()) }), Math.min(Math.max(next - d.now(), 0) + 50, MAX_TIMER));
+    // the clock moves to the REAL time when the timer fires (never to the reset time itself: a delay cut at the timer's ceiling must not make a far reset look passed) — the effect then looks for the next one
+    const id = setTimeout(() => setClock({ run: shown.run, at: d.now() }), Math.min(Math.max(next - d.now(), 0) + 50, MAX_TIMER));
     return () => clearTimeout(id);
   }, [view, now, deps, shown.run]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-hidden sm:max-w-2xl" data-testid="agent-usage-sheet">
+      <DialogContent showCloseButton={false} className="max-h-[85dvh] overflow-hidden sm:max-w-2xl" data-testid="agent-usage-sheet">
         <DialogHeader>
           <DialogTitle data-testid="agent-usage-title">{view?.deviceName ? t('title', { device: view.deviceName }) : t('titleNoDevice')}</DialogTitle>
           <DialogDescription className="break-keep" data-testid="agent-usage-lead">{t('lead')}</DialogDescription>
@@ -88,8 +89,8 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
           {view ? <Body view={view} now={now} t={t} /> : null}
         </div>
         <DialogFooter>
-          {state ? <Button variant="outline" onClick={start} data-testid="agent-usage-reload">{t('retry')}</Button> : null}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>{t('close')}</Button>
+          {state ? <Button variant="outline" className="min-h-11" onClick={start} data-testid="agent-usage-reload">{t('retry')}</Button> : null}
+          <Button variant="outline" className="min-h-11" onClick={() => onOpenChange(false)} data-testid="agent-usage-close">{t('close')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

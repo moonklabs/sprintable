@@ -58,14 +58,15 @@ describe('loadUsage', () => {
 });
 
 describe('the words of time — the strip\'s own buckets', () => {
-  it('«last seen»: under a minute → now · minutes · hours · days (a future time is «now»)', () => {
+  it('«last seen»: under a minute → now · minutes · hours · days (drift up to a minute is «now» · further ahead says nothing)', () => {
     expect(agoOf(iso(-30_000), NOW)).toEqual({ unit: 'now' });
     expect(agoOf(iso(-60_000), NOW)).toEqual({ unit: 'min', n: 1 });
     expect(agoOf(iso(-59 * 60_000), NOW)).toEqual({ unit: 'min', n: 59 });
     expect(agoOf(iso(-60 * 60_000), NOW)).toEqual({ unit: 'hour', n: 1 });
     expect(agoOf(iso(-(24 * 60 - 1) * 60_000), NOW)).toEqual({ unit: 'hour', n: 23 });
     expect(agoOf(iso(-3 * 24 * 3_600_000), NOW)).toEqual({ unit: 'day', n: 3 });
-    expect(agoOf(iso(+5 * 60_000), NOW)).toEqual({ unit: 'now' });
+    expect(agoOf(iso(+30_000), NOW)).toEqual({ unit: 'now' });       // up to a minute ahead (clock drift) is «now»
+    expect(agoOf(iso(+5 * 60_000), NOW)).toBeNull();                 // further ahead cannot be read — the strip's rule: it says nothing
     expect(agoOf(null, NOW)).toBeNull(); expect(agoOf('soon', NOW)).toBeNull();
   });
   it('«resets in»: past → passed · minutes (at least 1) · hours · days', () => {

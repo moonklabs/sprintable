@@ -78,11 +78,13 @@ export async function loadUsage(agentId: string, deps: UsageDeps): Promise<Usage
 
 export type Ago = { unit: 'now' } | { unit: 'min' | 'hour' | 'day'; n: number };
 
-/** how long ago (the strip's own buckets): under a minute → now · under an hour → minutes · under a day → hours · else days. `null` = no usable time */
+/** how long ago (the strip's own buckets and rule — `lastSeenLine`): under a minute → now · under an hour → minutes · under a day → hours · else days; a time that cannot be read (none · not a date · more than a minute in the future) says nothing → `null` */
 export function agoOf(iso: string | null | undefined, now: number): Ago | null {
   const at = iso ? Date.parse(iso) : NaN;
   if (!Number.isFinite(at)) return null;
-  const min = Math.max(0, Math.floor((now - at) / 60_000));
+  const ms = now - at;
+  if (ms < -60_000) return null;
+  const min = Math.max(0, Math.floor(ms / 60_000));
   if (min < 1) return { unit: 'now' };
   if (min < 60) return { unit: 'min', n: min };
   if (min < 24 * 60) return { unit: 'hour', n: Math.floor(min / 60) };
