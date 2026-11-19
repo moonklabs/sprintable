@@ -40,6 +40,10 @@
 // 가드가 계속 초록인데 새 키만 화면에 그대로 뜬다 — 새 조합 키를 추가할 때 반드시 여기 항목을
 // 같이 추가할 것.
 export const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
+  // story 4983 (P5) — the phone app's folder list: what an end that is not a list says (components/desktop/phone-files-page.tsx `endLine`)
+  ['phoneFiles.reason.', ['not_enabled', 'no_folder', 'not_found', 'is_link', 'hidden_name', 'looks_secret', 'too_big', 'not_text', 'not_plain', 'multi_linked', 'other_device', 'changed_while_reading', 'busy', 'timeout', 'denied', 'unsupported'], 'lib/phone-files.ts FILE_REASONS (the contract\'s `reasons`)'],
+  ['phoneFiles.key.', ['biometric_required', 'no_screen_lock', 'key_invalidated', 'key_failed', 'no_key', 'not_registered'], 'lib/phone-files.ts KEY_CODES'],
+  ['phoneFiles.outcome.', ['cancelled', 'needs_update', 'remote_off', 'unreachable', 'not_paired', 'no_folder', 'not_allowed', 'busy', 'unsupported', 'timeout', 'failed'], 'lib/phone-files.ts FilesOutcome kinds (the ones that are not a list · a reason · a key)'],
   ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
   ['gateConfig.work_', ['done', 'merge'], 'gate-level-matrix.tsx WORK_TYPES'],
   ['gateConfig.actor_', ['agent', 'human'], 'gate-level-matrix.tsx ACTOR_TYPES'],

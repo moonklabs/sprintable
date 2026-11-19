@@ -352,7 +352,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
       {showChanges ? (
-        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} open={changesOpen} onOpenChange={setChangesOpen} />
+        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} filesHref={phone && typeof view.setup_id === 'string' && view.setup_id ? `/phone-files?setup_id=${encodeURIComponent(view.setup_id)}&agent_id=${encodeURIComponent(agentId)}` : null} open={changesOpen} onOpenChange={setChangesOpen} />
       ) : null}
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>

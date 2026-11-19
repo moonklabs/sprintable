@@ -743,3 +743,38 @@ describe('the «바뀐 파일» button next to the stop / instruct buttons (stor
     expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
   });
 });
+
+describe('[4983] the files line of the «바뀐 파일» sheet', () => {
+  const SETUP = '11111111-2222-4333-8444-555555555555';
+  const filesLine = () => document.body.querySelector<HTMLAnchorElement>('[data-testid="agent-changes-files"]');
+  async function openSheet() {
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return res(201, { command_id: '33333333-4444-4555-8666-777777777777' });
+      if (String(url).includes('desktop-changes')) return res(200, { state: 'done', files: [], more: false, total: 0 });
+      return res(200, sessionView);
+    });
+    await render();
+    await act(async () => { (container.querySelector('[data-testid="agent-changes-open"]') as HTMLButtonElement).click(); });
+    await settle(12);
+  }
+  it('inside the phone app the sheet\'s last line goes to THIS computer and THIS agent — nothing else rides on the address', async () => {
+    sessionView = { ...sessionView, setup_id: SETUP, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()?.getAttribute('href')).toBe(`/phone-files?setup_id=${SETUP}&agent_id=${AGENT}`);
+  });
+  it('in a browser the line is not drawn (only the phone app\'s shell can sign)', async () => {
+    phone = false;
+    sessionView = { ...sessionView, setup_id: SETUP, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()).toBeNull();
+  });
+  it('a session that names no computer (an older server) has no line', async () => {
+    sessionView = { ...sessionView, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()).toBeNull();
+    sessionView = { ...sessionView, setup_id: '' };
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await openSheet();
+    expect(filesLine()).toBeNull();
+  });
+});

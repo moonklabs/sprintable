@@ -5629,6 +5629,7 @@
         "loading": "Reading on the computer…",
         "empty": "No files changed",
         "more": "There are more — {total} in all",
+        "allFiles": "See all files of this project",
         "reload": "Reload",
         "close": "Close",
         "hidden": "1 hidden file",
@@ -8302,5 +8303,67 @@
   "designSystem": {
     "title": "Design system",
     "lead": "Tokens and every ds part and state, light and dark side by side."
+  },
+  "phoneFiles": {
+    "title": "Project files",
+    "home": "Go back",
+    "back": "Choose a project",
+    "up": "Up one folder",
+    "retry": "Try again",
+    "oldApp": "Update the app to a newer version to use this.",
+    "readFailed": "Couldn't read the list.",
+    "noMac": "No Mac is connected yet.",
+    "remoteOff": "Remote control is off. Turn it on and come back.",
+    "noProjectOnMac": "No project has a folder set on this Mac.",
+    "chooseComputer": "Choose a Mac",
+    "chooseProject": "Choose a project to look at on {device}.",
+    "loading": "Asking the Mac. Confirm on your phone.",
+    "empty": "Empty.",
+    "hidden": "{count} hidden",
+    "more": "Show more",
+    "openFolder": "Open the {name} folder",
+    "kind": {
+      "link": "link",
+      "other": "other"
+    },
+    "outcome": {
+      "cancelled": "Not confirmed, so nothing was sent.",
+      "needs_update": "Update the app to a newer version.",
+      "remote_off": "Remote control is off.",
+      "unreachable": "The Mac isn't responding right now.",
+      "not_paired": "This Mac isn't connected to this phone.",
+      "no_folder": "The Mac has no folder for this project.",
+      "not_allowed": "Only the person who connected this Mac can see its files.",
+      "busy": "The Mac is busy with another request. Try again in a moment.",
+      "unsupported": "This name can't be opened.",
+      "timeout": "No answer came. Try again.",
+      "failed": "Couldn't open it. Try again."
+    },
+    "key": {
+      "biometric_required": "Turn on fingerprint or face confirmation on your phone.",
+      "no_screen_lock": "Set a screen lock on your phone.",
+      "key_invalidated": "Your phone's confirmation changed. Connect it again.",
+      "key_failed": "The phone couldn't confirm.",
+      "no_key": "This phone isn't connected yet.",
+      "not_registered": "This phone isn't connected yet."
+    },
+    "reason": {
+      "not_enabled": "File viewing is off on this Mac.",
+      "no_folder": "The Mac has no folder for this project.",
+      "not_found": "That folder wasn't found.",
+      "is_link": "Links aren't opened.",
+      "hidden_name": "It has a hidden name, so it isn't opened.",
+      "looks_secret": "It may hold secrets, so it isn't opened.",
+      "too_big": "There are too many items to show.",
+      "not_text": "It isn't a text file.",
+      "not_plain": "It isn't a plain file.",
+      "multi_linked": "The file is linked from several places, so it isn't opened.",
+      "other_device": "It is on another drive, so it isn't opened.",
+      "changed_while_reading": "It changed while reading. Try again.",
+      "busy": "The Mac is busy with another request. Try again in a moment.",
+      "timeout": "The Mac didn't answer in time. Try again.",
+      "denied": "No permission to open it.",
+      "unsupported": "This name can't be opened."
+    }
   }
 }
