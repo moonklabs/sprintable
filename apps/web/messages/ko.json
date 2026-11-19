@@ -7849,7 +7849,7 @@
         "remoteOff": "원격 제어가 꺼져 있어 사용량을 볼 수 없어요",
         "noComputer": "이 에이전트가 쓰는 컴퓨터가 아직 없어요",
         "empty": "아직 알려 준 값이 없어요 — 에이전트가 일하기 시작하면 보여요",
-        "disconnected": "지금은 이 컴퓨터와 연결이 끊겨 있어요",
+        "disconnected": "연결이 끊겼어요",
         "account": "{runtime} · 계정 {n}",
         "window": {
           "five_hour": "5시간 한도",

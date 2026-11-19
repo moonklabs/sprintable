@@ -46,7 +46,7 @@ function server() {
     if (url.startsWith('/api/desktop/startable')) {
       return json(world.startable ?? { remote_control: world.remote !== false, computers: [{ setup_id: SETUP, device_name: '윤재의 맥북', reachable: world.reachable !== false, agents: agents(world.running !== false) }] });
     }
-    if (url.endsWith('/desktop-usage')) return json(world.usage ?? { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '윤재의 맥북', connected: true, usage: [] }); // story 4981 (PR 4): the «사용량» sheet's read
+    if (url.endsWith('/desktop-usage')) return json(world.usage ?? { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '작업용 맥북', connected: true, usage: [] }); // story 4981 (PR 4): the «사용량» sheet's read
     if (url.includes('/clock/commands/')) return world.poll ? world.poll.clone() : json({ command_id: CMD, state: 'done', result_code: 'ok' }); // a Response body can be read once: every look gets its own
     if (url.includes('/clock?phone_key_id=')) {
       if (typeof world.clock === 'function') return (world.clock as () => Promise<Response> | Response)();

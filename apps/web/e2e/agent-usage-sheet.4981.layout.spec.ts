@@ -26,10 +26,17 @@ async function build() {
         import ko from './messages/ko.json';
         import en from './messages/en.json';
         import { AgentUsageSheet } from './src/components/desktop/agent-usage-sheet';
+        // the sheet is opened by a TAP on a button, as on the card (the dialog decides its first focus by how it was opened)
+        function Host({ deps }) {
+          const [open, setOpen] = React.useState(false);
+          return React.createElement(React.Fragment, null,
+            React.createElement('button', { id: 'usage-trigger', style: { minHeight: 44, minWidth: 88, margin: 16 }, onClick: () => setOpen(true) }, 'open'),
+            React.createElement(AgentUsageSheet, { agentId: 'a-1', open, onOpenChange: setOpen, deps }));
+        }
         window.__mount = (answer, locale) => {
           const deps = { fetch: async () => new Response(JSON.stringify(answer), { status: 200 }), now: () => Date.now() };
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' },
-            React.createElement(AgentUsageSheet, { agentId: 'a-1', open: true, onOpenChange: () => {}, deps })));
+            React.createElement(Host, { deps })));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
@@ -68,6 +75,7 @@ async function open(page: Page, ans: object, locale: Locale) {
   await page.goto('http://preview.test/');
   await page.addScriptTag({ content: js });
   await page.evaluate(([a, l]) => (window as unknown as { __mount: (a: object, l: string) => void }).__mount(a as object, l as string), [ans, locale]);
+  await page.locator('#usage-trigger').tap();
   await page.locator('[data-testid="agent-usage-sheet"]').waitFor();
   await page.locator('[data-testid="agent-usage-loading"]').waitFor({ state: 'detached' });
   // the dialog opens with a zoom-in: a press measured mid-animation is 97 % of itself (44 → 42.7 px) — measure and shoot when the animations have finished
@@ -93,6 +101,12 @@ async function expectClean(page: Page, label: string) {
   expect(m.tiny, `${label}: text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
   expect(m.overflowX, `${label}: overflow`).toBe(false);
   expect(m.sheetInside, `${label}: the sheet stays inside the screen`).toBe(true);
+  // opened by a finger: the sheet itself holds the focus, and neither [닫기] nor [다시 읽기] shows a focus ring (it would read as «pressed»)
+  const focus = await page.evaluate(() => ({
+    active: document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName,
+    ring: [...document.querySelectorAll('[data-testid="agent-usage-close"], [data-testid="agent-usage-reload"]')].filter((e) => e.matches(':focus-visible') || e === document.activeElement).length,
+  }));
+  expect(focus, `${label}: no focus ring after a tap`).toEqual({ active: 'agent-usage-sheet', ring: 0 });
   return m;
 }
 async function shot(page: Page, name: string) {
@@ -107,45 +121,45 @@ test.describe('on a touch phone (390 × 844)', () => {
     const ans = answer([
       row({ windows: [win(), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: at(3 * 24 * H) })] }),
       row({ runtime: 'codex', account: 'cccccccccccc', windows: [win({ kind: 'other', minutes: 60, used_percent: 7, resets_at: at(25 * 60_000) })], seen_at: at(-90_000) }),
-    ], { device_name: '윤재의 맥북' });
+    ], { device_name: '작업용 맥북' });
     await open(page, ans, 'ko');
     await expectClean(page, 'ko numbers');
     const widths = await page.locator('[data-testid="agent-usage-bar"] > div').evaluateAll((els) => els.map((e) => Math.round((e.getBoundingClientRect().width / (e.parentElement as HTMLElement).getBoundingClientRect().width) * 100)));
     expect(widths, 'each fill is as wide as its percent').toEqual([63, 41, 7]);
-    await expect(page.locator('[data-testid="agent-usage-title"]')).toHaveText('윤재의 맥북의 계정 사용량');
+    await expect(page.locator('[data-testid="agent-usage-title"]')).toHaveText('작업용 맥북의 계정 사용량');
     await shot(page, 'ko-numbers');
-    await open(page, { ...ans, device_name: 'Yoonjae MacBook' }, 'en');
+    await open(page, { ...ans, device_name: 'Work MacBook' }, 'en');
     await expectClean(page, 'en numbers');
-    await expect(page.locator('[data-testid="agent-usage-title"]')).toHaveText('Account usage on Yoonjae MacBook');
+    await expect(page.locator('[data-testid="agent-usage-title"]')).toHaveText('Account usage on Work MacBook');
     await shot(page, 'en-numbers');
   });
 
   test('[SID:4981] a window whose reset time has passed: one line, no bar and no percent (ko and en), beside a window still running', async ({ page }) => {
-    const ans = answer([row({ seen_at: at(-3 * 24 * H), windows: [win({ used_percent: 91, resets_at: at(-2 * 24 * H) }), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: at(2 * 24 * H) })] })], { device_name: '윤재의 맥북' });
+    const ans = answer([row({ seen_at: at(-3 * 24 * H), windows: [win({ used_percent: 91, resets_at: at(-2 * 24 * H) }), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: at(2 * 24 * H) })] })], { device_name: '작업용 맥북' });
     await open(page, ans, 'ko');
     await expectClean(page, 'ko stale');
     expect(await page.locator('[data-testid="agent-usage-bar"]').count(), 'only the running window has a bar').toBe(1);
     await expect(page.locator('[data-testid="agent-usage-stale"]')).toHaveText('풀렸어요 · 새 숫자는 다음 세션 때');
     await shot(page, 'ko-stale');
-    await open(page, { ...ans, device_name: 'Yoonjae MacBook' }, 'en');
+    await open(page, { ...ans, device_name: 'Work MacBook' }, 'en');
     await expectClean(page, 'en stale');
     await shot(page, 'en-stale');
   });
 
   test('[SID:4981] no numbers: the reason line (an API-key login · not read), and nothing yet — each one line, no bar (ko and en)', async ({ page }) => {
-    const reasons = answer([row({ state: 'unavailable', why: 'api_key', windows: [] }), row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'not_read', windows: [] })], { device_name: '윤재의 맥북' });
+    const reasons = answer([row({ state: 'unavailable', why: 'api_key', windows: [] }), row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'not_read', windows: [] })], { device_name: '작업용 맥북' });
     await open(page, reasons, 'ko');
     await expectClean(page, 'ko reasons');
     expect(await page.locator('[data-testid="agent-usage-bar"]').count()).toBe(0);
     await expect(page.locator('[data-testid="agent-usage-why"]').first()).toHaveText('사용량을 알 수 없어요');
     await shot(page, 'ko-reasons');
-    await open(page, { ...reasons, device_name: 'Yoonjae MacBook' }, 'en');
+    await open(page, { ...reasons, device_name: 'Work MacBook' }, 'en');
     await expectClean(page, 'en reasons');
     await shot(page, 'en-reasons');
-    await open(page, answer([], { device_name: '윤재의 맥북' }), 'ko');
+    await open(page, answer([], { device_name: '작업용 맥북' }), 'ko');
     await expectClean(page, 'ko nothing yet');
     await shot(page, 'ko-nothing');
-    await open(page, answer([row()], { device_name: '윤재의 맥북', connected: false }), 'ko');
+    await open(page, answer([row()], { device_name: '작업용 맥북', connected: false }), 'ko');
     await expectClean(page, 'ko disconnected');
     await expect(page.locator('[data-testid="agent-usage-disconnected"]')).toBeVisible();
     await shot(page, 'ko-disconnected');

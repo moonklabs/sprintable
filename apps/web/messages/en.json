@@ -7849,7 +7849,7 @@
         "remoteOff": "Remote control is off, so the usage cannot be shown",
         "noComputer": "This agent does not run on a computer yet",
         "empty": "No values reported yet — they show up once the agent starts working",
-        "disconnected": "This computer is disconnected right now",
+        "disconnected": "Disconnected",
         "account": "{runtime} · account {n}",
         "window": {
           "five_hour": "5-hour limit",

@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { lastSeenLine } from '@/components/chat/agent-session-strip'; // the 4979 strip's own «연결이 끊겼어요 · 마지막으로 본 지 N분 전» — one function, one set of words
 import {
   accountOrdinal, agoOf, loadUsage, untilOf, windowName,
   type Ago, type UsageDeps, type UsageRow, type UsageState, type UsageView, type UsageWindow, type Until, type WindowName,
@@ -16,6 +17,12 @@ import {
  * line (closed list). A computer that is silent right now keeps its last numbers with its time and one line saying it is disconnected. The sheet reads when it opens (a closed sheet reads nothing)
  * and again on [다시 읽기]. The look is the changes sheet's (Dialog · header · scrolling body · footer): no new shape.
  */
+/** the strip's line for a computer that is not heard: «연결이 끊겼어요 · 마지막으로 본 지 N분 전» — from the newest time this computer told us anything (its newest reading); null = no readable time */
+function disconnectedLine(view: UsageView, now: number, tStrip: T): string | null {
+  let newest: string | null = null;
+  for (const r of view.rows) if (newest === null || Date.parse(r.seenAt) > Date.parse(newest)) newest = r.seenAt;
+  return lastSeenLine((key, values) => tStrip(key as never, values as never), newest, now);
+}
 const MAX_TIMER = 2 ** 31 - 1; // setTimeout's own ceiling (a reset further away than ~24 days is checked again when the sheet is read next)
 /** the soonest reset time (ms) after `now` among the windows drawn — the moment a bar has to turn into «풀렸어요»; null when none is ahead */
 function nextReset(view: UsageView, now: number): number | null {
@@ -38,6 +45,8 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
   deps?: UsageDeps;
 }) {
   const t = useTranslations('desktop.phoneSessions.usage');
+  const tStrip = useTranslations('chats.agentSession'); // the strip's keys (line.disconnectedSeen…): the disconnected line is the strip's, not a second wording
+  const popup = useRef<HTMLDivElement | null>(null);
   // the answer belongs to ONE opening (tagged with its run): a closed sheet — or an older run — shows nothing; nothing is reset from inside an effect
   const [shown, setShown] = useState<{ run: number; state: UsageState; at: number }>({ run: 0, state: { kind: 'failed' }, at: 0 });
   // the clock the words are counted from: the moment of the read, moved on to the next reset time while the sheet stays open (so a window that is freed while it is on the screen turns into «풀렸어요» at once, by the same calculation)
@@ -78,7 +87,9 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="max-h-[85dvh] overflow-hidden sm:max-w-2xl" data-testid="agent-usage-sheet">
+      <DialogContent ref={popup} showCloseButton={false} className="max-h-[85dvh] overflow-hidden sm:max-w-2xl" data-testid="agent-usage-sheet"
+        // opened by a finger (or a mouse) the sheet itself takes the focus — a ring on [닫기] would read as «pressed»; opened from the keyboard the first press does (the default) and its ring shows
+        initialFocus={(type) => (type === 'keyboard' ? true : popup.current)}>
         <DialogHeader>
           <DialogTitle data-testid="agent-usage-title">{view?.deviceName ? t('title', { device: view.deviceName }) : t('titleNoDevice')}</DialogTitle>
           <DialogDescription className="break-keep" data-testid="agent-usage-lead">{t('lead')}</DialogDescription>
@@ -86,7 +97,7 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
         <div className="focus-inset min-h-0 flex-1 overflow-y-auto" data-testid="agent-usage-body">
           {reading || (open && state === null) ? <p role="status" className="px-4 py-6 text-ds-small text-ds-ink-3" data-testid="agent-usage-loading">{t('loading')}</p> : null}
           {state?.kind === 'failed' || state?.kind === 'gone' ? <p role="alert" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-failed">{t('failed')}</p> : null}
-          {view ? <Body view={view} now={now} t={t} /> : null}
+          {view ? <Body view={view} now={now} t={t} tStrip={tStrip} /> : null}
         </div>
         <DialogFooter>
           {state ? <Button variant="outline" className="min-h-11" onClick={start} data-testid="agent-usage-reload">{t('retry')}</Button> : null}
@@ -99,12 +110,12 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 
 type T = ReturnType<typeof useTranslations>;
 
-function Body({ view, now, t }: { view: UsageView; now: number; t: T }) {
+function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tStrip: T }) {
   if (!view.remoteControl) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-remote-off">{t('remoteOff')}</p>;
   if (!view.hasComputer) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-no-computer">{t('noComputer')}</p>;
   return (
     <div className="space-y-4 px-4 py-4">
-      {!view.connected ? <p role="status" className="break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-disconnected">{t('disconnected')}</p> : null}
+      {!view.connected ? <p role="status" className="break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-disconnected">{disconnectedLine(view, now, tStrip) ?? t('disconnected')}</p> : null}
       {view.rows.length === 0 ? <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-empty">{t('empty')}</p> : null}
       {view.rows.map((row) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} ordinal={accountOrdinal(view.rows, row)} now={now} t={t} />)}
     </div>

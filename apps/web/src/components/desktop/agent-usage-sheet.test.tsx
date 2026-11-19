@@ -19,7 +19,7 @@ const NOW = Date.parse('2026-11-19T06:00:00Z');
 const iso = (ms: number) => new Date(NOW + ms).toISOString();
 const win = (over: Record<string, unknown> = {}) => ({ kind: 'five_hour', minutes: 300, used_percent: 63, resets_at: iso(2 * 3_600_000 + 10 * 60_000), ...over });
 const row = (over: Record<string, unknown> = {}) => ({ runtime: 'claude', account: 'a1b2c3d4e5f6', state: 'windows', why: null, windows: [win()], seen_at: iso(-5 * 60_000), ...over });
-const answer = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'a-1', remote_control: true, setup_id: 's-1', device_name: '윤재의 맥북', connected: true, usage, ...over });
+const answer = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'a-1', remote_control: true, setup_id: 's-1', device_name: '작업용 맥북', connected: true, usage, ...over });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 let container: HTMLDivElement;
@@ -51,7 +51,7 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     const { d, calls } = deps([json(200, answer([row({ windows: [win(), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: iso(3 * 24 * 3_600_000) })] })]))]);
     await render(d);
     expect(calls).toEqual(['a-1']);
-    expect(text('[data-testid="agent-usage-title"]')).toBe('윤재의 맥북의 계정 사용량');
+    expect(text('[data-testid="agent-usage-title"]')).toBe('작업용 맥북의 계정 사용량');
     expect(text('[data-testid="agent-usage-lead"]')).toBe('마지막으로 알려 준 값이에요');
     const ws = qa('[data-testid="agent-usage-window"]');
     expect(ws).toHaveLength(2);
@@ -75,7 +75,7 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
   it('a silent computer keeps its last numbers with their time and ONE line that it is disconnected', async () => {
     const { d } = deps([json(200, answer([row({ seen_at: iso(-3 * 3_600_000) })], { connected: false }))]);
     await render(d);
-    expect(text('[data-testid="agent-usage-disconnected"]')).toBe('지금은 이 컴퓨터와 연결이 끊겨 있어요');
+    expect(text('[data-testid="agent-usage-disconnected"]')).toBe('연결이 끊겼어요 · 마지막으로 본 지 3시간 전');   // the 4979 strip\'s own line (the same key and the same calculation, from the computer\'s newest reading)
     expect(text('[data-testid="agent-usage-percent"]')).toBe('63%');
     expect(text('[data-testid="agent-usage-seen"]')).toBe('마지막으로 본 지 3시간 전');
   });
@@ -168,6 +168,22 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
   });
 
+  it('the disconnected line is the strip\'s line word for word (ko and en) and, with no readable time, its first half', async () => {
+    const strip = (await import('../../../messages/ko.json')).default.chats.agentSession.line;
+    await render(deps([json(200, answer([row({ seen_at: iso(-5 * 60_000) }), row({ account: 'zzzzzzzzzzzz', seen_at: iso(-45 * 60_000) })], { connected: false }))]).d);
+    expect(text('[data-testid="agent-usage-disconnected"]')).toBe(strip.disconnectedSeenMin.replace('{n}', '5'));   // the NEWEST reading's time
+    await render(deps([json(200, answer([], { connected: false }))]).d);
+    expect(text('[data-testid="agent-usage-disconnected"]')).toBe('연결이 끊겼어요');
+  });
+
+  it('opened by a finger the sheet itself holds the focus — [닫기] shows no focus ring (it would read as «pressed»)', async () => {
+    await render(deps([json(200, answer([row()]))]).d);
+    const sheet = q('[data-testid="agent-usage-sheet"]')!;
+    await vi.waitFor(() => expect(document.activeElement === sheet, 'the sheet itself holds the focus').toBe(true));   // (the dialog moves focus a frame after it opens)
+    expect(document.activeElement).not.toBe(q('[data-testid="agent-usage-close"]'));
+    expect(document.activeElement).not.toBe(q('[data-testid="agent-usage-reload"]'));
+  });
+
   it('a closed sheet reads NOTHING; opening reads once', async () => {
     const { d, calls } = deps([json(200, answer([row()]))]);
     await render(d, 'ko', false);
@@ -177,10 +193,10 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
   });
 
   it('English: every word of the sheet exists in en (percent · windows · resets · seen · why · states)', async () => {
-    const { d } = deps([json(200, answer([row({ windows: [win(), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: iso(3 * 24 * 3_600_000) })] }), row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'api_key', windows: [] })], { connected: false, device_name: 'Yoonjae MacBook' }))]);
+    const { d } = deps([json(200, answer([row({ windows: [win(), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41, resets_at: iso(3 * 24 * 3_600_000) })] }), row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'api_key', windows: [] })], { connected: false, device_name: 'Work MacBook' }))]);
     await render(d, 'en');
     const all = document.body.textContent ?? '';
-    for (const w of ['Account usage on Yoonjae MacBook', '5-hour limit', 'Weekly limit', '63%', '41%', 'Resets in 2 h', 'Resets in 3 d', 'Last seen 5 min ago', 'Usage is not available', 'This computer is disconnected right now', 'Read again', 'Close']) expect(all, w).toContain(w);
+    for (const w of ['Account usage on Work MacBook', '5-hour limit', 'Weekly limit', '63%', '41%', 'Resets in 2 h', 'Resets in 3 d', 'Last seen 5 min ago', 'Usage is not available', 'Disconnected · last seen 5 min ago', 'Read again', 'Close']) expect(all, w).toContain(w);
     expect(q('[data-testid="agent-usage-sheet"]')!.textContent).not.toMatch(/[가-힣]/);
   });
 

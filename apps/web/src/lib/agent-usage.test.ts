@@ -6,14 +6,14 @@ const NOW = Date.parse('2026-11-19T06:00:00Z');
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 const win = (over: Record<string, unknown> = {}) => ({ kind: 'five_hour', minutes: 300, used_percent: 63, resets_at: iso(2 * 3_600_000), ...over });
 const row = (over: Record<string, unknown> = {}) => ({ runtime: 'claude', account: 'a1b2c3d4e5f6', state: 'windows', why: null, windows: [win()], seen_at: iso(-90_000), ...over });
-const view = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'x', remote_control: true, setup_id: 's-1', device_name: '윤재의 맥북', connected: true, usage, ...over });
+const view = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'x', remote_control: true, setup_id: 's-1', device_name: '작업용 맥북', connected: true, usage, ...over });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 describe('parseUsage — only the closed shape is kept', () => {
   it('a good answer comes through with its words and numbers', () => {
     const v = parseUsage(view([row(), row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'api_key', windows: [] })]))!;
     expect(v.remoteControl && v.connected && v.hasComputer).toBe(true);
-    expect(v.deviceName).toBe('윤재의 맥북');
+    expect(v.deviceName).toBe('작업용 맥북');
     expect(v.rows.map((r) => [r.runtime, r.state, r.why, r.windows.length])).toEqual([['claude', 'windows', null, 1], ['codex', 'unavailable', 'api_key', 0]]);
     expect(v.rows[0]!.windows[0]).toEqual({ kind: 'five_hour', minutes: 300, usedPercent: 63, resetsAt: iso(2 * 3_600_000) });
   });
