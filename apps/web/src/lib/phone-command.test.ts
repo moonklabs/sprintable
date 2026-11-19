@@ -8,6 +8,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestI
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const CONV = '33333333-4444-4555-8666-777777777777';
+const OTHER_CONV = '99999999-4444-4555-8666-777777777777';
 const CMD = '44444444-5555-4666-8777-888888888888';
 const json = (status: number, body?: unknown) => new Response(body === undefined ? null : JSON.stringify(body), { status });
 
@@ -240,5 +241,161 @@ describe('[4534] commandOnPhone — the ends', () => {
   ])('the server refuses %s → %s', async (code, kind) => {
     server(json(409, { error: { code } }));
     await expect(commandOnPhone(prompt, deps(signedPrompt))).resolves.toEqual({ kind });
+  });
+});
+
+// ── story 4976 A3: the instruction goes SEALED when the shell says it can ───────────────────────────────────────────────────────────────────────────────────
+describe('[4976 A3] a sealed instruction — the words never leave the phone app but as an envelope', () => {
+  const MARK = 'MK4976webwords';
+  const typed = { agentId: AGENT, kind: 'send_prompt' as const, text: `run ${MARK}`, conversationId: CONV, computerOpensSealed: true };
+  const ENV = { v: 1, kind: 'send_prompt', setup_id: 'setup', session_key: 's-9', command_id: 'idem-1', from: 'k-1', ct: 'AAAA' };
+  const sealedAnswer: PhoneAnswer = { id: 'w', ok: true, sealed: true, envelope: ENV, phone_key_id: 'k-1', session_key: 's-9', conversation_id: CONV };
+  const CAPS: PhoneAnswer = { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+  /** a shell by call type: `caps` answers shell.caps; `signs` answers the command.sign calls in order (the last repeats) */
+  const shell = (caps: PhoneAnswer | Error, signs: PhoneAnswer[], extra: Partial<CommandDeps> = {}) => {
+    let i = 0;
+    const phoneCall = vi.fn(async (type: string, _args?: unknown) => {
+      if (type === 'shell.caps') { if (caps instanceof Error) throw caps; return caps; }
+      return signs[Math.min(i++, signs.length - 1)]!;
+    });
+    const sent: string[] = [];
+    let k = 0;
+    const d = { phoneCall, sendMessage: async (t: string) => { sent.push(t); return true; }, newKey: () => `idem-${++k}`, wait: async () => {}, sent, ...extra } as unknown as CommandDeps & { sent: string[]; phoneCall: typeof phoneCall };
+    return d;
+  };
+  const signCalls = (d: { phoneCall: ReturnType<typeof vi.fn> }) => d.phoneCall.mock.calls.filter((c) => c[0] === 'command.sign');
+
+  it('a shell that can seal: the shell gets the press key first · the post is {kind, session_key, conversation_id, envelope, phone_key_id, idempotency_key} — no text, no signed — and the words are in no byte of it', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: null })]);
+    const d = shell(CAPS, [sealedAnswer]);
+    await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sent_now' });
+    expect(signCalls(d)).toEqual([['command.sign', { agent_member_id: AGENT, kind: 'send_prompt', text: typed.text, conversation_id: CONV, sealed: true, idempotency_key: 'idem-1' }]]);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body).toEqual({ kind: 'send_prompt', idempotency_key: 'idem-1', session_key: 's-9', conversation_id: CONV, envelope: ENV, phone_key_id: 'k-1' });
+    expect(d.phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')[0]![1]).toHaveProperty('idempotency_key', body.idempotency_key); // the key the shell sealed into the header is the key posted
+    expect(Object.keys(body)).not.toContain('text');
+    expect(Object.keys(body)).not.toContain('signed');
+    expect(calls.map((c) => String(c.init?.body ?? '')).join('')).not.toContain(MARK);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('a shell that cannot (old shell: the question is refused · answers without the flag · flag 0 · the question throws) → the plain road exactly as before, never `sealed`', async () => {
+    for (const caps of [{ id: 'c', ok: false, code: 'bad_request' }, { id: 'c', ok: true }, { id: 'c', ok: true, caps: {} }, { id: 'c', ok: true, caps: { sealed_prompt: 0 } }, { id: 'c', ok: true, caps: { sealed_prompt: '1' } }, new Error('no bridge')] as Array<PhoneAnswer | Error>) {
+      const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+      const d = shell(caps, [signedPrompt]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sent_now' });
+      expect(signCalls(d)).toEqual([['command.sign', { agent_member_id: AGENT, kind: 'send_prompt', text: typed.text, conversation_id: CONV }]]);
+      expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ kind: 'send_prompt', idempotency_key: 'idem-1', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1', text: 'ls  then stop', conversation_id: CONV });
+    }
+  });
+
+  it('a computer that did not say its app opens a sealed instruction (absent · false · null — an app from before) → the plain road, and the shell is not even asked what it can do', async () => {
+    for (const flag of [undefined, false] as const) {
+      const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+      const d = shell(CAPS, [signedPrompt]);
+      await expect(commandOnPhone({ ...typed, computerOpensSealed: flag }, d)).resolves.toEqual({ kind: 'sent_now' });
+      expect(d.phoneCall.mock.calls.map((c) => c[0])).toEqual(['command.sign']);
+      expect(signCalls(d)[0]![1]).not.toHaveProperty('sealed');
+      expect(JSON.parse(calls[0]!.init!.body as string)).toHaveProperty('signed', 'SIGNED');
+    }
+  });
+
+  it('a stop and an end never ask `shell.caps` and never go sealed', async () => {
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+    const d = shell(CAPS, [signedStop]);
+    await commandOnPhone(stop, d);
+    expect(d.phoneCall.mock.calls.map((c) => c[0])).toEqual(['command.sign']);
+  });
+
+  it('the shell cannot seal for THIS computer (host_not_pinned · host_not_sealing): the same words then go the plain road — a second sign, without `sealed`', async () => {
+    for (const code of ['host_not_pinned', 'host_not_sealing']) {
+      const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+      const d = shell(CAPS, [{ id: 'w', ok: false, code }, signedPrompt]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sent_now' });
+      expect(signCalls(d).map((c) => (c[1] as { sealed?: boolean }).sealed)).toEqual([true, undefined]);
+      expect(JSON.parse(calls[0]!.init!.body as string)).toHaveProperty('signed', 'SIGNED');
+    }
+  });
+
+  it('every other refusal of a sealing shell is its own line — a vault that does not answer is «failed» (never a quiet drop to the plain road) · too_long · cancelled · key refusals · the turn ended → the words go as a message', async () => {
+    const cases: Array<[string, unknown]> = [['vault_unavailable', { kind: 'failed' }], ['bad_request', { kind: 'failed' }], ['too_long', { kind: 'too_long' }], ['cancelled', { kind: 'cancelled' }], ['biometric_required', { kind: 'biometric_required' }],
+      ['no_screen_lock', { kind: 'no_screen_lock' }], ['key_invalidated', { kind: 'key_invalidated' }], ['not_registered', { kind: 'not_registered' }], ['remote_control_off', { kind: 'remote_off' }], ['conversation_not_found', { kind: 'conversation_not_found' }], ['no_key', { kind: 'not_paired' }]];
+    for (const [code, outcome] of cases) {
+      const calls = server(json(500));
+      const d = shell(CAPS, [{ id: 'w', ok: false, code }, signedPrompt]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual(outcome);
+      expect(signCalls(d)).toHaveLength(1);
+      expect(calls).toHaveLength(0); // nothing was posted
+    }
+    for (const code of ['not_working', 'no_session']) {
+      const d = shell(CAPS, [{ id: 'w', ok: false, code }]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sealed_not_taken' });
+      expect(d.sent).toEqual([]); // never quietly turned into a chat message
+    }
+  });
+
+  it('an answer that is not exactly a sealed one (flag missing · no envelope · a list · another room · no key id · no session) is «failed» and nothing is posted', async () => {
+    for (const bad of [{ ...sealedAnswer, sealed: undefined }, { ...sealedAnswer, envelope: undefined }, { ...sealedAnswer, envelope: [ENV] }, { ...sealedAnswer, envelope: 'x' }, { ...sealedAnswer, conversation_id: OTHER_CONV }, { ...sealedAnswer, phone_key_id: undefined }, { ...sealedAnswer, session_key: undefined }] as PhoneAnswer[]) {
+      const calls = server(json(500));
+      await expect(commandOnPhone(typed, shell(CAPS, [bad]))).resolves.toEqual({ kind: 'failed' });
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it('the turn had ended (the Mac says so · the server says so) or the session cannot take it into the turn now → «sealed_not_taken»: NOT sent as a chat message (that would put the words on the server in the clear)', async () => {
+    for (const poll of [{ state: 'rejected', result_code: 'session_not_working' }, { state: 'rejected', result_code: 'instruct_not_now' }]) {
+      server(json(201, { command_id: CMD, state: 'queued' }), [json(200, poll)]);
+      const d = shell(CAPS, [sealedAnswer]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sealed_not_taken' });
+      expect(d.sent).toEqual([]);
+    }
+    for (const code of ['session_not_working', 'session_not_found']) {
+      server(json(409, { error: { code } }));
+      const d = shell(CAPS, [sealedAnswer]);
+      await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'sealed_not_taken' });
+      expect(d.sent).toEqual([]);
+    }
+    // …while the PLAIN road keeps what it always did (its words are in the body the person signed): a message
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'rejected', result_code: 'session_not_working' })]);
+    const plain = shell({ id: 'c', ok: false, code: 'bad_request' }, [signedPrompt]);
+    await expect(commandOnPhone(typed, plain)).resolves.toEqual({ kind: 'sent_as_message' });
+    expect(plain.sent).toEqual(['ls  then stop']);
+  });
+
+  it('the Mac refuses a sealed instruction for its length or its hidden characters → their own lines (no message, no retry)', async () => {
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'rejected', result_code: 'instruct_too_long' })]);
+    const d = shell(CAPS, [sealedAnswer]);
+    await expect(commandOnPhone(typed, d)).resolves.toEqual({ kind: 'too_long' });
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'rejected', result_code: 'instruct_hidden_text' })]);
+    const d2 = shell(CAPS, [sealedAnswer]);
+    await expect(commandOnPhone(typed, d2)).resolves.toEqual({ kind: 'hidden_text' });
+    expect(d.sent.concat(d2.sent)).toEqual([]);
+  });
+
+  it('an end the web cannot see → «unknown» holds the SAME body and key (no words held); [결과 확인] posts them again — no new sign, no new key, no words in the post', async () => {
+    currentFetch = async () => { throw new Error('offline'); };
+    const d = shell(CAPS, [sealedAnswer]);
+    const first = await commandOnPhone(typed, d);
+    expect(first.kind).toBe('unknown');
+    const pending = (first as { pending: Pending }).pending;
+    expect(pending.key).toBe('idem-1');
+    expect(pending.sealed).toBe(true);
+    expect(JSON.stringify(pending)).not.toContain(MARK); // the web keeps no copy of the words in what it holds for [결과 확인]
+    expect(Object.keys(pending.body).sort()).toEqual(['conversation_id', 'envelope', 'kind', 'phone_key_id', 'session_key']);
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+    await expect(checkCommand(AGENT, pending, d)).resolves.toEqual({ kind: 'sent_now' });
+    expect(signCalls(d)).toHaveLength(1);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.idempotency_key).toBe('idem-1');
+    expect(body.envelope).toEqual(ENV);
+    expect(calls.map((c) => String(c.init?.body ?? '')).join('')).not.toContain(MARK);
+  });
+
+  it('the server refuses the envelope (422 envelope_header_mismatch · another 4xx) → «failed» (nothing was made); a 5xx → unknown (kept, followed with the same key)', async () => {
+    server(json(422, { error: { code: 'envelope_header_mismatch' } }));
+    await expect(commandOnPhone(typed, shell(CAPS, [sealedAnswer]))).resolves.toEqual({ kind: 'failed' });
+    server(json(502));
+    const r = await commandOnPhone(typed, shell(CAPS, [sealedAnswer]));
+    expect(r.kind).toBe('unknown');
   });
 });

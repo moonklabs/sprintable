@@ -274,6 +274,66 @@ describe('[4534] the strip inside the phone app', () => {
     expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'stop_session', session_key: 's-9', signed: 'S', phone_key_id: 'k-1' });
   });
 
+  // story 4976 A3: a shell that can seal — the instruction goes as an envelope; the words are in no byte of the post; a turn that has ended is NOT turned into a message, and what was written stays
+  it('[4976] a sealing shell: the post is the envelope (no words) · «… 단계를 마치면 바로 들어가요» · and a session that cannot take it → «보내지 않았어요» line, no message post, the words stay', async () => {
+    vi.useFakeTimers();
+    const ENV = { v: 1, kind: 'send_prompt', command_id: 'k', ct: 'AAAA' };
+    let signs = 0;
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown>) => {
+      if (type === 'shell.caps') return { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+      signs += 1;
+      expect(args).toMatchObject({ kind: 'send_prompt', text: 'secret words 4976', conversation_id: CONV, sealed: true });
+      expect(typeof args.idempotency_key).toBe('string');
+      return signs === 1 ? { id: 'w', ok: true, sealed: true, envelope: ENV, phone_key_id: 'k-1', session_key: 's-9', conversation_id: CONV } : { id: 'w', ok: false, code: 'not_working' };
+    });
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: 'after_step' })]);
+    sessionView = { ...sessionView, sealed_prompt: true }; // this computer's app says it opens a sealed instruction
+    await render();
+    const type = async (text: string) => {
+      await press(ko.button.instruct);
+      const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
+      await press(ko.sheet.send);
+    };
+    await type('secret words 4976');
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
+    const posted = calls.filter((c) => c.init?.method === 'POST');
+    expect(posted).toHaveLength(1);
+    const body = JSON.parse(posted[0]!.init!.body as string);
+    expect(body).toMatchObject({ kind: 'send_prompt', conversation_id: CONV, session_key: 's-9', phone_key_id: 'k-1', envelope: ENV });
+    expect(body).not.toHaveProperty('text');
+    expect(body).not.toHaveProperty('signed');
+    expect(String(posted[0]!.init!.body)).not.toContain('secret words');
+    // the session cannot take the next one: said, not sent, no message; the words stay in the box
+    await type('secret words 4976');
+    expect(commandLine()?.textContent).toBe(ko.command.sealedNotTaken);
+    expect(calls.filter((c) => String(c.url).includes('/messages'))).toEqual([]);
+    await press(ko.button.instruct);
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toBe('secret words 4976');
+  });
+
+  it('[4976] a shell that can seal but a computer that has NOT said its app opens one → the plain road (the session view\'s `sealed_prompt` is what lets a sealed instruction be made)', async () => {
+    vi.useFakeTimers();
+    phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: { sealed_prompt: 1 } } : { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'go on' }));
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    for (const flag of [undefined, false, null]) {
+      sessionView = { ...sessionView, sealed_prompt: flag as never };
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      await press(ko.button.instruct);
+      const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'go on'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+      await press(ko.sheet.send);
+    }
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toEqual([]);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').every((c) => !('sealed' in (c[1] as object)))).toBe(true);
+    const posted = calls.filter((c) => c.init?.method === 'POST');
+    expect(posted.length).toBeGreaterThan(0);
+    expect(posted.every((c) => JSON.parse(c.init!.body as string).signed === 'S')).toBe(true);
+  });
+
   it('[지금 지시]: the sheet (title · note) → [보내기] → the shell gets the text and this conversation → «… 단계를 마치면 바로 들어가요» · the draft goes', async () => {
     vi.useFakeTimers();
     const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: 'after_step' })]);
@@ -336,7 +396,7 @@ describe('[4534] the strip inside the phone app', () => {
     await press(ko.button.checkResult);
     await poll(1);
     expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
-    expect(phoneCall).toHaveBeenCalledTimes(1);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(1); // (an instruction first asks the shell what it can do — `shell.caps` — that is a read, not a signature)
     expect(posts().length).toBe(1);
     expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
   });

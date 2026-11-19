@@ -59,6 +59,8 @@ interface View {
   // story #4534 (0438 · PO 06:30Z): the daemon says whether an instruction can go into this session's turn — [지금 지시] only when
   // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
   instruct_now?: boolean | null;
+  // story 4976 (A3 · Kadir 871 ⓓ): this computer's app OPENS a sealed instruction (it said so itself) — a sealed instruction is made only when true; absent / false / null → the plain road (an app from before opens none)
+  sealed_prompt?: boolean | null;
   limit?: SessionLimit | null;
   // story 4686 (AC2): what it really runs on — model · whether the profile named it · thinking depth · account (the server sends it only while
   // the computer is heard and the session lives; an older server sends none → no line)
@@ -302,7 +304,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
     settle(verb, await commandOnPhone(
       verb === 'stop' ? { agentId, kind: 'stop_session' }
         : verb === 'end' ? { agentId, kind: 'end_session' }
-          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId }, deps,
+          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId, computerOpensSealed: view.sealed_prompt === true }, deps,
     ));
   };
   // [결과 확인]: the same command followed again — no signature, no sheet
@@ -426,6 +428,8 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_as_message': return line(t('command.sentAsMessage'));
     case 'sent_as_message_not_now': return line(t('command.sentAsMessageNotNow'));
     case 'too_long': return line(t('sheet.tooLong'));
+    // story 4976 A3: a sealed instruction the session could not take — not sent, not turned into a message, the words stay in the box
+    case 'sealed_not_taken': return line(t('command.sealedNotTaken'));
     // story 4633 (Yuna 4633-hidden-text-copy.md · web line): refused for invisible characters — nothing went in, nothing was sent as a message
     case 'hidden_text': return line(t('command.hiddenText'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
