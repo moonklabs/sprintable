@@ -336,7 +336,7 @@ describe('[4534] the strip inside the phone app', () => {
     await press(ko.button.checkResult);
     await poll(1);
     expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
-    expect(phoneCall).toHaveBeenCalledTimes(1);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(1); // (an instruction first asks the shell what it can do — `shell.caps` — that is a read, not a signature)
     expect(posts().length).toBe(1);
     expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
   });
