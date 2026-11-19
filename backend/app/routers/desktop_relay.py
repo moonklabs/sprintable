@@ -25,7 +25,7 @@ from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
-from app.services import desktop_changes, desktop_clock, pairing_sessions
+from app.services import desktop_changes, desktop_clock, desktop_usage, pairing_sessions
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -429,6 +429,27 @@ async def post_presence(
     await relay.touch_presence(db, setup.id, x_desktop_device_token)
     await db.commit()
     return {"ok": True}
+
+
+@router.put("/relay/usage")
+async def put_usage(
+    body: desktop_usage.UsageReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+) -> dict:
+    """story 4981 (연결 ③): the computer's agent usage — closed numbers its host read (whole percent per limit window · the reset time) or the word `unavailable` with its reason. The device is the token's own (`_device`); the body
+    names no computer. Counted per VERIFIED device, before anything is written (429 `RATE_LIMITED`). An older report than the stored one (by the host's `seen_at`) is ignored; a closed computer is refused (409). Nothing of the body is logged."""
+    from app.core.rate_limit import hit_person_limits
+
+    retry = hit_person_limits("desktop-usage", str(setup.id), desktop_usage.USAGE_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    try:
+        written = await desktop_usage.apply_usage(db, setup, body, x_desktop_device_token)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"ok": True, "written": written}
 
 
 @router.post("/relay/permission-requests")

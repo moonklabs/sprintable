@@ -1030,6 +1030,11 @@
 "kind": "unknown"
 },
 {
+"method": "PUT",
+"path": "/api/v2/desktop/relay/usage",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/remote-control",
 "kind": "object"

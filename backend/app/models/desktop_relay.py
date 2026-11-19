@@ -214,6 +214,34 @@ class DesktopClockView(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class DesktopUsage(Base):
+    """story 4981 (0487): the computer's last known agent usage, one row per (computer, CLI, account) — closed numbers the host read (see the migration). Written only through the device's own
+    `PUT /relay/usage`; `seen_at` is the host's time (the phone's «마지막으로 본 지»), `reported_at` the server's. Never logged."""
+
+    __tablename__ = "desktop_usage"
+    __table_args__ = (
+        CheckConstraint("runtime IN ('claude', 'codex')", name="ck_desktop_usage_runtime"),
+        CheckConstraint("account ~ '^[a-z0-9]{8,32}$'", name="ck_desktop_usage_account"),
+        CheckConstraint("state IN ('windows', 'unavailable')", name="ck_desktop_usage_state"),
+        CheckConstraint("why IS NULL OR why IN ('api_key', 'not_read')", name="ck_desktop_usage_why"),
+        # the two shapes are the only ones: numbers (no reason · 1–4 windows) or the word (a reason · no numbers) — the same text as the migration (0487)
+        CheckConstraint(
+            "(state = 'windows' AND why IS NULL AND jsonb_typeof(windows) = 'array' AND jsonb_array_length(windows) BETWEEN 1 AND 4)"
+            " OR (state = 'unavailable' AND why IS NOT NULL AND windows = '[]'::jsonb)",
+            name="ck_desktop_usage_shape",
+        ),
+    )
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True)
+    runtime: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, primary_key=True)  # an opaque short id of the CLI's settings folder (never a path)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    why: Mapped[str | None] = mapped_column(Text, nullable=True)
+    windows: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class DesktopChangesRead(Base):
     """story #4951 (0477 · ①a · Kadir lens A · E · I): one short-lived read of a session folder's changed-file LIST. Who asked (`viewer_id`), which computer (`setup_id`) and
     the command it travels in are fixed when the row is made; the computer's list (`payload`: names · a status word · line counts — no content) is written once and is
