@@ -34,11 +34,11 @@ function deps(look: Response[], ask: Response = json(201, { command_id: COMMAND 
   };
   return { d, calls };
 }
-async function open(d: ChangesDeps, locale: 'ko' | 'en' = 'ko', device: string | null = 'SYJ-MacBook-Pro') {
+async function open(d: ChangesDeps, locale: 'ko' | 'en' = 'ko', device: string | null = 'SYJ-MacBook-Pro', filesHref?: string | null) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <AgentChangesSheet agentId="a-1" sessionKey="s-1" deviceName={device} open onOpenChange={() => {}} deps={d} />
+        <AgentChangesSheet agentId="a-1" sessionKey="s-1" deviceName={device} filesHref={filesHref} open onOpenChange={() => {}} deps={d} />
       </NextIntlClientProvider>,
     );
   });
@@ -46,6 +46,35 @@ async function open(d: ChangesDeps, locale: 'ko' | 'en' = 'ko', device: string |
 }
 const q = (sel: string) => document.body.querySelector(sel);
 const rows = () => [...document.body.querySelectorAll('[data-testid="agent-changes-row"]')];
+
+vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
+
+describe('AgentChangesSheet — the files line (story 4983 · PO 11-20)', () => {
+  const HREF = '/phone-files?setup_id=11111111-2222-4333-8444-555555555555&agent_id=a-1';
+  it('the LAST thing in the body is one line — «이 프로젝트 파일 전부 보기» (en: See all files of this project) — to exactly the address it was given', async () => {
+    const { d } = deps([json(200, { state: 'done', code: 'ok', more: true, total: 9, files: [file()] })]);
+    await open(d, 'ko', 'SYJ-MacBook-Pro', HREF);
+    const link = q('[data-testid="agent-changes-files"]') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(HREF);
+    expect(link.textContent).toBe(koMessages.chats.agentSession.changes.allFiles);
+    const body = q('[data-testid="agent-changes-body"]')!;
+    expect(body.lastElementChild?.getAttribute('data-testid')).toBe('agent-changes-files-line'); // below the rows and the «more» line
+    expect(document.body.querySelectorAll('[data-testid="agent-changes-files"]')).toHaveLength(1);
+  });
+  it('in English too, and it stands while the list is loading or has failed (the line does not wait for the list)', async () => {
+    const { d } = deps([json(409, { error: { code: 'device_unreachable' } })], json(409, { error: { code: 'device_unreachable' } }));
+    await open(d, 'en', 'Mac', HREF);
+    expect((q('[data-testid="agent-changes-files"]') as HTMLElement).textContent).toBe(enMessages.chats.agentSession.changes.allFiles);
+  });
+  it('without an address (a browser · an older app · no computer) there is no line at all', async () => {
+    const { d } = deps([json(200, { state: 'done', code: 'ok', more: false, total: 0, files: [] })]);
+    await open(d, 'ko', 'Mac', null);
+    expect(q('[data-testid="agent-changes-files"]')).toBeNull();
+    expect(q('[data-testid="agent-changes-files-line"]')).toBeNull();
+    await open(d, 'ko', 'Mac', undefined);
+    expect(q('[data-testid="agent-changes-files-line"]')).toBeNull();
+  });
+});
 
 describe('AgentChangesSheet (story 4951 ①c)', () => {
   it('draws one row per file: the name, the numbers, a status chip — a rename shows both names, a binary file says so, a hidden one has no name at all', async () => {

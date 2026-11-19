@@ -168,7 +168,7 @@ const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
   '/verify-email': '로그인 흐름', '/mfa': '로그인 흐름', '/auth/reset-required': '로그인 흐름', '/invite': '초대 흐름', '/invite/accept': '초대 흐름', '/unsubscribe': '메일 수신 거부 링크',
   '/terms': '공개 약관(바닥글)', '/privacy': '공개 약관(바닥글)', '/refund-policy': '공개 약관(바닥글)', '/native/continue': '앱 로그인 흐름', '/native/oauth-return': '앱 로그인 흐름',
   '/session-unconfirmed': '세션 확인 실패 때 프록시가 rewrite로 보여 주는 공개 «다시 시도» 화면(주소로 바로 와도 공개 · 메뉴 입구 없음이 맞음)',
-  '/phone-landing': '폰 연결 흐름', '/phone-start': '폰 연결 흐름', '/onboarding': '온보딩 흐름', '/onboarding/first-instruction': '온보딩 흐름', '/share/[token]': '공유 링크',
+  '/phone-landing': '폰 연결 흐름', '/phone-start': '폰 연결 흐름', '/phone-files': '폰 연결 흐름', '/onboarding': '온보딩 흐름', '/onboarding/first-instruction': '온보딩 흐름', '/share/[token]': '공유 링크',
   // 다른 화면 안에서 열리는 화면(상세 · 흐름의 한 단계) — 입구는 부모 화면의 본문 링크
   '/chats/[conversation_id]': '«대화» 안에서 열리는 방', '/gates/[id]': '«결재» 항목 상세', '/organization/workforce/[id]': '«에이전트» 목록의 상세',
   '/[ws]/[proj]/docs/[slug]': '«문서» 목록의 상세', '/[ws]/[proj]/docs/[slug]/view': '문서 보기', '/[ws]/[proj]/goals/[id]': '«목표» 목록의 상세', '/[ws]/[proj]/loops/[id]': '«실행» 목록의 상세',
