@@ -28,6 +28,9 @@ BAD = [
     ("", "empty"), ("a" * (LABEL_MAX + 1), "too_long"), ("😀" * (LABEL_MAX + 1), "too_long"),
     ("a/b", "bad_chars"), ("a\\b", "bad_chars"), ("a\nb", "bad_chars"), ("a\u0000b", "bad_chars"), ("a\u202eb", "bad_chars"), ("a\u2066b", "bad_chars"),
     ("a\u200bb", "bad_chars"), ("\ufeffa", "bad_chars"), (" a", "bad_chars"), ("a ", "bad_chars"), ("a\u2028b", "bad_chars"), ("a\u0085b", "bad_chars"),
+    # codex 11-20: format characters the first table did not name, a soft hyphen, private use, and slashes that only LOOK like a slash (fullwidth · division · fraction · diagonals)
+    ("Acme\u2060Corp", "bad_chars"), ("a\u00adb", "bad_chars"), ("a\ue000b", "bad_chars"), ("a\u180eb", "bad_chars"),
+    ("Acme\uff0fCorp", "bad_chars"), ("a\uff3cb", "bad_chars"), ("a\u2215b", "bad_chars"), ("a\u2044b", "bad_chars"), ("a\u29f8b", "bad_chars"), ("a\u2571b", "bad_chars"),
 ]
 
 
@@ -89,6 +92,16 @@ async def test_04_a_bad_label_stops_the_whole_report_nothing_of_it_is_written(wo
 
 
 @pytest.mark.parametrize("bad", [5, True, ["a"], {"a": 1}, 1.5])
+async def test_04b_a_refused_report_never_carries_the_name_back(world):
+    async with _client() as c:
+        device, _agent = await _computer(c, "d4986 mac echo")
+        r = await c.put(PUT, json={"usage": [_entry(label="SECRETNAME/x")]}, headers=_tok(device["device_token"]))
+        assert r.status_code == 422, r.text
+        assert "SECRETNAME" not in r.text and '"input"' not in r.text, r.text          # (codex 11-20: the default 422 carries each error's `input`)
+        r = await c.put(PUT, json={"usage": [{**_entry(), "account": "SECRETACCT/path"}]}, headers=_tok(device["device_token"]))
+        assert r.status_code == 422 and "SECRETACCT" not in r.text, r.text            # … and no other field of this report either
+
+
 async def test_05_a_label_that_is_not_a_text_is_refused(world, bad):
     async with _client() as c:
         device, _agent = await _computer(c, "d4986 mac type")
