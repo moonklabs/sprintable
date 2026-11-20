@@ -5655,6 +5655,7 @@
           "session_gone": "This session is no longer on that computer",
           "expired": "The list expired — reload it",
           "no_folder": "The session's working folder was not found",
+          "not_enabled": "Viewing files from a phone is turned off on this computer",
           "not_a_repo": "This folder is not a git repository",
           "not_repo_root": "This folder is not the top folder of its git repository",
           "unsafe_repo_config": "This repository's git settings name a program to run, so it was not read",
