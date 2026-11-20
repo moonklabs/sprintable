@@ -1014,6 +1014,19 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert sum("drop_index" in h and "ix_desktop_commands_file_list_by" in h for h in file_read) == 1 and sum("create_index" in h and "ix_desktop_commands_file_by" in h for h in file_read) == 1, file_read
     up0491 = (_ROOT / "backend/alembic/versions/0491_desktop_file_read_kind.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table", up0491), "0491's upgrade() changes no row, no column and no table"
+    # story 4988 (P8): 0492 is 0491's shape once more — one more word in the command-kind CHECK (`file_download`: dropped and made again; an old revision never writes the new word) and the person's ask-pause index made again over the three
+    # file words (the old revision never names it) — plus what a download needs: TWO counters on `desktop_file_reads` (`chunks_written`, `chunks_read`: NOT NULL with a CONSTANT default 0 — no table rewrite, and a running old revision never names them,
+    # so every row it writes has 0 and 0), ONE CHECK over them (`chunks_read >= 0 AND chunks_read <= chunks_written AND chunks_written <= 57`: the table holds a few rows of the last ten minutes, so the scan under the CHECK's brief lock is
+    # nothing, and 0 ≤ 0 ≤ 0 passes) and a NEW table `desktop_file_chunks` (hanging from the request's row by a cascading foreign key — nothing existing is altered). The reading lists exactly these seven lines. No row is changed, nothing is dropped or renamed.
+    file_download = [h for h in hits if h.startswith("0492_")]
+    assert len(file_download) == 7, file_download
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in file_download) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in file_download), file_download
+    assert sum("drop_index" in h and "ix_desktop_commands_file_by" in h for h in file_download) == 1 and sum("create_index" in h and "ix_desktop_commands_file_by" in h for h in file_download) == 1, file_download
+    assert sum("add_column" in h and "nullable=False" in h and 'server_default="0"' in h and '"desktop_file_reads"' in h for h in file_download) == 2, "the two counters: NOT NULL with a constant default, on the short-lived table"
+    assert sum("create_check_constraint" in h and "ck_desktop_file_reads_chunks" in h for h in file_download) == 1, file_download
+    up0492 = (_ROOT / "backend/alembic/versions/0492_desktop_file_download.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|drop_column|alter_column|rename_|drop_table", up0492), "0492's upgrade() changes no row, drops nothing and renames nothing"
+    assert up0492.count("op.create_table(") == 1 and '"desktop_file_chunks"' in up0492 and 'ondelete="CASCADE"' in up0492, "the one new table, hanging from the request's row"
     # story 4976 (A5): 0489 is FOUR lines of upgrade() the reading lists: ONE data `UPDATE` (the backfill: a computer whose capabilities already hold `sealed_prompt` gets `sealed_prompts_at = now()`; restricted by `capabilities @>` to those rows, row locks only —
     # a few computers), the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_prompts_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds
     # (`sealed_prompts_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never names the column, so every UPDATE it makes to a `desktop_setups` row leaves the value as it was
@@ -1034,7 +1047,7 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
     up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_"))]
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

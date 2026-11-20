@@ -684,6 +684,30 @@ async def put_files(command_id: uuid.UUID, request: Request, setup: DesktopSetup
     return {"bytes": size}
 
 
+@router.put("/relay/files/{command_id}/chunks/{i}")
+async def put_files_chunk(command_id: uuid.UUID, request: Request, i: int = Path(ge=0, lt=57), setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4988 (P8): chunk i of the computer's SEALED answer to a DOWNLOAD it was told to do — put once, in order, at most a few ahead of what the phone has read (409 `files_chunks_ahead`: put it again a moment later). The body is read and judged here
+    so that no refusal (and no log, no error report) ever carries what it held; it is an envelope the server cannot open: a size class, nothing else."""
+    from app.services import desktop_files
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_files.ANSWER_BODY_MAX:
+            raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_files.ANSWER_BODY_MAX:
+                raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        size = await desktop_files.write_chunk(db, setup, command_id, i, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer)
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"bytes": size}
+
+
 @router.put("/relay/pairings")
 async def put_pairings(body: PairingSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     from app.services import agent_permissions

@@ -676,9 +676,13 @@ def test_15_the_command_words_of_the_code_and_the_migration_are_the_same():
 
     from app.models.desktop_relay import COMMAND_KINDS
 
-    # the CHECK as the LATEST migration that changed it leaves it (0491 added `file_read`): the code's words and that migration's are the same
-    spec = util.spec_from_file_location("m0491", Path(__file__).parent.parent / "alembic" / "versions" / "0491_desktop_file_read_kind.py")
+    # the CHECK as the LATEST migration that changed it leaves it (0492 added `file_download`): the code's words and that migration's are the same
+    spec = util.spec_from_file_location("m0492", Path(__file__).parent.parent / "alembic" / "versions" / "0492_desktop_file_download.py")
     mod = util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert tuple(mod._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS
-    assert tuple(mod._OLD) + ("file_read",) == tuple(COMMAND_KINDS), "0491 adds exactly one word to what 0488 left"
+    assert tuple(mod._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS and "file_download" in COMMAND_KINDS
+    assert tuple(mod._OLD) + ("file_download",) == tuple(COMMAND_KINDS), "0492 adds exactly one word to what 0491 left"
+    spec = util.spec_from_file_location("m0491", Path(__file__).parent.parent / "alembic" / "versions" / "0491_desktop_file_read_kind.py")
+    old = util.module_from_spec(spec)
+    spec.loader.exec_module(old)
+    assert tuple(old._NEW) == tuple(mod._OLD) and tuple(old._OLD) + ("file_read",) == tuple(old._NEW), "0491 adds exactly one word to what 0488 left, and 0492 starts where 0491 ended"

@@ -900,8 +900,18 @@
 "kind": "unknown"
 },
 {
+"method": "DELETE",
+"path": "/api/v2/desktop/computers/{}/files/{}",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/computers/{}/files/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/files/{}/chunks/{}",
 "kind": "unknown"
 },
 {
@@ -967,6 +977,11 @@
 {
 "method": "PUT",
 "path": "/api/v2/desktop/relay/files/{}",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/files/{}/chunks/{}",
 "kind": "unknown"
 },
 {

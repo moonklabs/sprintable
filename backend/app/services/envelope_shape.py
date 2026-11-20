@@ -18,12 +18,13 @@ ENVELOPE_KINDS = frozenset({
     "key_notice", "migrate_approve", "record_handoff", "direct_open", "direct_offer", "direct_close",
     "file_list", "file_result",  # story 4983 (P5): a phone's request to list a folder of a project of its computer, and the computer's answer
     "file_read",  # story 4983 (P6): a phone's request to open one file of a project of its computer (its answer is a `file_result` too)
+    "file_download",  # story 4988 (P8): a phone's request to download one file of a project of its computer (its answer is a train of `file_result` chunks)
 })
 MAX_CT_BYTES = 256 * 1024
 # a card's words are a few hundred characters and a preview of at most 2400 — a card envelope is small (the host pads to a fixed width inside this cap)
 # story 4976: a phone's instruction into the running turn is at most INSTRUCT_NOW_MAX (400) characters — a few KiB at 4 bytes a character; the phone pads to a fixed width inside this cap
 # story 4983: a files request (a list or an open) is a short list of names (the padded frame is at most 4096 bytes, contract `envelope.request.ct_max_bytes` · `envelope.request_read.ct_max_bytes`); its answer is the full cap
-MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024}
+MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024, "file_download": 4 * 1024}
 MAX_TO = 16
 MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1
