@@ -289,6 +289,10 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # (resolve_member of the path org · role owner · a person's session)
     # story #4951 — the device's «changed files» list: a row of THIS device (command id AND the device token's own setup id), written once; another computer's command id is «not found» — no project entity
     "app.routers.desktop_relay:put_files": "the device token's own files row (command id + the token's setup id, written once; another computer's id is not found) — services.desktop_files.write_answer; the project access is judged on the person's routes (ask and read)",
+    # story 4988 — a DOWNLOAD's chunks: the device token's own files row again (command id + the token's setup id; in order, once each, a few ahead of the phone at most) — services.desktop_files.write_chunk; and the person's own [done / give up] of
+    # their own request (the row is selected by command id AND the asker's own id AND the computer's id — another person's or another computer's id deletes nothing) — services.desktop_files.finish_download
+    "app.routers.desktop_relay:put_files_chunk": "the device token's own files row (command id + the token's setup id, one chunk at a time, in order; another computer's id is not found) — services.desktop_files.write_chunk; the project access is judged on the person's routes",
+    "app.routers.desktop_files:delete_desktop_files": "the asker's own request row (command id + the caller's own user id + the computer's id; any other id deletes nothing) — services.desktop_files.finish_download; the project is judged when the request is asked and every time a chunk is read",
     "app.routers.desktop_relay:put_changes": "the device token's own read row (command id + the token's setup id, written once; another computer's id is not found) — services.desktop_changes.write_result",
     "app.routers.remote_control:put_remote_control": "org-level setting, owner of the path org only (routers.remote_control._person_of + role check)",
     # story #4533 — [빼기] one phone ↔ computer pair: the phone is selected in the caller's org (remote_devices.org_id) and must be

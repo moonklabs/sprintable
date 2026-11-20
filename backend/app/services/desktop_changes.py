@@ -408,7 +408,7 @@ async def reject_stale_commands(db: AsyncSession, commands: list[DesktopCommand]
     now = now or _now()
     keep: list[DesktopCommand] = []
     for c in commands:
-        if c.kind in ("read_changes", "file_list", "file_read") and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:  # (story 4983: a files request waits no longer than a changed-files read)
+        if c.kind in ("read_changes", "file_list", "file_read", "file_download") and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:  # (story 4983: a files request waits no longer than a changed-files read)
             c.state, c.result_code, c.finished_at = "rejected", "expired", now
         else:
             keep.append(c)

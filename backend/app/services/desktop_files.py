@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.desktop_relay import DesktopCommand, DesktopFileRead
+from app.models.desktop_relay import DesktopCommand, DesktopFileChunk, DesktopFileRead
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_changes import OPEN_COMMAND_STATES, lines_of_machine, may_read, take_limit_locks
 from app.services.desktop_relay import DesktopRelayError
@@ -37,7 +37,9 @@ PER_PERSON_INTERVAL = timedelta(seconds=1)  # a person taps through folders: one
 POLL_INTERVAL = timedelta(milliseconds=500)  # one look at a pending request per half second
 ANSWER_BODY_MAX = 400 * 1024  # an answer envelope as JSON text: the sealed body is at most 256 KiB + the tag (≈350 KiB as base64url) + the header — a full-size legal answer passes; over this is refused before it is parsed
 ASK_BODY_MAX = 16 * 1024  # a files request as JSON text: the padded frame is at most 4 KiB + the tag (≈5.5 KiB as base64url) + the header — over this is refused before it is parsed
-FILE_ASK_KINDS = ("file_list", "file_read")  # the kinds of a files request: the envelope's own header says which (story 4983 P6)
+FILE_ASK_KINDS = ("file_list", "file_read", "file_download")  # the kinds of a files request: the envelope's own header says which (story 4983 P6 · story 4988 P8: a download)
+CHUNKS_MAX = 57  # contract `download.limits.chunks_max`: ceil(8 MiB / 144 KiB) — a download is at most this many chunks (the migration's CHECKs say the same number)
+CHUNKS_AHEAD_MAX = 4  # contract `download.limits.chunks_ahead_max`: the computer may be at most this many chunks ahead of the phone (what the server holds unread, ≈ 1 MiB sealed)
 KINDS = (*FILE_ASK_KINDS, "file_result")
 
 
@@ -144,6 +146,10 @@ async def create_ask(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UU
     if last is not None and now - last < PER_PERSON_INTERVAL:
         raise DesktopRelayError(429, "files_too_fast", "wait a moment before asking again", detail={"retry_after": 1})
     lines = lines_of_machine(setup)
+    # story 4988: a person's earlier DOWNLOAD that ENDED with chunks nobody read (the phone was closed meanwhile) is replaced by this ask — what the server keeps for a person who asks again and again is one such leftover, never ten minutes of
+    # unread chunks per press. (A download that is still open is not touched: the computer's own slot below says «busy».)
+    ended = select(DesktopCommand.id).where(DesktopCommand.kind == "file_download", DesktopCommand.state.in_(("done", "failed", "rejected")))
+    await db.execute(delete(DesktopFileRead).where(DesktopFileRead.setup_id.in_(lines), DesktopFileRead.viewer_id == user_id, DesktopFileRead.command_id.in_(ended)))
     busy = (await db.execute(
         select(func.count()).select_from(DesktopFileRead).join(DesktopCommand, DesktopCommand.id == DesktopFileRead.command_id)
         .where(DesktopFileRead.setup_id.in_(lines), DesktopFileRead.payload.is_(None), DesktopCommand.state.in_(OPEN_COMMAND_STATES))
@@ -206,6 +212,8 @@ async def write_answer(db: AsyncSession, setup: DesktopSetup, command_id: uuid.U
     )).scalar_one_or_none()
     if row is None or cmd is None:
         raise DesktopRelayError(404, "files_read_not_found", "no such request on this device")
+    if cmd.kind == "file_download":  # a download is answered in chunks (`write_chunk`): the one-answer road is not its road
+        raise DesktopRelayError(409, "files_use_chunks", "a download is answered in chunks")
     if row.expires_at <= _now():
         await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))
         raise DesktopRelayError(404, "files_read_not_found", "no such request on this device")
@@ -246,7 +254,7 @@ async def read_answer(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         raise DesktopRelayError(429, "files_polled_too_fast", "ask again in a moment", detail={"retry_after": 1})
     cmd = (await db.execute(select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup_id, DesktopCommand.kind.in_(FILE_ASK_KINDS)).with_for_update())).scalar_one_or_none()
     setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
-    if cmd is None or setup is None:
+    if cmd is None or setup is None or cmd.kind == "file_download":  # (a download is read chunk by chunk: `read_chunk`)
         raise not_found
     row = (await db.execute(  # the row afresh, under the command's lock (the gap is judged again: two looks that arrived together cannot both pass it)
         select(DesktopFileRead).where(DesktopFileRead.command_id == command_id).with_for_update().execution_options(populate_existing=True)
@@ -280,6 +288,118 @@ async def read_answer(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         raise not_found
     logger.info("desktop files read: viewer=%s setup=%s command=%s", user_id, setup.id, command_id)  # ids only
     return {"state": "done", "code": cmd.result_code, "envelope": taken["envelope"]}
+
+
+# ── ④ a download: the computer's chunks, the person's reading of them ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def write_chunk(db: AsyncSession, setup: DesktopSetup, command_id: uuid.UUID, i: int, raw: bytes) -> int:
+    """One SEALED chunk of a download (the contract's `download`): put by the computer into the request's row of THIS computer, IN ORDER (chunk i only when i chunks are already there) and never more than CHUNKS_AHEAD_MAX ahead of
+    what the phone has read (`files_chunks_ahead`: the computer waits and puts it again). Judged as an answer is — by shape and by its header (this computer · this project · the press's own key · a time near now) — and never read.
+    → the envelope's size in bytes (a size class, nothing else)."""
+    answer = parse_answer(raw)
+    env = answer.envelope
+    cmd = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup.id, DesktopCommand.kind == "file_download").with_for_update()
+    )).scalar_one_or_none()
+    await purge_expired(db)
+    row = (await db.execute(
+        select(DesktopFileRead).where(DesktopFileRead.command_id == command_id, DesktopFileRead.setup_id == setup.id).with_for_update()
+    )).scalar_one_or_none()
+    if row is None or cmd is None:
+        raise DesktopRelayError(404, "files_read_not_found", "no such request on this device")
+    if row.expires_at <= _now():
+        await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))
+        raise DesktopRelayError(404, "files_read_not_found", "no such request on this device")
+    if not may_read(setup, row.viewer_id):
+        await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))
+        raise DesktopRelayError(409, "files_viewer_gone", "the person who asked no longer pairs this computer")
+    if cmd.state not in ("delivered", "acked"):
+        raise DesktopRelayError(409, "files_command_closed", "that command is not open")
+    now_ms = int(_now().timestamp() * 1000)
+    if env["setup_id"] != str(setup.id) or env["session_key"] != session_key_of(row.project_id) or env["command_id"] != row.press_key or not _fresh(env, now_ms):
+        raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this request's")
+    if i != row.chunks_written:
+        raise DesktopRelayError(409, "files_chunk_out_of_order", "chunks are put in order, once each")
+    if row.chunks_written - row.chunks_read >= CHUNKS_AHEAD_MAX:
+        raise DesktopRelayError(409, "files_chunks_ahead", "the phone has not read the chunks already here", detail={"retry_after": 1})
+    db.add(DesktopFileChunk(command_id=command_id, i=i, payload={"envelope": env}))
+    row.chunks_written += 1
+    await db.flush()
+    return len(raw)
+
+
+async def _has_live_phone(db: AsyncSession, member_id: uuid.UUID, setup_id: uuid.UUID) -> bool:
+    """Does this person have a LIVE phone paired with this computer? The phone's key and the pairing rows are held with a SHARE LOCK until the transaction ends (the same lock `paired_phone(lock=True)` takes for an ask): a pairing removal (which locks the
+    pairing row FOR UPDATE) or a key revocation that is on its way waits for this read — or has committed before it, and then this finds nothing — so a chunk is never handed over after a pairing that was removed has committed."""
+    from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
+
+    stmt = (
+        select(RemoteDevice.id).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
+        .where(RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None), RemoteDevice.revoked_at.is_(None), RemoteDevice.member_id == member_id)
+        .limit(1).with_for_update(read=True, of=(RemoteDevice, RemoteDevicePairing))
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
+async def read_chunk(db: AsyncSession, *, user_id: uuid.UUID, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, command_id: uuid.UUID, i: int) -> dict:
+    """Chunk `i` of a download (the person's), IN ORDER: once. Reading deletes the chunk in the same statement that returns it. Not there yet: where the request stands (the person asks again); the request ended and the chunk never came:
+    that is the answer (the phone's `incomplete`) and the row goes. A row that is not THIS person's · not of THIS computer · expired · not a download · a person who lost the pairing, the seat or the project: «not found» — one answer for every reason."""
+    from app.services import remote_control
+    from app.services.desktop_commands import org_role
+    from app.services.project_auth import has_project_access
+
+    not_found = DesktopRelayError(404, "files_read_not_found", "no such request")
+    now = _now()  # (the place `i` is bounded by the route's own path rule — 0 … CHUNKS_MAX-1 — and by the table's CHECK: no third check here)
+    row = (await db.execute(select(DesktopFileRead).where(DesktopFileRead.command_id == command_id, DesktopFileRead.viewer_id == user_id, DesktopFileRead.setup_id == setup_id))).scalar_one_or_none()
+    if row is None:
+        raise not_found
+    cmd = (await db.execute(select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup_id, DesktopCommand.kind == "file_download").with_for_update())).scalar_one_or_none()
+    setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
+    if cmd is None or setup is None:
+        raise not_found
+    row = (await db.execute(
+        select(DesktopFileRead).where(DesktopFileRead.command_id == command_id).with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if row is None:
+        raise not_found
+    now = _now()
+    if row.expires_at <= now:
+        await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))
+        raise not_found
+    # the person must still have a LIVE PHONE paired with this computer (a chunk is sealed to a phone's key: a pairing that was removed since the ask leaves nobody to read it) as well as the computer's pairing, their seat, remote control and the project
+    if not (may_read(setup, user_id) and await _has_live_phone(db, member_id, setup_id) and await org_role(db, org_id, user_id) is not None and await remote_control.is_enabled(db, org_id)
+            and await has_project_access(db, user_id, row.project_id, org_id)):
+        await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))  # the pairing, the phone, the line or the seat is gone since the ask: nothing stays
+        raise not_found
+    if i != row.chunks_read:
+        raise DesktopRelayError(409, "files_chunk_out_of_order", "chunks are read in order, once each")
+    taken = (await db.execute(
+        delete(DesktopFileChunk).where(DesktopFileChunk.command_id == command_id, DesktopFileChunk.i == i).returning(DesktopFileChunk.payload)
+    )).scalar_one_or_none()
+    if taken is not None:
+        row.chunks_read += 1
+        await db.flush()
+        logger.info("desktop files chunk read: viewer=%s setup=%s command=%s i=%s", user_id, setup.id, command_id, i)  # ids only
+        return {"state": "ready", "code": cmd.result_code, "envelope": taken["envelope"]}
+    if cmd.state in ("done", "failed", "rejected"):  # the computer ended and chunk i never came: that is the answer, and the row has nothing left to hold
+        await db.execute(delete(DesktopFileRead).where(DesktopFileRead.command_id == command_id))
+        return {"state": cmd.state, "code": cmd.result_code, "envelope": None}
+    if row.polled_at is not None and now - row.polled_at < POLL_INTERVAL:  # (a look that finds nothing costs the person a 429; a look that finds a chunk never does)
+        raise DesktopRelayError(429, "files_polled_too_fast", "ask again in a moment", detail={"retry_after": 1})
+    await db.execute(update(DesktopFileRead).where(DesktopFileRead.command_id == command_id).values(polled_at=now))
+    return {"state": cmd.state, "code": cmd.result_code, "envelope": None}
+
+
+async def finish_download(db: AsyncSession, *, user_id: uuid.UUID, setup_id: uuid.UUID, command_id: uuid.UUID) -> bool:
+    """The person is done with a request (the last chunk was read) or gives it up: its row and every chunk still in it go NOW (the chunks by the foreign key). Only the asker's own row; any other id deletes nothing. → whether a row went. The caller commits."""
+    gone = (await db.execute(
+        delete(DesktopFileRead).where(
+            DesktopFileRead.command_id == command_id, DesktopFileRead.viewer_id == user_id, DesktopFileRead.setup_id == setup_id,
+            DesktopFileRead.command_id.in_(select(DesktopCommand.id).where(DesktopCommand.kind == "file_download")),  # (a list's or an open's answer is not this route's to delete)
+        ).returning(DesktopFileRead.command_id)
+    )).scalar_one_or_none()
+    return gone is not None
 
 
 # ── the queue's own ───────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -74,11 +74,11 @@ async def test_02_the_header_rules_of_a_list_are_the_rules_of_an_open(world):
         assert await _file_cmds(sid, "file_read") == []
 
 
-async def test_03_only_the_two_asking_kinds_are_taken_and_a_read_request_has_the_size_class_of_a_list(world):
+async def test_03_only_the_asking_kinds_are_taken_and_a_read_request_has_the_size_class_of_a_list(world):
     async with _client() as c:
         _d, _a, phone, sid, project = await _setup(c, "d4983r mac c")
         good = _read_body(sid, project, phone)
-        for kind in ("file_result", "send_prompt", "file_download", "approval_card", "", "File_Read"):
+        for kind in ("file_result", "send_prompt", "approval_card", "", "File_Read", "File_Download"):  # (story 4988: `file_download` is the third asking kind — its own tests are test_4988_*)
             r = await _ask(c, sid, {**good, "envelope": {**good["envelope"], "kind": kind}})
             assert r.status_code == 422, (kind, r.text)
         r = await _ask(c, sid, {**good, "envelope": {**good["envelope"], "kind": 7}})
@@ -198,10 +198,11 @@ def test_10_the_envelope_kinds_and_their_size_classes_are_held_together():
     from app.services.desktop_relay import PAYLOAD_SCHEMAS
     from app.services.envelope_shape import ENVELOPE_KINDS, MAX_CT_BYTES, MAX_CT_BYTES_BY_KIND
 
-    assert FILE_ASK_KINDS == ("file_list", "file_read") and set(FILE_ASK_KINDS) <= set(COMMAND_KINDS) and set(FILE_ASK_KINDS) <= ENVELOPE_KINDS
-    assert MAX_CT_BYTES_BY_KIND["file_read"] == MAX_CT_BYTES_BY_KIND["file_list"] == 4 * 1024 and "file_result" not in MAX_CT_BYTES_BY_KIND and MAX_CT_BYTES == 256 * 1024
+    assert FILE_ASK_KINDS == ("file_list", "file_read", "file_download") and set(FILE_ASK_KINDS) <= set(COMMAND_KINDS) and set(FILE_ASK_KINDS) <= ENVELOPE_KINDS
+    assert MAX_CT_BYTES_BY_KIND["file_download"] == MAX_CT_BYTES_BY_KIND["file_read"] == MAX_CT_BYTES_BY_KIND["file_list"] == 4 * 1024 and "file_result" not in MAX_CT_BYTES_BY_KIND and MAX_CT_BYTES == 256 * 1024
     assert PAYLOAD_SCHEMAS["file_read"] is PAYLOAD_SCHEMAS["file_list"], "an open names exactly what a list names: the project and the sealed request"
     assert set(PAYLOAD_SCHEMAS["file_read"].model_fields) == {"project_id", "envelope"}
+    assert PAYLOAD_SCHEMAS["file_download"] is PAYLOAD_SCHEMAS["file_list"], "a download names exactly what a list names (story 4988)"
 
 
 async def test_11_an_answer_row_is_only_ever_for_a_files_command_the_kind_filters_hold_on_both_roads(world):

@@ -19,7 +19,8 @@ from app.core.database import Base
 # story #4951 (0477 · ①a): `read_changes` — the computer's pairing person asks for the LIST of changed files of one session's folder (names · status word · line counts, never content); payload exactly {session_key}
 # story 4983 (0488 · P5): `file_list` — a person's SEALED request to list a folder of a project on their own computer; payload exactly {project_id, envelope} (no session, no path — the computer maps the project to a folder of its own)
 # story 4983 (0491 · P6): `file_read` — the same road to OPEN one file of a project (text or a small picture); payload exactly the same {project_id, envelope}: the folder and the file's name are inside the sealed request
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read")
+# story 4988 (0492 · P8): `file_download` — the same road to DOWNLOAD one file (up to 8 MiB, as sealed chunks); payload exactly the same {project_id, envelope}
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -282,6 +283,7 @@ class DesktopFileRead(Base):
     __tablename__ = "desktop_file_reads"
     __table_args__ = (
         CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_file_reads_written"),
+        CheckConstraint("chunks_read >= 0 AND chunks_read <= chunks_written AND chunks_written <= 57", name="ck_desktop_file_reads_chunks"),  # story 4988 (0492)
         Index("ix_desktop_file_reads_expires_at", "expires_at"),
         Index("ix_desktop_file_reads_setup_created", "setup_id", "created_at"),
     )
@@ -296,6 +298,22 @@ class DesktopFileRead(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4988 (0492 · P8): a DOWNLOAD's chunks are put (`chunks_written`) and taken (`chunks_read`) in order; the server holds at most CHUNKS_AHEAD_MAX unread ones (a `file_list`/`file_read` row keeps both at 0)
+    chunks_written: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    chunks_read: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+class DesktopFileChunk(Base):
+    """story 4988 (0492 · P8): one SEALED chunk of a download (`payload` = {"envelope": …}: the server cannot open it — no name, no word, no byte of the file). Put by the computer once, deleted the moment the person reads it; it hangs from its
+    request's row (`desktop_file_reads.command_id`, ON DELETE CASCADE) so every end of that row takes its chunks with it."""
+
+    __tablename__ = "desktop_file_chunks"
+    __table_args__ = (CheckConstraint("i >= 0 AND i < 57", name="ck_desktop_file_chunks_i"),)
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_file_reads.command_id", ondelete="CASCADE"), primary_key=True)
+    i: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    written_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DesktopChangesAudit(Base):
