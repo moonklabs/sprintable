@@ -7702,7 +7702,7 @@
         "afterTitle": "After the move",
         "afterLogin": "Sign in to {tools} on this computer yourself — the sign-in is not carried over",
         "afterOldComputer": "An agent that worked on another computer stops taking instructions there once this computer is connected",
-        "afterMemo": "The last handoff note shows up as a reference when the agent first starts work here",
+        "afterMemo": "The last handoff is passed on to this computer's agent as a reference when sessions are started with Start all sessions on a phone",
         "runningNote": "If you leave, the move carries on on this computer.",
         "failureNotAdminTitle": "You need to be an organization admin to move agents",
         "failureNotAdminBody": "This account isn't an admin of this organization. Ask an admin to move them from this screen, or open it again after you get admin rights.",

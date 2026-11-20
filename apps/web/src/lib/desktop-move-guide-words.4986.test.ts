@@ -34,6 +34,17 @@ describe('[SID:4986] the move guide\'s words', () => {
     expect(FORBIDDEN_EN.some((re) => re.test('Move your account'))).toBe(true);
     expect(FORBIDDEN_EN.some((re) => re.test('We log you in'))).toBe(true);
   });
+  it('the memo line uses the web\'s own names — «인계» / handoff (the phone card\'s word; never 퇴근 · 출근 · 메모) — and the button the person sees («모든 세션 시작» / Start all sessions); it is no longer tied to the move itself: after a move the agent starts at once, the handoff comes with that press', () => {
+    expect(ko.desktop.setup.move.afterMemo).toBe('지난 인계는 폰의 「모든 세션 시작」으로 세션을 시작할 때 이 컴퓨터의 에이전트에게 참고 글로 넘어가요');
+    expect(en.desktop.setup.move.afterMemo).toBe('The last handoff is passed on to this computer\'s agent as a reference when sessions are started with Start all sessions on a phone');
+    // the words are the phone card's own button labels (one source of the name)
+    expect(ko.desktop.setup.move.afterMemo).toContain(`「${ko.desktop.phoneSessions.startAll}」`);
+    expect(en.desktop.setup.move.afterMemo).toContain(en.desktop.phoneSessions.startAll);
+    expect(ko.desktop.setup.move.afterMemo).not.toMatch(/첫 출근|퇴근|메모|[«»≪≫]/);
+    // «인계» is what the phone card calls it (one name)
+    expect(ko.desktop.phoneSessions.panel.leadIdle).toContain('인계');
+    expect(ko.desktop.setup.move.afterMemo).toContain('인계');
+  });
   it('the login line says what is true: the sign-in is not carried over (ko · en)', () => {
     expect(ko.desktop.setup.move.afterLogin).toContain('로그인 정보는 옮겨지지 않아요');
     expect(en.desktop.setup.move.afterLogin).toContain('not carried over');
