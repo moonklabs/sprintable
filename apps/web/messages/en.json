@@ -8373,6 +8373,32 @@
       "timeout": "The Mac didn't answer in time. Try again.",
       "denied": "No permission to open it.",
       "unsupported": "This name can't be opened."
+    },
+    "file": {
+      "openFile": "Open {name}",
+      "back": "Back to the list",
+      "loading": "Fetching the file from the Mac. Confirm on your phone.",
+      "empty": "The file is empty.",
+      "masked": "{count} line(s) that look like secrets are hidden.",
+      "imageAlt": "Image {name}"
+    },
+    "fileReason": {
+      "not_enabled": "File viewing is off on this Mac.",
+      "no_folder": "The Mac has no folder for this project.",
+      "not_found": "That file wasn't found.",
+      "is_link": "Links aren't opened.",
+      "hidden_name": "It has a hidden name, so it isn't opened.",
+      "looks_secret": "It may hold secrets, so it isn't opened.",
+      "too_big": "The file is too big to open here.",
+      "not_text": "It isn't text or a small picture, so it can't be opened.",
+      "not_plain": "It isn't a plain file.",
+      "multi_linked": "The file is linked from several places, so it isn't opened.",
+      "other_device": "It is on another drive, so it isn't opened.",
+      "changed_while_reading": "It changed while reading. Try again.",
+      "busy": "The Mac is busy with another request. Try again in a moment.",
+      "timeout": "The Mac didn't answer in time. Try again.",
+      "denied": "Permission was missing, so it couldn't be opened.",
+      "unsupported": "That name can't be opened."
     }
   }
 }

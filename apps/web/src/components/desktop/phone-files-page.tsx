@@ -2,7 +2,8 @@
 
 // story 4983 (P5 · layer 5 · provisional words until the copy list is final) — the phone app's «프로젝트 파일»: pick a computer and one of its projects, then walk its folders. Every folder
 // you open is one request the shell seals and the OS prompt confirms; the answer is sealed too — the server holds neither. Nothing here knows a path: a folder is the single names the computer
-// listed, and the computer decides which folder of its own a project is. This slice LISTS; opening a file and saving one come later.
+// listed, and the computer decides which folder of its own a project is. It LISTS and (P6) OPENS one file — its text (secret-looking lines hidden) or a small picture, each one more request the shell seals and the OS prompt
+// confirms; saving a file comes later.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
@@ -11,12 +12,13 @@ import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 import { groupByComputer, readStartable, type StartableComputer } from '@/lib/phone-start';
-import { listFolder, shellTakesFiles, type FileEntry, type FilesList, type FilesOutcome } from '@/lib/phone-files';
+import { listFolder, openFile, shellTakesFileRead, shellTakesFiles, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
 
-type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean };
-type View =
-  | { kind: 'choose' }
-  | { kind: 'folder'; setupId: string; projectId: string; projectName: string; dir: string[]; state: { kind: 'loading' } | { kind: 'list'; list: FilesList } | { kind: 'end'; outcome: Exclude<FilesOutcome, { kind: 'list' }> } };
+type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean; canOpen: boolean };
+type FolderView = { kind: 'folder'; setupId: string; projectId: string; projectName: string; dir: string[]; state: { kind: 'loading' } | { kind: 'list'; list: FilesList } | { kind: 'end'; outcome: Ended } };
+/** one file opened from a folder: `back` is the folder as it was (its list is kept, so going back asks nothing) */
+type FileView = { kind: 'file'; setupId: string; projectId: string; projectName: string; dir: string[]; name: string; back: FolderView; state: { kind: 'loading' } | { kind: 'shown'; body: Extract<OpenOutcome, { kind: 'text' | 'image' }> } | { kind: 'end'; outcome: Ended } };
+type View = { kind: 'choose' } | FolderView | FileView;
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
 
@@ -80,7 +82,11 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
       if (!takes) { setRead({ kind: 'old_app' }); return; }
       const r = await readStartable(phoneCall, () => !alive.current || mine !== ask.current).catch(() => ({ kind: 'failed' as const }));
       if (!alive.current || mine !== ask.current) return;
-      if (r.kind === 'view') setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control });
+      if (r.kind === 'view') {
+        const canOpen = await shellTakesFileRead(phoneCall); // (a shell that only lists keeps listing: the files are not offered)
+        if (!alive.current || mine !== ask.current) return;
+        setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control, canOpen });
+      }
       else setRead(r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
     })();
   }, [phoneCall]);
@@ -101,6 +107,19 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
     });
   }, [phoneCall]);
 
+  // one file: asked from the folder that holds it (its list stays in memory behind it)
+  const openOne = useCallback((from: FolderView, name: string) => {
+    const mine = ++ask.current;
+    setView({ kind: 'file', setupId: from.setupId, projectId: from.projectId, projectName: from.projectName, dir: from.dir, name, back: from, state: { kind: 'loading' } });
+    void openFile({ setupId: from.setupId, projectId: from.projectId, dir: from.dir, name }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current }).then((out) => {
+      if (!alive.current || mine !== ask.current) return;
+      setView((v) => {
+        if (v.kind !== 'file' || v.name !== name || v.setupId !== from.setupId || v.projectId !== from.projectId) return v;
+        return { ...v, state: out.kind === 'text' || out.kind === 'image' ? { kind: 'shown', body: out } : { kind: 'end', outcome: out } };
+      });
+    });
+  }, [phoneCall]);
+
   // came from the session: the agent has ONE project on that computer → open its top at once (the one thing the person asked for); several → the choice among THOSE projects; none → the ordinary choice
   const entered = useRef(false);
   const from = read.kind === 'ready' && entry ? entryOf(read.computers, entry) : null;
@@ -117,8 +136,10 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
     <div className="flex min-h-screen justify-center bg-background px-4 py-6">
       <div className="w-full max-w-md space-y-4" data-testid="phone-files-page">
         <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
-        {view.kind === 'folder'
-          ? <Folder t={t} v={view} onOpen={open} onBack={() => { ask.current += 1; setView({ kind: 'choose' }); }} />
+        {view.kind === 'file'
+          ? <FileScreen t={t} v={view} onRetry={() => openOne(view.back, view.name)} onBack={() => { ask.current += 1; setView(view.back); }} />
+          : view.kind === 'folder'
+          ? <Folder t={t} v={view} canOpen={read.kind === 'ready' && read.canOpen} onOpen={open} onFile={(name) => openOne(view, name)} onBack={() => { ask.current += 1; setView({ kind: 'choose' }); }} />
           : <Choose t={t} read={read} only={from} onReload={readNow} onPick={(setupId, project) => open(setupId, project.project_id, project.name, [])} />}
         <div className="border-t border-border pt-4">
           <Button variant="ghost" onClick={() => window.location.replace(homeHref)} data-testid="phone-files-home">{t('home')}</Button>
@@ -196,7 +217,43 @@ function endLine(t: T, o: Exclude<FilesOutcome, { kind: 'list' }>): string {
   return t(`outcome.${o.kind}`);
 }
 
-function Folder({ t, v, onOpen, onBack }: { t: T; v: Extract<View, { kind: 'folder' }>; onOpen: (setupId: string, projectId: string, projectName: string, dir: string[], cursor?: string, keep?: FileEntry[]) => void; onBack: () => void }) {
+/** what an end of an OPEN says — the closed words of the contract, said for one file */
+function fileEndLine(t: T, o: Ended): string {
+  if (o.kind === 'reason') return t(`fileReason.${o.reason}`);
+  return endLine(t, o);
+}
+
+function FileScreen({ t, v, onRetry, onBack }: { t: T; v: FileView; onRetry: () => void; onBack: () => void }) {
+  const crumbs = [v.projectName, ...v.dir, v.name].join(' › ');
+  return (
+    <div className="space-y-3" data-testid="phone-files-open">
+      <p className="break-all text-sm text-muted-foreground" data-testid="phone-files-crumbs">{crumbs}</p>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={onBack} data-testid="phone-files-file-back">{t('file.back')}</Button>
+      </div>
+      {v.state.kind === 'loading' && (
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-file-loading">
+          <Loader2 className="size-4 animate-spin" aria-hidden /> {t('file.loading')}
+        </div>
+      )}
+      {v.state.kind === 'end' && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
+      {v.state.kind === 'shown' && v.state.body.kind === 'text' && (
+        <div className="space-y-2">
+          {v.state.body.masked > 0 && <p role="status" className="text-xs text-muted-foreground" data-testid="phone-files-file-masked">{t('file.masked', { count: v.state.body.masked })}</p>}
+          {v.state.body.text === ''
+            ? <p className="text-sm text-muted-foreground" data-testid="phone-files-file-empty">{t('file.empty')}</p>
+            : <Card className="p-3"><pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words text-xs text-foreground" data-testid="phone-files-file-text">{v.state.body.text}</pre></Card>}
+        </div>
+      )}
+      {v.state.kind === 'shown' && v.state.body.kind === 'image' && (
+        // eslint-disable-next-line @next/next/no-img-element -- story 4983 P6: bytes the person's own computer sent (type and size checked), shown as a data: URL — nothing to optimise and no host to allow
+        <img src={`data:${v.state.body.mime};base64,${v.state.body.data}`} alt={t('file.imageAlt', { name: v.name })} width={v.state.body.w} height={v.state.body.h} className="h-auto max-w-full rounded-md" data-testid="phone-files-file-image" />
+      )}
+    </div>
+  );
+}
+
+function Folder({ t, v, canOpen, onOpen, onFile, onBack }: { t: T; v: FolderView; canOpen: boolean; onFile: (name: string) => void; onOpen: (setupId: string, projectId: string, projectName: string, dir: string[], cursor?: string, keep?: FileEntry[]) => void; onBack: () => void }) {
   const here = (dir: string[], cursor?: string, keep?: FileEntry[]) => onOpen(v.setupId, v.projectId, v.projectName, dir, cursor, keep);
   const crumbs = [v.projectName, ...v.dir].join(' › ');
   return (
@@ -214,7 +271,7 @@ function Folder({ t, v, onOpen, onBack }: { t: T; v: Extract<View, { kind: 'fold
       {v.state.kind === 'end' && (v.state.outcome.kind === 'cancelled'
         ? <Line t={t} text={t('outcome.cancelled')} testId="phone-files-end" onRetry={() => here(v.dir)} />
         : <Line t={t} text={endLine(t, v.state.outcome)} testId="phone-files-end" onRetry={retryable(v.state.outcome) ? () => here(v.dir) : undefined} />)}
-      {v.state.kind === 'list' && <List t={t} list={v.state.list} onFolder={(n) => here([...v.dir, n])} onMore={() => here(v.dir, v.state.kind === 'list' ? v.state.list.cursor : undefined, v.state.kind === 'list' ? v.state.list.entries : undefined)} />}
+      {v.state.kind === 'list' && <List t={t} list={v.state.list} canOpen={canOpen} onFile={onFile} onFolder={(n) => here([...v.dir, n])} onMore={() => here(v.dir, v.state.kind === 'list' ? v.state.list.cursor : undefined, v.state.kind === 'list' ? v.state.list.entries : undefined)} />}
     </div>
   );
 }
@@ -224,7 +281,7 @@ function retryable(o: Exclude<FilesOutcome, { kind: 'list' }>): boolean {
   return o.kind === 'busy' || o.kind === 'timeout' || o.kind === 'failed' || o.kind === 'unreachable' || (o.kind === 'reason' && (o.reason === 'busy' || o.reason === 'timeout' || o.reason === 'changed_while_reading'));
 }
 
-function List({ t, list, onFolder, onMore }: { t: T; list: FilesList; onFolder: (name: string) => void; onMore: () => void }) {
+function List({ t, list, canOpen, onFile, onFolder, onMore }: { t: T; list: FilesList; canOpen: boolean; onFile: (name: string) => void; onFolder: (name: string) => void; onMore: () => void }) {
   return (
     <div className="space-y-2" data-testid="phone-files-list">
       {list.entries.length === 0 && <p className="text-sm text-muted-foreground" data-testid="phone-files-empty">{t('empty')}</p>}
@@ -235,6 +292,11 @@ function List({ t, list, onFolder, onMore }: { t: T; list: FilesList; onFolder: 
             {e.k === 'd' ? (
               <Button variant="ghost" className="h-auto w-full justify-start px-0 py-0 text-left font-medium" onClick={() => onFolder(e.n)} aria-label={t('openFolder', { name: e.n })}>
                 <span className="break-all">{e.n}</span><span aria-hidden className="ml-1 text-muted-foreground">/</span>
+              </Button>
+            ) : e.k === 'f' && canOpen ? (
+              <Button variant="ghost" className="h-auto w-full justify-between gap-2 px-0 py-0 text-left font-normal" onClick={() => onFile(e.n)} aria-label={t('file.openFile', { name: e.n })} data-testid="phone-files-file">
+                <span className="break-all text-sm text-foreground">{e.n}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{e.s !== undefined ? sizeText(e.s) : ''}</span>
               </Button>
             ) : (
               <div className="flex items-baseline justify-between gap-2">

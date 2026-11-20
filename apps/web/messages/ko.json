@@ -8373,6 +8373,32 @@
       "timeout": "Mac이 제때 답하지 못했어요. 다시 해 보세요.",
       "denied": "권한이 없어 열지 못했어요.",
       "unsupported": "이 이름은 열 수 없어요."
+    },
+    "file": {
+      "openFile": "{name} 열기",
+      "back": "목록으로",
+      "loading": "Mac에서 파일을 가져오는 중이에요. 폰에서 확인해 주세요.",
+      "empty": "빈 파일이에요.",
+      "masked": "비밀처럼 보이는 {count}줄은 가렸어요.",
+      "imageAlt": "{name} 이미지"
+    },
+    "fileReason": {
+      "not_enabled": "이 Mac에서 파일 보기가 꺼져 있어요.",
+      "no_folder": "이 프로젝트의 폴더가 Mac에 없어요.",
+      "not_found": "그 파일을 찾지 못했어요.",
+      "is_link": "바로가기는 열지 않아요.",
+      "hidden_name": "숨겨진 이름이라 열지 않아요.",
+      "looks_secret": "비밀 정보가 있을 수 있어 열지 않아요.",
+      "too_big": "파일이 너무 커서 여기서 열 수 없어요.",
+      "not_text": "글이나 작은 사진이 아니라서 열 수 없어요.",
+      "not_plain": "일반 파일이 아니에요.",
+      "multi_linked": "여러 곳에 연결된 파일이라 열지 않아요.",
+      "other_device": "다른 저장 장치에 있어 열지 않아요.",
+      "changed_while_reading": "읽는 사이 바뀌었어요. 다시 해 보세요.",
+      "busy": "Mac이 다른 요청을 처리 중이에요. 잠시 뒤에 다시 해 주세요.",
+      "timeout": "Mac이 제때 답하지 못했어요. 다시 해 보세요.",
+      "denied": "권한이 없어 열지 못했어요.",
+      "unsupported": "이 이름은 열 수 없어요."
     }
   }
 }

@@ -14,6 +14,9 @@ const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 const { PhoneFilesPage, projectsOf, sizeText, entryOf } = await import('./phone-files-page');
 const { FILE_REASONS } = await import('@/lib/phone-files');
+// [P6] a shell that opens files says `file_read: 1` beside `files: 1`
+const OPENS = { sealed_prompt: 1, files: 1, file_read: 1 };
+const PNG_HEX = '89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c49444154789c636868680000030401814bd3d2100000000049454e44ae426082';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,7 +33,7 @@ const LISTS: Record<string, unknown[]> = {
   '': [entry('src', 'd', { t: 1 }), entry('README.md', 'f', { s: 1500, t: 2 }), entry('ln', 'l'), entry('sock', 'o')],
   'src': [entry('app', 'd'), entry('index.ts', 'f', { s: 42 })],
 };
-interface World { remote?: boolean; computers?: unknown[]; post?: Response; reason?: string; caps?: Record<string, unknown> | null; pages?: Record<string, unknown[]>; poll?: Response }
+interface World { remote?: boolean; computers?: unknown[]; post?: Response; reason?: string; caps?: Record<string, unknown> | null; pages?: Record<string, unknown[]>; poll?: Response; read?: unknown }
 let world: World;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 let seal: Array<Record<string, unknown>>;
@@ -63,6 +66,7 @@ beforeEach(() => {
     if (type === 'device.key.info') return { id: 'k', ok: true, key_number: '482 917' };
     if (type === 'files.seal') { seal.push(args); return sealAnswer(args); }
     if (type === 'files.open') {
+      if (seal[seal.length - 1]!.name !== undefined) return { id: 'o', ok: true, body: world.read }; // [P6] the last request sealed was an OPEN: its answer is the read body of the world
       const dir = (seal[seal.length - 1]!.dir as string[]).join('/');
       const cursor = seal[seal.length - 1]!.cursor as string | undefined;
       if (world.reason) return { id: 'o', ok: true, body: { v: 1, kind: 'list', ok: false, reason: world.reason } };
@@ -424,5 +428,147 @@ describe('[4983] small helpers', () => {
   it('projectsOf lists a project once however many agents work in it', () => {
     const c = computer({ agents: [{ agent_member_id: 'a', name: 'a', can_command: true, projects: [{ project_id: 'p1', name: 'P1' }] }, { agent_member_id: 'b', name: 'b', can_command: false, projects: [{ project_id: 'p1', name: 'P1' }, { project_id: 'p2', name: 'P2' }] }] });
     expect(projectsOf(c as never).map((p) => p.project_id)).toEqual(['p1', 'p2']);
+  });
+});
+
+
+// ── [P6] opening one file ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('[4983 P6] a file is opened from the folder that holds it', () => {
+  const textBody = (text: string, masked = 0) => ({ v: 1, kind: 'read', ok: true, form: 'text', s: text.length, masked, text });
+  async function openFolder(caps: Record<string, unknown> = OPENS) {
+    world.caps = caps;
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+  }
+
+  it('a shell that opens files makes the file rows buttons; one that only lists keeps them plain', async () => {
+    await openFolder();
+    expect(all('phone-files-file').map((e) => e.textContent)).toEqual(['README.md1.5 KB']);
+    expect(all('phone-files-file')[0]!.getAttribute('aria-label')).toBe('README.md 열기');
+    expect(names()).toContain('ln바로가기'); // a link and anything else are not asked for
+  });
+  it('a shell that only lists: no file is offered', async () => {
+    await openFolder({ sealed_prompt: 1, files: 1 });
+    expect(all('phone-files-file')).toHaveLength(0);
+    expect(names()).toContain('README.md1.5 KB');
+  });
+
+  it('pressing a file asks the shell for exactly the computer · project · the folder\'s names · the file\'s name · a press key — and the server gets no name', async () => {
+    world.read = textBody('hello\nworld');
+    await openFolder();
+    await press(all('phone-files-entry')[0]!.querySelector('button')); // into `src`
+    await press(all('phone-files-file')[0]!); // src/index.ts
+    expect(seal.at(-1)).toEqual({ setup_id: SETUP, project_id: 'proj-1', dir: ['src'], name: 'index.ts', idempotency_key: expect.any(String) });
+    expect(seal.at(-1)).not.toHaveProperty('cursor');
+    const ask = posts().at(-1)!.body!;
+    expect(Object.keys(ask).sort()).toEqual(['envelope', 'idempotency_key', 'phone_key_id', 'project_id']);
+    expect(JSON.stringify(ask)).not.toContain('index.ts');
+    expect(byId('phone-files-crumbs')?.textContent).toBe('결제 서비스 › src › index.ts');
+  });
+
+  it('a text is drawn as it came, with the note of the lines that were hidden — and going back shows the list again WITHOUT asking', async () => {
+    world.read = textBody('line one\nAPI=••••', 1);
+    await openFolder();
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-text')?.textContent).toBe('line one\nAPI=••••');
+    expect(byId('phone-files-file-masked')?.textContent).toBe(ko.file.masked.replace('{count}', '1'));
+    const before = { seals: seal.length, posts: posts().length };
+    await press(byId('phone-files-file-back'));
+    expect(byId('phone-files-list')).not.toBeNull();
+    expect(names()).toContain('README.md1.5 KB');
+    expect({ seals: seal.length, posts: posts().length }).toEqual(before);
+  });
+
+  it('an empty file says so; no note when nothing was hidden', async () => {
+    world.read = textBody('', 0);
+    await openFolder();
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-empty')?.textContent).toBe(ko.file.empty);
+    expect(byId('phone-files-file-masked')).toBeNull();
+    expect(byId('phone-files-file-text')).toBeNull();
+  });
+
+  it('a picture is shown as a data: image of the type and size it said, with a name for a reader', async () => {
+    const png = Buffer.from(PNG_HEX, 'hex');
+    world.read = { v: 1, kind: 'read', ok: true, form: 'image', s: png.length, mime: 'image/png', w: 1, h: 1, data: png.toString('base64') };
+    await openFolder();
+    await press(all('phone-files-file')[0]!);
+    const img = byId('phone-files-file-image') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe(`data:image/png;base64,${png.toString('base64')}`);
+    expect(img.getAttribute('alt')).toBe('README.md 이미지');
+    expect([img.getAttribute('width'), img.getAttribute('height')]).toEqual(['1', '1']);
+  });
+
+  it('the type the computer said is the type drawn (a JPEG is not a PNG)', async () => {
+    world.read = { v: 1, kind: 'read', ok: true, form: 'image', s: 16, mime: 'image/jpeg', w: 4, h: 3, data: '/9j/4AAAAAAAAAAAAAAAAA==' };
+    await openFolder();
+    await press(all('phone-files-file')[0]!);
+    expect((byId('phone-files-file-image') as HTMLImageElement).getAttribute('src')).toBe('data:image/jpeg;base64,/9j/4AAAAAAAAAAAAAAAAA==');
+  });
+
+  it('every closed word has its own sentence for a FILE (a list keeps its own): too big · hidden · not text · looks secret …', async () => {
+    await openFolder();
+    for (const word of FILE_REASONS) {
+      world.read = { v: 1, kind: 'read', ok: false, reason: word };
+      await press(all('phone-files-file')[0]!);
+      expect(byId('phone-files-file-end')?.textContent).toContain((ko.fileReason as Record<string, string>)[word]);
+      await press(byId('phone-files-file-back'));
+    }
+    expect(ko.fileReason.too_big).not.toBe(ko.reason.too_big);
+  });
+  it('a refusal that may pass (busy · timeout · changed while reading) offers «try again» and asks again; a refusal that will not (hidden · too big) does not', async () => {
+    await openFolder();
+    world.read = { v: 1, kind: 'read', ok: false, reason: 'hidden_name' };
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-end')?.querySelector('button')).toBeNull();
+    await press(byId('phone-files-file-back'));
+    world.read = { v: 1, kind: 'read', ok: false, reason: 'changed_while_reading' };
+    await press(all('phone-files-file')[0]!);
+    const asked = seal.length;
+    world.read = textBody('now fine');
+    await press(byId('phone-files-file-end')!.querySelector('button'));
+    expect(seal.length).toBe(asked + 1);
+    expect(byId('phone-files-file-text')?.textContent).toBe('now fine');
+  });
+  it('a press the person did not confirm says so and may be tried again', async () => {
+    await openFolder();
+    sealAnswer = () => ({ id: 's', ok: false, code: 'cancelled' });
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-end')?.textContent).toContain(ko.outcome.cancelled);
+    expect(byId('phone-files-file-end')?.querySelector('button')).not.toBeNull();
+    expect(posts().filter((c) => c.url.endsWith('/files'))).toHaveLength(1); // only the folder's own list was posted
+  });
+  it('a body that is not an open answer (a list answering) is drawn as a failure, never as a list', async () => {
+    world.read = { v: 1, kind: 'list', ok: true, entries: [{ n: 'x', k: 'f' }], hidden: 0, more: false };
+    await openFolder();
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-end')?.textContent).toContain(ko.outcome.failed);
+    expect(byId('phone-files-list')).toBeNull();
+  });
+  it('English words, and a text that holds markup is text (nothing is interpreted)', async () => {
+    world.read = textBody('<img src=x onerror=alert(1)>\n<b>bold</b>');
+    world.caps = OPENS;
+    await screen({ locale: 'en' });
+    await press(byId('phone-files-project-proj-1'));
+    expect(all('phone-files-file')[0]!.getAttribute('aria-label')).toBe('Open README.md');
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-text')?.textContent).toBe('<img src=x onerror=alert(1)>\n<b>bold</b>');
+    expect(byId('phone-files-file-text')?.querySelector('img, b')).toBeNull();
+    expect(byId('phone-files-file-back')?.textContent).toBe(en.file.back);
+  });
+  it('leaving while a file is being asked draws nothing afterwards', async () => {
+    await openFolder();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const orig = phoneCall.getMockImplementation()! as (type: string, args?: Record<string, unknown>) => Promise<unknown>;
+    phoneCall.mockImplementation(async (type: string, args?: Record<string, unknown>) => { if (type === 'files.seal') await gate; return orig(type, args); });
+    await act(async () => { all('phone-files-file')[0]!.click(); });
+    await flush();
+    expect(byId('phone-files-file-loading')).not.toBeNull();
+    await press(byId('phone-files-file-back'));
+    release(); await flush(); await settle();
+    expect(byId('phone-files-file-text')).toBeNull();
+    expect(byId('phone-files-list')).not.toBeNull();
   });
 });
