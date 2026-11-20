@@ -225,6 +225,7 @@ class DesktopUsage(Base):
         CheckConstraint("account ~ '^[a-z0-9]{8,32}$'", name="ck_desktop_usage_account"),
         CheckConstraint("state IN ('windows', 'unavailable')", name="ck_desktop_usage_state"),
         CheckConstraint("why IS NULL OR why IN ('api_key', 'not_read')", name="ck_desktop_usage_why"),
+        CheckConstraint("label IS NULL OR char_length(label) BETWEEN 1 AND 40", name="ck_desktop_usage_label"),  # 0490 — the length; the rest of the rule is the door's (desktop_usage.label_problem) and the reader's
         # the two shapes are the only ones: numbers (no reason · 1–4 windows) or the word (a reason · no numbers) — the same text as the migration (0487)
         CheckConstraint(
             "(state = 'windows' AND why IS NULL AND jsonb_typeof(windows) = 'array' AND jsonb_array_length(windows) BETWEEN 1 AND 4)"
@@ -239,6 +240,7 @@ class DesktopUsage(Base):
     state: Mapped[str] = mapped_column(Text, nullable=False)
     why: Mapped[str | None] = mapped_column(Text, nullable=True)
     windows: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)  # story 4986 (0490): the name the person gave the account on the computer — display text only
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

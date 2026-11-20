@@ -12,10 +12,11 @@ Reading (the phone) is a later door; this one only keeps what the computer says.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,24 @@ from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError, tou
 USAGE_LIMIT = "20/minute"  # per VERIFIED device (the device row, never a header), counted before anything is written — presence's frame; the host sends on change, coalesced, a few a minute at most
 MAX_WINDOWS = 4
 MAX_ACCOUNTS = 8  # entries in one report AND rows kept per computer (a person's CLIs and logins on one computer are few) — the oldest `seen_at` goes first
+LABEL_MAX = 40  # characters (code points), as the host counts them
+# the same table as the host's `labelProblem` (desktop-electron/src/claude-account-labels.ts) — a label is plain display text: no slash or backslash (it must not look like a path), no C0/C1 control, no line or paragraph
+# separator, no bidirectional override or isolate, no zero-width character or BOM, no space at either end. The server judges it itself (the host's check is not trusted), and tests/test_4986_usage_label_realdb.py pins the
+# two tables with the same cases.
+_LABEL_BAD = re.compile(r"[\\/\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069\u200b-\u200f\ufeff]")
+
+
+def label_problem(text: object) -> str | None:
+    """None = usable as a label; else the closed word of the first rule it breaks (`empty` · `too_long` · `bad_chars`)."""
+    if not isinstance(text, str) or text == "":
+        return "empty"
+    if len(text) > LABEL_MAX:
+        return "too_long"
+    if _LABEL_BAD.search(text) or text != text.strip():
+        return "bad_chars"
+    return None
+
+
 ACCOUNT_PATTERN = r"^[a-z0-9]{8,32}$"  # the host's opaque id of a settings folder (a hash prefix) — never a path, never a name
 MAX_MINUTES = 525_600  # a year
 RESET_HORIZON = timedelta(days=400)  # a reset time further ahead than this is not believed (a wrong unit · a broken source)
@@ -55,6 +74,14 @@ class UsageEntry(BaseModel):
     state: Literal["windows", "unavailable"]
     windows: list[UsageWindowReport] = Field(default_factory=list, max_length=MAX_WINDOWS)
     why: Literal["api_key", "not_read"] | None = None
+    label: StrictStr | None = None  # story 4986: the name the person gave this account on the computer — display text only (nothing is decided by it); absent = none, and a report without it CLEARS the stored one
+
+    @field_validator("label")
+    @classmethod
+    def _label(cls, v: str | None) -> str | None:
+        if v is not None and (why := label_problem(v)) is not None:
+            raise ValueError(f"label: {why}")
+        return v
 
     @model_validator(mode="after")
     def _shape(self) -> "UsageEntry":
@@ -101,10 +128,10 @@ async def apply_usage(db: AsyncSession, setup: DesktopSetup, report: UsageReport
     for entry in report.usage:
         seen = min(entry.seen_at.astimezone(timezone.utc), now)  # the host's clock may run ahead: never a time in the future
         windows = _windows_json(entry, now) if entry.state == "windows" else []
-        ins = pg_insert(DesktopUsage).values(setup_id=setup.id, runtime=entry.runtime, account=entry.account, state=entry.state, why=entry.why, windows=windows, seen_at=seen, reported_at=now)
+        ins = pg_insert(DesktopUsage).values(setup_id=setup.id, runtime=entry.runtime, account=entry.account, state=entry.state, why=entry.why, windows=windows, label=entry.label, seen_at=seen, reported_at=now)
         stmt = ins.on_conflict_do_update(
             index_elements=[DesktopUsage.setup_id, DesktopUsage.runtime, DesktopUsage.account],
-            set_={"state": ins.excluded.state, "why": ins.excluded.why, "windows": ins.excluded.windows, "seen_at": ins.excluded.seen_at, "reported_at": ins.excluded.reported_at},
+            set_={"state": ins.excluded.state, "why": ins.excluded.why, "windows": ins.excluded.windows, "label": ins.excluded.label, "seen_at": ins.excluded.seen_at, "reported_at": ins.excluded.reported_at},
             where=DesktopUsage.seen_at <= ins.excluded.seen_at,  # a late, older report never covers a newer one
         )
         res = await db.execute(stmt)
@@ -123,15 +150,17 @@ def row_view(row: DesktopUsage) -> dict | None:
     """one stored row as a reader sees it — judged AGAIN by the very model the door uses (Kadir 5854 · PR 3 condition): the table's CHECK holds the outer shape only, so a row written by anything but the door (a direct SQL
     write, a migration slip) could carry an odd element in `windows`. The row is read through `UsageEntry`; one that does not pass is LEFT OUT (never returned, never a 500), and what is returned is built from the model's
     own fields — not from the stored JSON — so no extra key can ride along. Returns None for a row that does not pass."""
+    # a label that does not pass the rule (a direct write · a migration slip) is left OUT — the numbers still show, without a name (never the whole row lost for a name)
+    safe_label = row.label if row.label is not None and label_problem(row.label) is None else None
     try:
         e = UsageEntry.model_validate({
             "runtime": row.runtime, "account": row.account, "seen_at": row.seen_at, "state": row.state, "why": row.why,
-            "windows": row.windows if isinstance(row.windows, list) else None,
+            "windows": row.windows if isinstance(row.windows, list) else None, "label": safe_label,
         })
     except ValidationError:
         return None
     return {
-        "runtime": e.runtime, "account": e.account, "state": e.state, "why": e.why,
+        "runtime": e.runtime, "account": e.account, "label": e.label, "state": e.state, "why": e.why,
         "windows": [{"kind": w.kind, "minutes": w.minutes, "used_percent": w.used_percent, "resets_at": w.resets_at.astimezone(timezone.utc).isoformat() if w.resets_at is not None else None} for w in e.windows],
         "seen_at": e.seen_at.astimezone(timezone.utc).isoformat(),
     }

@@ -64,7 +64,8 @@ async def test_01_the_person_who_may_see_the_agent_sees_its_computers_numbers_wi
         assert v["agent_id"] == agent and v["setup_id"] == device["setup_id"] and v["remote_control"] is True
         assert [(u["runtime"], u["account"]) for u in v["usage"]] == [("claude", "aaaaaaaaaaaa"), ("claude", "bbbbbbbbbbbb"), ("codex", "cccccccccccc")]
         first = v["usage"][0]
-        assert set(first) == {"runtime", "account", "state", "why", "windows", "seen_at"}
+        assert set(first) == {"runtime", "account", "label", "state", "why", "windows", "seen_at"}   # story 4986: + the name the host gave the account (null when none)
+        assert first["label"] is None
         assert first["state"] == "windows" and first["windows"][0]["used_percent"] == 63 and first["windows"][0]["kind"] == "five_hour"
         assert datetime.fromisoformat(first["seen_at"]) < datetime.now(timezone.utc)
 
