@@ -110,6 +110,17 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 
 type T = ReturnType<typeof useTranslations>;
 
+/** story 4986: each row's heading — the name the person gave the account, else the number (two accounts of a CLI) or the CLI's name alone. A name must never read as ANOTHER account's heading (codex, twice: a name «account 2» on account 1; a name «account 2 (account 1)»
+ *  on account 3): a CLI with more than one account therefore ALWAYS ends a named heading with its own number — «Claude · 회사 계정 (계정 1)». Two headings of one CLI then cannot be equal whatever the names are: a named one ends in «(계정 n)» with its own n, an unnamed one
+ *  has no bracket at its end, and the CLI's name comes first — a name cannot change that. A CLI with a single account has nothing to be mistaken for: «Claude · 회사 계정». */
+function headings(rows: readonly UsageRow[], t: T): Array<{ row: UsageRow; heading: string }> {
+  return rows.map((row) => {
+    const runtime = RUNTIME_NAME[row.runtime]; const n = accountOrdinal(rows, row);
+    const heading = row.label !== null ? (n === null ? t('accountNamed', { runtime, label: row.label }) : t('accountNamedN', { runtime, label: row.label, n })) : n === null ? runtime : t('account', { runtime, n });
+    return { row, heading };
+  });
+}
+
 function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tStrip: T }) {
   if (!view.remoteControl) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-remote-off">{t('remoteOff')}</p>;
   if (!view.hasComputer) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-no-computer">{t('noComputer')}</p>;
@@ -117,7 +128,7 @@ function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tS
     <div className="space-y-4 px-4 py-4">
       {!view.connected ? <p role="status" className="break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-disconnected">{disconnectedLine(view, now, tStrip) ?? t('disconnected')}</p> : null}
       {view.rows.length === 0 ? <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-empty">{t('empty')}</p> : null}
-      {view.rows.map((row) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} ordinal={accountOrdinal(view.rows, row)} now={now} t={t} />)}
+      {headings(view.rows, t).map(({ row, heading }) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} heading={heading} now={now} t={t} />)}
     </div>
   );
 }
@@ -150,13 +161,11 @@ function agoText(t: T, a: Ago | null): string | null {
   }
 }
 
-function UsageSection({ row, ordinal, now, t }: { row: UsageRow; ordinal: number | null; now: number; t: T }) {
-  const runtime = RUNTIME_NAME[row.runtime];
-  const heading = ordinal === null ? runtime : t('account', { runtime, n: ordinal });
+function UsageSection({ row, heading, now, t }: { row: UsageRow; heading: string; now: number; t: T }) {
   const seen = agoText(t, agoOf(row.seenAt, now));
   return (
     <section aria-label={heading} className="space-y-2" data-testid="agent-usage-row" data-runtime={row.runtime}>
-      <h3 className="text-ds-body font-semibold text-ds-ink">{heading}</h3>
+      <h3 className="break-words text-ds-body font-semibold text-ds-ink">{heading}</h3>
       {row.state === 'windows' ? row.windows.map((w, i) => <WindowBar key={i} w={w} now={now} t={t} />) : (
         <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-why" data-why={row.why ?? ''}>{row.why === 'api_key' ? t('why.api_key') : row.why === 'not_read' ? t('why.not_read') : null}</p>
       )}
