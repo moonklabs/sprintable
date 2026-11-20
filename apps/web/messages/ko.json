@@ -7854,6 +7854,7 @@
         "disconnected": "연결이 끊겼어요",
         "account": "{runtime} · 계정 {n}",
         "accountNamed": "{runtime} · {label}",
+        "accountNamedN": "{runtime} · {label} (계정 {n})",
         "window": {
           "five_hour": "5시간 한도",
           "seven_day": "일주일 한도",

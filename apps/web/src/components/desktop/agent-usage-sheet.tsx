@@ -110,6 +110,21 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 
 type T = ReturnType<typeof useTranslations>;
 
+/** story 4986: each row's heading — the name the person gave the account («Claude · 회사 계정»), else the number (two accounts of a CLI) or the CLI's name alone. A name must never read as ANOTHER account's heading (codex: a name «account 2» on account 1 looks
+ *  like the heading of account 2; two accounts given one name look alike): where two rows would show the same words, the NAMED one also says its own number — «Claude · account 2 (account 1)» — so no heading passes for another's. */
+function headings(rows: readonly UsageRow[], t: T): Array<{ row: UsageRow; heading: string }> {
+  const plain = (r: UsageRow): string => {
+    const runtime = RUNTIME_NAME[r.runtime]; const n = accountOrdinal(rows, r);
+    return r.label !== null ? t('accountNamed', { runtime, label: r.label }) : n === null ? runtime : t('account', { runtime, n });
+  };
+  const words = rows.map(plain);
+  const count = new Map<string, number>(); for (const w of words) count.set(w, (count.get(w) ?? 0) + 1);
+  return rows.map((row, i) => {
+    const n = accountOrdinal(rows, row);
+    return { row, heading: row.label !== null && n !== null && (count.get(words[i]!) ?? 0) > 1 ? t('accountNamedN', { runtime: RUNTIME_NAME[row.runtime], label: row.label, n }) : words[i]! };
+  });
+}
+
 function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tStrip: T }) {
   if (!view.remoteControl) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-remote-off">{t('remoteOff')}</p>;
   if (!view.hasComputer) return <p role="status" className="break-keep px-4 py-6 text-ds-body text-ds-ink-2" data-testid="agent-usage-no-computer">{t('noComputer')}</p>;
@@ -117,7 +132,7 @@ function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tS
     <div className="space-y-4 px-4 py-4">
       {!view.connected ? <p role="status" className="break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-disconnected">{disconnectedLine(view, now, tStrip) ?? t('disconnected')}</p> : null}
       {view.rows.length === 0 ? <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-empty">{t('empty')}</p> : null}
-      {view.rows.map((row) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} ordinal={accountOrdinal(view.rows, row)} now={now} t={t} />)}
+      {headings(view.rows, t).map(({ row, heading }) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} heading={heading} now={now} t={t} />)}
     </div>
   );
 }
@@ -150,10 +165,7 @@ function agoText(t: T, a: Ago | null): string | null {
   }
 }
 
-function UsageSection({ row, ordinal, now, t }: { row: UsageRow; ordinal: number | null; now: number; t: T }) {
-  const runtime = RUNTIME_NAME[row.runtime];
-  // story 4986: the name the person gave the account («Claude · 회사 계정») — plain text; without a name the number as before (two accounts) or the CLI's name alone
-  const heading = row.label !== null ? t('accountNamed', { runtime, label: row.label }) : ordinal === null ? runtime : t('account', { runtime, n: ordinal });
+function UsageSection({ row, heading, now, t }: { row: UsageRow; heading: string; now: number; t: T }) {
   const seen = agoText(t, agoOf(row.seenAt, now));
   return (
     <section aria-label={heading} className="space-y-2" data-testid="agent-usage-row" data-runtime={row.runtime}>

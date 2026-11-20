@@ -7854,6 +7854,7 @@
         "disconnected": "Disconnected",
         "account": "{runtime} · account {n}",
         "accountNamed": "{runtime} · {label}",
+        "accountNamedN": "{runtime} · {label} (account {n})",
         "window": {
           "five_hour": "5-hour limit",
           "seven_day": "Weekly limit",

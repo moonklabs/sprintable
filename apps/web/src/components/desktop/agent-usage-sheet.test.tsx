@@ -105,6 +105,18 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     expect(qa('[data-testid="agent-usage-row"]')[0]!.getAttribute('aria-label')).toBe('Claude · 회사 계정');
   });
 
+  it('[4986 codex] a name never passes for ANOTHER account\'s heading: «계정 2» on account 1 (while account 2 has none) and two accounts given one name each also say their own number', async () => {
+    const { d } = deps([json(200, answer([
+      row({ account: 'aaaaaaaaaaaa', label: '계정 2' }), row({ account: 'bbbbbbbbbbbb' }),                     // account 1 is named like account 2's number heading
+      row({ runtime: 'codex', account: 'cccccccccccc', label: '같은 이름' }), row({ runtime: 'codex', account: 'dddddddddddd', label: '같은 이름' }),   // one name on two accounts
+      row({ runtime: 'codex', account: 'eeeeeeeeeeee', label: '다른 이름' }),
+    ]))]);
+    await render(d);
+    const heads = qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent);
+    expect(heads).toEqual(['Claude · 계정 2 (계정 1)', 'Claude · 계정 2', 'Codex · 같은 이름 (계정 1)', 'Codex · 같은 이름 (계정 2)', 'Codex · 다른 이름']);
+    expect(new Set(heads).size).toBe(heads.length);                                                          // no two headings read alike
+  });
+
   it('[4986] a name the rule does not allow is not drawn (the number heading stays) — and the numbers are', async () => {
     const { d } = deps([json(200, answer([row({ account: 'aaaaaaaaaaaa', label: 'a/b' }), row({ account: 'bbbbbbbbbbbb', label: 'Acme\u2060Corp' })]))]);
     await render(d);
