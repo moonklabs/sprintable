@@ -572,3 +572,147 @@ describe('[4983 P6] a file is opened from the folder that holds it', () => {
     expect(byId('phone-files-list')).not.toBeNull();
   });
 });
+
+
+// ── story 4987 (P7 · the 10-minute window): the phone app's «10분 동안 다시 묻지 않음 · 남은 시간 · [닫기]» ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('[4987 P7] the 10-minute window line', () => {
+  const WINDOWS = { sealed_prompt: 1, files: 1, file_read: 1, file_window: 1 };
+  const withWindow = (state: 'opened' | 'riding' = 'opened', ms_left = 590_000) => { sealAnswer = (args) => ({ id: 's', ok: true, envelope: { v: 1, kind: 'file_list' }, phone_key_id: KEYID, idempotency_key: args.idempotency_key, window: { state, ms_left } }); };
+  const line = () => byId('phone-files-window');
+
+  it('a shell that takes windows is asked for one with each request (`window: true`), and the line says what the shell said: the count-down from 9:50', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen();
+    expect(line()).toBeNull();
+    await press(byId('phone-files-project-proj-1'));
+    expect(seal[0]).toEqual({ setup_id: SETUP, project_id: 'proj-1', dir: [], idempotency_key: expect.any(String), window: true });
+    expect(line()?.textContent).toContain('10분 동안 다시 묻지 않음 · 남은 시간 9:');
+    expect(byId('phone-files-window-close')?.textContent).toBe('닫기');
+    const before = line()!.textContent;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(line()!.textContent).not.toBe(before);
+  });
+
+  it('the count-down is the shell\'s time left minus the time that passed here, to the second; at zero the line is gone', async () => {
+    world.caps = WINDOWS; withWindow('opened', 9_000); // (the press itself lets about 3 s pass on the fake clock)
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()).not.toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(7_000); });
+    expect(line()).toBeNull();
+  });
+
+  it('[닫기] tells the shell to forget the window (files.window_close with the computer) and the line goes at once; the next request asks for a window again', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    await press(byId('phone-files-window-close'));
+    expect(phoneCall).toHaveBeenCalledWith('files.window_close', { setup_id: SETUP });
+    expect(line()).toBeNull();
+    await press(all('phone-files-entry')[0]!.querySelector('button')!);
+    expect(seal[seal.length - 1]).toMatchObject({ window: true });
+  });
+
+  it('riding an open window shows the line too (no OS prompt was asked for this request)', async () => {
+    world.caps = WINDOWS; withWindow('riding', 120_000);
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()?.textContent).toMatch(/남은 시간 1:5\d/); // 120 s from the shell, about 3 s passed while the press settled
+  });
+
+  it('a request the shell refuses (the computer was lost …) takes the line away — what the shell said of the window is gone with it', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()).not.toBeNull();
+    sealAnswer = () => ({ id: 's', ok: false, code: 'device_unreachable' });
+    await press(all('phone-files-entry')[0]!.querySelector('button')!);
+    expect(line()).toBeNull();
+  });
+
+  it('the line shows AT ONCE when the shell says a window is open (not only after the next tick)', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen();
+    await act(async () => { byId('phone-files-project-proj-1')!.click(); });
+    await flush(); // (no timer advanced: the ask is made and answered on the fake clock's first instant)
+    expect(line()?.textContent).toContain('남은 시간 9:5');
+  });
+
+  it('a window belongs to ONE computer: its line is drawn on that computer\'s folders only', async () => {
+    world.caps = WINDOWS; withWindow();
+    world.computers = [computer(), computer({ setup_id: SETUP2, device_name: '사무실 맥', agents: [{ agent_member_id: 'a2', name: 'x', can_command: true, projects: [{ project_id: 'proj-9', name: '다른 일' }] }] })];
+    await screen();
+    await press(byId(`phone-files-computer-${SETUP}`));
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()).not.toBeNull();
+    await press(byId('phone-files-back'));
+    await press(byId(`phone-files-computer-${SETUP2}`));
+    await press(byId('phone-files-project-proj-9')); // (the shell says a window for THIS request too — the line is the one of the computer on screen)
+    expect(seal[1]).toMatchObject({ setup_id: SETUP2 });
+    expect(line()).not.toBeNull();
+    // …but a window the shell reported for the FIRST computer is not drawn on the second one's screen
+    await press(byId('phone-files-back'));
+    await press(byId(`phone-files-computer-${SETUP}`));
+    sealAnswer = (args) => ({ id: 's', ok: true, envelope: { v: 1, kind: 'file_list' }, phone_key_id: KEYID, idempotency_key: args.idempotency_key });
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()).toBeNull(); // no window said for this request: no line
+  });
+
+  it('a late word about a window (the person already walked to another computer) is not drawn on the other computer\'s screen', async () => {
+    world.caps = WINDOWS;
+    world.computers = [computer(), computer({ setup_id: SETUP2, device_name: '사무실 맥', agents: [{ agent_member_id: 'a2', name: 'x', can_command: true, projects: [{ project_id: 'proj-9', name: '다른 일' }] }] })];
+    const base = phoneCall.getMockImplementation() as (type: string, args?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    let first = true;
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown> = {}) => {
+      if (type === 'files.seal' && first) { first = false; await gate; return { id: 's', ok: true, envelope: { v: 1, kind: 'file_list' }, phone_key_id: KEYID, idempotency_key: args.idempotency_key, window: { state: 'opened', ms_left: 590_000 } }; }
+      return base(type, args);
+    });
+    await screen();
+    await press(byId(`phone-files-computer-${SETUP}`));
+    await act(async () => { byId('phone-files-project-proj-1')!.click(); }); await flush(); // the first computer's ask waits at the shell
+    await press(byId('phone-files-back'));
+    await press(byId(`phone-files-computer-${SETUP2}`));
+    await press(byId('phone-files-project-proj-9')); // the second computer's list is drawn (no window)
+    expect(line()).toBeNull();
+    release(); await flush(); await settle(); // the first computer's word arrives late
+    expect(line()).toBeNull();
+  });
+
+  it('[닫기] is finished at the shell BEFORE the next request is sealed (a request made at once is never made inside the window that was just closed)', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    const order: string[] = [];
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    const base = phoneCall.getMockImplementation() as (type: string, args?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown> = {}) => {
+      if (type === 'files.window_close') { order.push('close-start'); await gate; order.push('close-end'); return { id: 'c', ok: true }; }
+      if (type === 'files.seal') order.push('seal');
+      return base(type, args);
+    });
+    await act(async () => { byId('phone-files-window-close')!.click(); }); await flush();
+    await act(async () => { all('phone-files-entry')[0]!.querySelector('button')!.click(); }); await flush(); // a folder pressed at once
+    expect(order).toEqual(['close-start']); // the new request waits
+    release(); await flush(); await settle();
+    expect(order).toEqual(['close-start', 'close-end', 'seal']);
+  });
+
+  it('a shell that does NOT take windows is asked for none, and no line is drawn — even if an answer carried one', async () => {
+    world.caps = { sealed_prompt: 1, files: 1, file_read: 1 }; withWindow();
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    expect(seal[0]).not.toHaveProperty('window');
+    expect(line()).toBeNull();
+  });
+
+  it('the line is not drawn on the choice of project, and English words follow the locale', async () => {
+    world.caps = WINDOWS; withWindow();
+    await screen({ locale: 'en' });
+    await press(byId('phone-files-project-proj-1'));
+    expect(line()?.textContent).toContain('Not asking again for 10 minutes · ');
+    expect(byId('phone-files-window-close')?.textContent).toBe('Close');
+    await press(byId('phone-files-back'));
+    expect(line()).toBeNull();
+  });
+});

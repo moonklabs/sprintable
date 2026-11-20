@@ -51,7 +51,14 @@ export interface FilesDeps {
   pollMaxMs?: number;
   /** true once the screen is gone or a newer ask replaced this one: nothing more is asked or drawn */
   stopped?: () => boolean;
+  /** story 4987 (P7 · the 10-minute window): `ask` = the shell takes windows (`shell.caps.file_window`) — each request says `window: true` and the SHELL decides (it opens one only of a computer that gives windows, rides an open one without a prompt).
+   *  `on` hears what the shell says of the window after each request: `{ state, ms_left }` or null (no window / it ended) */
+  window?: { ask: boolean; on?: (w: WindowSeen | null) => void; /** awaited before a request is sealed: a [닫기] that is still on its way to the shell finishes first (the next request is then never made inside the window it closed) */ before?: () => Promise<void> };
 }
+
+/** what the shell says of a computer's window (never a key) */
+export interface WindowSeen { state: 'opened' | 'riding'; ms_left: number }
+const windowOf = (v: unknown): WindowSeen | null => (isObj(v) && (v.state === 'opened' || v.state === 'riding') && typeof v.ms_left === 'number' && Number.isFinite(v.ms_left) && v.ms_left >= 0 ? { state: v.state, ms_left: v.ms_left } : null);
 
 /** how often the answer is looked for (the server pauses a look that comes sooner than half a second) */
 export const FILES_POLL_MS = 1_000;
@@ -70,6 +77,24 @@ export async function shellTakesFiles(phoneCall: FilesDeps['phoneCall']): Promis
 export async function shellTakesFileRead(phoneCall: FilesDeps['phoneCall']): Promise<boolean> {
   const caps = await phoneCall('shell.caps', {}).catch(() => null);
   return !!caps && caps.ok === true && isObj(caps.caps) && (caps.caps as { files?: unknown }).files === 1 && (caps.caps as { file_read?: unknown }).file_read === 1;
+}
+
+/** story 4987: the shell can ask for and ride the 10-minute window: `shell.caps` says `file_window: 1` (read, never guessed from a version) */
+export async function shellTakesFileWindow(phoneCall: FilesDeps['phoneCall']): Promise<boolean> {
+  const caps = await phoneCall('shell.caps', {}).catch(() => null);
+  return !!caps && caps.ok === true && isObj(caps.caps) && (caps.caps as { files?: unknown }).files === 1 && (caps.caps as { file_window?: unknown }).file_window === 1;
+}
+
+/** the window of one computer as the shell sees it (`files.window`): opened · for how long — or null */
+export async function windowState(setupId: string, phoneCall: FilesDeps['phoneCall']): Promise<WindowSeen | null> {
+  const r = await phoneCall('files.window', { setup_id: setupId }).catch(() => null);
+  if (!r || r.ok !== true || !isObj(r.window) || r.window.open !== true || typeof r.window.ms_left !== 'number') return null;
+  return { state: 'riding', ms_left: r.window.ms_left };
+}
+
+/** [닫기]: the shell forgets the window's key at once (the computer is told nothing — its window ends by itself) */
+export async function closeWindow(setupId: string, phoneCall: FilesDeps['phoneCall']): Promise<void> {
+  await phoneCall('files.window_close', { setup_id: setupId }).catch(() => null);
 }
 
 // the shell's refusal words → what the screen says (a word the shell has and this table has not is `failed`: nothing was asked)
@@ -135,12 +160,17 @@ export type Ended = Exclude<FilesOutcome, { kind: 'list' }>;
  * The road both requests share: the shell seals and signs (the person confirms on the OS prompt) → the web posts the envelope → the web looks for the sealed answer → the shell opens it.
  * `sealArgs(key)` is what the shell is told (the computer · the project · the NAMES · the press key); the body the shell hands back is returned as it is (the caller judges its shape).
  */
-async function ask(input: { setupId: string; projectId: string; sealArgs: (key: string) => Record<string, unknown> }, deps: FilesDeps): Promise<{ ok: true; body: unknown } | { ok: false; outcome: Ended }> {
+async function ask(input: { setupId: string; projectId: string; sealArgs: (key: string) => Record<string, unknown> }, deps: FilesDeps, retried = false): Promise<{ ok: true; body: unknown } | { ok: false; outcome: Ended }> {
   const key = deps.newKey();
   const stopped = deps.stopped ?? (() => false);
   const end = (outcome: Ended): { ok: false; outcome: Ended } => ({ ok: false, outcome });
-  const sealed = await deps.phoneCall('files.seal', input.sealArgs(key));
-  if (!sealed.ok) return end(fromShell(sealed.code ?? '') as Ended);
+  if (deps.window?.before) await deps.window.before().catch(() => {});
+  if (stopped()) return end({ kind: 'cancelled' });
+  const sealed = await deps.phoneCall('files.seal', { ...input.sealArgs(key), ...(deps.window?.ask ? { window: true } : {}) });
+  // what the shell says of the window is the screen's only while this ask is the current one (an older ask's late word must not overwrite or erase the line of the one on screen)
+  if (!sealed.ok) { if (!stopped()) deps.window?.on?.(null); return end(fromShell(sealed.code ?? '') as Ended); } // (a refused request: whatever window there was may be gone — the screen asks the shell again)
+  const seen = windowOf((sealed as { window?: unknown }).window); // story 4987: what the shell says of the window this request rode or opened
+  if (!stopped()) deps.window?.on?.(seen);
   if (!isObj(sealed.envelope) || typeof sealed.phone_key_id !== 'string' || sealed.idempotency_key !== key) return end({ kind: 'failed' });
   if (stopped()) return end({ kind: 'cancelled' });
 
@@ -184,6 +214,13 @@ async function ask(input: { setupId: string; projectId: string; sealArgs: (key: 
       return { ok: true, body: opened.body };
     }
     // the computer ended without an answer: its own closed word is the end (never an answer's content)
+    // story 4987: the computer refused a request that RODE a window (it forgot the window: a restart · remote control off · a pairing change) — the shell is told to forget it too and the request is made ONCE more as a first
+    // request (an OS confirmation that opens a new window); a second refusal is the end
+    if (r.state === 'rejected' && r.code === 'envelope_bad_signature' && seen?.state === 'riding' && !retried && !stopped()) {
+      await closeWindow(input.setupId, deps.phoneCall);
+      if (!stopped()) deps.window?.on?.(null);
+      return ask(input, deps, true); // (a screen that left while the shell was closing the window makes no second request: the first thing `ask` does is look at `stopped`)
+    }
     if (r.state === 'rejected' || r.state === 'failed') return end(r.code === 'expired' ? { kind: 'timeout' } : { kind: 'failed' });
     if (r.state === 'done') return end({ kind: 'failed' }); // done with no answer to read
   }
