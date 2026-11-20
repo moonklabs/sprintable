@@ -875,6 +875,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           )}
           {/* Yuna 05:39Z: with nothing to move the folder line says nothing true */}
           {anyMovable ? <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p> : null}
+          {/* story 4986 AC5: what a person does after the move — the login stays on the old computer (never carried), the old computer lets go once the new one is connected, the last 퇴근 memo is a reading for the first 출근 */}
+          {anyMovable ? (
+            <div className="mt-3 rounded-md border p-3 text-xs text-muted-foreground" data-testid="setup-move-after">
+              <p className="font-medium text-foreground">{t('move.afterTitle')}</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                <li>{t('move.afterLogin')}</li>
+                <li>{t('move.afterOldComputer')}</li>
+                <li>{t('move.afterMemo')}</li>
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : (
         <>

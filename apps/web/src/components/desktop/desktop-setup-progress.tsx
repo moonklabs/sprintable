@@ -143,7 +143,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   // story 4498 (PO 10:50Z · Yuna 10:51Z): a disconnected setup ends here — whatever the steps had reached before (a result
   // shown before the disconnect is not drawn as «done»: nothing continues), and opened again by its address the same card
   if (progress.disconnected) return <Failure failure="disconnected" todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
-  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} phoneControlFailed={phoneControlFailed} isAdmin={isAdmin} app={app} canWorkdir={canWorkdir} />;
+  if (move) return <MoveProgressBody move={move} kind={snap?.status.setup_kind === 'move' ? 'move' : 'solo'} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} phoneControlFailed={phoneControlFailed} isAdmin={isAdmin} app={app} canWorkdir={canWorkdir} />;
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
@@ -366,8 +366,9 @@ function PhoneHandoffCardBody({ isAdmin, app }: { isAdmin: boolean; app: NativeR
  * story #4576 (Yuna «② 옮긴 뒤 진행 표시»): a move's two steps — no first task, no result, no [결과 보기]. Agents by their own names
  * (always the `…Bare` forms: name + particle). A moved agent waiting for its folder is ①'s note (as the trust note), not a failure.
  */
-function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmin, app, canWorkdir }: { move: MoveProgress; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null; canWorkdir: boolean }) {
+function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, isAdmin, app, canWorkdir }: { move: MoveProgress; kind: 'move' | 'solo'; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null; canWorkdir: boolean }) {
   const t = useTranslations('desktop.setup');
+  const flatHref = useFlatHref();
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
   if (move.blocked) return <Failure failure="managed" />;
   if (move.expired) return <Failure failure="expired" />;
@@ -454,6 +455,13 @@ function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmi
           <Button asChild><a href={todayHref}>{t('goToday')}</a></Button>
         </div>
         <p className="text-xs text-muted-foreground">{done ? t('move.doneNote') : t('move.runningNote')}</p>
+        {/* story 4986 AC5: only a MOVE can leave another computer behind (a solo start made a new agent); said once the new computer is connected — the old key still worked until then (measured on dev) */}
+        {done && kind === 'move' ? (
+          <p className="text-xs text-muted-foreground" data-testid="setup-move-old-computer">
+            {t('move.oldComputerNote')}{' '}
+            <a className="underline" href={flatHref('/desktop')}>{t('move.oldComputerLink')}</a>
+          </p>
+        ) : null}
       </footer>
       {/* story 4670 AC1: the usual new-customer road is a move — the phone's way in (QR · [폰 페어링 열기] · the remote-control [켜기]) is
           there too, and the «아래 카드에서 다시 켤 수 있어요» line points at it */}

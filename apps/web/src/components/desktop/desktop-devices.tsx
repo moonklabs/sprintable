@@ -301,6 +301,10 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
               {dateText ? <>{' · '}{tz ? dateText : <InvisibleSample>{dateText}</InvisibleSample>}</> : null}
               {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}
             </p>
+            {/* story 4986 AC5: a computer an agent was moved away from stays connected with no agent — said in words (a person ends it; nothing is ended for them) */}
+            {computer.state === 'handed_over' && computerAgents(computer).length === 0 ? (
+              <p className="mt-0.5 break-keep text-xs text-foreground" data-testid="desktop-computer-empty">{t('emptyComputer')}</p>
+            ) : null}
             <p className="mt-0.5 text-xs text-muted-foreground" aria-hidden>
               <span className="group-open:hidden">{t('setupsShow')}</span>
               <span className="hidden group-open:inline">{t('setupsHide')}</span>
