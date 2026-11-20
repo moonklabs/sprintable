@@ -1072,6 +1072,7 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "clock": ClockPayload,
     "read_changes": ReadChangesPayload,
     "file_list": FileListPayload,
+    "file_read": FileListPayload,  # story 4983 (P6): the same two fields — the project and the sealed request (the file's name is inside it)
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -1235,7 +1236,7 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         .limit(100)
     )).scalars().all()
     now = _now()
-    if any(r.kind in ("read_changes", "file_list") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too)
+    if any(r.kind in ("read_changes", "file_list", "file_read") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too — a list and an open)
         from app.services.desktop_changes import reject_stale_commands
 
         rows = await reject_stale_commands(db, rows, now=now)

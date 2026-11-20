@@ -1,7 +1,9 @@
-"""story 4983 (P5 · phone ↔ host project files) — layer 3, the server's part of a files LIST request: a person's sealed request goes to ONE computer, the computer's sealed answer comes back, the server holds both unread.
+"""story 4983 (P5 · phone ↔ host project files) — layer 3, the server's part of a files request (a folder LIST, or — P6 — the OPENING of one file): a person's sealed request goes to ONE computer, the computer's sealed
+answer comes back, the server holds both unread.
 
-The contract is `contracts/file-browse-vectors.json` of the mobile repository (`envelope`): kind `file_list` (the phone's, header `session_key` = `file:<project id>`, `command_id` = the press's own key) and kind `file_result`
-(the computer's, the same `command_id`). The server cannot open either: it sees envelopes — sizes, times, ids — never a name, a path or a word of what a folder holds. What it keeps: one row per request in
+The contract is `contracts/file-browse-vectors.json` of the mobile repository (`envelope`): kind `file_list` or `file_read` (the phone's, header `session_key` = `file:<project id>`, `command_id` = the press's own key)
+and kind `file_result` (the computer's, the same `command_id`). The kind of the COMMAND is the kind the envelope's own header says (both are judged by shape, the same limits apply to both, and the two share one
+open request per computer and one ask per person per second). The server cannot open either: it sees envelopes — sizes, times, ids — never a name, a path or a word of what a folder holds. What it keeps: one row per request in
 `desktop_file_reads`, for at most FILE_TTL (10 minutes from the ask), deleted the moment its person reads it.
 
   who may ask ......... the person who paired that computer (`may_read` — the same single rule as the changed-files list, never an org role), who can open the PROJECT, with a phone of theirs paired with that computer
@@ -35,7 +37,8 @@ PER_PERSON_INTERVAL = timedelta(seconds=1)  # a person taps through folders: one
 POLL_INTERVAL = timedelta(milliseconds=500)  # one look at a pending request per half second
 ANSWER_BODY_MAX = 400 * 1024  # an answer envelope as JSON text: the sealed body is at most 256 KiB + the tag (≈350 KiB as base64url) + the header — a full-size legal answer passes; over this is refused before it is parsed
 ASK_BODY_MAX = 16 * 1024  # a files request as JSON text: the padded frame is at most 4 KiB + the tag (≈5.5 KiB as base64url) + the header — over this is refused before it is parsed
-KINDS = ("file_list", "file_result")
+FILE_ASK_KINDS = ("file_list", "file_read")  # the kinds of a files request: the envelope's own header says which (story 4983 P6)
+KINDS = (*FILE_ASK_KINDS, "file_result")
 
 
 def _now() -> datetime:
@@ -63,7 +66,8 @@ class ListRequest(BaseModel):
     @classmethod
     def _shape(cls, env: dict) -> dict:
         try:
-            return check_envelope(env, kind="file_list")
+            kind = env.get("kind") if isinstance(env, dict) else None
+            return check_envelope(env, kind=kind if kind in FILE_ASK_KINDS else "file_list")  # a kind that is not a files request is refused by the shape check below (never echoed)
         except ValueError as exc:  # our own message names no field of the caller's
             raise ValueError(str(exc)) from None
 
@@ -94,8 +98,8 @@ def _check_header(env: dict, *, setup: DesktopSetup, project_id: uuid.UUID, key:
         raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this press's")
 
 
-async def create_list(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, body: ListRequest) -> tuple[uuid.UUID, datetime]:
-    """→ (the command's id, when the answer's wait ends). The same press key again gives back the first command. The caller commits."""
+async def create_ask(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, body: ListRequest) -> tuple[uuid.UUID, datetime]:
+    """→ (the command's id, when the answer's wait ends). The command's kind is the envelope's (`file_list` · `file_read`). The same press key again gives back the first command. The caller commits."""
     from app.services import remote_control
     from app.services.agent_permissions import _reachable, paired_phone
     from app.services.desktop_commands import org_role
@@ -107,11 +111,14 @@ async def create_list(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.U
     if setup is None or not may_read(setup, user_id) or await org_role(db, org_id, user_id) is None:
         raise denied  # one answer for «no such computer» and «not yours»
     await require_project_access(db, user_id, body.project_id, org_id, not_found_detail={"code": "project_not_found", "message": "no such project"})  # the one judge of project access (404, never «forbidden»)
+    kind = body.envelope["kind"]
     # the press again (the same key): the first command comes back, whatever the computer or the switch say now — a second command would put the question to the computer twice
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id, DesktopCommand.idempotency_key == f"files:{member_id}:{body.idempotency_key}")
     )).scalar_one_or_none()
     if existing is not None:
+        if existing.kind != kind:  # one press, one question: the same key for another kind is a mistake, not a repeat
+            raise DesktopRelayError(409, "files_key_reused", "that press key was used for another kind of request")
         row = (await db.execute(select(DesktopFileRead).where(DesktopFileRead.command_id == existing.id, DesktopFileRead.viewer_id == user_id))).scalar_one_or_none()
         if row is None or row.expires_at <= _now():
             raise DesktopRelayError(404, "files_read_not_found", "no such request")
@@ -133,7 +140,7 @@ async def create_list(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.U
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
     await purge_expired(db, now=now)
     await take_limit_locks(db, setup, user_id, road="files")
-    last = (await db.execute(select(func.max(DesktopCommand.created_at)).where(DesktopCommand.kind == "file_list", DesktopCommand.requested_by == member_id))).scalar_one()
+    last = (await db.execute(select(func.max(DesktopCommand.created_at)).where(DesktopCommand.kind.in_(FILE_ASK_KINDS), DesktopCommand.requested_by == member_id))).scalar_one()
     if last is not None and now - last < PER_PERSON_INTERVAL:
         raise DesktopRelayError(429, "files_too_fast", "wait a moment before asking again", detail={"retry_after": 1})
     lines = lines_of_machine(setup)
@@ -144,7 +151,7 @@ async def create_list(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.U
     if busy:
         raise DesktopRelayError(409, "files_busy", "that computer is already looking at its files")
     cmd = await enqueue_command(
-        db, setup=setup, kind="file_list", payload={"project_id": str(body.project_id), "envelope": body.envelope},
+        db, setup=setup, kind=kind, payload={"project_id": str(body.project_id), "envelope": body.envelope},
         idempotency_key=f"files:{member_id}:{body.idempotency_key}", requested_by=member_id,
     )
     expires_at = now + FILE_TTL
@@ -191,7 +198,7 @@ async def write_answer(db: AsyncSession, setup: DesktopSetup, command_id: uuid.U
     env = answer.envelope
     # the ONE lock order of the changed-files list: the command row first, then the read row
     cmd = (await db.execute(
-        select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup.id, DesktopCommand.kind == "file_list").with_for_update()
+        select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup.id, DesktopCommand.kind.in_(FILE_ASK_KINDS)).with_for_update()
     )).scalar_one_or_none()
     await purge_expired(db)
     row = (await db.execute(
@@ -237,7 +244,7 @@ async def read_answer(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         raise not_found
     if row.polled_at is not None and now - row.polled_at < POLL_INTERVAL:  # before any lock: a tight poll costs the person a 429, not the computer's command row a queue
         raise DesktopRelayError(429, "files_polled_too_fast", "ask again in a moment", detail={"retry_after": 1})
-    cmd = (await db.execute(select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup_id, DesktopCommand.kind == "file_list").with_for_update())).scalar_one_or_none()
+    cmd = (await db.execute(select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == setup_id, DesktopCommand.kind.in_(FILE_ASK_KINDS)).with_for_update())).scalar_one_or_none()
     setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
     if cmd is None or setup is None:
         raise not_found

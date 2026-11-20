@@ -625,10 +625,10 @@ def test_18_the_sensitive_name_rule_reads_every_segment_both_names_and_every_spe
     from app.services.desktop_changes import clean_name, is_sensitive_path
 
     for path in (".env", "a/b/.env.local", "A/.ENV", ".env.", ".env ", "dir/id_ed25519", "x/server.key", "x/Cert.PEM", "a/.aws/credentials", ".aws/config", "k/my-credentials-2.txt",
-                 "svc/service-account-x.json", "t/terraform.tfstate.backup", ".docker/config.json", "app/.npmrc", "b/.netrc", "x/vpn.ovpn", "p/.htpasswd", "k/kubeconfig", "a\\.env", "secrets.yaml", "cfg/client_secret.json", "my-secret.txt", "infra/prod.tfvars.json", "a.keychain", "login.keychain-db", "x/.token", ".docker\u1680/config.json", ".docker./config.json\u00a0",
+                 "svc/service-account-x.json", "t/terraform.tfstate.backup", ".docker/config.json", "app/.npmrc", ".claude.json", "x/.claude.json.backup", ".claude.json\ufe0f", ".claude\u2800.json", ".claude.js\u3164on", "b/.netrc", "x/vpn.ovpn", "p/.htpasswd", "k/kubeconfig", "a\\.env", "secrets.yaml", "cfg/client_secret.json", "my-secret.txt", "infra/prod.tfvars.json", "a.keychain", "login.keychain-db", "x/.token", ".docker\u1680/config.json", ".docker./config.json\u00a0",
                  ".e\u200bnv", ".netrc\u00a0", ".env\u2003", "x\uff0f.env", "a/.ENV\u200d", "ｋ/.env", ".aws\u200b/config"):
         assert is_sensitive_path(path), path
-    for path in ("src/app.ts", "README.md", "environment.ts", "docs/key-notes.md", "assets/keyboard.png", "src/envelope.ts", "env\u200bironment.ts", "", None):
+    for path in ("src/app.ts", "README.md", "environment.ts", "docs/key-notes.md", "assets/keyboard.png", ".claude/settings.json", ".claude/commands/x.md", ".claude.jsonl", "x/.claude.json-config", ".claude.jsonc", "src/envelope.ts", "env\u200bironment.ts", "", None):
         assert not is_sensitive_path(path), path
     assert clean_name("a‮b⁦c‎d\u0000e\u0085f g") == "abcdefg"
     assert len(clean_name("가" * 300)) == 240

@@ -1006,6 +1006,14 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     files = [h for h in hits if h.startswith("0488_")]
     assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in files) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in files), files
     assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in files), files
+    # story 4983 (P6): 0491 is 0488's shape again — one more word in the command-kind CHECK (`file_read`: dropped and made again; an old revision never writes the new word, every value it does write still passes) and the one partial index
+    # of the person's ask pause swapped for the same index over both kinds (the old revision never names it: it asks no files question at all). The reading lists exactly those four lines — the CHECK swap, the index dropped, the index built — nothing else.
+    file_read = [h for h in hits if h.startswith("0491_")]
+    assert len(file_read) == 4, file_read
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in file_read) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in file_read), file_read
+    assert sum("drop_index" in h and "ix_desktop_commands_file_list_by" in h for h in file_read) == 1 and sum("create_index" in h and "ix_desktop_commands_file_by" in h for h in file_read) == 1, file_read
+    up0491 = (_ROOT / "backend/alembic/versions/0491_desktop_file_read_kind.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table", up0491), "0491's upgrade() changes no row, no column and no table"
     # story 4976 (A5): 0489 is FOUR lines of upgrade() the reading lists: ONE data `UPDATE` (the backfill: a computer whose capabilities already hold `sealed_prompt` gets `sealed_prompts_at = now()`; restricted by `capabilities @>` to those rows, row locks only —
     # a few computers), the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_prompts_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds
     # (`sealed_prompts_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never names the column, so every UPDATE it makes to a `desktop_setups` row leaves the value as it was
@@ -1026,7 +1034,7 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
     up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_"))]
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

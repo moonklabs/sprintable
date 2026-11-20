@@ -73,9 +73,10 @@ def clean_name(text: str) -> str:
 # rename as well as the new: `.env` renamed to `notes.txt` is still the secret.
 _SENSITIVE_EXACT = frozenset((
     ".npmrc", ".netrc", ".pgpass", ".git-credentials", ".pypirc", ".htpasswd", "kubeconfig", "credentials", "credentials.json",
-    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".dockercfg",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".dockercfg", ".claude.json",
 ))
-_SENSITIVE_PREFIX = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".env", "service-account")
+# `.claude.json`: the Claude CLI's account file and its backups (story 4983 P6) — the `.claude/` folder is the user's own and is not hidden
+_SENSITIVE_PREFIX = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".env", "service-account", ".claude.json.")
 _SENSITIVE_SUFFIX = (
     ".pem", ".key", ".p12", ".p8", ".pfx", ".jks", ".keystore", ".gpg", ".asc", ".kdbx", ".tfstate", ".tfstate.backup", ".tfvars", ".tfvars.json", ".ovpn",
     ".keychain", ".keychain-db", ".token",
@@ -84,11 +85,20 @@ _SENSITIVE_CONTAINS = ("credentials", "secret")
 _SENSITIVE_DIRS = frozenset((".aws", ".ssh", ".gnupg", ".kube"))
 
 
+# the blank look-alikes (braille blank · Hangul fillers) and the variation selectors draw nothing: a name spelled with one is the name without it (the host's table drops the same)
+_BLANKS = frozenset("\u2800\u3164\uffa0\u115f\u1160\u17b4\u17b5\u034f")
+
+
+def _is_variation_selector(ch: str) -> bool:
+    cp = ord(ch)
+    return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF or 0x180B <= cp <= 0x180D or cp == 0x180F
+
+
 def _canon(text: str) -> str:
     """What a name IS for the rule, not how it is drawn: compatibility forms folded (NFKC: a full-width slash is a slash, a no-break space a space), every control and every invisible
     format character (zero-width space / joiner, soft hyphen, bidirectional marks …: categories Cc and Cf) dropped, case folded. Used for MATCHING only — the shown name is `clean_name`'s."""
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(ch for ch in folded if unicodedata.category(ch) not in ("Cc", "Cf")).casefold()
+    return "".join(ch for ch in folded if unicodedata.category(ch) not in ("Cc", "Cf") and ch not in _BLANKS and not _is_variation_selector(ch)).casefold()
 
 
 def _strip_tail(seg: str) -> str:
@@ -398,7 +408,7 @@ async def reject_stale_commands(db: AsyncSession, commands: list[DesktopCommand]
     now = now or _now()
     keep: list[DesktopCommand] = []
     for c in commands:
-        if c.kind in ("read_changes", "file_list") and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:  # (story 4983: a files request waits no longer than a changed-files read)
+        if c.kind in ("read_changes", "file_list", "file_read") and c.created_at is not None and now - c.created_at > COMMAND_EXPIRY:  # (story 4983: a files request waits no longer than a changed-files read)
             c.state, c.result_code, c.finished_at = "rejected", "expired", now
         else:
             keep.append(c)
