@@ -440,8 +440,11 @@ class StartableSnapshot(BaseModel):
     # story 4976 (A3 · Kadir 871 ⓓ): this computer's app OPENS a sealed instruction (`send_prompt` as an envelope — host `sealed-prompt.ts`). The card-sealing mark a phone pins says «this computer seals cards», which an app from before
     # the sealed instruction also says; only THIS word says the Mac can open one — kept in `capabilities` like `computer_press`, shown in the session view (`sealed_prompt`) so a sealed instruction is never sent to a Mac that cannot open it.
     sealed_prompt: StrictBool | None = None  # (true and nothing else, as above)
+    # story 4987 (P7 · the 10-minute files window): this computer's app accepts a files request signed by a window key (it said so with its startable list) — kept in `capabilities` like the two words above and told to the
+    # phone with the session view (`file_window`), so a phone asks for a window only of a Mac that can give one; absent = an app from before (the phone then asks for the OS confirmation on every request)
+    file_window: StrictBool | None = None  # (true and nothing else, as above)
 
-    @field_validator("computer_press", "sealed_prompt")
+    @field_validator("computer_press", "sealed_prompt", "file_window")
     @classmethod
     def _only_true(cls, v: bool | None) -> bool | None:
         if v is False:
@@ -814,6 +817,7 @@ async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: 
 
 COMPUTER_PRESS = "computer_press"
 SEALED_PROMPT = "sealed_prompt"  # story 4976 (A3): the computer's app opens a sealed instruction
+FILE_WINDOW = "file_window"  # story 4987 (P7): the computer's app accepts a files request signed by a window key (the 10-minute window)
 
 
 async def note_computer_press(db: AsyncSession, setup: DesktopSetup, knows: bool) -> None:
@@ -823,7 +827,7 @@ async def note_computer_press(db: AsyncSession, setup: DesktopSetup, knows: bool
 
 
 async def note_capabilities(db: AsyncSession, setup: DesktopSetup, says: dict[str, bool]) -> None:
-    """the capability words the computer says with its list (`computer_press` · `sealed_prompt`), all in ONE write (a second write would start from the old value the first had already changed): each kept in
+    """the capability words the computer says with its list (`computer_press` · `sealed_prompt` · `file_window`), all in ONE write (a second write would start from the old value the first had already changed): each kept in
     `capabilities` when said, taken out again when a list comes without it; the other words are left as they are"""
     have = [c for c in (setup.capabilities or []) if isinstance(c, str)]
     want = sorted(({*have} | {w for w, k in says.items() if k}) - {w for w, k in says.items() if not k})

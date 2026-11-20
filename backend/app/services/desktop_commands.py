@@ -205,6 +205,8 @@ def _picked_view(pick: DesktopSession, setup: DesktopSetup, state: str) -> dict:
         "instruct_now": pick.instruct_now if heard else None,
         # story 4976 (A3 · Kadir 871 ⓓ): whether this computer's app OPENS a sealed instruction (it said so with its startable list) — told only while the device is heard (the same gate); a sealed instruction is made only for a Mac that says true
         "sealed_prompt": ("sealed_prompt" in (setup.capabilities or [])) if heard else None,
+        # story 4987 (P7): whether this computer's app accepts a files request signed by a window key (the 10-minute window; it said so with its startable list) — told only while the device is heard (the same gate)
+        "file_window": ("file_window" in (setup.capabilities or [])) if heard else None,
     }
 
 
@@ -221,7 +223,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None, "sealed_prompt": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None, "sealed_prompt": None, "file_window": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -788,6 +790,8 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
             "device_name": setup.device_name, "reachable": setup.id in reachable, "last_heard_at": _iso(heard_at.get(setup.id)), "agents": agents,
             # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
             "computer_press": "computer_press" in (setup.capabilities or []),
+            # story 4987 (P7): …and accepts a files request signed by a window key (the 10-minute window) — the phone asks for a window only then
+            "file_window": "file_window" in (setup.capabilities or []),
             # story 4714: agents of this computer the person can see but not talk to (the agent's message policy) were left out; when that is why the list
             # is empty the phone says so instead of «no agent yet — start the first at the Mac»
             **({"agents_hidden": "message_policy"} if hidden_by_policy and not agents else {}),
