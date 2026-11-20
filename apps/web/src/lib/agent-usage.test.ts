@@ -1,6 +1,6 @@
 // story 4981 (PR 4): the usage sheet's data — only the server's closed shape is kept, times are worded in the strip's own buckets.
 import { describe, expect, it } from 'vitest';
-import { accountOrdinal, agoOf, loadUsage, parseUsage, untilOf, windowName, type UsageRow } from './agent-usage';
+import { LABEL_MAX, accountOrdinal, agoOf, loadUsage, parseUsage, safeLabel, untilOf, windowName, type UsageRow } from './agent-usage';
 
 const NOW = Date.parse('2026-11-19T06:00:00Z');
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
@@ -8,6 +8,23 @@ const win = (over: Record<string, unknown> = {}) => ({ kind: 'five_hour', minute
 const row = (over: Record<string, unknown> = {}) => ({ runtime: 'claude', account: 'a1b2c3d4e5f6', state: 'windows', why: null, windows: [win()], seen_at: iso(-90_000), ...over });
 const view = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'x', remote_control: true, setup_id: 's-1', device_name: '작업용 맥북', connected: true, usage, ...over });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+
+// story 4986: the name of an account — the SAME cases as the server's table (backend tests/test_4986_usage_label_realdb.py) and the host's, so the three tables cannot drift apart without a test saying so
+const GOOD = ['회사 계정', 'work', 'a'.repeat(LABEL_MAX), '한'.repeat(LABEL_MAX), '😀'.repeat(LABEL_MAX), 'a b', '회사-1'];
+const BAD = ['', 'a'.repeat(LABEL_MAX + 1), '😀'.repeat(LABEL_MAX + 1), 'a/b', 'a\\b', 'a\nb', 'a\u0000b', 'a\u202eb', 'a\u2066b', 'a\u200bb', '\ufeffa', ' a', 'a ', 'a\u2028b', 'a\u0085b',
+  'Acme\u2060Corp', 'a\u00adb', 'a\ue000b', 'a\u180eb', 'Acme\uff0fCorp', 'a\uff3cb', 'a\u2215b', 'a\u2044b', 'a\u29f8b', 'a\u2571b'];
+
+describe('the name of an account (story 4986)', () => {
+  it('a good name is kept as written; every bad one is null (the same cases as the server and the host)', () => {
+    for (const t of GOOD) expect(safeLabel(t), JSON.stringify(t)).toBe(t);
+    for (const t of BAD) expect(safeLabel(t), JSON.stringify(t)).toBeNull();
+    for (const t of [null, undefined, 5, true, ['a'], { a: 1 }]) expect(safeLabel(t)).toBeNull();
+  });
+  it('a row carries its name (or null); a bad name costs the NAME only — the numbers stay', () => {
+    const v = parseUsage(view([row({ label: '회사 계정' }), row({ account: 'bbbbbbbbbbbb', label: 'a/b' }), row({ account: 'cccccccccccc' }), row({ account: 'dddddddddddd', label: null })]))!;
+    expect(v.rows.map((r) => [r.account, r.label, r.windows[0]!.usedPercent])).toEqual([['a1b2c3d4e5f6', '회사 계정', 63], ['bbbbbbbbbbbb', null, 63], ['cccccccccccc', null, 63], ['dddddddddddd', null, 63]]);
+  });
+});
 
 describe('parseUsage — only the closed shape is kept', () => {
   it('a good answer comes through with its words and numbers', () => {

@@ -93,6 +93,25 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     expect(qa('[data-testid="agent-usage-window"]')[2]!.textContent).toContain('1시간 한도');
   });
 
+  it('[4986] an account the person named is headed «Claude · 회사 계정» (the other keeps its number; a lone named account too); the name is drawn as TEXT, whatever it holds', async () => {
+    const { d } = deps([json(200, answer([
+      row({ account: 'aaaaaaaaaaaa', label: '회사 계정' }), row({ account: 'bbbbbbbbbbbb' }),
+      row({ runtime: 'codex', account: 'cccccccccccc', label: '개인 <b>굵게' }),   // (markup characters are allowed text — a slash is not, so no closing tag: shown as text, never as markup)
+    ]))]);
+    await render(d);
+    const heads = qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent);
+    expect(heads).toEqual(['Claude · 회사 계정', 'Claude · 계정 2', 'Codex · 개인 <b>굵게']);
+    expect(qa('[data-testid="agent-usage-row"] h3 b')).toHaveLength(0);                 // no element was made from the name
+    expect(qa('[data-testid="agent-usage-row"]')[0]!.getAttribute('aria-label')).toBe('Claude · 회사 계정');
+  });
+
+  it('[4986] a name the rule does not allow is not drawn (the number heading stays) — and the numbers are', async () => {
+    const { d } = deps([json(200, answer([row({ account: 'aaaaaaaaaaaa', label: 'a/b' }), row({ account: 'bbbbbbbbbbbb', label: 'Acme\u2060Corp' })]))]);
+    await render(d);
+    expect(qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent)).toEqual(['Claude · 계정 1', 'Claude · 계정 2']);
+    expect(qa('[data-testid="agent-usage-window"]')).toHaveLength(2);
+  });
+
   it('a window whose reset time has PASSED draws no percent and no bar — one line «풀렸어요 · 새 숫자는 다음 세션 때» (a window still running beside it keeps its bar)', async () => {
     const { d } = deps([json(200, answer([row({ seen_at: iso(-3 * 24 * 3_600_000), windows: [win({ used_percent: 91, resets_at: iso(-2 * 24 * 3_600_000) }), win({ kind: 'seven_day', minutes: 10_080, used_percent: 41 })] })]))]);
     await render(d);

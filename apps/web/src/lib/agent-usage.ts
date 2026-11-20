@@ -13,6 +13,8 @@ export interface UsageWindow { kind: UsageKind; minutes: number | null; usedPerc
 export interface UsageRow {
   runtime: UsageRuntime;
   account: string;
+  /** story 4986: the name the person gave this account on the computer (display text) — null when none, or when the server's word is not a name this rule allows */
+  label: string | null;
   state: 'windows' | 'unavailable';
   why: UsageWhy | null;
   windows: UsageWindow[];
@@ -36,18 +38,29 @@ function parseWindow(raw: unknown): UsageWindow | null {
   return { kind, minutes: m, usedPercent: pct, resetsAt: isTime(resets) ? resets : null };
 }
 
+export const LABEL_MAX = 40;
+/** the characters a name may not have — the SAME table as the server's (backend `desktop_usage.label_problem`) and the host's: controls · format (zero-width, word joiner, soft hyphen, BOM, direction overrides) · private use · line/paragraph separators,
+ *  slash and backslash and the characters that LOOK like one, and no space at an end. The server already judged it; the page judges it again (a row someone wrote by hand) and shows no name rather than a bad one. */
+const LABEL_BAD_CHAR = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\\/\u2044\u2215\u2216\u29f5\u29f8\u29f9\ufe68\uff0f\uff3c\u2571\u2572\u27cb\u27cd]/u;
+/** a name the page may draw, or null */
+export function safeLabel(v: unknown): string | null {
+  if (typeof v !== 'string' || v === '' || [...v].length > LABEL_MAX || v !== v.trim() || LABEL_BAD_CHAR.test(v)) return null;
+  return v;
+}
+
 function parseRow(raw: unknown): UsageRow | null {
   if (!isObj(raw)) return null;
   const { runtime, account, state, why, windows, seen_at: seen } = raw;
+  const label = safeLabel(raw.label);
   if (runtime !== 'claude' && runtime !== 'codex') return null;
   if (typeof account !== 'string' || !/^[a-z0-9]{8,32}$/.test(account) || !isTime(seen)) return null;
   if (state === 'windows') {
     if (!Array.isArray(windows) || windows.length < 1 || windows.length > 4) return null;
     const ws = windows.map(parseWindow);
     if (ws.some((w) => w === null)) return null;
-    return { runtime, account, state, why: null, windows: ws as UsageWindow[], seenAt: seen };
+    return { runtime, account, label, state, why: null, windows: ws as UsageWindow[], seenAt: seen };
   }
-  if (state === 'unavailable' && (why === 'api_key' || why === 'not_read')) return { runtime, account, state, why, windows: [], seenAt: seen };
+  if (state === 'unavailable' && (why === 'api_key' || why === 'not_read')) return { runtime, account, label, state, why, windows: [], seenAt: seen };
   return null;
 }
 

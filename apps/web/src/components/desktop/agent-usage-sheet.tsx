@@ -152,11 +152,12 @@ function agoText(t: T, a: Ago | null): string | null {
 
 function UsageSection({ row, ordinal, now, t }: { row: UsageRow; ordinal: number | null; now: number; t: T }) {
   const runtime = RUNTIME_NAME[row.runtime];
-  const heading = ordinal === null ? runtime : t('account', { runtime, n: ordinal });
+  // story 4986: the name the person gave the account («Claude · 회사 계정») — plain text; without a name the number as before (two accounts) or the CLI's name alone
+  const heading = row.label !== null ? t('accountNamed', { runtime, label: row.label }) : ordinal === null ? runtime : t('account', { runtime, n: ordinal });
   const seen = agoText(t, agoOf(row.seenAt, now));
   return (
     <section aria-label={heading} className="space-y-2" data-testid="agent-usage-row" data-runtime={row.runtime}>
-      <h3 className="text-ds-body font-semibold text-ds-ink">{heading}</h3>
+      <h3 className="break-words text-ds-body font-semibold text-ds-ink">{heading}</h3>
       {row.state === 'windows' ? row.windows.map((w, i) => <WindowBar key={i} w={w} now={now} t={t} />) : (
         <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-why" data-why={row.why ?? ''}>{row.why === 'api_key' ? t('why.api_key') : row.why === 'not_read' ? t('why.not_read') : null}</p>
       )}
