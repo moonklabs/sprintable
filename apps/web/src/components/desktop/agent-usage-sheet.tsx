@@ -110,18 +110,14 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 
 type T = ReturnType<typeof useTranslations>;
 
-/** story 4986: each row's heading — the name the person gave the account («Claude · 회사 계정»), else the number (two accounts of a CLI) or the CLI's name alone. A name must never read as ANOTHER account's heading (codex: a name «account 2» on account 1 looks
- *  like the heading of account 2; two accounts given one name look alike): where two rows would show the same words, the NAMED one also says its own number — «Claude · account 2 (account 1)» — so no heading passes for another's. */
+/** story 4986: each row's heading — the name the person gave the account, else the number (two accounts of a CLI) or the CLI's name alone. A name must never read as ANOTHER account's heading (codex, twice: a name «account 2» on account 1; a name «account 2 (account 1)»
+ *  on account 3): a CLI with more than one account therefore ALWAYS ends a named heading with its own number — «Claude · 회사 계정 (계정 1)». Two headings of one CLI then cannot be equal whatever the names are: a named one ends in «(계정 n)» with its own n, an unnamed one
+ *  has no bracket at its end, and the CLI's name comes first — a name cannot change that. A CLI with a single account has nothing to be mistaken for: «Claude · 회사 계정». */
 function headings(rows: readonly UsageRow[], t: T): Array<{ row: UsageRow; heading: string }> {
-  const plain = (r: UsageRow): string => {
-    const runtime = RUNTIME_NAME[r.runtime]; const n = accountOrdinal(rows, r);
-    return r.label !== null ? t('accountNamed', { runtime, label: r.label }) : n === null ? runtime : t('account', { runtime, n });
-  };
-  const words = rows.map(plain);
-  const count = new Map<string, number>(); for (const w of words) count.set(w, (count.get(w) ?? 0) + 1);
-  return rows.map((row, i) => {
-    const n = accountOrdinal(rows, row);
-    return { row, heading: row.label !== null && n !== null && (count.get(words[i]!) ?? 0) > 1 ? t('accountNamedN', { runtime: RUNTIME_NAME[row.runtime], label: row.label, n }) : words[i]! };
+  return rows.map((row) => {
+    const runtime = RUNTIME_NAME[row.runtime]; const n = accountOrdinal(rows, row);
+    const heading = row.label !== null ? (n === null ? t('accountNamed', { runtime, label: row.label }) : t('accountNamedN', { runtime, label: row.label, n })) : n === null ? runtime : t('account', { runtime, n });
+    return { row, heading };
   });
 }
 

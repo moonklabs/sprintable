@@ -93,28 +93,31 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     expect(qa('[data-testid="agent-usage-window"]')[2]!.textContent).toContain('1시간 한도');
   });
 
-  it('[4986] an account the person named is headed «Claude · 회사 계정» (the other keeps its number; a lone named account too); the name is drawn as TEXT, whatever it holds', async () => {
+  it('[4986] an account the person named is headed «Claude · 회사 계정 (계정 1)» when the CLI has more accounts (the other keeps its number) and plain «Codex · …» when it is the only one; the name is drawn as TEXT, whatever it holds', async () => {
     const { d } = deps([json(200, answer([
       row({ account: 'aaaaaaaaaaaa', label: '회사 계정' }), row({ account: 'bbbbbbbbbbbb' }),
       row({ runtime: 'codex', account: 'cccccccccccc', label: '개인 <b>굵게' }),   // (markup characters are allowed text — a slash is not, so no closing tag: shown as text, never as markup)
     ]))]);
     await render(d);
     const heads = qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent);
-    expect(heads).toEqual(['Claude · 회사 계정', 'Claude · 계정 2', 'Codex · 개인 <b>굵게']);
+    expect(heads).toEqual(['Claude · 회사 계정 (계정 1)', 'Claude · 계정 2', 'Codex · 개인 <b>굵게']);
     expect(qa('[data-testid="agent-usage-row"] h3 b')).toHaveLength(0);                 // no element was made from the name
-    expect(qa('[data-testid="agent-usage-row"]')[0]!.getAttribute('aria-label')).toBe('Claude · 회사 계정');
+    expect(qa('[data-testid="agent-usage-row"]')[0]!.getAttribute('aria-label')).toBe('Claude · 회사 계정 (계정 1)');
   });
 
-  it('[4986 codex] a name never passes for ANOTHER account\'s heading: «계정 2» on account 1 (while account 2 has none) and two accounts given one name each also say their own number', async () => {
-    const { d } = deps([json(200, answer([
-      row({ account: 'aaaaaaaaaaaa', label: '계정 2' }), row({ account: 'bbbbbbbbbbbb' }),                     // account 1 is named like account 2's number heading
-      row({ runtime: 'codex', account: 'cccccccccccc', label: '같은 이름' }), row({ runtime: 'codex', account: 'dddddddddddd', label: '같은 이름' }),   // one name on two accounts
-      row({ runtime: 'codex', account: 'eeeeeeeeeeee', label: '다른 이름' }),
-    ]))]);
-    await render(d);
-    const heads = qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent);
-    expect(heads).toEqual(['Claude · 계정 2 (계정 1)', 'Claude · 계정 2', 'Codex · 같은 이름 (계정 1)', 'Codex · 같은 이름 (계정 2)', 'Codex · 다른 이름']);
-    expect(new Set(heads).size).toBe(heads.length);                                                          // no two headings read alike
+  it('[4986 codex] no heading passes for ANOTHER account\'s, whatever the names are: «계정 2» on account 1 · one name on two accounts · a name that holds a bracket and a number (the shapes codex found, and a spread of others)', async () => {
+    const names = ['계정 2', '계정 2 (계정 1)', '계정 1', '(계정 1)', '같은 이름', '같은 이름', 'Claude', 'Claude · 계정 2', '계정 3)', ' x'.trim()];
+    const accounts = names.map((_, i) => `a${String(i).padStart(11, '0')}`);
+    // every subset-like arrangement: all named · alternate named · none named — one CLI each time, so the CLI has several accounts
+    const arrangements: Array<Array<string | null>> = [names, names.map((n, i) => (i % 2 === 0 ? n : null)), names.map((n, i) => (i % 2 === 1 ? n : null)), names.map(() => null), [...names].reverse()];
+    for (const labels of arrangements) {
+      await act(async () => { root.unmount(); }); container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);   // (a fresh sheet each time: it reads when it opens)
+      const { d } = deps([json(200, answer(labels.map((label, i) => row({ account: accounts[i]!, ...(label !== null ? { label } : {}) }))))]);
+      await render(d);
+      const heads = qa('[data-testid="agent-usage-row"] h3').map((h) => h.textContent);
+      expect(heads, JSON.stringify(labels)).toHaveLength(labels.length);
+      expect(new Set(heads).size, `no two headings read alike for ${JSON.stringify(labels)}: ${JSON.stringify(heads)}`).toBe(heads.length);
+    }
   });
 
   it('[4986] a name the rule does not allow is not drawn (the number heading stays) — and the numbers are', async () => {
