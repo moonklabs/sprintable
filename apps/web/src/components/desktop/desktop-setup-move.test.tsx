@@ -359,6 +359,49 @@ describe('[SID:4576] the move refused', () => {
   });
 });
 
+describe('[SID:4986] AC5 · what a person does after the move (the panel)', () => {
+  const AFTER = koMessages.desktop.setup.move;
+  it('the «옮긴 뒤에 알아 둘 것» block is on the move way once an agent can be moved: login stays here · the old computer lets go when this one is connected · the last 퇴근 memo is a reading', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    expect(container.querySelector('[data-testid=setup-move-after]')).toBeNull(); // the recipe way says nothing of it
+    await chooseMove();
+    const block = container.querySelector('[data-testid=setup-move-after]') as HTMLElement;
+    expect(block).not.toBeNull();
+    // before anything is ticked it names every tool an agent that can be moved uses (the list has a Claude Code and a Codex agent) — never only «Claude Code»
+    expect([...block.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Claude Code · Codex는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요', AFTER.afterOldComputer, AFTER.afterMemo]);
+    // …and then only the tools of what is ticked
+    await tick('댄 어윈');
+    expect(container.querySelector('[data-testid=setup-move-after] li')?.textContent).toBe('Claude Code는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요');
+    await tick('댄 어윈'); await tick('까디르 QA');
+    expect(container.querySelector('[data-testid=setup-move-after] li')?.textContent).toBe('Codex는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요');
+    expect(block.querySelector('p')?.textContent).toBe('옮긴 뒤에 알아 둘 것');
+    // the moment is «this computer is connected» — never the confirmation (the old key still worked until the exchange: measured on dev)
+    expect(AFTER.afterOldComputer).toContain('이 컴퓨터 연결이 끝나면');
+    expect(AFTER.afterLogin).toContain('로그인 정보는 옮겨지지 않아요');
+    expect(AFTER.afterLogin).toContain('{tools}');
+  });
+
+  it('nothing that can be moved → no block (like the folder line: nothing true to say)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [KADIR] }), { status: 200 }); // a codex agent on a computer that has only claude
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
+    await chooseMove();
+    expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
+    expect(container.querySelector('[data-testid=setup-move-after]')).toBeNull();
+    expect(text()).not.toContain('옮긴 뒤에 알아 둘 것');
+  });
+
+  it('en: the block is there in English', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />, 'en');
+    await act(async () => { (container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[1] as HTMLElement).click(); });
+    const block = container.querySelector('[data-testid=setup-move-after]') as HTMLElement;
+    expect(block.textContent).toContain(enMessages.desktop.setup.move.afterTitle);
+    expect(block.textContent).toContain('Sign in to Claude Code · Codex on this computer yourself — the sign-in is not carried over');
+  });
+});
+
 describe('[SID:4576] the move\'s progress — two steps, by name', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'Date'] }); vi.setSystemTime(Date.parse('2026-10-06T04:42:00Z')); });
   afterEach(() => { vi.useRealTimers(); });
@@ -503,6 +546,38 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     const out = container.querySelector('[data-testid=setup-way-out]') as HTMLElement;
     expect([...out.querySelectorAll('a,button')].map((b) => b.textContent)).toEqual(['홈으로 가기']);
     expect(text()).toContain('이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요');
+  });
+
+  // story 4986 AC5: a MOVE can leave another computer behind — said only once this computer is connected (the old key still worked until then), with a link to the list where it is ended
+  describe('[SID:4986] the done screen says what became of the old computer', () => {
+    const connectedAll = { tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }, { member_id: 'm-kad', at: '2026-10-06T04:41:02Z' }] };
+    it('a finished move → the line + [연결된 기기 보기] to the existing /desktop screen', async () => {
+      statusNow = () => base(connectedAll);
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      const line = container.querySelector('[data-testid=setup-move-old-computer]') as HTMLElement;
+      expect(line.textContent).toContain('다른 컴퓨터에서 일하던 에이전트는 이제 그 컴퓨터에서 지시를 더 받지 않아요');
+      expect(line.textContent).toContain('그 컴퓨터 자체는 연결된 기기 화면에서 끊을 수 있어요');
+      expect(line.textContent).not.toMatch(/[«»≪≫]/); // no quote marks on this line (the fonts draw «» as ≪≫ at this size — PO 11-20)
+      const a = line.querySelector('a') as HTMLAnchorElement;
+      expect(a.textContent).toBe('연결된 기기 보기');
+      expect(a.getAttribute('href')).toMatch(/^\/desktop(\?|$)/); // the existing screen (the flat link adds the project when one is chosen)
+    });
+    it('not connected yet → no line (before the exchange the old computer still has the agent)', async () => {
+      statusNow = () => base({});
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(container.querySelector('[data-testid=setup-move-old-computer]')).toBeNull();
+    });
+    it('a solo start made a NEW agent — nothing was left behind, so no line', async () => {
+      statusNow = () => ({ ...base(connectedAll), setup_kind: 'solo' });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(container.querySelector('[data-testid=setup-move-old-computer]')).toBeNull();
+    });
   });
 
   // story 4670 AC1: the move is the new customer's usual road — its end screen carries the phone's way in too (the QR block · [폰 페어링 열기]
