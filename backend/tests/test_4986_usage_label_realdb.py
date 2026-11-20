@@ -91,7 +91,6 @@ async def test_04_a_bad_label_stops_the_whole_report_nothing_of_it_is_written(wo
         assert await _sql(fetch=f"SELECT count(*) FROM desktop_usage WHERE setup_id = '{device['setup_id']}'") == [(0,)]   # not even the good entry (no half write)
 
 
-@pytest.mark.parametrize("bad", [5, True, ["a"], {"a": 1}, 1.5])
 async def test_04b_a_refused_report_never_carries_the_name_back(world):
     async with _client() as c:
         device, _agent = await _computer(c, "d4986 mac echo")
@@ -102,6 +101,7 @@ async def test_04b_a_refused_report_never_carries_the_name_back(world):
         assert r.status_code == 422 and "SECRETACCT" not in r.text, r.text            # … and no other field of this report either
 
 
+@pytest.mark.parametrize("bad", [5, True, ["a"], {"a": 1}, 1.5])
 async def test_05_a_label_that_is_not_a_text_is_refused(world, bad):
     async with _client() as c:
         device, _agent = await _computer(c, "d4986 mac type")
