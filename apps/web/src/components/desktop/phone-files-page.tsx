@@ -12,9 +12,11 @@ import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 import { groupByComputer, readStartable, type StartableComputer } from '@/lib/phone-start';
-import { listFolder, openFile, shellTakesFileRead, shellTakesFiles, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
+import { closeWindow, listFolder, openFile, shellTakesFileRead, shellTakesFileWindow, shellTakesFiles, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
 
-type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean; canOpen: boolean };
+type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean; canOpen: boolean; canWindow: boolean };
+/** story 4987 (P7): the 10-minute window the shell says is open for ONE computer — `msLeft` as of `at` (the screen counts it down; the shell's clocks are the judge, the next answer corrects this one) */
+type WindowNow = { setupId: string; msLeft: number; at: number };
 type FolderView = { kind: 'folder'; setupId: string; projectId: string; projectName: string; dir: string[]; state: { kind: 'loading' } | { kind: 'list'; list: FilesList } | { kind: 'end'; outcome: Ended } };
 /** one file opened from a folder: `back` is the folder as it was (its list is kept, so going back asks nothing) */
 type FileView = { kind: 'file'; setupId: string; projectId: string; projectName: string; dir: string[]; name: string; back: FolderView; state: { kind: 'loading' } | { kind: 'shown'; body: Extract<OpenOutcome, { kind: 'text' | 'image' }> } | { kind: 'end'; outcome: Ended } };
@@ -59,6 +61,8 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   const [read, setRead] = useState<Read>({ kind: 'reading' });
   const [view, setView] = useState<View>({ kind: 'choose' });
+  const [win, setWin] = useState<WindowNow | null>(null);
+  const [clock, setClock] = useState(0); // the screen's «now» for the count-down: set when a window is heard and once a second after (never read from the clock during a render)
   const alive = useRef(true);
   const ask = useRef(0); // one ask counts: a newer one (or leaving) makes an older one draw nothing
   useEffect(() => {
@@ -84,8 +88,9 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
       if (!alive.current || mine !== ask.current) return;
       if (r.kind === 'view') {
         const canOpen = await shellTakesFileRead(phoneCall); // (a shell that only lists keeps listing: the files are not offered)
+        const canWindow = await shellTakesFileWindow(phoneCall); // (story 4987: a shell that does not know windows is asked for none — every request is an OS confirmation, as before)
         if (!alive.current || mine !== ask.current) return;
-        setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control, canOpen });
+        setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control, canOpen, canWindow });
       }
       else setRead(r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
     })();
@@ -93,11 +98,25 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
   const readNow = useCallback(() => { setRead({ kind: 'reading' }); load(); }, [load]); // a press (retry): the empty area, then read again
   useEffect(() => { if (inPhoneApp) load(); }, [inPhoneApp, load]);
 
+  // a [닫기] on its way to the shell: the next request waits for it (`window.before`), so it is never made inside the window that was closed
+  const closing = useRef<Promise<void>>(Promise.resolve());
+  // what the shell says of the window after each request (null = none · it ended): the line on the screen follows it
+  const canWindow = read.kind === 'ready' && read.canWindow;
+  const windowDeps = useCallback((setupId: string) => ({ ask: canWindow, before: () => closing.current, on: (w: { ms_left: number } | null) => { if (!alive.current || !canWindow) return; if (w) { const at = Date.now(); setClock(at); setWin({ setupId, msLeft: w.ms_left, at }); } else setWin(null); /* (the shell's word on a request: none — what the screen showed of a window is not drawn until the next request says it again) */ } }), [canWindow]);
+  useEffect(() => {
+    if (!win) return;
+    // the timer runs while a window is heard and stops at its end (the line is drawn only while there is time left: the end needs no state of its own)
+    const timer = setInterval(() => { const n = Date.now(); setClock(n); if (n - win.at >= win.msLeft) clearInterval(timer); }, 1000);
+    return () => clearInterval(timer);
+  }, [win]);
+  const msLeft = win ? win.msLeft - (clock - win.at) : 0;
+  const closeNow = useCallback(() => { if (!win) return; const id = win.setupId; setWin(null); closing.current = closeWindow(id, phoneCall); }, [win, phoneCall]);
+
   const open = useCallback((setupId: string, projectId: string, projectName: string, dir: string[], cursor?: string, keep?: FileEntry[]) => {
     const mine = ++ask.current;
     if (cursor === undefined) setView({ kind: 'folder', setupId, projectId, projectName, dir, state: { kind: 'loading' } });
     else setView((v) => (v.kind === 'folder' ? { ...v, state: { kind: 'loading' } } : v));
-    void listFolder({ setupId, projectId, dir, ...(cursor !== undefined ? { cursor } : {}) }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current }).then((out) => {
+    void listFolder({ setupId, projectId, dir, ...(cursor !== undefined ? { cursor } : {}) }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current, window: windowDeps(setupId) }).then((out) => {
       if (!alive.current || mine !== ask.current) return;
       setView((v) => {
         if (v.kind !== 'folder' || v.setupId !== setupId || v.projectId !== projectId) return v;
@@ -105,20 +124,20 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
         return { ...v, dir, state: { kind: 'end', outcome: out } };
       });
     });
-  }, [phoneCall]);
+  }, [phoneCall, windowDeps]);
 
   // one file: asked from the folder that holds it (its list stays in memory behind it)
   const openOne = useCallback((from: FolderView, name: string) => {
     const mine = ++ask.current;
     setView({ kind: 'file', setupId: from.setupId, projectId: from.projectId, projectName: from.projectName, dir: from.dir, name, back: from, state: { kind: 'loading' } });
-    void openFile({ setupId: from.setupId, projectId: from.projectId, dir: from.dir, name }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current }).then((out) => {
+    void openFile({ setupId: from.setupId, projectId: from.projectId, dir: from.dir, name }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current, window: windowDeps(from.setupId) }).then((out) => {
       if (!alive.current || mine !== ask.current) return;
       setView((v) => {
         if (v.kind !== 'file' || v.name !== name || v.setupId !== from.setupId || v.projectId !== from.projectId) return v;
         return { ...v, state: out.kind === 'text' || out.kind === 'image' ? { kind: 'shown', body: out } : { kind: 'end', outcome: out } };
       });
     });
-  }, [phoneCall]);
+  }, [phoneCall, windowDeps]);
 
   // came from the session: the agent has ONE project on that computer → open its top at once (the one thing the person asked for); several → the choice among THOSE projects; none → the ordinary choice
   const entered = useRef(false);
@@ -136,6 +155,7 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
     <div className="flex min-h-screen justify-center bg-background px-4 py-6">
       <div className="w-full max-w-md space-y-4" data-testid="phone-files-page">
         <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
+        {win && msLeft > 0 && view.kind !== 'choose' && win.setupId === view.setupId ? <WindowLine t={t} msLeft={msLeft} onClose={closeNow} /> : null}
         {view.kind === 'file'
           ? <FileScreen t={t} v={view} onRetry={() => openOne(view.back, view.name)} onBack={() => { ask.current += 1; setView(view.back); }} />
           : view.kind === 'folder'
@@ -150,6 +170,18 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
 }
 
 type T = ReturnType<typeof useTranslations>;
+
+/** story 4987 (P7): «10분 동안 다시 묻지 않음 · 남은 시간 mm:ss · [닫기]» — shown while the shell says a window is open; [닫기] makes the next request an OS confirmation again */
+function WindowLine({ t, msLeft, onClose }: { t: T; msLeft: number; onClose: () => void }) {
+  const s = Math.max(0, Math.ceil(msLeft / 1000));
+  const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground" data-testid="phone-files-window">
+      <span>{t('window.on', { time })}</span>
+      <Button variant="outline" size="sm" onClick={onClose} data-testid="phone-files-window-close">{t('window.close')}</Button>
+    </div>
+  );
+}
 
 function Choose({ t, read, only, onReload, onPick }: { t: T; read: Read; only: ReturnType<typeof entryOf>; onReload: () => void; onPick: (setupId: string, project: { project_id: string; name: string }) => void }) {
   const [picked, setPicked] = useState<string | null>(null);

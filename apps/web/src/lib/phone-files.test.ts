@@ -1,7 +1,7 @@
 // story 4983 (P5 · layer 5) — every way a folder-list ask from the phone app ends maps to one outcome; what the web hands the shell and the server is the four agreed things and nothing else
 // (no path · no name beyond the folder's own single names); the shell's and the server's refusals each have ONE word; a body the computer sealed is drawn only if it has the contract's shape.
 import { describe, expect, it, vi } from 'vitest';
-import { FILE_REASONS, FILES_POLL_MAX_MS, READ_LIMITS, listFolder, openFile, parseList, parseRead, shellTakesFileRead, shellTakesFiles, type FilesDeps } from './phone-files';
+import { FILE_REASONS, FILES_POLL_MAX_MS, READ_LIMITS, closeWindow, listFolder, openFile, parseList, parseRead, shellTakesFileRead, shellTakesFileWindow, shellTakesFiles, windowState, type FilesDeps } from './phone-files';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -289,5 +289,153 @@ describe('[4983 P6] parseRead — a body is drawn only if it has the contract\'s
     const data = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(READ_LIMITS.imageBytesMax - 8, 1)]).toString('base64');
     expect(parseRead(img({ s: READ_LIMITS.imageBytesMax, data }))).toMatchObject({ kind: 'image' });
     expect(READ_LIMITS).toEqual({ textBytesMax: 65536, lineCharsMax: 2000, textShownBytesMax: 131072, imageBytesMax: 153600, imagePixelsMax: 16000000, resultBytesMax: 220000 });
+  });
+});
+
+
+describe('[4987 P7] the 10-minute window — what the web asks of the shell and hears back', () => {
+  const OPENED = { state: 'opened', ms_left: 590_000 };
+  const RIDING = { state: 'riding', ms_left: 300_000 };
+  const okServer = () => server(() => json(201, { command_id: CMD }), [json(200, { state: 'done', envelope: ANSWER })]);
+
+  it('a shell that takes windows is told `window: true` with each request; one that does not is told nothing new (the same arguments as before)', async () => {
+    okServer();
+    const on = deps({ 'files.seal': { ...SEALED, window: OPENED } as PhoneAnswer, 'files.open': { id: 'w2', ok: true, body: LIST } }, { window: { ask: true } });
+    await listFolder(ask, on);
+    expect(on.phoneCall).toHaveBeenNthCalledWith(1, 'files.seal', { setup_id: SETUP, project_id: 'proj-1', dir: ['src'], idempotency_key: 'press-key-0001', window: true });
+    okServer();
+    const off = deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: LIST } }, { window: { ask: false } });
+    await listFolder(ask, off);
+    expect((off.phoneCall.mock.calls[0] as unknown[])[1]).not.toHaveProperty('window');
+    okServer();
+    const none = deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: LIST } });
+    await listFolder(ask, none);
+    expect((none.phoneCall.mock.calls[0] as unknown[])[1]).not.toHaveProperty('window');
+  });
+
+  it('an open asks the same way, and the shell\'s word about the window is passed on (opened · riding · none) — nothing of a key', async () => {
+    const heard: unknown[] = [];
+    okServer();
+    const d = deps({ 'files.seal': { ...SEALED, window: RIDING } as PhoneAnswer, 'files.open': { id: 'w2', ok: true, body: { v: 1, kind: 'read', ok: true, form: 'text', text: 'hi', masked: 0, size: 2 } } }, { window: { ask: true, on: (w) => heard.push(w) } });
+    await openFile({ setupId: SETUP, projectId: 'proj-1', dir: [], name: 'a.txt' }, d);
+    expect((d.phoneCall.mock.calls[0] as unknown[])[1]).toMatchObject({ name: 'a.txt', window: true });
+    expect(heard).toEqual([RIDING]);
+    // a word that is not the shell's shape is none
+    for (const bad of [undefined, null, 'open', { state: 'riding' }, { state: 'riding', ms_left: -1 }, { state: 'opened', ms_left: Number.NaN }, { state: 'other', ms_left: 5 }]) {
+      okServer(); heard.length = 0;
+      await listFolder(ask, deps({ 'files.seal': { ...SEALED, window: bad } as unknown as PhoneAnswer, 'files.open': { id: 'w2', ok: true, body: LIST } }, { window: { ask: true, on: (w) => heard.push(w) } }));
+      expect(heard, JSON.stringify(bad)).toEqual([null]);
+    }
+  });
+
+  it('a refusal at the shell tells the screen there is no window (it may be gone), and posts nothing', async () => {
+    const heard: unknown[] = [];
+    const calls = server(json(201, { command_id: CMD }));
+    const out = await listFolder(ask, deps({ 'files.seal': { id: 'w1', ok: false, code: 'device_unreachable' } }, { window: { ask: true, on: (w) => heard.push(w) } }));
+    expect(out).toEqual({ kind: 'unreachable' });
+    expect(heard).toEqual([null]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the computer REFUSES a request that rode a window (bad signature): the shell is told to forget it and the request is made ONCE more as a first request — an OS confirmation that opens a new window', async () => {
+    const heard: unknown[] = [];
+    let seals = 0;
+    const phoneCall = vi.fn(async (type: string): Promise<PhoneAnswer> => {
+      if (type === 'files.seal') return (++seals === 1 ? { ...SEALED, window: RIDING } : { ...SEALED, idempotency_key: 'press-key-0001', window: OPENED }) as PhoneAnswer;
+      if (type === 'files.open') return { id: 'w2', ok: true, body: LIST } as PhoneAnswer;
+      return { id: 'x', ok: true } as PhoneAnswer;
+    });
+    let n = 0;
+    server(() => json(201, { command_id: CMD }), [() => (n++ === 0 ? json(200, { state: 'rejected', code: 'envelope_bad_signature', envelope: null }) : json(200, { state: 'done', envelope: ANSWER }))]);
+    const out = await listFolder(ask, { phoneCall, newKey: () => 'press-key-0001', wait: async () => {}, window: { ask: true, on: (w) => heard.push(w) } } as FilesDeps);
+    expect(out.kind).toBe('list');
+    expect(phoneCall.mock.calls.map((c) => c[0])).toEqual(['files.seal', 'files.window_close', 'files.seal', 'files.open']);
+    expect(phoneCall).toHaveBeenNthCalledWith(2, 'files.window_close', { setup_id: SETUP });
+    expect(heard).toEqual([RIDING, null, OPENED]);
+  });
+
+  it('only a request that RODE a window is retried, and only once: a refused first request, another word, or a second refusal end it', async () => {
+    // a first request (opened) refused with a bad signature: no retry
+    const a = deps({ 'files.seal': { ...SEALED, window: OPENED } as PhoneAnswer, 'files.open': { id: 'w2', ok: true, body: LIST } }, { window: { ask: true } });
+    server(() => json(201, { command_id: CMD }), [() => json(200, { state: 'rejected', code: 'envelope_bad_signature', envelope: null })]);
+    expect(await listFolder(ask, a)).toEqual({ kind: 'failed' });
+    expect(a.phoneCall.mock.calls.map((c) => c[0])).toEqual(['files.seal']);
+    // a ride refused with another word: no retry
+    const b = deps({ 'files.seal': { ...SEALED, window: RIDING } as PhoneAnswer }, { window: { ask: true } });
+    server(() => json(201, { command_id: CMD }), [() => json(200, { state: 'rejected', code: 'envelope_replay', envelope: null })]);
+    expect(await listFolder(ask, b)).toEqual({ kind: 'failed' });
+    expect(b.phoneCall.mock.calls.map((c) => c[0])).toEqual(['files.seal']);
+    // a ride refused twice (the retry rides again, refused again): the second refusal is the end
+    const c = deps({ 'files.seal': { ...SEALED, window: RIDING } as PhoneAnswer }, { window: { ask: true } });
+    server(() => json(201, { command_id: CMD }), [() => json(200, { state: 'rejected', code: 'envelope_bad_signature', envelope: null })]);
+    expect(await listFolder(ask, c)).toEqual({ kind: 'failed' });
+    expect(c.phoneCall.mock.calls.map((x) => x[0])).toEqual(['files.seal', 'files.window_close', 'files.seal']);
+    // a screen that is gone does not retry
+    let gone = false;
+    const d = deps({ 'files.seal': { ...SEALED, window: RIDING } as PhoneAnswer }, { window: { ask: true }, stopped: () => gone });
+    server(() => json(201, { command_id: CMD }), [() => { gone = true; return json(200, { state: 'rejected', code: 'envelope_bad_signature', envelope: null }); }]);
+    await listFolder(ask, d);
+    expect(d.phoneCall.mock.calls.map((x) => x[0])).toEqual(['files.seal']);
+  });
+
+  it('only the CURRENT ask reports the window: an older ask (the screen moved on) says nothing about it — neither a window nor «none»', async () => {
+    const heard: unknown[] = [];
+    let gone = false;
+    const d = deps({ 'files.seal': { ...SEALED, window: OPENED } as PhoneAnswer }, { window: { ask: true, on: (w) => heard.push(w) }, stopped: () => gone });
+    const base = d.phoneCall.getMockImplementation()!;
+    d.phoneCall.mockImplementation(async (type: string, ...rest: unknown[]) => { if (type === 'files.seal') gone = true; return (base as (t: string, ...r: unknown[]) => Promise<PhoneAnswer>)(type, ...rest); });
+    server(() => json(201, { command_id: CMD }));
+    expect(await listFolder(ask, d)).toEqual({ kind: 'cancelled' });
+    expect(heard).toEqual([]);
+    gone = false;
+    const refused = deps({ 'files.seal': { id: 'w1', ok: false, code: 'device_unreachable' } }, { window: { ask: true, on: (w) => heard.push(w) }, stopped: () => gone });
+    const rb = refused.phoneCall.getMockImplementation()!;
+    refused.phoneCall.mockImplementation(async (type: string, ...rest: unknown[]) => { if (type === 'files.seal') gone = true; return (rb as (t: string, ...r: unknown[]) => Promise<PhoneAnswer>)(type, ...rest); });
+    expect(await listFolder(ask, refused)).toEqual({ kind: 'unreachable' });
+    expect(heard, 'a stopped ask\'s refusal does not erase the line either').toEqual([]);
+  });
+
+  it('a [닫기] still on its way to the shell is finished BEFORE the next request is sealed (`window.before`), and a screen that is already gone seals nothing', async () => {
+    const order: string[] = [];
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    const d = deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: LIST } }, { window: { ask: true, before: () => gate.then(() => { order.push('closed'); }) } });
+    const base = d.phoneCall.getMockImplementation()!;
+    d.phoneCall.mockImplementation(async (type: string, ...rest: unknown[]) => { order.push(type); return (base as (t: string, ...r: unknown[]) => Promise<PhoneAnswer>)(type, ...rest); });
+    server(() => json(201, { command_id: CMD }), [() => json(200, { state: 'done', envelope: ANSWER })]);
+    const running = listFolder(ask, d);
+    await Promise.resolve();
+    expect(order).toEqual([]); // nothing was sealed while the close is out
+    release();
+    await running;
+    expect(order).toEqual(['closed', 'files.seal', 'files.open']);
+    const gone = deps({ 'files.seal': SEALED }, { window: { ask: true, before: async () => {} }, stopped: () => true });
+    expect(await listFolder(ask, gone)).toEqual({ kind: 'cancelled' });
+    expect(gone.phoneCall).not.toHaveBeenCalled();
+  });
+
+  it('the screen left while the shell was closing the refused window: the request is NOT made again', async () => {
+    let gone = false; const heard: unknown[] = [];
+    const d = deps({ 'files.seal': { ...SEALED, window: RIDING } as PhoneAnswer }, { window: { ask: true, on: (w) => heard.push(w) }, stopped: () => gone });
+    const base = d.phoneCall.getMockImplementation()!;
+    d.phoneCall.mockImplementation(async (type: string, ...rest: unknown[]) => { if (type === 'files.window_close') gone = true; return (base as (t: string, ...r: unknown[]) => Promise<PhoneAnswer>)(type, ...rest); });
+    server(() => json(201, { command_id: CMD }), [() => json(200, { state: 'rejected', code: 'envelope_bad_signature', envelope: null })]);
+    expect(await listFolder(ask, d)).toEqual({ kind: 'cancelled' });
+    expect(d.phoneCall.mock.calls.map((c) => c[0])).toEqual(['files.seal', 'files.window_close']);
+    expect(heard, 'and the screen that left is told nothing about the window it closed').toEqual([RIDING]);
+  });
+
+  it('shell.caps `file_window: 1` (beside `files: 1`) is what says the shell takes windows; files.window and files.window_close are plain calls', async () => {
+    const caps = (c: Record<string, unknown>) => vi.fn(async () => ({ id: 'c', ok: true, caps: c }) as PhoneAnswer);
+    expect(await shellTakesFileWindow(caps({ files: 1, file_window: 1 }))).toBe(true);
+    expect(await shellTakesFileWindow(caps({ files: 1 }))).toBe(false);
+    expect(await shellTakesFileWindow(caps({ file_window: 1 }))).toBe(false);
+    expect(await shellTakesFileWindow(caps({ files: 1, file_window: true }))).toBe(false);
+    expect(await shellTakesFileWindow(vi.fn(async () => { throw new Error('x'); }))).toBe(false);
+    expect(await windowState(SETUP, vi.fn(async () => ({ id: 'c', ok: true, window: { open: true, ms_left: 5000 } }) as PhoneAnswer))).toEqual({ state: 'riding', ms_left: 5000 });
+    for (const w of [{ open: false, ms_left: 0 }, { open: true }, null, 'x']) expect(await windowState(SETUP, vi.fn(async () => ({ id: 'c', ok: true, window: w }) as unknown as PhoneAnswer))).toBeNull();
+    const closer = vi.fn(async () => ({ id: 'c', ok: true }) as PhoneAnswer);
+    await closeWindow(SETUP, closer);
+    expect(closer).toHaveBeenCalledWith('files.window_close', { setup_id: SETUP });
+    await expect(closeWindow(SETUP, vi.fn(async () => { throw new Error('x'); }))).resolves.toBeUndefined();
   });
 });

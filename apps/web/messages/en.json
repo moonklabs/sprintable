@@ -8320,6 +8320,10 @@
   "phoneFiles": {
     "title": "Project files",
     "home": "Go back",
+    "window": {
+      "on": "Not asking again for 10 minutes · {time} left",
+      "close": "Close"
+    },
     "back": "Choose a project",
     "up": "Up one folder",
     "retry": "Try again",
