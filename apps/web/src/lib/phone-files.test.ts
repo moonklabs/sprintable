@@ -1,7 +1,7 @@
 // story 4983 (P5 · layer 5) — every way a folder-list ask from the phone app ends maps to one outcome; what the web hands the shell and the server is the four agreed things and nothing else
 // (no path · no name beyond the folder's own single names); the shell's and the server's refusals each have ONE word; a body the computer sealed is drawn only if it has the contract's shape.
 import { describe, expect, it, vi } from 'vitest';
-import { FILE_REASONS, FILES_POLL_MAX_MS, listFolder, parseList, shellTakesFiles, type FilesDeps } from './phone-files';
+import { FILE_REASONS, FILES_POLL_MAX_MS, READ_LIMITS, listFolder, openFile, parseList, parseRead, shellTakesFileRead, shellTakesFiles, type FilesDeps } from './phone-files';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -179,5 +179,115 @@ describe('[4983] shellTakesFiles', () => {
     }
     expect(await shellTakesFiles(async () => ({ id: 'a', ok: false, code: 'bad_request' }))).toBe(false);
     expect(await shellTakesFiles(async () => { throw new Error('x'); })).toBe(false);
+  });
+});
+
+
+// ── [P6] opening one file ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const PNG = '89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c49444154789c636868680000030401814bd3d2100000000049454e44ae426082';
+const PNG_B64 = Buffer.from(PNG, 'hex').toString('base64');
+const TEXT = { v: 1, kind: 'read', ok: true, form: 'text', s: 14, masked: 1, text: 'hello\nAPI=••••' };
+const IMAGE = { v: 1, kind: 'read', ok: true, form: 'image', s: PNG.length / 2, mime: 'image/png', w: 1, h: 1, data: PNG_B64 };
+const OPEN = { setupId: SETUP, projectId: 'proj-1', dir: ['src'], name: 'a b.txt' };
+
+describe('[4983 P6] shellTakesFileRead — the shell says it opens files in its own word', () => {
+  const caps = (c: unknown) => async () => ({ id: 'x', ok: true, caps: c } as PhoneAnswer);
+  it('only `files: 1` AND `file_read: 1` is a yes', async () => {
+    expect(await shellTakesFileRead(caps({ files: 1, file_read: 1 }))).toBe(true);
+    expect(await shellTakesFileRead(caps({ files: 1 }))).toBe(false);
+    expect(await shellTakesFileRead(caps({ file_read: 1 }))).toBe(false);
+    expect(await shellTakesFileRead(caps({ files: 1, file_read: 2 }))).toBe(false);
+    expect(await shellTakesFileRead(caps({ files: 1, file_read: true }))).toBe(false);
+    expect(await shellTakesFileRead(caps(null))).toBe(false);
+    expect(await shellTakesFileRead(async () => ({ id: 'x', ok: false, code: 'bad_request' }) as PhoneAnswer)).toBe(false);
+    expect(await shellTakesFileRead(async () => { throw new Error('bridge'); })).toBe(false);
+  });
+  it('a shell that only lists is still a list-taker', async () => {
+    expect(await shellTakesFiles(caps({ files: 1 }))).toBe(true);
+    expect(await shellTakesFiles(caps({ files: 1, file_read: 1 }))).toBe(true);
+  });
+});
+
+describe('[4983 P6] openFile — what the web asks and posts', () => {
+  it('the shell gets the computer · the project · the folder NAMES · the file\'s NAME · the press key (no cursor); the server gets the envelope and the ids only', async () => {
+    const calls = server(json(201, { command_id: CMD }), [json(200, { state: 'done', code: null, envelope: ANSWER })]);
+    const d = deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: TEXT } });
+    const out = await openFile(OPEN, d);
+    expect(out).toEqual({ kind: 'text', text: TEXT.text, masked: 1, size: 14 });
+    expect(d.phoneCall).toHaveBeenNthCalledWith(1, 'files.seal', { setup_id: SETUP, project_id: 'proj-1', dir: ['src'], name: 'a b.txt', idempotency_key: 'press-key-0001' });
+    expect((d.phoneCall.mock.calls[0] as unknown[])[1]).not.toHaveProperty('cursor');
+    expect(d.phoneCall).toHaveBeenNthCalledWith(2, 'files.open', { setup_id: SETUP, project_id: 'proj-1', idempotency_key: 'press-key-0001', envelope: ANSWER });
+    const posted = JSON.parse(calls[0]!.init!.body as string);
+    expect(posted).toEqual({ project_id: 'proj-1', idempotency_key: 'press-key-0001', phone_key_id: 'k-1', envelope: SEALED.envelope });
+    expect(JSON.stringify(posted)).not.toContain('a b.txt');
+    expect(JSON.stringify(posted)).not.toContain('src');
+  });
+
+  it('a picture, a refusal word and a body that is not a read answer', async () => {
+    server(json(201, { command_id: CMD }), [json(200, { state: 'done', envelope: ANSWER })]);
+    expect(await openFile(OPEN, deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: IMAGE } }))).toEqual({ kind: 'image', mime: 'image/png', w: 1, h: 1, data: PNG_B64, size: PNG.length / 2 });
+    server(json(201, { command_id: CMD }), [json(200, { state: 'done', envelope: ANSWER })]);
+    expect(await openFile(OPEN, deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: { v: 1, kind: 'read', ok: false, reason: 'too_big' } } }))).toEqual({ kind: 'reason', reason: 'too_big' });
+    server(json(201, { command_id: CMD }), [json(200, { state: 'done', envelope: ANSWER })]);
+    expect(await openFile(OPEN, deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: LIST } }))).toEqual({ kind: 'failed' }); // a folder list answering an open
+  });
+
+  it('the same refusals as a list: the shell\'s words, the server\'s, a vanished row, a timeout — and a list still draws a list', async () => {
+    const calls = server(json(201, { command_id: CMD }));
+    expect(await openFile(OPEN, deps({ 'files.seal': { id: 'w', ok: false, code: 'cancelled' } }))).toEqual({ kind: 'cancelled' });
+    expect(await openFile(OPEN, deps({ 'files.seal': { id: 'w', ok: false, code: 'bad_request' } }))).toEqual({ kind: 'unsupported' });
+    expect(await openFile(OPEN, deps({ 'files.seal': { id: 'w', ok: false, code: 'no_screen_lock' } }))).toEqual({ kind: 'key', code: 'no_screen_lock' });
+    expect(calls.length).toBe(0);
+    server(json(409, { error: { code: 'files_busy' } }));
+    expect(await openFile(OPEN, deps({ 'files.seal': SEALED }))).toEqual({ kind: 'busy' });
+    server(json(201, { command_id: CMD }), [json(404)]);
+    expect(await openFile(OPEN, deps({ 'files.seal': SEALED }))).toEqual({ kind: 'timeout' });
+    server(json(201, { command_id: CMD }), [json(200, { state: 'done', envelope: ANSWER })]);
+    expect(await listFolder(ask, deps({ 'files.seal': SEALED, 'files.open': { id: 'w2', ok: true, body: LIST } }))).toMatchObject({ kind: 'list' });
+  });
+});
+
+describe('[4983 P6] parseRead — a body is drawn only if it has the contract\'s shape', () => {
+  const img = (over: Record<string, unknown> = {}) => ({ ...IMAGE, ...over });
+  const txt = (over: Record<string, unknown> = {}) => ({ ...TEXT, ...over });
+  it('the valid ones', () => {
+    expect(parseRead(TEXT)).toEqual({ kind: 'text', text: TEXT.text, masked: 1, size: 14 });
+    expect(parseRead(txt({ text: '', s: 0, masked: 0 }))).toEqual({ kind: 'text', text: '', masked: 0, size: 0 });
+    expect(parseRead(txt({ text: 'a\ufffdb\n\t한글 😀' }))).toMatchObject({ kind: 'text' });
+    expect(parseRead(IMAGE)).toMatchObject({ kind: 'image', mime: 'image/png', w: 1, h: 1 });
+    for (const word of FILE_REASONS) expect(parseRead({ v: 1, kind: 'read', ok: false, reason: word })).toEqual({ kind: 'reason', reason: word });
+    const pngOf = (n: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(n - 8, 1)]).toString('base64');
+    expect(parseRead(img({ w: 4000, h: 4000, s: 12, data: pngOf(12) }))).toMatchObject({ kind: 'image' });
+    for (const n of [12, 13, 14, 15]) expect(parseRead(img({ data: pngOf(n), s: n }))).toMatchObject({ kind: 'image', size: n });
+  });
+  it('every one that is not', () => {
+    const failed = { kind: 'failed' };
+    for (const body of [
+      null, [], 'x', { v: 1, kind: 'list', ok: true, entries: [], hidden: 0, more: false }, { ...TEXT, v: 2 }, { ...TEXT, kind: 'list' }, { ...TEXT, ok: 'yes' },
+      { v: 1, kind: 'read', ok: false, reason: 'weird' }, { v: 1, kind: 'read', ok: false, reason: 'too_big', path: '/x' },
+      txt({ form: 'pdf' }), { ...TEXT, form: undefined }, txt({ extra: 1 }), txt({ s: -1 }), txt({ s: 1.5 }), txt({ masked: -1 }), txt({ masked: 'a' }), txt({ text: 7 }), txt({ mime: 'image/png' }),
+      ...['\u0000', '\r', '\u0085', '\u007f', '\u2028', '\u200b', '\u202e', '\u2060', '\u2800', '\u3164', '\ufeff', '\u0001', '\u001b'].map((bad) => txt({ text: `a${bad}b` })),
+      txt({ s: READ_LIMITS.textBytesMax + 1 }), txt({ text: 'a'.repeat(READ_LIMITS.textShownBytesMax + 1) }), txt({ text: '\n'.repeat(READ_LIMITS.textShownBytesMax) }),
+      img({ mime: 'image/svg+xml' }), img({ mime: 'IMAGE/PNG' }), img({ mime: 5 }), img({ w: 0 }), img({ h: 1.5 }), img({ w: 2 ** 31 }), img({ w: 4000, h: 4001 }),
+      img({ data: 'a b c' }), img({ data: `data:image/png;base64,${PNG_B64}` }), img({ data: 'AAA!', s: 3 }), img({ data: 5 }), img({ s: 999 }), img({ extra: 1 }), img({ name: 'a.png' }),
+      img({ s: READ_LIMITS.imageBytesMax + 3, data: Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(READ_LIMITS.imageBytesMax - 5, 1)]).toString('base64') }),
+      img({ s: 0, data: '' }), img({ s: 3, data: 'AAAA' }), img({ mime: 'image/jpeg' }),
+      img({ s: 11, data: Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(3, 1)]).toString('base64') }),
+      txt({ text: 'x'.repeat(2001) }), txt({ text: 'a\ud800b' }), txt({ text: 'a\udc00b' }),
+    ]) expect(parseRead(body)).toEqual(failed);
+  });
+  it('every type must start like itself, a line may be 2000 characters and no more, a pair of surrogates is fine', () => {
+    const tagged = (mime: string, bytes: number[]) => { const data = Buffer.concat([Buffer.from(bytes), Buffer.alloc(16, 0)]).toString('base64'); return parseRead(img({ mime, s: Buffer.from(data, 'base64').length, data })).kind; };
+    expect(tagged('image/gif', [...Buffer.from('GIF87a')])).toBe('image'); expect(tagged('image/gif', [...Buffer.from('GIF88a')])).toBe('failed'); expect(tagged('image/gif', [...Buffer.from('GIFxyz')])).toBe('failed');
+    expect(tagged('image/jpeg', [0xff, 0xd8, 0xff, 0xe0])).toBe('image'); expect(tagged('image/jpeg', [0xff, 0xd8, 0x00])).toBe('failed'); expect(tagged('image/jpeg', [0xff, 0x00, 0x00])).toBe('failed');
+    expect(tagged('image/webp', [...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBP')])).toBe('image'); expect(tagged('image/webp', [...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WAVE')])).toBe('failed');
+    expect(tagged('image/png', [0x89, 0x50, 0x4e, 0x47, 0x0a, 0x0a, 0x1a, 0x0a])).toBe('failed');
+    expect(parseRead(txt({ text: 'x'.repeat(2000) })).kind).toBe('text'); expect(parseRead(txt({ text: 'a\ud83d\ude00b' })).kind).toBe('text');
+  });
+  it('the largest picture is drawn, and the answer\'s room is the contract\'s', () => {
+    const data = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(READ_LIMITS.imageBytesMax - 8, 1)]).toString('base64');
+    expect(parseRead(img({ s: READ_LIMITS.imageBytesMax, data }))).toMatchObject({ kind: 'image' });
+    expect(READ_LIMITS).toEqual({ textBytesMax: 65536, lineCharsMax: 2000, textShownBytesMax: 131072, imageBytesMax: 153600, imagePixelsMax: 16000000, resultBytesMax: 220000 });
   });
 });
