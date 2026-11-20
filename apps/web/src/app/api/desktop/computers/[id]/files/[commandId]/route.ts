@@ -21,3 +21,14 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   const res = await proxyToFastapi(new Request(url.toString(), { method: 'GET', headers: request.headers, signal: request.signal }), `/api/v2/desktop/computers/${id}/files/${commandId}`);
   return noStore(res);
 }
+
+// story 4988 (P8) — the person is done with a DOWNLOAD (the last chunk was read) or gives it up: DELETE /api/v2/desktop/computers/{id}/files/{command_id} deletes the request's row and every chunk still in it (the server's rule: the asker's own
+// download only; any other id deletes nothing and says `deleted: false`).
+export async function DELETE(request: Request, { params }: RouteParams): Promise<Response> {
+  const { id, commandId } = await params;
+  if (!UUID.test(id) || !UUID.test(commandId)) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
+  const url = new URL(request.url);
+  url.search = '';
+  const res = await proxyToFastapi(new Request(url.toString(), { method: 'DELETE', headers: request.headers, signal: request.signal }), `/api/v2/desktop/computers/${id}/files/${commandId}`);
+  return noStore(res);
+}

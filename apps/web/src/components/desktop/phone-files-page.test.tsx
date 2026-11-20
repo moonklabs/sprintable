@@ -33,7 +33,7 @@ const LISTS: Record<string, unknown[]> = {
   '': [entry('src', 'd', { t: 1 }), entry('README.md', 'f', { s: 1500, t: 2 }), entry('ln', 'l'), entry('sock', 'o')],
   'src': [entry('app', 'd'), entry('index.ts', 'f', { s: 42 })],
 };
-interface World { remote?: boolean; computers?: unknown[]; post?: Response; reason?: string; caps?: Record<string, unknown> | null; pages?: Record<string, unknown[]>; poll?: Response; read?: unknown }
+interface World { remote?: boolean; computers?: unknown[]; post?: Response; reason?: string; caps?: Record<string, unknown> | null; pages?: Record<string, unknown[]>; poll?: Response; read?: unknown; hold?: Promise<void>; chunk?: (i: number) => Response; step?: (args: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>> }
 let world: World;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 let seal: Array<Record<string, unknown>>;
@@ -52,6 +52,9 @@ function server() {
     if (url === '/api/remote-devices') return json({ devices: [{ id: KEYID, confirm_number: '482 917' }] });
     if (url.startsWith('/api/desktop/startable')) return json({ remote_control: world.remote !== false, computers: world.computers ?? [computer()] });
     if (url.endsWith('/files') && method === 'POST') return world.post ?? json({ command_id: CMD, expires_at: 'x' }, 201);
+    if (method === 'DELETE' && url.includes('/files/')) return json({ deleted: true });
+    const chunk = /\/chunks\/(\d+)$/.exec(url); // story 4988: chunk i of a download
+    if (chunk) return world.chunk ? world.chunk(Number(chunk[1])) : json({ state: 'ready', code: null, envelope: { v: 1, kind: 'file_result', chunk: Number(chunk[1]) } });
     if (url.includes('/files/')) return world.poll ? world.poll.clone() : json({ state: 'done', code: null, envelope: { v: 1, kind: 'file_result' } });
     throw new Error(`unexpected ${method} ${url}`);
   });
@@ -66,6 +69,7 @@ beforeEach(() => {
     if (type === 'device.key.info') return { id: 'k', ok: true, key_number: '482 917' };
     if (type === 'files.seal') { seal.push(args); return sealAnswer(args); }
     if (type === 'files.open') {
+      if (world.hold) await world.hold; // a test holds an open while it is «loading»
       if (seal[seal.length - 1]!.name !== undefined) return { id: 'o', ok: true, body: world.read }; // [P6] the last request sealed was an OPEN: its answer is the read body of the world
       const dir = (seal[seal.length - 1]!.dir as string[]).join('/');
       const cursor = seal[seal.length - 1]!.cursor as string | undefined;
@@ -74,6 +78,8 @@ beforeEach(() => {
       if (page) return { id: 'o', ok: true, body: { v: 1, kind: 'list', ok: true, entries: page, hidden: 0, more: cursor === undefined, ...(cursor === undefined ? { cursor: 'next' } : {}) } };
       return { id: 'o', ok: true, body: { v: 1, kind: 'list', ok: true, entries: LISTS[dir] ?? [], hidden: dir === '' ? 3 : 0, more: false } };
     }
+    if (type === 'files.download_step') return { id: 'd', ...(world.step ? await world.step(args) : { ok: true, state: 'saved' }) };
+    if (type === 'files.download_cancel') return { id: 'd', ok: true };
     return { id: 'x', ok: false, code: 'bad_request' };
   });
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
@@ -362,7 +368,7 @@ describe('[4983] every end that is not a list says its own words', () => {
     for (const reason of FILE_REASONS) {
       world.reason = reason;
       await open();
-      expect(byId('phone-files-end')?.textContent, reason).toContain(ko.reason[reason]);
+      expect(byId('phone-files-end')?.textContent, reason).toContain(reason === 'incomplete' ? ko.outcome.failed : ko.reason[reason]); // (`incomplete` is a DOWNLOAD's word: a list that says it is no good answer — `failed`)
       expect(text()).not.toContain('phoneFiles.');
       await act(async () => { root.unmount(); }); root = createRoot(container);
       server();
@@ -512,7 +518,7 @@ describe('[4983 P6] a file is opened from the folder that holds it', () => {
     for (const word of FILE_REASONS) {
       world.read = { v: 1, kind: 'read', ok: false, reason: word };
       await press(all('phone-files-file')[0]!);
-      expect(byId('phone-files-file-end')?.textContent).toContain((ko.fileReason as Record<string, string>)[word]);
+      expect(byId('phone-files-file-end')?.textContent).toContain(word === 'incomplete' ? ko.outcome.failed : (ko.fileReason as Record<string, string>)[word]);
       await press(byId('phone-files-file-back'));
     }
     expect(ko.fileReason.too_big).not.toBe(ko.reason.too_big);
@@ -714,5 +720,181 @@ describe('[4987 P7] the 10-minute window line', () => {
     expect(byId('phone-files-window-close')?.textContent).toBe('Close');
     await press(byId('phone-files-back'));
     expect(line()).toBeNull();
+  });
+});
+
+
+// story 4988 (P8) — the download of the file on screen: a button where the shell can download, progress while it runs, one line at the end, and everything dropped when the person stops or leaves
+describe('[4988 P8] a file is downloaded from its screen', () => {
+  const DL = { sealed_prompt: 1, files: 1, file_read: 1, file_download: 1 };
+  const textBody = (text: string) => ({ v: 1, kind: 'read', ok: true, form: 'text', s: text.length, masked: 0, text });
+  async function openFile(caps: Record<string, unknown> = DL, read: unknown = textBody('hello')) {
+    world.caps = caps; world.read = read;
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    await press(all('phone-files-file')[0]!);
+  }
+  const sealsOf = () => seal.filter((a) => a.download === true);
+  const cancels = () => phoneCall.mock.calls.filter((c) => c[0] === 'files.download_cancel');
+  const steps = () => phoneCall.mock.calls.filter((c) => c[0] === 'files.download_step');
+  const deletes = () => calls.filter((c) => c.method === 'DELETE');
+
+  it('the button is there only when the shell says it downloads — and only once the file (or its refusal) is on screen', async () => {
+    await openFile({ sealed_prompt: 1, files: 1, file_read: 1 });
+    expect(byId('phone-files-download')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await openFile();
+    expect(byId('phone-files-download')?.textContent).toBe(ko.download.button);
+  });
+
+  it('while the file is still being fetched (loading) there is no download button yet', async () => {
+    let release: () => void = () => {};
+    world.caps = DL; world.read = textBody('hello');
+    await screen();
+    await press(byId('phone-files-project-proj-1'));
+    world.hold = new Promise<void>((r) => { release = r; });
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-file-loading')).not.toBeNull();
+    expect(byId('phone-files-download')).toBeNull();
+    release(); await flush(); await settle();
+    expect(byId('phone-files-download')).not.toBeNull();
+  });
+
+  it('pressing it asks the shell for exactly the computer · project · the folder\'s names · the file\'s name · a press key · `download: true` (no window), the server gets the envelope and the ids, and the chunks are taken in order into the shell', async () => {
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk < 2 ? { ok: true, state: 'more', got: (a.envelope as { chunk: number }).chunk + 1, of: 3 } : { ok: true, state: 'saved' });
+    await openFile();
+    await press(byId('phone-files-download'));
+    expect(sealsOf()).toEqual([{ setup_id: SETUP, project_id: 'proj-1', dir: [], name: 'README.md', idempotency_key: expect.any(String), download: true }]);
+    expect(sealsOf()[0]).not.toHaveProperty('window');
+    const ask = posts().at(-1)!.body!;
+    expect(Object.keys(ask).sort()).toEqual(['envelope', 'idempotency_key', 'phone_key_id', 'project_id']);
+    expect(JSON.stringify(ask)).not.toContain('README');
+    expect(calls.filter((c) => /\/chunks\/\d+$/.test(c.url)).map((c) => c.url.split('/').at(-1))).toEqual(['0', '1', '2']);
+    expect(steps().map((c) => (c[1] as { envelope: { chunk: number } }).envelope.chunk)).toEqual([0, 1, 2]);
+    expect(byId('phone-files-download-saved')?.textContent).toBe(ko.download.saved);
+    expect(byId('phone-files-download')).toBeNull(); // (the button is replaced by the line)
+    expect(deletes()).toHaveLength(1);
+    expect(cancels()).toHaveLength(0);
+  });
+
+  it('while it runs: the line says `got/of` after each chunk and [그만두기] stops it — the shell drops the train and the server deletes the request', async () => {
+    let release: (v: Record<string, unknown>) => void = () => {};
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise((r) => { release = r; }));
+    await openFile();
+    await press(byId('phone-files-download'));
+    expect(byId('phone-files-download-running')?.textContent).toContain(ko.download.running.replace('{got}', '1').replace('{of}', '57'));
+    expect(byId('phone-files-download')).toBeNull();
+    await press(byId('phone-files-download-stop'));
+    expect(byId('phone-files-download-running')).toBeNull();
+    expect(byId('phone-files-download')).not.toBeNull(); // the button is back
+    expect(cancels()).toHaveLength(1);
+    expect(deletes()).toHaveLength(1);
+    release({ ok: true, state: 'more', got: 2, of: 57 }); await flush(); await settle();
+    expect(byId('phone-files-download-running')).toBeNull(); // a late answer of the stopped download draws nothing
+    expect(byId('phone-files-download-end')).toBeNull(); // …and no end line either (the road ended `cancelled`: the screen of a stopped download does not hear it)
+    expect(byId('phone-files-download')).not.toBeNull();
+  });
+
+  it('the first moment says «asking the Mac» (nothing counted yet) and the shell\'s OS prompt is the person\'s confirmation', async () => {
+    let release: (v: Record<string, unknown>) => void = () => {};
+    const open = (await import('react')).act;
+    void open;
+    sealAnswer = (args) => ({ id: 's', ok: true, envelope: { v: 1, kind: 'file_download' }, phone_key_id: KEYID, idempotency_key: args.idempotency_key });
+    world.step = () => new Promise((r) => { release = r; });
+    await openFile();
+    await press(byId('phone-files-download'));
+    expect(byId('phone-files-download-running')?.textContent).toContain(ko.download.starting);
+    release({ ok: true, state: 'saved' }); await flush(); await settle();
+    expect(byId('phone-files-download-saved')).not.toBeNull();
+  });
+
+  it('each end is one line: the computer\'s refusal says its own word (a secret is not downloaded), an incomplete file is said and may be tried again, a save that failed is said', async () => {
+    const ends: Array<[Record<string, unknown>, string, boolean]> = [
+      [{ ok: true, state: 'refused', reason: 'looks_secret' }, ko.download.reason.looks_secret, false],
+      [{ ok: true, state: 'refused', reason: 'too_big' }, ko.download.reason.too_big, false],
+      [{ ok: true, state: 'refused', reason: 'changed_while_reading' }, ko.download.reason.changed_while_reading, true],
+      [{ ok: true, state: 'refused', reason: 'busy' }, ko.download.reason.busy, true],
+      [{ ok: false, code: 'incomplete' }, ko.download.reason.incomplete, true],
+      [{ ok: false, code: 'save_failed' }, ko.download.saveFailed, true],
+      [{ ok: false, code: 'cancelled' }, ko.outcome.cancelled, true],
+    ];
+    for (const [step, line, again] of ends) {
+      world.step = () => step;
+      await openFile();
+      await press(byId('phone-files-download'));
+      expect(byId('phone-files-download-end')?.textContent, JSON.stringify(step)).toContain(line);
+      expect(!!byId('phone-files-download-end')?.querySelector('button'), `retry for ${JSON.stringify(step)}`).toBe(again);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+  });
+
+  it('a file too big (or not a text or a small picture) to open offers the download instead of a dead end', async () => {
+    await openFile(DL, { v: 1, kind: 'read', ok: false, reason: 'too_big' });
+    expect(byId('phone-files-file-end')?.textContent).toContain(ko.fileReason.too_big);
+    expect(byId('phone-files-download-instead')?.textContent).toBe(ko.download.button);
+    expect(byId('phone-files-download')).toBeNull(); // (the header button is for a file that is shown: a refusal has the one button of its own)
+    await press(byId('phone-files-download-instead'));
+    expect(sealsOf()).toHaveLength(1);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await openFile(DL, { v: 1, kind: 'read', ok: false, reason: 'not_text' });
+    expect(byId('phone-files-download-instead')).not.toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    for (const reason of ['looks_secret', 'hidden_name', 'is_link', 'not_enabled', 'multi_linked', 'not_found']) {
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await openFile(DL, { v: 1, kind: 'read', ok: false, reason });
+      expect(byId('phone-files-download-instead'), reason).toBeNull(); // what is refused as a secret · a link · a hidden name is not offered for download
+      expect(byId('phone-files-download'), reason).toBeNull();
+    }
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await openFile({ sealed_prompt: 1, files: 1, file_read: 1 }, { v: 1, kind: 'read', ok: false, reason: 'too_big' });
+    expect(byId('phone-files-download-instead')).toBeNull(); // a shell that does not download offers nothing
+  });
+
+  it('going back, or leaving the screen, ends a download that is running: the shell drops its chunks and the server deletes the request', async () => {
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise(() => {}));
+    await openFile();
+    await press(byId('phone-files-download'));
+    expect(byId('phone-files-download-running')).not.toBeNull();
+    await press(byId('phone-files-file-back'));
+    expect(cancels()).toHaveLength(1); expect(deletes()).toHaveLength(1);
+    expect(byId('phone-files-list')).not.toBeNull();
+    // leaving the screen altogether
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    phoneCall.mockClear(); calls.length = 0;
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise(() => {}));
+    await openFile();
+    await press(byId('phone-files-download'));
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await flush(); await settle();
+    expect(cancels()).toHaveLength(1);
+  });
+
+  it('[돌아가기] on the way out ends a download that is running first (the page unloads: nothing after that would)', async () => {
+    const replace = vi.fn();
+    vi.stubGlobal('location', { ...window.location, replace });
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise(() => {}));
+    await openFile();
+    await press(byId('phone-files-download'));
+    await press(byId('phone-files-home'));
+    expect(replace).toHaveBeenCalledWith('/today');
+    expect(cancels()).toHaveLength(1); expect(deletes()).toHaveLength(1);
+  });
+
+  it('English: the button, the progress and the refusals read in English', async () => {
+    world.step = () => ({ ok: true, state: 'refused', reason: 'too_big' });
+    world.caps = DL; world.read = textBody('hello');
+    await screen({ locale: 'en' });
+    await press(byId('phone-files-project-proj-1'));
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-download')?.textContent).toBe(en.download.button);
+    await press(byId('phone-files-download'));
+    expect(byId('phone-files-download-end')?.textContent).toContain(en.download.reason.too_big);
+  });
+
+  it('every word of the closed list has a sentence for a download, in both languages (and none is empty)', () => {
+    for (const word of FILE_REASONS) {
+      expect((ko.download.reason as Record<string, string>)[word], `ko ${word}`).toBeTruthy();
+      expect((en.download.reason as Record<string, string>)[word], `en ${word}`).toBeTruthy();
+    }
   });
 });

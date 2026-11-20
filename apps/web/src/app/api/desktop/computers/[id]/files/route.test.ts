@@ -21,7 +21,7 @@ beforeEach(() => { proxy.mockReset().mockImplementation(async () => new Response
 describe('POST /api/desktop/computers/[id]/files', () => {
   it('exports only its HTTP handler (a Next.js app route may export nothing else)', () => {
     expect(Object.keys(route)).toEqual(['POST']);
-    expect(Object.keys(answerRoute)).toEqual(['GET']);
+    expect(Object.keys(answerRoute)).toEqual(['GET', 'DELETE']); // (story 4988: the person's «done / give up» of a download)
   });
 
   it('proxies to exactly /api/v2/desktop/computers/{id}/files with ONLY the four agreed fields', async () => {

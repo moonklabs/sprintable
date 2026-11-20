@@ -12,14 +12,16 @@ import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 import { groupByComputer, readStartable, type StartableComputer } from '@/lib/phone-start';
-import { closeWindow, listFolder, openFile, shellTakesFileRead, shellTakesFileWindow, shellTakesFiles, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
+import { closeWindow, downloadFile, listFolder, openFile, shellTakesFileDownload, shellTakesFileRead, shellTakesFileWindow, shellTakesFiles, type DownloadOutcome, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
 
-type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean; canOpen: boolean; canWindow: boolean };
+type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'old_app' } | { kind: 'ready'; computers: StartableComputer[]; remoteOn: boolean; canOpen: boolean; canWindow: boolean; canDownload: boolean };
+/** story 4988 (P8): a download of the file on screen — running (`got` of `of` chunks the shell took; 0 of 0 until the first) or ended */
+type Download = { kind: 'running'; got: number; of: number } | { kind: 'end'; outcome: DownloadOutcome };
 /** story 4987 (P7): the 10-minute window the shell says is open for ONE computer — `msLeft` as of `at` (the screen counts it down; the shell's clocks are the judge, the next answer corrects this one) */
 type WindowNow = { setupId: string; msLeft: number; at: number };
 type FolderView = { kind: 'folder'; setupId: string; projectId: string; projectName: string; dir: string[]; state: { kind: 'loading' } | { kind: 'list'; list: FilesList } | { kind: 'end'; outcome: Ended } };
 /** one file opened from a folder: `back` is the folder as it was (its list is kept, so going back asks nothing) */
-type FileView = { kind: 'file'; setupId: string; projectId: string; projectName: string; dir: string[]; name: string; back: FolderView; state: { kind: 'loading' } | { kind: 'shown'; body: Extract<OpenOutcome, { kind: 'text' | 'image' }> } | { kind: 'end'; outcome: Ended } };
+type FileView = { kind: 'file'; setupId: string; projectId: string; projectName: string; dir: string[]; name: string; back: FolderView; state: { kind: 'loading' } | { kind: 'shown'; body: Extract<OpenOutcome, { kind: 'text' | 'image' }> } | { kind: 'end'; outcome: Ended } ; dl: Download | null };
 type View = { kind: 'choose' } | FolderView | FileView;
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
@@ -65,10 +67,13 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
   const [clock, setClock] = useState(0); // the screen's «now» for the count-down: set when a window is heard and once a second after (never read from the clock during a render)
   const alive = useRef(true);
   const ask = useRef(0); // one ask counts: a newer one (or leaving) makes an older one draw nothing
+  const dlAsk = useRef(0); // story 4988: the same rule for a DOWNLOAD (leaving, a stop or a newer one ends the older one: it drops what the shell and the server hold)
+  const dlCleanup = useRef<(() => Promise<void>) | null>(null); // story 4988: ends the download that is running NOW (the shell drops its chunks, the server deletes the request)
+  const endDownload = useCallback(() => { dlAsk.current += 1; const c = dlCleanup.current; dlCleanup.current = null; if (c) void c(); }, []);
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; ask.current += 1; };
-  }, []);
+    return () => { alive.current = false; ask.current += 1; endDownload(); };
+  }, [endDownload]);
 
   // this screen is the phone app's: anywhere else (a browser that opened the address) it goes home after the claim had its moment
   useEffect(() => {
@@ -89,8 +94,9 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
       if (r.kind === 'view') {
         const canOpen = await shellTakesFileRead(phoneCall); // (a shell that only lists keeps listing: the files are not offered)
         const canWindow = await shellTakesFileWindow(phoneCall); // (story 4987: a shell that does not know windows is asked for none — every request is an OS confirmation, as before)
+        const canDownload = await shellTakesFileDownload(phoneCall); // (story 4988: a shell that does not know downloads is offered none)
         if (!alive.current || mine !== ask.current) return;
-        setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control, canOpen, canWindow });
+        setRead({ kind: 'ready', computers: groupByComputer(r.view.computers), remoteOn: r.view.remote_control, canOpen, canWindow, canDownload });
       }
       else setRead(r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
     })();
@@ -129,7 +135,7 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
   // one file: asked from the folder that holds it (its list stays in memory behind it)
   const openOne = useCallback((from: FolderView, name: string) => {
     const mine = ++ask.current;
-    setView({ kind: 'file', setupId: from.setupId, projectId: from.projectId, projectName: from.projectName, dir: from.dir, name, back: from, state: { kind: 'loading' } });
+    setView({ kind: 'file', setupId: from.setupId, projectId: from.projectId, projectName: from.projectName, dir: from.dir, name, back: from, state: { kind: 'loading' }, dl: null });
     void openFile({ setupId: from.setupId, projectId: from.projectId, dir: from.dir, name }, { phoneCall, newKey, stopped: () => !alive.current || mine !== ask.current, window: windowDeps(from.setupId) }).then((out) => {
       if (!alive.current || mine !== ask.current) return;
       setView((v) => {
@@ -138,6 +144,22 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
       });
     });
   }, [phoneCall, windowDeps]);
+
+  // story 4988 (P8): download the file on screen — one more request the shell seals and the OS prompt confirms (every time: a window never covers it); the chunks go through the shell, which hands the whole file to the share sheet
+  const download = useCallback((v: FileView) => {
+    const mine = ++dlAsk.current;
+    const put = (dl: Download | null) => setView((cur) => (cur.kind === 'file' && cur.name === v.name && cur.setupId === v.setupId && cur.projectId === v.projectId ? { ...cur, dl } : cur));
+    put({ kind: 'running', got: 0, of: 0 });
+    void downloadFile({ setupId: v.setupId, projectId: v.projectId, dir: v.dir, name: v.name }, {
+      phoneCall, newKey, stopped: () => !alive.current || mine !== dlAsk.current,
+      onProgress: (p) => put({ kind: 'running', got: p.got, of: p.of }), // (the road calls this only while this download is the current one: its own `stopped` says so)
+      onCleanup: (c) => { if (mine === dlAsk.current) dlCleanup.current = c; },
+    }).then((outcome) => { // (`downloadFile` never rejects: a refused bridge call ends it as `failed`)
+      if (!alive.current || mine !== dlAsk.current) return;
+      put({ kind: 'end', outcome });
+    });
+  }, [phoneCall]);
+  const stopDownload = useCallback((v: FileView) => { endDownload(); setView((cur) => (cur.kind === 'file' && cur.name === v.name ? { ...cur, dl: null } : cur)); }, [endDownload]);
 
   // came from the session: the agent has ONE project on that computer → open its top at once (the one thing the person asked for); several → the choice among THOSE projects; none → the ordinary choice
   const entered = useRef(false);
@@ -157,12 +179,12 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
         <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
         {win && msLeft > 0 && view.kind !== 'choose' && win.setupId === view.setupId ? <WindowLine t={t} msLeft={msLeft} onClose={closeNow} /> : null}
         {view.kind === 'file'
-          ? <FileScreen t={t} v={view} onRetry={() => openOne(view.back, view.name)} onBack={() => { ask.current += 1; setView(view.back); }} />
+          ? <FileScreen t={t} v={view} canDownload={read.kind === 'ready' && read.canDownload} onDownload={() => download(view)} onStopDownload={() => stopDownload(view)} onRetry={() => openOne(view.back, view.name)} onBack={() => { ask.current += 1; endDownload(); setView(view.back); }} />
           : view.kind === 'folder'
           ? <Folder t={t} v={view} canOpen={read.kind === 'ready' && read.canOpen} onOpen={open} onFile={(name) => openOne(view, name)} onBack={() => { ask.current += 1; setView({ kind: 'choose' }); }} />
           : <Choose t={t} read={read} only={from} onReload={readNow} onPick={(setupId, project) => open(setupId, project.project_id, project.name, [])} />}
         <div className="border-t border-border pt-4">
-          <Button variant="ghost" onClick={() => window.location.replace(homeHref)} data-testid="phone-files-home">{t('home')}</Button>
+          <Button variant="ghost" onClick={() => { endDownload(); window.location.replace(homeHref); }} data-testid="phone-files-home">{t('home')}</Button>
         </div>
       </div>
     </div>
@@ -255,20 +277,40 @@ function fileEndLine(t: T, o: Ended): string {
   return endLine(t, o);
 }
 
-function FileScreen({ t, v, onRetry, onBack }: { t: T; v: FileView; onRetry: () => void; onBack: () => void }) {
+/** story 4988 (P8): what a download says — «받는 중 3/57» while it runs, one line when it ended (saved, or why not) */
+function DownloadLine({ t, dl, onStop, onRetry }: { t: T; dl: Download; onStop: () => void; onRetry: () => void }) {
+  if (dl.kind === 'running') {
+    return (
+      <div role="status" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground" data-testid="phone-files-download-running">
+        <span className="flex items-center gap-2"><Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />{dl.of > 0 ? t('download.running', { got: dl.got, of: dl.of }) : t('download.starting')}</span>
+        <Button variant="outline" size="sm" onClick={onStop} data-testid="phone-files-download-stop">{t('download.stop')}</Button>
+      </div>
+    );
+  }
+  const o = dl.outcome;
+  if (o.kind === 'saved') return <p role="status" className="text-sm text-foreground" data-testid="phone-files-download-saved">{t('download.saved')}</p>;
+  const line = o.kind === 'incomplete' ? t('download.reason.incomplete') : o.kind === 'save_failed' ? t('download.saveFailed') : o.kind === 'reason' ? t(`download.reason.${o.reason}`) : o.kind === 'cancelled' ? t('outcome.cancelled') : endLine(t, o);
+  const again = o.kind === 'incomplete' || o.kind === 'save_failed' || o.kind === 'cancelled' || (o.kind === 'reason' ? o.reason === 'busy' || o.reason === 'timeout' || o.reason === 'changed_while_reading' : retryable(o));
+  return <Line t={t} text={line} testId="phone-files-download-end" onRetry={again ? onRetry : undefined} />;
+}
+
+function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, onBack }: { t: T; v: FileView; canDownload: boolean; onDownload: () => void; onStopDownload: () => void; onRetry: () => void; onBack: () => void }) {
   const crumbs = [v.projectName, ...v.dir, v.name].join(' › ');
   return (
     <div className="space-y-3" data-testid="phone-files-open">
       <p className="break-all text-sm text-muted-foreground" data-testid="phone-files-crumbs">{crumbs}</p>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" onClick={onBack} data-testid="phone-files-file-back">{t('file.back')}</Button>
+        {canDownload && v.state.kind === 'shown' && v.dl === null && <Button variant="outline" size="sm" onClick={onDownload} data-testid="phone-files-download">{t('download.button')}</Button>}
       </div>
+      {v.dl && <DownloadLine t={t} dl={v.dl} onStop={onStopDownload} onRetry={onDownload} />}
       {v.state.kind === 'loading' && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-file-loading">
           <Loader2 className="size-4 animate-spin" aria-hidden /> {t('file.loading')}
         </div>
       )}
       {v.state.kind === 'end' && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
+      {canDownload && v.dl === null && v.state.kind === 'end' && v.state.outcome.kind === 'reason' && (v.state.outcome.reason === 'too_big' || v.state.outcome.reason === 'not_text') && <div><Button variant="outline" onClick={onDownload} data-testid="phone-files-download-instead">{t('download.button')}</Button></div>}
       {v.state.kind === 'shown' && v.state.body.kind === 'text' && (
         <div className="space-y-2">
           {v.state.body.masked > 0 && <p role="status" className="text-xs text-muted-foreground" data-testid="phone-files-file-masked">{t('file.masked', { count: v.state.body.masked })}</p>}
