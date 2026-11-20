@@ -72,6 +72,42 @@ describe('AgentUsageSheet (story 4981 PR 4)', () => {
     expect(qa('[data-testid="agent-usage-bar"]')).toHaveLength(0);
   });
 
+  // story 4986 (PO 11-20): «아직 읽지 않았어요» alone tells a person nothing to DO — for Claude it says how to turn the numbers on, ONCE under the list, with both ways (menu · command) because the page does not know the OS
+  describe('[SID:4986] the «not read» hint', () => {
+    const hint = () => q('[data-testid="agent-usage-not-read-hint"]');
+    it('a Claude account that is not read → ONE hint under the list (not one per row): the menu item and the command, and the cost', async () => {
+      const { d } = deps([json(200, answer([row({ runtime: 'claude', state: 'unavailable', why: 'not_read', windows: [] }), row({ runtime: 'claude', account: 'bbbbbbbbbbbb', state: 'unavailable', why: 'not_read', windows: [] })]))]);
+      await render(d);
+      expect(qa('[data-testid="agent-usage-not-read-hint"]')).toHaveLength(1);
+      const t = hint()!.textContent ?? '';
+      expect(t).toContain('Sprintable 앱 메뉴의 「폰에서 Claude 사용량 보기」를 켜 주세요');
+      expect(t).toContain('창 없이 쓰는 컴퓨터는 터미널에서 sprintable host usage-line on 을 실행하면 돼요');
+      expect(t).toContain('새로 여는 Claude부터 보여요');
+      expect(t).toContain('단축키 안내 줄은 사라져요'); // the cost, said before the person turns it on
+      expect(hint()!.querySelector('code')?.textContent).toBe('sprintable host usage-line on'); // the command is the one the host answers to
+      expect(t).not.toMatch(/[«»≪≫]/);
+    });
+    for (const [name, rows] of [
+      ['numbers are shown', [row({ runtime: 'claude', state: 'windows' })]],
+      ['an API-key login (nothing to turn on)', [row({ runtime: 'claude', state: 'unavailable', why: 'api_key', windows: [] })]],
+      ['only a Codex row that is not read (the switch is Claude\'s)', [row({ runtime: 'codex', account: 'cccccccccccc', state: 'unavailable', why: 'not_read', windows: [] })]],
+    ] as const) {
+      it(`no hint when ${name}`, async () => {
+        const { d } = deps([json(200, answer([...rows]))]);
+        await render(d);
+        expect(hint()).toBeNull();
+      });
+    }
+    it('en: the same hint in English (the menu item\'s own English name · the command)', async () => {
+      const { d } = deps([json(200, answer([row({ runtime: 'claude', state: 'unavailable', why: 'not_read', windows: [] })]))]);
+      await render(d, 'en');
+      const t = hint()!.textContent ?? '';
+      expect(t).toContain('turn on Show Claude usage on my phone in the Sprintable app menu on that computer');
+      expect(t).toContain('On a computer with no window, run sprintable host usage-line on in a terminal.');
+      expect(t).toContain('the line of keyboard shortcuts that was there goes away');
+    });
+  });
+
   it('a silent computer keeps its last numbers with their time and ONE line that it is disconnected', async () => {
     const { d } = deps([json(200, answer([row({ seen_at: iso(-3 * 3_600_000) })], { connected: false }))]);
     await render(d);
