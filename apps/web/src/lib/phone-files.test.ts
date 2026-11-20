@@ -154,7 +154,7 @@ describe('[4983] parseList — only the contract\'s shape is drawn', () => {
   it('a list and a refusal word', () => {
     expect(parseList(LIST)).toEqual({ kind: 'list', list: { entries: LIST.entries, hidden: 2, more: false } });
     expect(parseList({ ...LIST, more: true, cursor: 'a.txt' })).toEqual({ kind: 'list', list: { entries: LIST.entries, hidden: 2, more: true, cursor: 'a.txt' } });
-    for (const reason of FILE_REASONS) expect(parseList({ v: 1, kind: 'list', ok: false, reason })).toEqual({ kind: 'reason', reason });
+    for (const reason of FILE_REASONS) expect(parseList({ v: 1, kind: 'list', ok: false, reason }), reason).toEqual(reason === 'incomplete' ? { kind: 'failed' } : { kind: 'reason', reason }); // (`incomplete` is a DOWNLOAD's word: a list that says it is no good answer)
   });
   it('anything else is a failure: a word that is not on the list · a wrong kind of entry · a missing count · another version', () => {
     for (const bad of [null, [], 'x', { ...LIST, v: 2 }, { ...LIST, kind: 'read' }, { ...LIST, ok: 'yes' }, { v: 1, kind: 'list', ok: false, reason: 'weird' }, { ...LIST, entries: [{ n: 'a', k: 'x' }] },
@@ -256,7 +256,7 @@ describe('[4983 P6] parseRead — a body is drawn only if it has the contract\'s
     expect(parseRead(txt({ text: '', s: 0, masked: 0 }))).toEqual({ kind: 'text', text: '', masked: 0, size: 0 });
     expect(parseRead(txt({ text: 'a\ufffdb\n\t한글 😀' }))).toMatchObject({ kind: 'text' });
     expect(parseRead(IMAGE)).toMatchObject({ kind: 'image', mime: 'image/png', w: 1, h: 1 });
-    for (const word of FILE_REASONS) expect(parseRead({ v: 1, kind: 'read', ok: false, reason: word })).toEqual({ kind: 'reason', reason: word });
+    for (const word of FILE_REASONS) expect(parseRead({ v: 1, kind: 'read', ok: false, reason: word }), word).toEqual(word === 'incomplete' ? { kind: 'failed' } : { kind: 'reason', reason: word });
     const pngOf = (n: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(n - 8, 1)]).toString('base64');
     expect(parseRead(img({ w: 4000, h: 4000, s: 12, data: pngOf(12) }))).toMatchObject({ kind: 'image' });
     for (const n of [12, 13, 14, 15]) expect(parseRead(img({ data: pngOf(n), s: n }))).toMatchObject({ kind: 'image', size: n });

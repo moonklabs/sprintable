@@ -8407,6 +8407,33 @@
       "timeout": "The Mac didn't answer in time. Try again.",
       "denied": "Permission was missing, so it couldn't be opened.",
       "unsupported": "That name can't be opened."
+    },
+    "download": {
+      "button": "Download",
+      "starting": "Asking the Mac. Confirm on your phone.",
+      "running": "Downloading · {got} of {of}",
+      "stop": "Stop",
+      "saved": "The file was handed to the phone's share sheet.",
+      "saveFailed": "Couldn't save it on the phone. Try again.",
+      "reason": {
+        "not_enabled": "File viewing is off on this Mac.",
+        "no_folder": "The Mac has no folder for this project.",
+        "not_found": "That file wasn't found.",
+        "is_link": "Links aren't downloaded.",
+        "hidden_name": "It has a hidden name, so it isn't downloaded.",
+        "looks_secret": "It may hold secrets, so it isn't downloaded.",
+        "too_big": "It is over 8 MB, so it can't come to the phone. Use it at the Mac.",
+        "not_text": "This file can't be downloaded.",
+        "not_plain": "It isn't a plain file.",
+        "multi_linked": "The file is linked from several places, so it isn't downloaded.",
+        "other_device": "It is on another drive, so it isn't downloaded.",
+        "changed_while_reading": "The file changed while downloading. Try again.",
+        "busy": "The Mac is busy with another request. Try again in a moment.",
+        "timeout": "The Mac didn't answer in time. Try again.",
+        "denied": "Permission was missing, so it couldn't be downloaded.",
+        "unsupported": "That name can't be downloaded.",
+        "incomplete": "The file did not arrive whole. Try downloading again."
+      }
     }
   }
 }
