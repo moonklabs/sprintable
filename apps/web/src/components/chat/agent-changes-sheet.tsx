@@ -138,6 +138,7 @@ function problemText(t: T, problem: ChangesProblem): string {
     case 'session_gone': return t('problem.session_gone');
     case 'expired': return t('problem.expired');
     case 'no_folder': return t('problem.no_folder');
+    case 'not_enabled': return t('problem.not_enabled');
     case 'not_a_repo': return t('problem.not_a_repo');
     case 'not_repo_root': return t('problem.not_repo_root');
     case 'unsafe_repo_config': return t('problem.unsafe_repo_config');

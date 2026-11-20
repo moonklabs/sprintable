@@ -145,6 +145,18 @@ describe('AgentChangesSheet (story 4951 ①c)', () => {
     }
   });
 
+  it('story 4983 AC5/AC6: the person turned «폰에서 파일 보기» off for this folder on the computer (`not_enabled`) — said in one plain sentence in ko AND en (the PO\'s wording in Korean), with no reload, never the bare «failed»', async () => {
+    for (const locale of ['ko', 'en'] as const) {
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await open(deps([json(200, { state: 'failed', code: 'not_enabled', files: null })]).d, locale);
+      const el = q('[data-testid="agent-changes-problem"]')!;
+      expect(el.getAttribute('data-problem')).toBe('not_enabled');
+      expect(el.textContent).toBe(locale === 'ko' ? '이 컴퓨터에서 폰 파일 보기가 꺼져 있어요' : 'Viewing files from a phone is turned off on this computer');
+      expect(el.textContent).not.toBe((locale === 'ko' ? koMessages : enMessages).chats.agentSession.changes.problem.failed);
+      expect(q('[data-testid="agent-changes-reload"]')).toBeNull(); // a new ask would be refused the same way
+    }
+  });
+
   it('a 404 after asking offers «다시 불러오기» (not a fault line)', async () => {
     await open(deps([json(404, { error: { code: 'changes_read_not_found' } })]).d);
     expect(q('[data-testid="agent-changes-problem"]')!.getAttribute('data-problem')).toBe('expired');
