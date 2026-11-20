@@ -2,6 +2,8 @@
 
 The host (desktop-electron `claude-account-labels.ts`) keeps a short, plain display name for each Claude settings folder; it now says it with the usage report so the phone's «사용량» sheet can tell two accounts
 of one CLI apart by name instead of by a number. Additive and nullable: nothing is backfilled, an old host sends none, and a report WITHOUT a label clears the stored one (the host is the one who speaks for the entry).
+Why a running old revision lives with it (the cutover sheet's reading of this file — tests/test_4796_cutover_prod_sheet.py): it never names `label`, so every row it writes has NULL and the CHECK passes for NULL; the table holds a few rows per computer, so the
+scan under the CHECK's brief lock is nothing; nothing existing is altered, dropped, renamed, backfilled or rewritten.
 Only the length is held in the table; the rest of the rule (no slash, no control or direction character, no space at an end) is the door's (`desktop_usage.label_problem`) and is applied again when a row is read.
 """
 import sqlalchemy as sa
