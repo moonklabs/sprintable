@@ -1018,7 +1018,15 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0489 = (_ROOT / "backend/alembic/versions/0489_desktop_setups_sealed_prompts.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|drop_column|alter_column|rename_", up0489), "0489's upgrade() adds a column, one bounded UPDATE, a function and a trigger — nothing dropped or retyped"
     assert len(re.findall(r"\bUPDATE\s+\w+\s+SET\b", up0489)) == 1 and "capabilities @>" in up0489, "the one data statement is the bounded backfill"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_"))]
+    # story 4986: 0490 is ONE line of upgrade() the reading lists: the CHECK on the NULLABLE column it adds to `desktop_usage` (the `add_column` of a nullable column is not listed — it is no rewrite). Why a running old revision lives with it: it never
+    # names `label`, so every row it writes has NULL and the CHECK (`label IS NULL OR char_length(label) BETWEEN 1 AND 40`) passes for NULL; the table holds at most eight rows per computer, so the scan under the CHECK's brief lock is nothing; nothing
+    # existing is altered, dropped, renamed, backfilled or rewritten, and no data is written by the migration. The downgrade() is not read.
+    named = [h for h in hits if h.startswith("0490_")]
+    assert len(named) == 1 and "create_check_constraint" in named[0] and "ck_desktop_usage_label" in named[0], named
+    assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
+    up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

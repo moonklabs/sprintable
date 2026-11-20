@@ -377,6 +377,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         or (request.method == "POST" and _DESKTOP_COMMAND_PATH.fullmatch(request.url.path.rstrip("/")) is not None)
         # story 4983: a refused files request (a sealed envelope · a project id) never carries what it was given back
         or (request.method == "POST" and _DESKTOP_FILES_PATH.fullmatch(request.url.path.rstrip("/")) is not None)
+        # story 4986 (codex): a refused usage report (a name that breaks the label rule) never carries the name back — the same as «nothing of a body is logged» (desktop_usage.py)
+        or (request.method == "PUT" and request.url.path.rstrip("/") == "/api/v2/desktop/relay/usage")
     ):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
