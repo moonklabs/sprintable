@@ -1,7 +1,8 @@
-"""story 4983 (P5 · phone ↔ host project files) — a person's request to LIST a folder of a project on their own computer, from the phone or the web, and the computer's SEALED answer. Both ways carry envelopes
+"""story 4983 (P5 · phone ↔ host project files) — a person's request to LIST a folder of a project on their own computer, or (P6) to OPEN one file of it, from the phone or the web, and the computer's SEALED answer. Both ways carry envelopes
 the server cannot open (contract: contracts/file-browse-vectors.json of the mobile repository).
 
 - POST /api/v2/desktop/computers/{setup_id}/files                 — the person who paired the computer asks: {project_id, idempotency_key, phone_key_id, envelope} → 201 {command_id, expires_at}
+                                                                    (the envelope's own header kind — `file_list` or `file_read` — is the kind of the command: one route, one set of rules)
 - GET  /api/v2/desktop/computers/{setup_id}/files/{command_id}    — the sealed answer, once (or where the request stands), for that person only: 404 `files_read_not_found` for every reason
 
 (The computer's own PUT of its answer is `PUT /api/v2/desktop/relay/files/{command_id}` in desktop_relay.) A person's own session only: an API key or an agent key 403. Who may ask — the computer's pairing
@@ -44,7 +45,7 @@ async def post_desktop_files(
             if len(raw) > desktop_files.ASK_BODY_MAX:
                 raise DesktopRelayError(413, "files_request_too_large", "the request is larger than the server takes")
         body = desktop_files.parse_ask(raw)
-        command_id, expires_at = await desktop_files.create_list(db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id, setup_id=setup_id, body=body)
+        command_id, expires_at = await desktop_files.create_ask(db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id, setup_id=setup_id, body=body)
     except DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)

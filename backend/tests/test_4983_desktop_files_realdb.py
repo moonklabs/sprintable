@@ -75,13 +75,13 @@ async def _rows(sid):
 
 async def _age(sid):
     """Let the pause and the poll gap pass without waiting."""
-    await _sql(f"UPDATE desktop_commands SET created_at = created_at - interval '10 seconds' WHERE setup_id = '{sid}' AND kind = 'file_list'")
+    await _sql(f"UPDATE desktop_commands SET created_at = created_at - interval '10 seconds' WHERE setup_id = '{sid}' AND kind IN ('file_list', 'file_read')")
     await _sql(f"UPDATE desktop_file_reads SET polled_at = NULL, created_at = created_at - interval '10 seconds' WHERE setup_id = '{sid}'")
 
 
 async def _close(sid):
     await _age(sid)
-    await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE setup_id = '{sid}' AND kind = 'file_list'")
+    await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE setup_id = '{sid}' AND kind IN ('file_list', 'file_read')")
 
 
 async def _asked(c, device, sid, phone, project, **kw):
@@ -453,7 +453,7 @@ async def test_23_remote_control_off_a_computer_not_heard_from_and_a_seat_that_e
         await _sql(f"UPDATE org_members SET deleted_at = now() WHERE user_id = '{OWNER}'")
         async with async_session_factory() as db:
             with pytest.raises(desktop_files.DesktopRelayError) as ei:
-                await desktop_files.create_list(db, member_id=uuid.uuid4(), user_id=OWNER, org_id=await _org(sid), setup_id=uuid.UUID(str(sid)),
+                await desktop_files.create_ask(db, member_id=uuid.uuid4(), user_id=OWNER, org_id=await _org(sid), setup_id=uuid.UUID(str(sid)),
                                                 body=desktop_files.ListRequest(**_body(sid, project, phone)))
         assert ei.value.status == 403 and ei.value.code == "not_allowed_to_read_files"
         await _sql(f"UPDATE org_members SET deleted_at = NULL WHERE user_id = '{OWNER}'")
@@ -676,7 +676,9 @@ def test_15_the_command_words_of_the_code_and_the_migration_are_the_same():
 
     from app.models.desktop_relay import COMMAND_KINDS
 
-    spec = util.spec_from_file_location("m0488", Path(__file__).parent.parent / "alembic" / "versions" / "0488_desktop_file_reads.py")
+    # the CHECK as the LATEST migration that changed it leaves it (0491 added `file_read`): the code's words and that migration's are the same
+    spec = util.spec_from_file_location("m0491", Path(__file__).parent.parent / "alembic" / "versions" / "0491_desktop_file_read_kind.py")
     mod = util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    assert tuple(mod._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS
+    assert tuple(mod._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS
+    assert tuple(mod._OLD) + ("file_read",) == tuple(COMMAND_KINDS), "0491 adds exactly one word to what 0488 left"
