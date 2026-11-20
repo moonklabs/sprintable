@@ -12,7 +12,6 @@ Reading (the phone) is a later door; this one only keeps what the computer says.
 """
 from __future__ import annotations
 
-import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -32,8 +31,7 @@ MAX_WINDOWS = 4
 MAX_ACCOUNTS = 8  # entries in one report AND rows kept per computer (a person's CLIs and logins on one computer are few) — the oldest `seen_at` goes first
 LABEL_MAX = 40  # characters (code points), as the host counts them
 # a label is plain display text (the server decides nothing by it; the web shows it as text only). The rule: no character of the categories Cc (controls) · Cf (format: zero-width, word joiner, soft hyphen, BOM, bidirectional
-# overrides and isolates …) · Cs · Co (private use) · Zl · Zp; no slash or backslash — nor a character that LOOKS like one (the fullwidth ／ ＼ are caught by NFKC; the division · fraction · set-minus slashes and the diagonals are
-# listed) — so a name cannot pass for a path; no space at either end. The server judges it itself (the host's check is not trusted); the host's table (desktop-electron `claude-account-labels.ts`) is the same, and
+# overrides and isolates …) · Cs · Co (private use) · Zl · Zp; no slash or backslash — nor a character that LOOKS like one (the fullwidth ／ ＼ · the division · fraction · set-minus slashes and the diagonals are listed one by one) — so a name cannot pass for a path; no space at either end. The server judges it itself (the host's check is not trusted); the host's table (desktop-electron `claude-account-labels.ts`) is the same, and
 # tests/test_4986_usage_label_realdb.py pins both with the same cases (codex 11-20: the first table named a few code points and missed U+2060 and the fullwidth slash).
 _LABEL_BAD_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Zl", "Zp"})
 _SLASH_LIKE = frozenset("\\/\u2044\u2215\u2216\u29f5\u29f8\u29f9\ufe68\uff0f\uff3c\u2571\u2572\u27cb\u27cd")
@@ -45,7 +43,7 @@ def label_problem(text: object) -> str | None:
         return "empty"
     if len(text) > LABEL_MAX:
         return "too_long"
-    if any(unicodedata.category(c) in _LABEL_BAD_CATEGORIES for c in text) or any(c in _SLASH_LIKE for c in text + unicodedata.normalize("NFKC", text)) or text != text.strip():
+    if any(unicodedata.category(c) in _LABEL_BAD_CATEGORIES for c in text) or any(c in _SLASH_LIKE for c in text) or text != text.strip():
         return "bad_chars"
     return None
 
