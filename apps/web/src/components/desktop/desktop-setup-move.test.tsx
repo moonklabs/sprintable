@@ -368,11 +368,18 @@ describe('[SID:4986] AC5 · what a person does after the move (the panel)', () =
     await chooseMove();
     const block = container.querySelector('[data-testid=setup-move-after]') as HTMLElement;
     expect(block).not.toBeNull();
-    expect([...block.querySelectorAll('li')].map((li) => li.textContent)).toEqual([AFTER.afterLogin, AFTER.afterOldComputer, AFTER.afterMemo]);
+    // before anything is ticked it names every tool an agent that can be moved uses (the list has a Claude Code and a Codex agent) — never only «Claude Code»
+    expect([...block.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Claude Code · Codex는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요', AFTER.afterOldComputer, AFTER.afterMemo]);
+    // …and then only the tools of what is ticked
+    await tick('댄 어윈');
+    expect(container.querySelector('[data-testid=setup-move-after] li')?.textContent).toBe('Claude Code는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요');
+    await tick('댄 어윈'); await tick('까디르 QA');
+    expect(container.querySelector('[data-testid=setup-move-after] li')?.textContent).toBe('Codex는 이 컴퓨터에서 직접 로그인해야 해요 — 로그인 정보는 옮겨지지 않아요');
     expect(block.querySelector('p')?.textContent).toBe('옮긴 뒤에 알아 둘 것');
     // the moment is «this computer is connected» — never the confirmation (the old key still worked until the exchange: measured on dev)
     expect(AFTER.afterOldComputer).toContain('이 컴퓨터 연결이 끝나면');
     expect(AFTER.afterLogin).toContain('로그인 정보는 옮겨지지 않아요');
+    expect(AFTER.afterLogin).toContain('{tools}');
   });
 
   it('nothing that can be moved → no block (like the folder line: nothing true to say)', async () => {
@@ -391,7 +398,7 @@ describe('[SID:4986] AC5 · what a person does after the move (the panel)', () =
     await act(async () => { (container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[1] as HTMLElement).click(); });
     const block = container.querySelector('[data-testid=setup-move-after]') as HTMLElement;
     expect(block.textContent).toContain(enMessages.desktop.setup.move.afterTitle);
-    expect(block.textContent).toContain('the sign-in is not carried over');
+    expect(block.textContent).toContain('Sign in to Claude Code · Codex on this computer yourself — the sign-in is not carried over');
   });
 });
 
@@ -551,7 +558,8 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
       await read();
       const line = container.querySelector('[data-testid=setup-move-old-computer]') as HTMLElement;
       expect(line.textContent).toContain('다른 컴퓨터에서 일하던 에이전트는 이제 그 컴퓨터에서 지시를 더 받지 않아요');
-      expect(line.textContent).toContain('«연결된 기기»에서 끊을 수 있어요');
+      expect(line.textContent).toContain('그 컴퓨터 자체는 연결된 기기 화면에서 끊을 수 있어요');
+      expect(line.textContent).not.toMatch(/[«»≪≫]/); // no quote marks on this line (the fonts draw «» as ≪≫ at this size — PO 11-20)
       const a = line.querySelector('a') as HTMLAnchorElement;
       expect(a.textContent).toBe('연결된 기기 보기');
       expect(a.getAttribute('href')).toMatch(/^\/desktop(\?|$)/); // the existing screen (the flat link adds the project when one is chosen)

@@ -17,6 +17,10 @@ describe('[SID:4986] the move guide\'s words', () => {
     expect(ko.desktop.devices.emptyComputer).toBe('에이전트가 없는 컴퓨터예요 — 끊어도 돼요');
     expect(typeof en.desktop.devices.emptyComputer).toBe('string');
   });
+  it('no quote marks in the done-screen line (they draw as ≪ ≫ there) — its link text is the only name of the screen', () => {
+    expect(ko.desktop.setup.move.oldComputerNote).not.toMatch(/[«»≪≫“”]/);
+    expect(en.desktop.setup.move.oldComputerNote).not.toMatch(/[«»≪≫“”]/);
+  });
   it('no forbidden phrase in any of them', () => {
     const koWords = [...MOVE_KEYS.map((k) => (ko.desktop.setup.move as Record<string, string>)[k]), ko.desktop.devices.emptyComputer];
     const enWords = [...MOVE_KEYS.map((k) => (en.desktop.setup.move as Record<string, string>)[k]), en.desktop.devices.emptyComputer];
@@ -33,5 +37,10 @@ describe('[SID:4986] the move guide\'s words', () => {
   it('the login line says what is true: the sign-in is not carried over (ko · en)', () => {
     expect(ko.desktop.setup.move.afterLogin).toContain('로그인 정보는 옮겨지지 않아요');
     expect(en.desktop.setup.move.afterLogin).toContain('not carried over');
+    // it names the tools it is told (never a fixed «Claude Code» — a Codex agent is moved on the same screen)
+    expect(ko.desktop.setup.move.afterLogin).toMatch(/^\{tools\}\{josa\} /);
+    expect(en.desktop.setup.move.afterLogin).toContain('{tools}');
+    expect(ko.desktop.setup.move.afterLogin).not.toContain('Claude Code');
+    expect(en.desktop.setup.move.afterLogin).not.toContain('Claude Code');
   });
 });
