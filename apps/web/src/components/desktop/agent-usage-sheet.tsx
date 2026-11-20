@@ -109,6 +109,8 @@ export function AgentUsageSheet({ agentId, open, onOpenChange, deps }: {
 }
 
 type T = ReturnType<typeof useTranslations>;
+/** the host command that is the app menu's «폰에서 Claude 사용량 보기» for a computer with no window (desktop-electron host-cli) — a command, never translated */
+const USAGE_LINE_COMMAND = 'sprintable host usage-line on';
 
 /** story 4986: each row's heading — the name the person gave the account, else the number (two accounts of a CLI) or the CLI's name alone. A name must never read as ANOTHER account's heading (codex, twice: a name «account 2» on account 1; a name «account 2 (account 1)»
  *  on account 3): a CLI with more than one account therefore ALWAYS ends a named heading with its own number — «Claude · 회사 계정 (계정 1)». Two headings of one CLI then cannot be equal whatever the names are: a named one ends in «(계정 n)» with its own n, an unnamed one
@@ -129,6 +131,14 @@ function Body({ view, now, t, tStrip }: { view: UsageView; now: number; t: T; tS
       {!view.connected ? <p role="status" className="break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-disconnected">{disconnectedLine(view, now, tStrip) ?? t('disconnected')}</p> : null}
       {view.rows.length === 0 ? <p className="break-keep text-ds-body text-ds-ink-2" data-testid="agent-usage-empty">{t('empty')}</p> : null}
       {headings(view.rows, t).map(({ row, heading }) => <UsageSection key={`${row.runtime}:${row.account}`} row={row} heading={heading} now={now} t={t} />)}
+      {/* story 4986 (PO 11-20): «아직 읽지 않았어요» tells a person nothing to DO. For Claude the numbers come only through the switch «폰에서 Claude 사용량 보기» (menu: every computer with a window · `sprintable host usage-line on`:
+          a computer with none) — said ONCE under the list, not on every row, and with both ways (the page does not know the computer's OS) */}
+      {view.rows.some((r) => r.runtime === 'claude' && r.why === 'not_read') ? (
+        <div className="space-y-1 break-keep text-ds-small text-ds-ink-3" data-testid="agent-usage-not-read-hint">
+          <p>{t('notReadHint')}{' '}<code className="rounded bg-ds-surface-sunk px-1 font-mono text-ds-ink-2">{USAGE_LINE_COMMAND}</code>{' '}{t('notReadHintAfter')}</p>
+          <p>{t('notReadCost')}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

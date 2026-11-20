@@ -60,13 +60,13 @@ const row = (over: Record<string, unknown> = {}) => ({ runtime: 'claude', accoun
 const answer = (usage: unknown[], over: Record<string, unknown> = {}) => ({ agent_id: 'a-1', remote_control: true, setup_id: 's-1', device_name: null as string | null, connected: true, usage, ...over });
 
 type Locale = 'ko' | 'en';
-async function open(page: Page, ans: object, locale: Locale) {
+async function open(page: Page, ans: object, locale: Locale, dark = false) {
   const { js, css } = await build();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.unrouteAll();
   await page.route('http://preview.test/**', async (route) => {
     if (new URL(route.request().url()).pathname === '/') {
-      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div></body></html>` });
+      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${locale}" class="${dark ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div></body></html>` });
     }
     return route.fulfill({ status: 404, body: '{}' });
   });
@@ -159,6 +159,20 @@ test.describe('on a touch phone (390 × 844)', () => {
     await open(page, answer([], { device_name: '작업용 맥북' }), 'ko');
     await expectClean(page, 'ko nothing yet');
     await shot(page, 'ko-nothing');
+    // story 4986 (PO 11-20): two Claude accounts the computer has not read (one named) → ONE hint under the list saying how to turn the numbers on (menu · command) — light and dark, ko and en
+    const notRead = answer([row({ label: '회사 계정', state: 'unavailable', why: 'not_read', windows: [] }), row({ account: 'bbbbbbbbbbbb', state: 'unavailable', why: 'not_read', windows: [] })], { device_name: '작업용 맥북' });
+    for (const dark of [false, true]) {
+      const tag = dark ? 'dark' : 'light';
+      await open(page, notRead, 'ko', dark);
+      await expectClean(page, `ko not-read hint ${tag}`);
+      await expect(page.locator('[data-testid="agent-usage-not-read-hint"]')).toHaveCount(1);
+      await expect(page.locator('[data-testid="agent-usage-not-read-hint"]')).toContainText('sprintable host usage-line on');
+      await shot(page, `ko-not-read-hint-${tag}`);
+    }
+    await open(page, { ...notRead, device_name: 'Work MacBook' }, 'en');
+    await expectClean(page, 'en not-read hint');
+    await expect(page.locator('[data-testid="agent-usage-not-read-hint"]')).toContainText('Show Claude usage on my phone');
+    await shot(page, 'en-not-read-hint-light');
     await open(page, answer([row()], { device_name: '작업용 맥북', connected: false }), 'ko');
     await expectClean(page, 'ko disconnected');
     await expect(page.locator('[data-testid="agent-usage-disconnected"]')).toBeVisible();
