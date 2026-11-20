@@ -457,3 +457,48 @@ describe('[4976 A5] a plain instruction the closed road refuses — the shell\'s
     expect(d.phoneCall.mock.calls.some((c) => c[0] === 'shell.caps')).toBe(false);
   });
 });
+
+describe('[4990] the shell refuses the plain road for a computer this phone holds no pin for (`sealed_pair_missing`) — the page sends nothing, another way or not', () => {
+  const MARK = 'MK4990words';
+  const CAPS: PhoneAnswer = { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+  const pairMissing: PhoneAnswer = { id: 'p', ok: false, code: 'sealed_pair_missing' };
+  const hostNotPinned: PhoneAnswer = { id: 'w', ok: false, code: 'host_not_pinned' };
+  const shell = (caps: PhoneAnswer, signs: PhoneAnswer[]) => {
+    let i = 0;
+    const phoneCall = vi.fn(async (type: string, _args?: unknown) => (type === 'shell.caps' ? caps : signs[Math.min(i++, signs.length - 1)]!));
+    let k = 0;
+    return { phoneCall, sendMessage: vi.fn(async () => true), newKey: () => `idem-${++k}`, wait: async () => {} } as unknown as CommandDeps & { phoneCall: typeof phoneCall; sendMessage: ReturnType<typeof vi.fn> };
+  };
+  const signFlags = (d: { phoneCall: ReturnType<typeof vi.fn> }) => d.phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').map((c) => (c[1] as { sealed?: boolean }).sealed);
+  const typed = (computerOpensSealed: boolean) => ({ agentId: AGENT, kind: 'send_prompt' as const, text: `run ${MARK}`, conversationId: CONV, computerOpensSealed });
+
+  it('the server says «this computer opens sealed ones»: the sealed call → host_not_pinned (a pairing fact) → the plain re-send → the shell\'s word → «sealed_pair_missing»: nothing posted, no chat message', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }));
+    const d = shell(CAPS, [hostNotPinned, pairMissing]);
+    await expect(commandOnPhone(typed(true), d)).resolves.toEqual({ kind: 'sealed_pair_missing' });
+    expect(signFlags(d)).toEqual([true, undefined]);
+    expect(calls.length, 'nothing posted').toBe(0); expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('the server does NOT say it (or the page did not ask): the plain call straight → the shell\'s word → «sealed_pair_missing»: nothing posted, no chat message', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }));
+    const d = shell(CAPS, [pairMissing]);
+    await expect(commandOnPhone(typed(false), d)).resolves.toEqual({ kind: 'sealed_pair_missing' });
+    expect(signFlags(d)).toEqual([undefined]);
+    expect(calls.length).toBe(0); expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('(codex) the word is the PLAIN call\'s only: if a SEALED call ever answered it, it is a plain «failed» — no second sign, no post, no chat message (it is not a pairing fact that lets the plain road be tried)', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }));
+    const d = shell(CAPS, [pairMissing, pairMissing]);
+    await expect(commandOnPhone(typed(true), d)).resolves.toEqual({ kind: 'failed' });
+    expect(signFlags(d), 'only the sealed call was made — no plain sign after it').toEqual([true]);
+    expect(calls.length, 'nothing posted').toBe(0); expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('the word is for an INSTRUCTION only; a stop is refused with it as any other word (no new road)', async () => {
+    const d = shell(CAPS, [pairMissing]);
+    const r = await commandOnPhone({ agentId: AGENT, kind: 'stop_session' as const }, d);
+    expect(r.kind).not.toBe('sealed_pair_missing'); expect(d.sendMessage).not.toHaveBeenCalled();
+  });
+});

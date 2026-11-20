@@ -26,6 +26,8 @@ export type CommandOutcome =
   // story 4976 A3 (Kadir 871 lens): a SEALED instruction the session could not take (the turn had ended · it cannot take one into the turn now) — NOT sent, and never quietly turned into a chat message
   // (that would put the words on the server in the clear, the thing sealing is for): the person is told, and what they wrote stays
   | { kind: 'sealed_not_taken' }
+  // story 4990 (879 audit «좁힘»): this phone holds a pin that opens SEALED instructions but none for THIS computer — the shell refuses the plain road (`sealed_pair_missing`): NOT sent, never re-sent plain, never a chat message; the person is told to pair again
+  | { kind: 'sealed_pair_missing' }
   | { kind: 'too_long' } // over 400 code points — the sheet stops it first; the server refuses it again
   // story 4633 (contract v0.4 §3 · web): the daemon refused it because the text holds invisible characters — refused, never sent as a message
   | { kind: 'hidden_text' }
@@ -151,6 +153,7 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
     // story 4976 (A5 · AC4b): the shell holds a pin that says this computer OPENS sealed instructions although the server's word (or this page's) said otherwise — it signs no plain instruction for it. The words go the sealed road once (a shell
     // that can seal is asked again; one that cannot, or that is refused again, ends the press with its own line — never the plain road, never a chat message)
     if (prompt && code === 'sealed_required') return (await trySealed()) ?? { kind: 'sealed_not_taken' };
+    if (prompt && code === 'sealed_pair_missing') return { kind: 'sealed_pair_missing' }; // story 4990: the shell's own word — the words are not sent another way (nothing was signed)
     return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome;
   }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string' || typeof signed.session_key !== 'string') return { kind: 'failed' };

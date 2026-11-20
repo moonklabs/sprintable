@@ -313,6 +313,31 @@ describe('[4534] the strip inside the phone app', () => {
     expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toBe('secret words 4976');
   });
 
+  it('[4990] a phone with a sealing pin and NO pin for this computer (the server names it anyway): the sealed call says host_not_pinned, the page\'s plain re-send is refused by the shell → the reason line + the pair-again way; NOTHING is posted, no chat message, the words stay', async () => {
+    vi.useFakeTimers();
+    const signs: Array<Record<string, unknown>> = [];
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown>) => {
+      if (type === 'shell.caps') return { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+      signs.push(args);
+      return args.sealed === true ? { id: 'w', ok: false, code: 'host_not_pinned' } : { id: 'w', ok: false, code: 'sealed_pair_missing' };
+    });
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: null })]);
+    sessionView = { ...sessionView, sealed_prompt: true }; // the server says this computer opens a sealed instruction — the phone's own table has no pin for it
+    await render();
+    await press(ko.button.instruct);
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'secret words 4990'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+    await press(ko.sheet.send);
+    expect(signs.map((a) => a.sealed)).toEqual([true, undefined]); // the sealed road first, then the plain re-send the shell refuses
+    expect(commandLine()?.textContent).toBe(ko.command.sealedPairMissing);
+    expect(Array.from(document.querySelectorAll('a')).some((a) => a.textContent === ko.command.pairAgain), 'the way to pair again is there').toBe(true);
+    expect(calls.filter((c) => c.init?.method === 'POST'), 'nothing posted').toEqual([]);
+    expect(calls.filter((c) => String(c.url).includes('/messages')), 'no chat message').toEqual([]);
+    expect(JSON.stringify(calls.map((c) => c.init?.body ?? ''))).not.toContain('secret words');
+    await press(ko.button.instruct);
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value, 'what the person wrote stays').toBe('secret words 4990');
+  });
+
   it('[4976] a shell that can seal but a computer that has NOT said its app opens one → the plain road (the session view\'s `sealed_prompt` is what lets a sealed instruction be made)', async () => {
     vi.useFakeTimers();
     phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: { sealed_prompt: 1 } } : { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'go on' }));
