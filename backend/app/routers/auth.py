@@ -728,6 +728,9 @@ async def _reclaim_unproved_account(
     keys_cut += (await session.execute(update(ApiKey).where(or_(ApiKey.member_id.in_(agents), ApiKey.team_member_id.in_(agents)), ApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
     keys_cut += (await session.execute(update(ProjectApiKey).where(ProjectApiKey.created_by == user.id, ProjectApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
     phones_cut = (await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_phones(session, select(RemoteDevice.id).where(RemoteDevice.member_id.in_(human_members)))  # story 4978: a revoked key takes what was addressed to it or put by it, on whatever computer
     setups = select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None))
     await session.execute(update(DesktopDeviceToken).where(DesktopDeviceToken.setup_id.in_(setups), DesktopDeviceToken.revoked_at.is_(None)).values(revoked_at=now))
     # story #4733 — the computers to cut are row-locked in id order FIRST (a report in flight on one finishes before we go on; the order is the one `forget` and the
@@ -747,6 +750,9 @@ async def _reclaim_unproved_account(
     await forget_prompts(session, cut_ids)  # story 4976 — nor the words of an instruction a cut-off computer still holds
     await desktop_changes.forget(session, cut_ids)  # story #4951 — no changed-file list stays for a computer cut off (the default lock: asked again on rows this transaction already holds — nothing waits)
     await desktop_files.forget(session, cut_ids)  # story 4983 — nor a sealed files answer
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget(session, cut_ids)  # story 4978 — nor a sealed record-key handoff for a computer cut off
     await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
     # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)
     # written LAST (after every revocation above): a slow reclaim that crosses a second must not leave the cut-off earlier than the end of its own work

@@ -245,6 +245,9 @@ async def remove_pair(
     pair.removed_at, pair.removed_by, pair.removal_acked_at = _now(), actor_member_id, None
     await db.flush()
     await _end_cards_without_phone(db, {setup_id})  # story 4972: a sealed card nobody can open any more does not wait out its window
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(setup_id, phone_id)])  # story 4978: a removed phone takes no record key — what travels on this pair goes with it
     _wake_device_after_commit(db, setup_id)
     return True
 
@@ -283,6 +286,9 @@ async def remove_computer_pairs(
         removed += 1
     await db.flush()
     await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(p.setup_id, phone_id) for p in pairs])  # story 4978: nor a record-key handoff on any of those pairs
     return removed
 
 
@@ -412,6 +418,9 @@ async def remove_phone(
         pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
     await db.flush()
     await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(p.setup_id, phone_id) for p in pairs])  # story 4978: a revoked key takes no record key
     session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
@@ -442,7 +451,7 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
         raise DesktopRelayError(422, "duplicate_pairing", "a phone key appears twice in the snapshot")
     phones = {d.fingerprint: d for d in (await db.execute(
         select(RemoteDevice).where(RemoteDevice.fingerprint.in_(fps), RemoteDevice.org_id == setup.org_id,
-                                   RemoteDevice.revoked_at.is_(None))
+                                   RemoteDevice.revoked_at.is_(None)).order_by(RemoteDevice.id).with_for_update(read=True)  # story 4978: the key row first (a revocation takes it FOR UPDATE, then the pairing rows) — a snapshot cannot list a key that was revoked while it read
     )).scalars().all()} if fps else {}
     rows = {r.remote_device_id: r for r in (await db.execute(
         select(RemoteDevicePairing).where(RemoteDevicePairing.setup_id == setup.id).with_for_update()
@@ -464,17 +473,22 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
                 row.removed_at = row.removed_by = row.removal_acked_at = None
             row.paired_at, row.reported_at = p.paired_at, now
     dropped = False
+    dropped_phones: list[uuid.UUID] = []
     for phone_id, row in rows.items():
         if phone_id in listed:
             continue
         if row.removed_at is None:
             row.removed_at = now  # the device dropped it on its own
             dropped = True
+            dropped_phones.append(phone_id)
         if row.removal_acked_at is None:
             row.removal_acked_at = now
     await db.flush()
     if dropped:
         await _end_cards_without_phone(db, {setup.id})  # story 4972: a snapshot that no longer lists the last phone of a person takes their sealed cards with it (nobody can open them now)
+        from app.services import desktop_record_handoff
+
+        await desktop_record_handoff.forget_pairs(db, [(setup.id, phone_id) for phone_id in dropped_phones])  # story 4978: a pair the device dropped takes what travelled on it (a re-added pair must not serve an old envelope)
     return {"pairings": len(listed), "unregistered": len(snapshot.pairings) - len(listed)}
 
 

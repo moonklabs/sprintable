@@ -882,6 +882,9 @@ async def changes_purge(
         from app.services.desktop_files import purge_expired as purge_expired_files
 
         files_purged = await purge_expired_files(session)  # story 4983 — a sealed files answer nobody came back to read goes at its end too
+        from app.services.desktop_record_handoff import purge_expired as purge_expired_handoffs
+
+        handoffs_purged = await purge_expired_handoffs(session)  # story 4978 — and a record-key handoff nobody took
         audit = await purge_audit(session)  # the audit lines past their 90 days
         # story 4972 (카디르 lens M1): the same minute job also lets go of the words of a permission request whose window passed (no new scheduler job: one more cron is one more
         # thing to set up by hand on dev and prod)
@@ -904,7 +907,7 @@ async def changes_purge(
                 tombstones = await purge_tombstones(session)
         except Exception as exc:
             logger.exception("cron error (changes-purge · record tombstones): %s", type(exc).__name__)
-        return _ok({"purged": purged, "files_purged": files_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts, "record_tombstones_purged": tombstones})
+        return _ok({"purged": purged, "files_purged": files_purged, "handoffs_purged": handoffs_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts, "record_tombstones_purged": tombstones})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

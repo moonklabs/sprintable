@@ -733,6 +733,156 @@ async def put_files_chunk(command_id: uuid.UUID, request: Request, i: int = Path
     return {"bytes": size}
 
 
+async def _read_capped(request: Request, limit: int, *, code: str) -> bytes:
+    """The request body, never more than `limit` bytes held whatever the header said (413 `code`)."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise relay.DesktopRelayError(413, code, "the envelope is larger than the server takes")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > limit:
+            raise relay.DesktopRelayError(413, code, "the envelope is larger than the server takes")
+    return raw
+
+
+@router.put("/relay/record-handoffs/{phone_key_id}")
+async def put_record_handoff_to_phone(phone_key_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the computer's SEALED record-key handoff for one phone of its organization (R is inside the envelope; the server cannot open it). 201 when new · 200 for the same envelope again · 409 `phone_not_paired` /
+    `handoff_queue_full` · 422 `invalid_record_handoff` (the shape and the one fixed size are all the server judges)."""
+    from app.services import desktop_record_handoff as handoff
+
+    try:
+        raw = await _read_capped(request, handoff.BODY_MAX, code="record_handoff_too_large")
+        row_id, new, ends = await handoff.host_put(db, setup, phone_key_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return JSONResponse(status_code=201 if new else 200, content={"id": str(row_id), "expires_at": ends.isoformat()})
+
+
+@router.get("/relay/record-handoffs")
+async def get_record_handoffs_for_host(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the handoffs phones have put for THIS computer (oldest first; reading deletes nothing — `received` does)."""
+    from app.services import desktop_record_handoff as handoff
+
+    try:
+        items = await handoff.host_list(db, setup)
+    except relay.DesktopRelayError as exc:  # the switch went off between the device gate and the read: its own 409, not a 500
+        await db.commit()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"items": items}
+
+
+@router.get("/relay/record-handoffs/waiting")
+async def get_record_handoffs_waiting_for_host(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): what THIS computer put that no phone has received yet — ids and ends with the server's own clock, never an envelope (a row gone before its end = received; one that ran out = not)."""
+    from app.services import desktop_record_handoff as handoff
+
+    out = await handoff.host_waiting(db, setup)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return out
+
+
+@router.post("/relay/record-handoffs/{handoff_id}/received")
+async def post_record_handoff_received_by_host(handoff_id: uuid.UUID, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the computer has the envelope — the row is deleted (only one addressed to this computer; any other id deletes nothing)."""
+    from app.services import desktop_record_handoff as handoff
+
+    deleted = await handoff.host_received(db, setup, handoff_id)
+    await db.commit()
+    return {"deleted": deleted}
+
+
+@router.put("/setups/{setup_id}/record-handoffs/{phone_key_id}")
+async def put_record_handoff_to_host(
+    setup_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): a person's phone puts its SEALED record-key handoff for a computer of the same organization. The phone is named by its own key id and must be the caller's (any other is 404 `phone_not_found`)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        raw = await _read_capped(request, handoff.BODY_MAX, code="record_handoff_too_large")
+        row_id, new, ends = await handoff.phone_put(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, phone_id=phone_key_id, raw=raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return JSONResponse(status_code=201 if new else 200, content={"id": str(row_id), "expires_at": ends.isoformat()})
+
+
+@router.get("/record-handoffs")
+async def get_record_handoffs_for_phone(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): the handoffs computers have put for THIS phone (the caller's own key id; oldest first; reading deletes nothing — `received` does)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        items = await handoff.phone_list(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return {"items": items}
+
+
+@router.get("/record-handoffs/waiting")
+async def get_record_handoffs_waiting_for_phone(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): what THIS phone (the caller's own key id) put that no computer has received yet — ids and ends with the server's own clock, never an envelope."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        out = await handoff.phone_waiting(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return out
+
+
+@router.post("/record-handoffs/{handoff_id}/received")
+async def post_record_handoff_received_by_phone(
+    handoff_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): the phone has the envelope — the row is deleted (only one addressed to this phone of this person; any other id deletes nothing)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        deleted = await handoff.phone_received(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id, handoff_id=handoff_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return {"deleted": deleted}
+
+
 @router.put("/relay/pairings")
 async def put_pairings(body: PairingSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     from app.services import agent_permissions

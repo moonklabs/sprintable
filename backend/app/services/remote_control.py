@@ -145,6 +145,9 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
         from app.services import desktop_files
 
         await desktop_files.forget(db, setup_ids)  # story 4983 — nor a sealed files answer
+        from app.services import desktop_record_handoff
+
+        await desktop_record_handoff.forget(db, setup_ids)  # story 4978 — nor a sealed record-key handoff
         from app.services.desktop_relay import forget_prompts
 
         await forget_prompts(db, setup_ids)  # story 4976 — nor the words of an instruction (the open ones ended above; this also covers an acked one)

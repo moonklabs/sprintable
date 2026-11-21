@@ -316,6 +316,31 @@ class DesktopFileChunk(Base):
     written_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class DesktopRecordHandoff(Base):
+    """story 4978 (0494 · C2): one SEALED `record_handoff` envelope in flight between a computer and a phone that are paired (the record key R travels inside, wrapped to ONE receiver: the server cannot open it and sees a shape and
+    one fixed size). Addressed by the pair — (`setup_id`, `remote_device_id`) — and a direction; deleted the moment the receiver says it has it, and anyway at `expires_at`; a computer or a phone that goes takes what was addressed to it
+    (ON DELETE CASCADE)."""
+
+    __tablename__ = "desktop_record_handoffs"
+    __table_args__ = (
+        CheckConstraint("direction IN ('host_to_phone', 'phone_to_host')", name="ck_desktop_record_handoffs_direction"),
+        CheckConstraint("char_length(command_id) BETWEEN 1 AND 64", name="ck_desktop_record_handoffs_command_id"),
+        UniqueConstraint("setup_id", "remote_device_id", "direction", "command_id", name="uq_desktop_record_handoffs_one_envelope"),
+        Index("ix_desktop_record_handoffs_pair", "setup_id", "remote_device_id", "direction", "created_at"),
+        Index("ix_desktop_record_handoffs_phone", "remote_device_id", "direction", "created_at"),
+        Index("ix_desktop_record_handoffs_expires", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    remote_device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[str] = mapped_column(Text, nullable=False)
+    envelope: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class DesktopChangesAudit(Base):
     """story #4951 (0477 · Kadir lens G): one line per changed-file list a person actually read — who · which computer · which command · how many files · when. No name, no content.
     No foreign key to the computer or the command (the line outlives a disconnect); it goes with its organization."""
