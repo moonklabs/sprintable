@@ -430,6 +430,8 @@ function ResultLine({ result }: { result: Result }) {
     case 'too_long': return line(t('sheet.tooLong'));
     // story 4976 A3: a sealed instruction the session could not take — not sent, not turned into a message, the words stay in the box
     case 'sealed_not_taken': return line(t('command.sealedNotTaken'));
+    // story 4990: this phone has no sealed pairing with that computer — not sent (the words stay in the box), and the way to pair again is right here
+    case 'sealed_pair_missing': return line(t('command.sealedPairMissing'), pairAgain);
     // story 4633 (Yuna 4633-hidden-text-copy.md · web line): refused for invisible characters — nothing went in, nothing was sent as a message
     case 'hidden_text': return line(t('command.hiddenText'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));

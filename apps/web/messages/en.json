@@ -5618,6 +5618,7 @@
         },
         "sentAsMessageNotNow": "It couldn't go into the current turn, so it went in as a message — it's read when its turn comes",
         "sealedNotTaken": "This session can't take an instruction right now, so it wasn't sent — what you wrote is still here. Send it again later, or send it in the conversation",
+        "sealedPairMissing": "This phone has no secure pairing with this computer, so it wasn't sent — what you wrote is still here. Pair this phone with the computer again, then send it",
         "hiddenText": "Not sent: the text contains invisible characters. Please paste the text again or type it out, then send."
       },
       "changes": {
