@@ -803,3 +803,107 @@ describe('[4983] the files line of the «바뀐 파일» sheet', () => {
     expect(filesLine()).toBeNull();
   });
 });
+
+// (last in the file: its open sheet is a dialog, and a dialog left to the unmount must not be the one the earlier dialog tests start from)
+describe('[4977] the «기록» button of the strip', () => {
+  const SETUP = '55555555-6666-4777-8888-999999999999';
+  const caps = (records: unknown) => phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: records === undefined ? {} : { records } } : { id: 'c', ok: false, code: 'bad_request' }));
+  const recordsButton = () => container.querySelector('[data-testid="agent-records-open"]') as HTMLButtonElement | null;
+
+  it('the phone app · a shell that says `records: 1` · a session that names its computer → [기록] sits with the other buttons', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    expect(recordsButton()?.textContent).toBe(ko.records.button);
+    expect(buttons()).toEqual([ko.records.button, ko.button.stop, ko.button.instruct]);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toHaveLength(1); // read ONCE, not at every render
+  });
+
+  it('[기록] opens the sheet of THIS chat (its title and its lead) and reads through the shell\'s own words only', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    await act(async () => { recordsButton()!.click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).not.toBeNull();
+    expect(document.body.textContent).toContain(ko.records.title);
+    expect(document.body.textContent).toContain(ko.records.lead);
+  });
+
+  it('no button: an older shell (no `records`, or a word that is not 1) · a session that names no computer · the browser — and the browser never asks the shell', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    for (const records of [undefined, 0, 2, true, '1']) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      caps(records);
+      await render();
+      expect(recordsButton(), String(records)).toBeNull();
+    }
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    caps(1);
+    await render();
+    expect(recordsButton()).toBeNull();
+    sessionView = { ...sessionView, setup_id: SETUP };
+    phone = false;
+    phoneCall.mockClear();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    caps(1);
+    await render();
+    expect(recordsButton()).toBeNull();
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toEqual([]);
+  });
+
+  it('the button goes when a later read of the session no longer names its computer (the shell\'s earlier answer is not enough)', async () => {
+    vi.useFakeTimers();
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    expect(recordsButton()).not.toBeNull();
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull();
+  });
+
+  it('a session that loses its computer and gets one back does not reopen the sheet by itself, and the button waits for the shell to say again', async () => {
+    vi.useFakeTimers();
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    await act(async () => { recordsButton()!.click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).not.toBeNull();
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull();
+    let release: (v: unknown) => void = () => {};
+    phoneCall.mockImplementation(() => new Promise((r) => { release = r; })); // the shell has not answered yet
+    sessionView = { ...sessionView, setup_id: SETUP };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull(); // not before the shell says it again
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull();
+    await act(async () => { release({ id: 'c', ok: true, caps: { records: 1 } }); });
+    await settle();
+    expect(recordsButton()).not.toBeNull();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull(); // and the sheet stays shut
+  });
+
+  it('with no other button (the agent is idle) [기록] stands alone at the right end', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP, state: 'idle' };
+    caps(1);
+    await render();
+    expect(container.querySelector('[data-testid="agent-changes-buttons"] [data-testid="agent-records-open"]')).not.toBeNull();
+  });
+});
