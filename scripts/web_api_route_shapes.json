@@ -915,6 +915,16 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/records",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/computers/{}/records",
+"kind": "unknown"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/device-token-codes",
 "kind": "object"
@@ -953,6 +963,11 @@
 "method": "GET",
 "path": "/api/v2/desktop/recipes/for-new-org",
 "kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/records",
+"kind": "unknown"
 },
 {
 "method": "PUT",
@@ -1037,6 +1052,11 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/presence",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/records",
 "kind": "unknown"
 },
 {

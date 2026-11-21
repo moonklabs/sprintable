@@ -1544,15 +1544,33 @@ async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUI
     deletion closes each open one of them exactly as a disconnect does (`_disconnect_setup`: keys, device token, open commands, open
     stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
     leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
-    Returns how many were closed."""
-    return await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+    story 4977 B2: the person's sealed records (their history, kept for them alone) go with the account — the rows and their tombstones — in every organization that outlives it.
+    Returns how many setups were closed."""
+    closed = await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+    await _delete_records_of_person(db, user_id=user_id, org_id=None)
+    return closed
 
 
 async def close_setups_of_removed_member(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, removed_by: uuid.UUID) -> int:
     """story #4769 — the same for a person REMOVED from one organization while their account lives on: the computers they confirmed IN THAT
     ORGANIZATION close like a disconnect (`revoked_by` = whoever removed them, `revoked_reason` = member_removed). Their computers in other
-    organizations are not touched, nor are agents a setup only attached. Returns how many were closed."""
-    return await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+    organizations are not touched, nor are agents a setup only attached. story 4977 B2: their sealed records IN THAT ORGANIZATION go too (nobody could read or delete them any more).
+    Returns how many setups were closed."""
+    closed = await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+    await _delete_records_of_person(db, user_id=user_id, org_id=org_id)
+    return closed
+
+
+async def _delete_records_of_person(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID | None) -> None:
+    """story 4977 B2: the sealed records a person kept (`session_records.owner_id`) — a person who leaves leaves no sealed rows behind that nobody can read or delete."""
+    from sqlalchemy import delete
+
+    from app.models.session_record import SessionRecord
+
+    cond = [SessionRecord.owner_id == user_id]
+    if org_id is not None:
+        cond.append(SessionRecord.org_id == org_id)
+    await db.execute(delete(SessionRecord).where(*cond))
 
 
 def _made_agent_ids(members) -> list[uuid.UUID]:
