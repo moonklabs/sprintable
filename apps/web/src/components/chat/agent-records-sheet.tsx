@@ -20,27 +20,34 @@ const SHOWN_STEP = 30;
 
 type T = ReturnType<typeof useTranslations<'chats.agentSession.records'>>;
 // the words are named one by one (not built from the problem's name): a key that is spelled out can be found by the dead-key scan, and by a person grepping for it
-const PROBLEM_TEXT: Record<'failed' | 'notPaired' | 'notAllowed' | 'unsupported', (t: T) => string> = {
+const PROBLEM_TEXT: Record<Problem, (t: T) => string> = {
   failed: (t) => t('problem.failed'),
   notPaired: (t) => t('problem.notPaired'),
   notAllowed: (t) => t('problem.notAllowed'),
   unsupported: (t) => t('problem.unsupported'),
+  noComputer: (t) => t('problem.noComputer'),
 };
+
+type Problem = 'failed' | 'notPaired' | 'notAllowed' | 'unsupported' | 'noComputer';
 
 type View =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'page'; page: RecordsPage }
-  | { kind: 'problem'; problem: 'failed' | 'notPaired' | 'notAllowed' | 'unsupported' };
+  | { kind: 'problem'; problem: Problem };
 
-const problemOf = (o: Exclude<RecordsOutcome, { kind: 'page' }>): 'failed' | 'notPaired' | 'notAllowed' | 'unsupported' => {
+const problemOf = (o: Exclude<RecordsOutcome, { kind: 'page' }>): Problem => {
   if (o.kind === 'not_paired') return 'notPaired';
   if (o.kind === 'not_allowed' || o.kind === 'room_not_found') return 'notAllowed';
   if (o.kind === 'unsupported') return 'unsupported';
   return 'failed'; // key · signed out · unreachable · failed: one line, with [다시 불러오기]
 };
 
-export function AgentRecordsSheet({ conversationId, setupId, open, onOpenChange }: { conversationId: string; setupId: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+/**
+ * `setupId` — the computer the read goes through (the server's records are the ROOM's; it needs one computer this phone is paired with to let the phone in). A session names it (the strip); a room with
+ * NO live session gives `null` and an `agentId`: the sheet then takes, from the computers this phone is paired with, the one the agent is on — and the first when none says so — and says which one it chose.
+ */
+export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName, open, onOpenChange }: { conversationId: string; setupId: string | null; agentId?: string; deviceName?: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const t = useTranslations('chats.agentSession.records');
   const { phoneCall } = usePhoneBridge();
   const [view, setView] = useState<View>({ kind: 'idle' });
@@ -51,6 +58,8 @@ export function AgentRecordsSheet({ conversationId, setupId, open, onOpenChange 
   const scroller = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const phoneKey = useRef<string | null>(null);
+  const picked = useRef<{ setupId: string; name: string } | null>(null); // the computer chosen for a room with no session (asked again at every opening)
+  const [computerName, setComputerName] = useState<string | null>(deviceName ?? null);
   const pageRef = useRef<RecordsPage | null>(null); // what is shown now (a continuation adds to it) — a ref, so `read` does not change with every page
   const show = useCallback((v: View) => { pageRef.current = v.kind === 'page' ? v.page : null; setView(v); }, []);
 
@@ -58,15 +67,24 @@ export function AgentRecordsSheet({ conversationId, setupId, open, onOpenChange 
     const mine = ++run.current;
     const keep = after !== undefined ? pageRef.current : null; // a continuation adds to what is shown
     if (!keep) show({ kind: 'loading' });
-    const listed = phoneKey.current ? null : await readStartableKeyed(phoneCall).catch(() => null);
+    const needList = !phoneKey.current || (setupId === null && !picked.current);
+    const listed = needList ? await readStartableKeyed(phoneCall).catch(() => null) : null;
     if (mine !== run.current) return;
     if (listed) {
-      if (listed.kind !== 'view') { show({ kind: 'problem', problem: listed.kind === 'no_phone' ? 'notPaired' : 'failed' }); return; }
+      if (listed.kind !== 'view') { show({ kind: 'problem', problem: listed.kind === 'no_phone' ? (setupId === null ? 'noComputer' : 'notPaired') : 'failed' }); return; } // (a phone with no pairing at all, for a room with no computer named: «no computer», not «that computer's pairing is cut»)
       phoneKey.current = listed.phoneKeyId;
+      if (setupId === null) {
+        const computers = listed.view.computers;
+        const choice = (agentId ? computers.find((c) => c.agents.some((a) => a.agent_member_id === agentId)) : undefined) ?? computers[0];
+        if (!choice) { show({ kind: 'problem', problem: 'noComputer' }); return; }
+        picked.current = { setupId: choice.setup_id, name: choice.device_name };
+        setComputerName(choice.device_name);
+      }
     }
     const key = phoneKey.current;
-    if (!key) { show({ kind: 'problem', problem: 'failed' }); return; }
-    const out = await readRecordsAll({ phoneCall, setupId, conversationId, phoneKeyId: key, ...(after !== undefined ? { after } : {}) });
+    const through = setupId ?? picked.current?.setupId ?? null;
+    if (!key || !through) { show({ kind: 'problem', problem: 'failed' }); return; }
+    const out = await readRecordsAll({ phoneCall, setupId: through, conversationId, phoneKeyId: key, ...(after !== undefined ? { after } : {}) });
     if (mine !== run.current) return; // a newer opening or a closed sheet: this answer is not drawn
     if (out.kind !== 'page') { show({ kind: 'problem', problem: problemOf(out) }); return; }
     const { kind: _kind, ...page } = out;
@@ -77,17 +95,20 @@ export function AgentRecordsSheet({ conversationId, setupId, open, onOpenChange 
         ? { ...page, lines: [...keep.lines, ...page.lines], closed: { noKey: keep.closed.noKey + page.closed.noKey, unverified: keep.closed.unverified + page.closed.unverified, unreadable: keep.closed.unreadable + page.closed.unreadable }, haveKey: keep.haveKey || page.haveKey }
         : page,
     });
-  }, [phoneCall, setupId, conversationId, show]);
+  }, [phoneCall, setupId, agentId, conversationId, show]);
 
   // every opening reads again (a closed sheet ends its run: whatever is still on its way is not drawn)
   useEffect(() => {
     if (!open) { run.current += 1; return undefined; }
     setShown(SHOWN_STEP);
     setDeleteFailed(false);
+    picked.current = null;
+    phoneKey.current = null; // every opening asks the phone's own list again: a phone paired anew since (another key) is not read with the old key
+    setComputerName(deviceName ?? null);
     void read();
     return () => { run.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- an OPENING, or another room / computer while open, starts a read (`read` itself is made new by the bridge wrapper at every render: not a reason to read again)
-  }, [open, setupId, conversationId]);
+  }, [open, setupId, agentId, conversationId]);
 
   // the sheet opens at the END of what was read (the newest line is what a person comes for)
   const pageLines = view.kind === 'page' ? view.page.lines.length : 0;
@@ -117,6 +138,7 @@ export function AgentRecordsSheet({ conversationId, setupId, open, onOpenChange 
           <DialogHeader>
             <DialogTitle>{t('title')}</DialogTitle>
             <DialogDescription className="break-keep">{t('lead')}</DialogDescription>
+            {computerName ? <p className="text-xs break-keep text-muted-foreground" data-testid="agent-records-computer">{t('computer', { name: computerName })}</p> : null}
           </DialogHeader>
           <div ref={scroller} className="max-h-[60vh] min-h-24 overflow-y-auto p-1" data-testid="agent-records-list">
             {view.kind === 'loading' || view.kind === 'idle' ? <p className="py-6 text-center text-sm text-muted-foreground" data-testid="agent-records-loading">{t('loading')}</p> : null}

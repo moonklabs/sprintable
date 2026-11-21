@@ -830,6 +830,7 @@ describe('[4977] the «기록» button of the strip', () => {
     expect(document.querySelector('[data-testid="agent-records-sheet"]')).not.toBeNull();
     expect(document.body.textContent).toContain(ko.records.title);
     expect(document.body.textContent).toContain(ko.records.lead);
+    expect(document.querySelector('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.records.computer.replace('{name}', 'SYJ-MacBook-Pro')); // whose history it is: the session's own computer
   });
 
   it('no button: an older shell (no `records`, or a word that is not 1) · a session that names no computer · the browser — and the browser never asks the shell', async () => {

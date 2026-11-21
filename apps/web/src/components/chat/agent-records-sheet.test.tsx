@@ -44,11 +44,11 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; });
 
 const settle = async (n = 12) => { for (let i = 0; i < n; i++) await act(async () => { await Promise.resolve(); }); };
-async function show(isOpen = true, locale: 'ko' | 'en' = 'ko', where: { room?: string; setup?: string } = {}) {
+async function show(isOpen = true, locale: 'ko' | 'en' = 'ko', where: { room?: string; setup?: string | null; agent?: string; device?: string | null } = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <AgentRecordsSheet conversationId={where.room ?? ROOM} setupId={where.setup ?? SETUP} open={isOpen} onOpenChange={() => {}} />
+        <AgentRecordsSheet conversationId={where.room ?? ROOM} setupId={where.setup === undefined ? SETUP : where.setup} {...(where.agent ? { agentId: where.agent } : {})} {...(where.device !== undefined ? { deviceName: where.device } : {})} open={isOpen} onOpenChange={() => {}} />
       </NextIntlClientProvider>,
     );
   });
@@ -235,6 +235,109 @@ describe('the «기록» sheet', () => {
     await settle();
     expect(document.body.textContent).not.toContain('COMES BACK');
     expect(q('[data-testid="agent-records-empty"]')).not.toBeNull();
+  });
+
+  const computer = (setup_id: string, device_name: string, agents: string[] = []) => ({ setup_id, device_name, reachable: true, agents: agents.map((agent_member_id) => ({ agent_member_id, name: agent_member_id, can_command: true, projects: [], running: false })) });
+  const SETUP_A = 'aaaaaaaa-1111-4222-8333-444444444444';
+  const SETUP_B = 'bbbbbbbb-1111-4222-8333-444444444444';
+  const AGENT = 'cccccccc-1111-4222-8333-444444444444';
+  const urls = () => fetchWithAuth.mock.calls.map((c) => String(c[0]));
+
+  it('a room with no session (no computer named): the sheet reads through the computer the agent is on, and says which one', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_A, '회사 맥'), computer(SETUP_B, '집 맥', [AGENT])] } });
+    history([line(1, 'kept')]);
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(text()).toEqual(['kept']);
+    expect(urls()[0]).toContain(`/computers/${SETUP_B}/records`);
+    expect(q('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.computer.replace('{name}', '집 맥'));
+    expect(JSON.stringify(phoneCall.mock.calls[0][1])).toContain(SETUP_B); // …and the shell is told the same computer
+  });
+
+  it('no computer has the agent: the first one of the phone\'s list; a blank sheet still says whose it is', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_A, '회사 맥'), computer(SETUP_B, '집 맥')] } });
+    history([]);
+    await show(true, 'en', { setup: null, agent: AGENT });
+    expect(urls()[0]).toContain(`/computers/${SETUP_A}/records`);
+    expect(q('[data-testid="agent-records-empty"]')).not.toBeNull();
+    expect(q('[data-testid="agent-records-computer"]')!.textContent).toBe(en.computer.replace('{name}', '회사 맥'));
+  });
+
+  it('the phone is paired with no computer: one line that says so, nothing is read', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [] } });
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(q('[data-testid="agent-records-problem"]')!.textContent).toContain(ko.problem.noComputer);
+    expect(fetchWithAuth).not.toHaveBeenCalled();
+    expect(q('[data-testid="agent-records-computer"]')).toBeNull();
+    expect(q('[data-testid="agent-records-reload"]')).toBeNull(); // nothing a second press would change
+  });
+
+  it('every opening asks the phone\'s computers again (the one chosen last time may be gone), a continuation does not', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_A, '회사 맥', [AGENT])] } });
+    history([line(1, 'one')]);
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    await show(false, 'ko', { setup: null, agent: AGENT });
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_B, '집 맥', [AGENT])] } });
+    history([line(1, 'two')]);
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(urls()[1]).toContain(`/computers/${SETUP_B}/records`);
+    expect(q('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.computer.replace('{name}', '집 맥'));
+  });
+
+  it('a continuation reads on through the computer chosen at the opening — the phone\'s list is not asked again for it', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_A, '회사 맥', [AGENT])] } });
+    fetchWithAuth.mockResolvedValueOnce(json(200, { records: Array.from({ length: 100 }, (_, i) => row(i + 1)), next_after: 100 }));
+    phoneCall.mockResolvedValueOnce(shellAnswer([line(100, 'page one')], { next_after: 100 }));
+    for (let i = 1; i < 10; i++) { fetchWithAuth.mockResolvedValueOnce(json(200, { records: Array.from({ length: 100 }, (_, j) => row(i * 100 + j + 1)), next_after: (i + 1) * 100 })); phoneCall.mockResolvedValueOnce(shellAnswer([], { next_after: (i + 1) * 100 })); }
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(readStartableKeyed).toHaveBeenCalledTimes(1);
+    fetchWithAuth.mockResolvedValueOnce(json(200, { records: [row(1001)], next_after: 1001 }));
+    phoneCall.mockResolvedValueOnce(shellAnswer([line(1001, 'page eleven')], { next_after: 1001 }));
+    await click('[data-testid="agent-records-more"]');
+    expect(text()).toEqual(['page one', 'page eleven']);
+    expect(readStartableKeyed).toHaveBeenCalledTimes(1);
+    expect(urls().at(-1)).toContain(`/computers/${SETUP_A}/records`);
+  });
+
+  it('another agent while the sheet stays open starts a new read through that agent\'s computer', async () => {
+    const AGENT2 = 'dddddddd-1111-4222-8333-444444444444';
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_A, '회사 맥', [AGENT]), computer(SETUP_B, '집 맥', [AGENT2])] } });
+    history([line(1, 'one')]);
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(urls()[0]).toContain(`/computers/${SETUP_A}/records`);
+    history([line(1, 'two')]);
+    await show(true, 'ko', { setup: null, agent: AGENT2 });
+    expect(urls()[1]).toContain(`/computers/${SETUP_B}/records`);
+    expect(q('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.computer.replace('{name}', '집 맥'));
+  });
+
+  it('a phone that is paired with nothing (no key) asks for no computer — its line is the «no computer» one; with a session\'s computer it is the «pairing cut» one', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'no_phone' });
+    await show(true, 'ko', { setup: null, agent: AGENT });
+    expect(q('[data-testid="agent-records-problem"]')!.textContent).toContain(ko.problem.noComputer);
+    await show(false, 'ko', { setup: SETUP_A });
+    await show(true, 'ko', { setup: SETUP_A });
+    expect(q('[data-testid="agent-records-problem"]')!.textContent).toContain(ko.problem.notPaired);
+    expect(fetchWithAuth).not.toHaveBeenCalled();
+  });
+
+  it('every opening asks the phone\'s own list again, also for a session\'s computer: a key that changed meanwhile is the key used', async () => {
+    const NEWKEY = '99999999-0000-4000-8000-000000000009';
+    history([line(1, 'one')]);
+    await show(true, 'ko', { setup: SETUP_A, device: '회사 맥' });
+    await show(false, 'ko', { setup: SETUP_A, device: '회사 맥' });
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: NEWKEY, view: { remote_control: true, computers: [] } });
+    history([line(1, 'one')]);
+    await show(true, 'ko', { setup: SETUP_A, device: '회사 맥' });
+    expect(readStartableKeyed).toHaveBeenCalledTimes(2);
+    expect(urls()[1]).toContain(`phone_key_id=${NEWKEY}`);
+  });
+
+  it('a session that names its computer shows that computer\'s name too, and the phone\'s list is not used to pick another', async () => {
+    readStartableKeyed.mockResolvedValue({ kind: 'view', phoneKeyId: PHONE, view: { remote_control: true, computers: [computer(SETUP_B, '집 맥', [AGENT])] } });
+    history([line(1, 'kept')]);
+    await show(true, 'ko', { setup: SETUP_A, agent: AGENT, device: '회사 맥' });
+    expect(urls()[0]).toContain(`/computers/${SETUP_A}/records`);
+    expect(q('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.computer.replace('{name}', '회사 맥'));
   });
 
   it('a line\'s time is drawn in the viewer\'s own zone (ko and en), and not at all while that zone is not known — never in UTC', async () => {
