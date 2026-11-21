@@ -5672,6 +5672,7 @@
         "button": "History",
         "title": "History of this conversation",
         "lead": "The server can't read this history.",
+        "computer": "Computer: {name}",
         "loading": "Loading history…",
         "empty": "No history yet.",
         "keyless": "This phone can't open this conversation's history yet.",
@@ -5689,7 +5690,8 @@
           "failed": "Couldn't load history — press Reload",
           "notPaired": "This phone is no longer paired with that computer, so it can't show history.",
           "notAllowed": "You can't view this conversation's history.",
-          "unsupported": "This app can't open history yet."
+          "unsupported": "This app can't open history yet.",
+          "noComputer": "This phone isn't paired with a computer, so the history can't be opened."
         },
         "delete": {
           "button": "Delete this conversation's history",

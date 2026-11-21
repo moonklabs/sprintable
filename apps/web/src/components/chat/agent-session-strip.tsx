@@ -371,7 +371,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
-      {showRecords ? <AgentRecordsSheet key={`${view.setup_id as string}/${conversationId}`} conversationId={conversationId} setupId={view.setup_id as string} open={recordsOpen} onOpenChange={setRecordsOpen} /> : null}
+      {showRecords ? <AgentRecordsSheet key={`${view.setup_id as string}/${conversationId}`} conversationId={conversationId} setupId={view.setup_id as string} deviceName={view.device_name} open={recordsOpen} onOpenChange={setRecordsOpen} /> : null}
       {showChanges ? (
         <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} filesHref={phone && typeof view.setup_id === 'string' && view.setup_id ? `/phone-files?setup_id=${encodeURIComponent(view.setup_id)}&agent_id=${encodeURIComponent(agentId)}` : null} open={changesOpen} onOpenChange={setChangesOpen} />
       ) : null}
