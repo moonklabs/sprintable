@@ -1321,6 +1321,9 @@ async def _retire_same_machine(
         from app.services import desktop_files
 
         await desktop_files.forget(db, [o.id for o in old], lock=False)  # story 4983 — nor a sealed files answer
+        from app.services import desktop_record_handoff
+
+        await desktop_record_handoff.forget(db, [o.id for o in old], lock=False)  # story 4978 — nor a sealed record-key handoff
         await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
         from app.services.desktop_relay import forget_prompts
 
@@ -1650,6 +1653,9 @@ async def _disconnect_setup(
     from app.services import desktop_files
 
     await desktop_files.forget(db, [setup.id], lock=False)  # story 4983 — nor a sealed files answer (the same row lock)
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget(db, [setup.id], lock=False)  # story 4978 — nor a sealed record-key handoff (the same row lock)
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     await desktop_relay.forget_prompts(db, [setup.id])  # story 4976 — nor the words of an instruction: the open ones ended just above, this also covers an acked one
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on

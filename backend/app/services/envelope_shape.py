@@ -25,7 +25,8 @@ MAX_CT_BYTES = 256 * 1024
 # a card's words are a few hundred characters and a preview of at most 2400 — a card envelope is small (the host pads to a fixed width inside this cap)
 # story 4976: a phone's instruction into the running turn is at most INSTRUCT_NOW_MAX (400) characters — a few KiB at 4 bytes a character; the phone pads to a fixed width inside this cap
 # story 4983: a files request (a list or an open) is a short list of names (the padded frame is at most 4096 bytes, contract `envelope.request.ct_max_bytes` · `envelope.request_read.ct_max_bytes`); its answer is the full cap
-MAX_CT_BYTES_BY_KIND = {"approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024, "file_download": 4 * 1024}
+HANDOFF_CT_BYTES = 14608  # story 4978: a `record_handoff` body is ONE fixed width (the 14,592-byte frame + the 16-byte tag — 256 key generations and 32 record writers' worth, whatever travels): the server cannot learn how many of either
+MAX_CT_BYTES_BY_KIND = {"record_handoff": HANDOFF_CT_BYTES, "approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024, "file_download": 4 * 1024}
 MAX_TO = 16
 MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1
@@ -159,4 +160,19 @@ def check_record_envelope(env: object) -> dict:
         raise ValueError("envelope: an empty record id")
     if not 1 <= _int(rec["rec_gen"], "rec.rec_gen") <= MAX_REC_GEN:
         raise ValueError("envelope: a record key generation is 1 or more and fits the column")
+    return env
+
+
+def check_record_handoff(env: object, *, setup_id: str) -> dict:
+    """story 4978 (C2): a `record_handoff` envelope as the server may judge it — SHAPE and size, nothing it would need a key for: the agreed shape of every envelope, then this kind's own: ONE receiver, no `rec`, no session key, the body at exactly
+    the fixed width (so its size tells nothing), and the pairing it names is the one the request is for. Returned unchanged, or ValueError (never a word of the envelope in the message)."""
+    check_envelope(env, kind="record_handoff")
+    assert isinstance(env, dict)
+    if len(env["to"]) != 1 or "rec" in env or env["session_key"] != "":  # `rec` ABSENT (a null is a field too)
+        raise ValueError("envelope: not the shape of a record handoff")
+    _b64(env["command_id"], exact_bytes=16, what="command_id")  # the envelope's one-time id: the base64url of the body's 16-byte nonce (so it also fits the table's 64-character column)
+    if _b64(env["ct"], what="body") != HANDOFF_CT_BYTES:
+        raise ValueError("envelope: a record handoff body has one fixed width")
+    if env["setup_id"] != setup_id:
+        raise ValueError("envelope: it names another pairing")
     return env

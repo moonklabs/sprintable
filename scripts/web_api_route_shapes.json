@@ -965,6 +965,21 @@
 "kind": "object"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/record-handoffs",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/record-handoffs/waiting",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/record-handoffs/{}/received",
+"kind": "unknown"
+},
+{
 "method": "DELETE",
 "path": "/api/v2/desktop/records",
 "kind": "unknown"
@@ -1052,6 +1067,26 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/presence",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/record-handoffs",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/record-handoffs/waiting",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/record-handoffs/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/record-handoffs/{}/received",
 "kind": "unknown"
 },
 {
@@ -1163,6 +1198,11 @@
 "method": "GET",
 "path": "/api/v2/desktop/setups/{}/hands",
 "kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/setups/{}/record-handoffs/{}",
+"kind": "unknown"
 },
 {
 "method": "GET",

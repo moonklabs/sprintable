@@ -111,7 +111,7 @@ def test_retire_closes_only_the_same_key_lines_with_the_reason():
     assert same_old.revoked_reason == "replaced_by_new_setup"
     assert other_machine.revoked_at is None and other_machine.revoked_reason is None
     assert already_closed.revoked_reason is None  # an earlier close is left as it was
-    assert len(db.statements) == 5  # the device tokens of the closed line (one statement), its clock view (story #4733: one delete — the row is already locked by the exchange), its «changed files» lists (story #4951: one more delete, same lock), its sealed files answers (story 4983: one more delete, same lock) and the words of the instructions it still holds (story 4976: one scrub)
+    assert len(db.statements) == 6  # the device tokens of the closed line (one statement), its clock view (story #4733: one delete — the row is already locked by the exchange), its «changed files» lists (story #4951: one more delete, same lock), its sealed files answers (story 4983: one more delete, same lock) its sealed record-key handoffs (story 4978: one more delete, same lock) and the words of the instructions it still holds (story 4976: one scrub)
 
 
 def test_retire_with_no_match_touches_nothing():

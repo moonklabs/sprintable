@@ -43,6 +43,11 @@ _KNOWN = {
     # story 4977 B2 — the same device token: ONE sealed record of the person's history the computer keeps (the row is that computer's own: its setup id; the server cannot open the envelope; the room is judged to be
     # of the token's own org; the PERSON's routes (desktop_records.py) judge the room per reader on every read, so a record written into a room its person is not in is reachable by nobody)
     "app/routers/desktop_relay.py::put_record",
+    # story 4978 (C2) — the same device token: a SEALED record-key handoff it puts for a phone of its organization, the handoffs phones put for IT (read), and its «received» (delete): the rows are that device's own (setup id from the token; the phone is named by its own key id and must be of the same organization and not revoked; the server cannot open the envelope) — no project entity
+    "app/routers/desktop_relay.py::put_record_handoff_to_phone",
+    "app/routers/desktop_relay.py::get_record_handoffs_for_host",
+    "app/routers/desktop_relay.py::get_record_handoffs_waiting_for_host",
+    "app/routers/desktop_relay.py::post_record_handoff_received_by_host",
     "app/routers/desktop_relay.py::post_session_state",
     "app/routers/desktop_relay.py::put_sessions",
     # story #4533 — the same device token: a permission prompt on that device (its own session · its own agent), its withdrawal
