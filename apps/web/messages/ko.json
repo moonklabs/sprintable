@@ -5667,6 +5667,38 @@
           "upload_failed": "컴퓨터가 읽은 목록을 보내지 못했어요 — 다시 불러와 주세요",
           "failed": "목록을 가져오지 못했어요 — 다시 불러와 주세요"
         }
+      },
+      "records": {
+        "button": "기록",
+        "title": "이 대화의 기록",
+        "lead": "서버는 내용을 읽지 못해요.",
+        "loading": "기록을 불러오는 중이에요.",
+        "empty": "아직 기록이 없어요.",
+        "keyless": "이 폰은 아직 이 대화의 기록을 열 수 없어요.",
+        "instruction": "지시",
+        "allowed": "허용됨 · {tool}",
+        "denied": "거부됨 · {tool}",
+        "writerPhone": "내 폰",
+        "writerHost": "컴퓨터",
+        "noKey": "이 폰에서 열 수 없는 기록 {n}개",
+        "unverified": "보낸 곳을 확인하지 못한 기록 {n}개",
+        "unreadable": "읽을 수 없는 기록 {n}개",
+        "loadMore": "더 불러오기",
+        "reload": "다시 불러오기",
+        "problem": {
+          "failed": "기록을 불러오지 못했어요 — 다시 불러오기를 눌러 주세요",
+          "notPaired": "이 폰은 그 컴퓨터와 페어링이 끊겨 기록을 볼 수 없어요.",
+          "notAllowed": "이 대화의 기록을 볼 수 없어요.",
+          "unsupported": "이 앱에서는 아직 기록을 열 수 없어요."
+        },
+        "delete": {
+          "button": "이 대화의 기록 지우기",
+          "title": "기록 지우기",
+          "body": "서버에 있는 이 대화의 기록을 모두 지울까요? 되돌릴 수 없어요.",
+          "cancel": "취소",
+          "confirm": "기록 지우기",
+          "failed": "기록을 지우지 못했어요. 다시 해 주세요."
+        }
       }
     },
     "entityTypeStory": "스토리",

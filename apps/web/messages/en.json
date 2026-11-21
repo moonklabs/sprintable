@@ -5667,6 +5667,38 @@
           "upload_failed": "The computer could not send the list it read — reload it",
           "failed": "The list could not be fetched — reload it"
         }
+      },
+      "records": {
+        "button": "History",
+        "title": "History of this conversation",
+        "lead": "The server can't read this history.",
+        "loading": "Loading history…",
+        "empty": "No history yet.",
+        "keyless": "This phone can't open this conversation's history yet.",
+        "instruction": "Instruction",
+        "allowed": "Allowed · {tool}",
+        "denied": "Denied · {tool}",
+        "writerPhone": "My phone",
+        "writerHost": "Computer",
+        "noKey": "{n, plural, one {# entry} other {# entries}} can't be opened on this phone",
+        "unverified": "{n, plural, one {# entry} other {# entries}} from an unverified sender",
+        "unreadable": "{n, plural, one {# entry} other {# entries}} can't be read",
+        "loadMore": "Load more",
+        "reload": "Reload",
+        "problem": {
+          "failed": "Couldn't load history — press Reload",
+          "notPaired": "This phone is no longer paired with that computer, so it can't show history.",
+          "notAllowed": "You can't view this conversation's history.",
+          "unsupported": "This app can't open history yet."
+        },
+        "delete": {
+          "button": "Delete this conversation's history",
+          "title": "Delete history",
+          "body": "Delete all history of this conversation from the server? This can't be undone.",
+          "cancel": "Cancel",
+          "confirm": "Delete history",
+          "failed": "Couldn't delete the history. Try again."
+        }
       }
     },
     "entityTypeStory": "Story",

@@ -23,6 +23,8 @@ import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
 import { inboxStop, type SessionInbox } from '@/lib/agent-session-inbox';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { AgentChangesSheet } from '@/components/chat/agent-changes-sheet';
+import { AgentRecordsSheet } from '@/components/chat/agent-records-sheet';
+import { shellTakesRecords } from '@/lib/phone-records';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -227,6 +229,20 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // first focus is [취소]
   const [endOpen, setEndOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false); // story #4951 ①c: the «바뀐 파일» sheet
+  // story 4977 (B3-2b): the «기록» sheet — the history of this chat, opened by the phone's shell. Only inside the app, and only when THIS shell says it opens records (`shell.caps` · read, never guessed from a version).
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsShell, setRecordsShell] = useState(false);
+  const hasComputer = typeof view.setup_id === 'string' && view.setup_id !== '';
+  const setupName = hasComputer ? (view.setup_id as string) : '';
+  const phoneCallRef = useRef(phoneCall); // the bridge wrapper is new at every render: the read below must not run again for each of them
+  useEffect(() => { phoneCallRef.current = phoneCall; }); // (kept current after each render — a ref is not written while rendering)
+  useEffect(() => {
+    if (!phone || !hasComputer) return undefined; // asked only where the button could stand: in the app, for a session that names its computer
+    let live = true;
+    void shellTakesRecords((type, args) => phoneCallRef.current(type, args)).then((ok) => { if (live) setRecordsShell(ok); });
+    // the button and the sheet belong to THIS computer: when the session loses it (or names another) both go, and what comes back is asked again — a sheet never reopens by itself
+    return () => { live = false; setRecordsShell(false); setRecordsOpen(false); };
+  }, [phone, hasComputer, setupName]);
   // story #4733 (Yuna 4733 §6): the hard end's dialog points at the phone's own [세션 종료] — drawn only where that button exists for this agent (its computer speaks
   // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
   const [clockAvailable, setClockAvailable] = useState(false);
@@ -316,6 +332,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 
   const showChanges = view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '';
   const changesButton = showChanges ? <Button size="sm" variant="outline" onClick={() => setChangesOpen(true)} data-testid="agent-changes-open">{t('changes.button')}</Button> : null;
+  const showRecords = phone && recordsShell && hasComputer;
+  const recordsButton = showRecords ? <Button size="sm" variant="outline" onClick={() => setRecordsOpen(true)} data-testid="agent-records-open">{t('records.button')}</Button> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2 text-xs" data-testid="agent-session-strip">
       <span
@@ -330,6 +348,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       {canStop ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
           {changesButton}
+          {recordsButton}
           {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
@@ -338,19 +357,21 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       ) : canEnd ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
           {changesButton}
+          {recordsButton}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
             : <Button size="sm" variant="outline" disabled={busy} onClick={() => setEndOpen(true)}>{t('button.endSession')}</Button>}
         </span>
-      ) : changesButton ? (
-        // no other buttons: this one stands alone at the right end. With others it joins THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
-        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}</span>
+      ) : changesButton || recordsButton ? (
+        // no other buttons: these stand alone at the right end. With others they join THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
+        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}{recordsButton}</span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
       <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
+      {showRecords ? <AgentRecordsSheet key={`${view.setup_id as string}/${conversationId}`} conversationId={conversationId} setupId={view.setup_id as string} open={recordsOpen} onOpenChange={setRecordsOpen} /> : null}
       {showChanges ? (
         <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} filesHref={phone && typeof view.setup_id === 'string' && view.setup_id ? `/phone-files?setup_id=${encodeURIComponent(view.setup_id)}&agent_id=${encodeURIComponent(agentId)}` : null} open={changesOpen} onOpenChange={setChangesOpen} />
       ) : null}
