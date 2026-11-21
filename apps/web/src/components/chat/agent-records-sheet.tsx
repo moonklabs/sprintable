@@ -9,6 +9,8 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { readStartableKeyed } from '@/lib/phone-start';
 import { deleteRoomRecords, readRecordsAll, type OpenLine, type RecordsPage, type RecordsOutcome } from '@/lib/phone-records';
+import { takeHandoffs, type TakeCache } from '@/lib/phone-handoff';
+import { ON_OPEN_MS, startHandoffWatch } from '@/lib/phone-handoff-watch';
 
 /**
  * story 4977 (B3-2b) — the «기록» sheet of an agent's chat in the phone app: what the person told the agent and what they answered to its questions, kept for them as SEALED records the server cannot read.
@@ -49,7 +51,7 @@ const problemOf = (o: Exclude<RecordsOutcome, { kind: 'page' }>): Problem => {
  */
 export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName, open, onOpenChange }: { conversationId: string; setupId: string | null; agentId?: string; deviceName?: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const t = useTranslations('chats.agentSession.records');
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, inPhoneApp } = usePhoneBridge();
   const [view, setView] = useState<View>({ kind: 'idle' });
   const [shown, setShown] = useState(SHOWN_STEP);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -58,6 +60,9 @@ export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName
   const scroller = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const phoneKey = useRef<string | null>(null);
+  // story 4977 (B3-5): a line sealed under a generation this phone does not hold yet is a key that has not REACHED it — pulled once per opening, at the moment it is needed (the watch is not a timer for ever)
+  const pulled = useRef(false);
+  const takeCache = useRef<TakeCache>({});
   const picked = useRef<{ setupId: string; name: string } | null>(null); // the computer chosen for a room with no session (asked again at every opening)
   const [computerName, setComputerName] = useState<string | null>(deviceName ?? null);
   const pageRef = useRef<RecordsPage | null>(null); // what is shown now (a continuation adds to it) — a ref, so `read` does not change with every page
@@ -84,8 +89,24 @@ export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName
     const key = phoneKey.current;
     const through = setupId ?? picked.current?.setupId ?? null;
     if (!key || !through) { show({ kind: 'problem', problem: 'failed' }); return; }
-    const out = await readRecordsAll({ phoneCall, setupId: through, conversationId, phoneKeyId: key, ...(after !== undefined ? { after } : {}) });
+    const readArgs = { phoneCall, setupId: through, conversationId, phoneKeyId: key, ...(after !== undefined ? { after } : {}) };
+    let out = await readRecordsAll(readArgs);
     if (mine !== run.current) return; // a newer opening or a closed sheet: this answer is not drawn
+    // story 4977 (B3-5 · last lap run64): the computer made a NEW generation when another phone was taken off and put it for this phone, but this phone — in the front all along, its look after the pairing long over — had not taken it:
+    // «1 entry can't be opened on this phone» for every line after the removal. A line this phone cannot open for want of a generation is the moment to ask: one look at what computers put for it (the shell takes what is its own),
+    // and the page is read again once the look has been made — also when it found nothing (another look of the page — the watch, a return to the front — may have taken the handoff a moment before this one asked, and then
+    // the generation IS here though this look saw nothing). Once per opening (a generation that never comes is not asked for in a loop).
+    if (out.kind === 'page' && out.closed.noKey > 0 && !pulled.current) {
+      pulled.current = true;
+      const took = await takeHandoffs({ phoneCall, cache: takeCache.current }).catch(() => null);
+      if (mine !== run.current) return;
+      if (took && took.kind === 'done') {
+        out = await readRecordsAll(readArgs);
+        if (mine !== run.current) return;
+      }
+    }
+    // opening the history is a reason to look now and for a minute (a generation a computer made while this phone sat in the front) — AFTER this read has had its own look: a watch started at the opening would race it for the same handoff
+    if (after === undefined && inPhoneApp) startHandoffWatch({ phoneCall, forMs: ON_OPEN_MS });
     if (out.kind !== 'page') { show({ kind: 'problem', problem: problemOf(out) }); return; }
     const { kind: _kind, ...page } = out;
     void _kind;
@@ -95,7 +116,7 @@ export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName
         ? { ...page, lines: [...keep.lines, ...page.lines], closed: { noKey: keep.closed.noKey + page.closed.noKey, unverified: keep.closed.unverified + page.closed.unverified, unreadable: keep.closed.unreadable + page.closed.unreadable }, haveKey: keep.haveKey || page.haveKey }
         : page,
     });
-  }, [phoneCall, setupId, agentId, conversationId, show]);
+  }, [phoneCall, inPhoneApp, setupId, agentId, conversationId, show]);
 
   // every opening reads again (a closed sheet ends its run: whatever is still on its way is not drawn)
   useEffect(() => {
@@ -103,6 +124,8 @@ export function AgentRecordsSheet({ conversationId, setupId, agentId, deviceName
     setShown(SHOWN_STEP);
     setDeleteFailed(false);
     picked.current = null;
+    pulled.current = false;
+    takeCache.current = {}; // (its cached phone key id is the old one's when a new pairing made another key — like `phoneKey` just below, every opening asks again)
     phoneKey.current = null; // every opening asks the phone's own list again: a phone paired anew since (another key) is not read with the old key
     setComputerName(deviceName ?? null);
     void read();
