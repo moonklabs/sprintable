@@ -378,6 +378,7 @@ export async function downloadFile(input: { setupId: string; projectId: string; 
     commandId = made.command_id;
 
     const startedAt = now();
+    let total = 0; // the number of chunks of the file, as the shell last said it (0 until the first)
     for (let i = 0; ; ) {
       const chunkDeadline = now() + DOWNLOAD_CHUNK_WAIT_MS;
       let envelope: unknown = null;
@@ -408,6 +409,7 @@ export async function downloadFile(input: { setupId: string; projectId: string; 
         }
         if (r.state === 'done') return { kind: 'incomplete' }; // done, and this chunk never came
       }
+      if (total > 0 && i === total - 1 && !stopped()) deps.onProgress?.({ got: total, of: total }); // (the last chunk is in hand: the shell's step for it ends only when the phone's share sheet is closed — the line must not say «56 of 57» behind the sheet)
       const step = await deps.phoneCall('files.download_step', { setup_id: input.setupId, project_id: input.projectId, idempotency_key: key, envelope });
       if (!step.ok) {
         const code = step.code ?? '';
@@ -424,6 +426,7 @@ export async function downloadFile(input: { setupId: string; projectId: string; 
       }
       if (step.state === 'saved') { finished = true; return { kind: 'saved' }; }
       if (step.state === 'more' && typeof step.got === 'number' && typeof step.of === 'number') {
+        total = step.of;
         if (!stopped()) deps.onProgress?.({ got: step.got, of: step.of });
         i += 1;
         if (stopped()) return { kind: 'cancelled' };

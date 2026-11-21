@@ -473,7 +473,7 @@ describe('[4983 P6] a file is opened from the folder that holds it', () => {
     expect(byId('phone-files-crumbs')?.textContent).toBe('결제 서비스 › src › index.ts');
   });
 
-  it('a text is drawn as it came, with the note of the lines that were hidden — and going back shows the list again WITHOUT asking', async () => {
+  it('a text is drawn as it came, with the note of the lines that were hidden — and going back to the list READS the folder again (story 4991 ③: a file made on the computer meanwhile is in it)', async () => {
     world.read = textBody('line one\nAPI=••••', 1);
     await openFolder();
     await press(all('phone-files-file')[0]!);
@@ -483,7 +483,7 @@ describe('[4983 P6] a file is opened from the folder that holds it', () => {
     await press(byId('phone-files-file-back'));
     expect(byId('phone-files-list')).not.toBeNull();
     expect(names()).toContain('README.md1.5 KB');
-    expect({ seals: seal.length, posts: posts().length }).toEqual(before);
+    expect({ seals: seal.length, posts: posts().length }).toEqual({ seals: before.seals + 1, posts: before.posts + 1 }); // (a new ask: one more seal, one more post)
   });
 
   it('an empty file says so; no note when nothing was hidden', async () => {
@@ -869,15 +869,43 @@ describe('[4988 P8] a file is downloaded from its screen', () => {
     expect(cancels()).toHaveLength(1);
   });
 
-  it('[돌아가기] on the way out ends a download that is running first (the page unloads: nothing after that would)', async () => {
-    const replace = vi.fn();
-    vi.stubGlobal('location', { ...window.location, replace });
+  it('[돌아가기] (the file screen\'s one way back) ends a download that is running first: the shell drops its chunks and the server deletes the request — and the page\'s own «Go back» is not on this screen (story 4991 ①)', async () => {
     world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise(() => {}));
     await openFile();
     await press(byId('phone-files-download'));
+    expect(byId('phone-files-home')).toBeNull();
+    await press(byId('phone-files-file-back'));
+    expect(cancels()).toHaveLength(1); expect(deletes()).toHaveLength(1);
+    expect(byId('phone-files-download-running')).toBeNull();
+  });
+
+  it('[4991 ①] one way back on each screen: the page\'s own «Go back» (out of the page) only on the first screen — the folder and the file have their own back, so they have no second one', async () => {
+    const replace = vi.fn();
+    vi.stubGlobal('location', { ...window.location, replace });
+    world.caps = DL; world.read = textBody('hello');
+    await screen();
+    expect(byId('phone-files-home')).not.toBeNull();
+    await press(byId('phone-files-project-proj-1'));
+    expect(byId('phone-files-home')).toBeNull(); expect(byId('phone-files-back')).not.toBeNull();
+    await press(all('phone-files-file')[0]!);
+    expect(byId('phone-files-home')).toBeNull(); expect(byId('phone-files-file-back')).not.toBeNull();
+    await press(byId('phone-files-file-back')); // (back to the folder)
+    await press(byId('phone-files-back')); // (back to the first screen)
+    expect(byId('phone-files-home')).not.toBeNull();
     await press(byId('phone-files-home'));
     expect(replace).toHaveBeenCalledWith('/today');
-    expect(cancels()).toHaveLength(1); expect(deletes()).toHaveLength(1);
+  });
+
+  it('[4991 ④] while a download runs (and after it ended) the open\'s own «too big to open here» card is not drawn — it only read as an error under the progress line; a download that is stopped gives it back', async () => {
+    world.step = (a) => ((a.envelope as { chunk: number }).chunk === 0 ? { ok: true, state: 'more', got: 1, of: 57 } : new Promise(() => {}));
+    await openFile(DL, { v: 1, kind: 'read', ok: false, reason: 'too_big' });
+    expect(byId('phone-files-file-end')).not.toBeNull();
+    await press(byId('phone-files-download-instead'));
+    expect(byId('phone-files-download-running')).not.toBeNull();
+    expect(byId('phone-files-file-end')).toBeNull();
+    await press(byId('phone-files-download-stop'));
+    expect(byId('phone-files-download-running')).toBeNull();
+    expect(byId('phone-files-file-end')).not.toBeNull();
   });
 
   it('English: the button, the progress and the refusals read in English', async () => {
