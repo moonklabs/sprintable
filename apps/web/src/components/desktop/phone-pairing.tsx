@@ -11,6 +11,8 @@ import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { sendHandoff } from '@/lib/phone-handoff';
+import { AFTER_PAIRING_MS, startHandoffWatch } from '@/lib/phone-handoff-watch';
 import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { QRCodeSVG } from 'qrcode.react';
 import { checkPairOffer, cancelPairSession, comparePairSession, finishPairSession, lookPaired, lookPairSession, phoneLabel, revealPairSession, scanPairQr, sendPairCommit, sendPairOffer, type OfferHead } from '@/lib/phone-pairing';
@@ -37,7 +39,7 @@ type View =
   | { kind: 'wait2'; head: OfferHead; phoneKeyId: string; bind: 'idle' | 'revealing' | 'cancelled' }
   | { kind: 'compare'; head: OfferHead; phoneKeyId: string; note: 'open' | 'closed' | 'notReady' | 'busy' | 'failed' } // the shell's window is up (open) · was closed with no answer
   | { kind: 'waitHost'; head: OfferHead; phoneKeyId: string }
-  | { kind: 'paired'; device: string }
+  | { kind: 'paired'; device: string; setupId?: string; offerId?: string } // `setupId` (the new pairing only): the computer this phone just paired with — what the record key handoff is made for (story 4978)
   | { kind: 'alreadyPaired'; device: string }
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
@@ -110,6 +112,15 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   // a pairing's generation: bumped when it is left (cancel · a new start · the screen goes away) — a late answer of an OLDER pairing's shell call does nothing. (The reveal step cannot use the effect's own `off`: the view changes to «revealing» while the OS prompt is up, which re-runs the effect.)
   const gen = useRef(0);
   useEffect(() => () => { gen.current += 1; }, []);
+  // story 4978 (C1b-phone): the new pairing is real — the shell makes the record key handoff the person's choice beside the number calls for (or says there is none) and it is put; then the phone looks for what the computer puts for IT for a while (the watch outlives
+  // this screen: it is the module's, not the page's). Once per pairing; a phone with no key, an older shell or a «new records only» choice does nothing visible.
+  const handoffFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (view.kind !== 'paired' || !view.setupId || !view.offerId || handoffFor.current === view.offerId) return;
+    const setupId = view.setupId;
+    handoffFor.current = view.offerId; // (per PAIRING — a second pairing with the same computer is a new press and makes its own handoff)
+    void (async () => { try { await sendHandoff({ phoneCall, setupId }); } catch { /* a handoff that did not go is not a pairing that failed */ } finally { startHandoffWatch({ phoneCall, forMs: AFTER_PAIRING_MS }); } })();
+  }, [view, phoneCall]);
 
   const scan = async () => {
     gen.current += 1;
@@ -178,7 +189,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   const endWith = (head: OfferHead, how: RetryLine | 'remoteOff'): void => {
     const g = gen.current;
     // the shell may answer «pinning» (the real pin is being written this very moment — the computer's person had confirmed): then the pairing is DONE and the line is replaced, never an error over a finished pairing
-    void cancelPairSession(head, deps).then((r) => { if (r.pinning && gen.current === g) setView((v) => (v.kind === 'retry' || v.kind === 'remoteOff' ? { kind: 'paired', device: head.device_name } : v)); });
+    void cancelPairSession(head, deps).then((r) => { if (r.pinning && gen.current === g) setView((v) => (v.kind === 'retry' || v.kind === 'remoteOff' ? { kind: 'paired', device: head.device_name, setupId: head.setup_id, offerId: head.offer_id } : v)); });
     known.current = null;
     setView(how === 'remoteOff' ? { kind: 'remoteOff' } : { kind: 'retry', line: how });
   };
@@ -225,7 +236,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         const last = await finishPairSession(waitHost.head, { phoneCall });
         if (off) return;
         switch (last.kind) {
-          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name }); return;
+          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name, setupId: waitHost.head.setup_id, offerId: waitHost.head.offer_id }); return;
           case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
           case 'receiptInvalid': endWith(waitHost.head, 'receiptInvalid'); return;
           case 'noReceipt': endWith(waitHost.head, 'noReceipt'); return;
@@ -242,7 +253,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         const f = await finishPairSession(waitHost.head, { phoneCall });
         if (off) return;
         switch (f.kind) {
-          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name }); return;
+          case 'pinned': setView({ kind: 'paired', device: waitHost.head.device_name, setupId: waitHost.head.setup_id, offerId: waitHost.head.offer_id }); return;
           case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: waitHost.head.device_name }); return;
           case 'expired': endWith(waitHost.head, 'expired'); return;
           case 'signedOut': endWith(waitHost.head, 'signedOut'); return;
@@ -287,7 +298,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
   const abandon = (v: { head: OfferHead }) => {
     const g = ++gen.current;
     // the shell may answer «pinning» (the real pin is being written this very moment: the computer's person has already confirmed) — then the pairing is DONE, not cancelled
-    void cancelPairSession(v.head, deps).then((r) => { if (r.pinning && gen.current === g) setView({ kind: 'paired', device: v.head.device_name }); });
+    void cancelPairSession(v.head, deps).then((r) => { if (r.pinning && gen.current === g) setView({ kind: 'paired', device: v.head.device_name, setupId: v.head.setup_id, offerId: v.head.offer_id }); });
     known.current = null; setView({ kind: 'start' });
   };
 

@@ -14,6 +14,11 @@ import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
+// story 4978 (C1b-phone): the record key handoff and its watch are the pairing screen's NEXT step, tested in their own files — here they are stand-ins (a real watch would look at the server on a timer)
+const handoff = vi.hoisted(() => ({ sendHandoff: vi.fn(async () => ({ kind: 'no_plan' })), startHandoffWatch: vi.fn(), stopHandoffWatch: vi.fn() }));
+vi.mock('@/lib/phone-handoff', () => ({ sendHandoff: handoff.sendHandoff }));
+vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: handoff.startHandoffWatch, stopHandoffWatch: handoff.stopHandoffWatch, AFTER_PAIRING_MS: 600_000, ON_OPEN_MS: 60_000 }));
+
 const { PhonePairing, PhonePairEntry } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -150,6 +155,8 @@ describe('[4532] phone pairing screen', () => {
     await tick();
     expect(line()).toBe('페어링했어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답하고, 멈추거나 지시할 수 있어요');
     expect(buttons()).toEqual(['닫기']);
+    expect(handoff.sendHandoff).not.toHaveBeenCalled(); // story 4978: the OLD procedure hands no record key (it is the new pairing's step)
+    expect((handoff.startHandoffWatch.mock.calls as unknown as Array<[{ forMs: number }]>).filter((c) => c[0].forMs === 600_000)).toEqual([]);
     const looks = fetchWithAuth.mock.calls.length;
     await tick();
     await tick();
