@@ -288,6 +288,9 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     # story #4535 — the org's «원격 제어» switch: an org-level setting (organizations row), changed only by that org's owner
     # (resolve_member of the path org · role owner · a person's session)
     # story #4951 — the device's «changed files» list: a row of THIS device (command id AND the device token's own setup id), written once; another computer's command id is «not found» — no project entity
+    # story 4977 B2 — a person's phone writes one SEALED record of their own history on THEIR computer: the setup id is judged by `may_read` (the one person who paired it), the phone by `paired_phone` (paired now, share-locked) and the
+    # room by the chat's own `_can_read_conversation` (participant · project access) — services.session_records / routers.desktop_records._gate; the record is the person's own (owner_id), never another person's
+    "app.routers.desktop_records:put_record": "the person's own computer (may_read) + their phone paired now (paired_phone) + the room judged by _can_read_conversation (participant · project access); the record is theirs alone (owner_id)",
     "app.routers.desktop_relay:put_files": "the device token's own files row (command id + the token's setup id, written once; another computer's id is not found) — services.desktop_files.write_answer; the project access is judged on the person's routes (ask and read)",
     # story 4988 — a DOWNLOAD's chunks: the device token's own files row again (command id + the token's setup id; in order, once each, a few ahead of the phone at most) — services.desktop_files.write_chunk; and the person's own [done / give up] of
     # their own request (the row is selected by command id AND the asker's own id AND the computer's id — another person's or another computer's id deletes nothing) — services.desktop_files.finish_download
