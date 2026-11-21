@@ -15,11 +15,19 @@ const PHONE = '33333333-4444-4555-8666-777777777777';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...a: unknown[]) => fetchWithAuth(...a) }));
 const phoneCall = vi.fn();
-vi.mock('@/components/providers/phone-bridge-context', () => ({ usePhoneBridge: () => ({ inPhoneApp: true, phoneCall: (...a: unknown[]) => phoneCall(...a) }) }));
+let inPhoneApp = true;
+vi.mock('@/components/providers/phone-bridge-context', () => ({ usePhoneBridge: () => ({ inPhoneApp, phoneCall: (...a: unknown[]) => phoneCall(...a) }) }));
 const readStartableKeyed = vi.fn();
 vi.mock('@/lib/phone-start', () => ({ readStartableKeyed: (...a: unknown[]) => readStartableKeyed(...a) }));
 let zone: string | null = 'Asia/Seoul';
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => zone }));
+const takeHandoffs = vi.fn();
+vi.mock('@/lib/phone-handoff', () => ({ takeHandoffs: (...a: unknown[]) => takeHandoffs(...a) }));
+const startHandoffWatch = vi.fn();
+vi.mock('@/lib/phone-handoff-watch', () => ({ ON_OPEN_MS: 60_000, startHandoffWatch: (...a: unknown[]) => startHandoffWatch(...a) }));
+const NO_LOOK = { kind: 'unreachable' } as const; // (the default of the older tests: the look did not complete, so no second read)
+const NOTHING_TAKEN = { kind: 'done', seen: 0, taken: 0, later: 0, rejected: 0, acked: 0 } as const;
+const TOOK_ONE = { kind: 'done', seen: 1, taken: 1, later: 0, rejected: 0, acked: 1 } as const;
 const { AgentRecordsSheet } = await import('./agent-records-sheet');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,6 +45,7 @@ let root: Root;
 const scrollHeight = 777;
 beforeEach(() => {
   zone = 'Asia/Seoul';
+  inPhoneApp = true; takeHandoffs.mockReset().mockResolvedValue(NO_LOOK); startHandoffWatch.mockReset();
   fetchWithAuth.mockReset(); phoneCall.mockReset(); readStartableKeyed.mockReset().mockResolvedValue({ kind: 'view', view: {}, phoneKeyId: PHONE });
   Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
@@ -403,6 +412,21 @@ describe('the «기록» sheet', () => {
     expect(new URL(fetchWithAuth.mock.calls.at(-1)![0] as string, 'http://x').searchParams.get('after')).toBe('1000');
   });
 
+  it('the second read of one opening (a continuation) does not ask again — once per OPENING, not once per read', async () => {
+    fetchWithAuth.mockResolvedValueOnce(json(200, { records: Array.from({ length: 100 }, (_, i) => row(i + 1)), next_after: 100 }));
+    phoneCall.mockResolvedValueOnce(shellAnswer([line(100, 'page one'), closedLine(99, 'no_key')], { next_after: 100 }));
+    for (let i = 1; i < 10; i++) { fetchWithAuth.mockResolvedValueOnce(json(200, { records: Array.from({ length: 100 }, (_, j) => row(i * 100 + j + 1)), next_after: (i + 1) * 100 })); phoneCall.mockResolvedValueOnce(shellAnswer([], { next_after: (i + 1) * 100 })); }
+    takeHandoffs.mockResolvedValueOnce({ kind: 'failed' }); // (a look that did not complete: no second read of the ten pages)
+    await show();
+    expect(q('[data-testid="agent-records-more"]')).not.toBeNull();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1); // the first read met a line with no generation: one look (it took nothing)
+    fetchWithAuth.mockResolvedValueOnce(json(200, { records: [row(1001), row(1002)], next_after: 1002 }));
+    phoneCall.mockResolvedValueOnce(shellAnswer([line(1001, 'page eleven'), closedLine(1002, 'no_key')], { next_after: 1002 }));
+    await click('[data-testid="agent-records-more"]');
+    expect(text()).toEqual(['page one', 'page eleven']);
+    expect(takeHandoffs).toHaveBeenCalledTimes(1); // the continuation met one too: not asked again within this opening
+  });
+
   it('the delete asks once, says WHAT goes (the server\'s history of this chat) and cannot be undone; cancel changes nothing; confirm deletes and shows the empty state', async () => {
     history([line(1, 'one')]);
     await show();
@@ -432,6 +456,139 @@ describe('the «기록» sheet', () => {
     await click('[data-testid="agent-records-delete-confirm"]');
     expect(q('[data-testid="agent-records-delete-failed"]')!.textContent).toBe(ko.delete.failed);
     expect(text()).toEqual(['kept']);
+  });
+
+  // story 4977 (B3-5 · last lap run64): the computer made a NEW generation when another phone was taken off and put it for THIS phone, which sat in the front and had not taken it — every line after the removal read
+  // «cannot be opened on this phone». A line this phone cannot open for want of a generation is the moment to ask for it (once per opening), and what the shell took is read again.
+  it('a line sealed under a generation this phone does not hold: one look at what computers put for it — and when it took something the history is read AGAIN and the line opens', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockResolvedValueOnce(TOOK_ONE);
+    history([line(1, 'first'), line(2, 'second')]);
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2); // read, take, read again
+    expect(text()).toEqual(['first', 'second']);
+    expect(q('[data-testid="agent-records-nokey"]')).toBeNull();
+  });
+
+  it('the look found nothing (the generation is not there yet): the page is read once more, and when it still does not open the sheet says so as before', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockResolvedValueOnce(NOTHING_TAKEN);
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    expect(text()).toEqual(['first']);
+    expect(q('[data-testid="agent-records-nokey"]')!.textContent).toBe(ko.noKey.replace('{n}', '1'));
+    expect(all('[data-testid="agent-records-nokey"]')).toHaveLength(1);
+  });
+
+  it('another look took the handoff a moment BEFORE this one asked (this one finds nothing): the page is read again and the line opens — no stale «cannot be opened»', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockResolvedValueOnce(NOTHING_TAKEN); // (this look finds nothing: another look took it first)
+    history([line(1, 'first'), line(2, 'second')]);
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(text()).toEqual(['first', 'second']);
+    expect(q('[data-testid="agent-records-nokey"]')).toBeNull();
+  });
+
+  it('a look that did not complete (the server could not be reached) is not followed by a second read — the page as read is shown', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockResolvedValueOnce({ kind: 'unreachable' });
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+    expect(all('[data-testid="agent-records-nokey"]')).toHaveLength(1);
+  });
+
+  it('a look that fails (rejects, or answers it could not) leaves the page as it was read — no error is drawn', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockRejectedValueOnce(new Error('boom'));
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(text()).toEqual(['first']);
+    expect(all('[data-testid="agent-records-nokey"]')).toHaveLength(1);
+    expect(q('[data-testid="agent-records-problem"]')).toBeNull();
+  });
+
+  it('asked ONCE per opening: a generation that does not come with the second read is not asked for in a loop — and the next opening asks again', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    takeHandoffs.mockResolvedValueOnce(TOOK_ONE);
+    history([line(1, 'first'), closedLine(2, 'no_key')]); // it took something, yet the line still does not open
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(fetchWithAuth).toHaveBeenCalledTimes(2);
+    await show(false);
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    await show(true);
+    expect(takeHandoffs).toHaveBeenCalledTimes(2); // a new opening is a new moment of need
+  });
+
+  it('every opening starts its look with a fresh cache (a phone paired anew has another key — the cached key id of the older opening is not used)', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    await show();
+    await show(false);
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    await show(true);
+    expect(takeHandoffs).toHaveBeenCalledTimes(2);
+    const first = (takeHandoffs.mock.calls[0]![0] as { cache: object }).cache;
+    const second = (takeHandoffs.mock.calls[1]![0] as { cache: object }).cache;
+    expect(second).not.toBe(first);
+  });
+
+  it('a history that opens fully asks for nothing', async () => {
+    history([line(1, 'first'), line(2, 'second')]);
+    await show();
+    expect(takeHandoffs).not.toHaveBeenCalled();
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('a phone with no key at all (every line has no generation) asks too — a phone whose first handoff has not been taken is the same need', async () => {
+    history([closedLine(1, 'no_key'), closedLine(2, 'no_key')], { have_key: false });
+    takeHandoffs.mockResolvedValueOnce(TOOK_ONE);
+    history([line(1, 'first'), line(2, 'second')]);
+    await show();
+    expect(takeHandoffs).toHaveBeenCalledTimes(1);
+    expect(text()).toEqual(['first', 'second']);
+    expect(q('[data-testid="agent-records-keyless"]')).toBeNull();
+  });
+
+  it('the sheet closed while the look was on its way: the answer is not drawn and nothing is read again', async () => {
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    let release!: (v: unknown) => void;
+    takeHandoffs.mockReturnValueOnce(new Promise((r) => { release = r; }));
+    await show();
+    await show(false);
+    await act(async () => { release(TOOK_ONE); });
+    await settle();
+    expect(fetchWithAuth).toHaveBeenCalledTimes(1); // no second read for a closed sheet
+  });
+
+  it('outside the phone app no look is started by the sheet (the same guard as the page\'s own watch)', async () => {
+    inPhoneApp = false;
+    history([line(1, 'first')]);
+    await show();
+    expect(startHandoffWatch).not.toHaveBeenCalled();
+  });
+
+  it('the watch of an opening is started AFTER the read\'s own look (a watch started first would race it for the same handoff)', async () => {
+    const order: string[] = [];
+    takeHandoffs.mockImplementationOnce(async () => { order.push('take'); return NOTHING_TAKEN; });
+    startHandoffWatch.mockImplementationOnce(() => { order.push('watch'); });
+    history([line(1, 'first'), closedLine(2, 'no_key')]);
+    history([line(1, 'first'), line(2, 'second')]);
+    await show();
+    expect(order).toEqual(['take', 'watch']);
+  });
+
+  it('opening the history starts a look now and for a minute (the generation a computer made while this phone sat in the front) — once per opening, not for a closed sheet', async () => {
+    history([line(1, 'first')]);
+    await show();
+    expect(startHandoffWatch).toHaveBeenCalledTimes(1);
+    expect(startHandoffWatch.mock.calls[0]![0]).toMatchObject({ forMs: 60_000 });
+    await show(false);
+    expect(startHandoffWatch).toHaveBeenCalledTimes(1);
   });
 
   it('no internal word reaches the person: not an envelope, a generation, a key or a signature (ko and en)', () => {
