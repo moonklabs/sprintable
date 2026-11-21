@@ -179,13 +179,15 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
         <h1 className="text-lg font-semibold text-foreground">{t('title')}</h1>
         {win && msLeft > 0 && view.kind !== 'choose' && win.setupId === view.setupId ? <WindowLine t={t} msLeft={msLeft} onClose={closeNow} /> : null}
         {view.kind === 'file'
-          ? <FileScreen t={t} v={view} canDownload={read.kind === 'ready' && read.canDownload} onDownload={() => download(view)} onStopDownload={() => stopDownload(view)} onRetry={() => openOne(view.back, view.name)} onBack={() => { ask.current += 1; endDownload(); setView(view.back); }} />
+          ? <FileScreen t={t} v={view} canDownload={read.kind === 'ready' && read.canDownload} onDownload={() => download(view)} onStopDownload={() => stopDownload(view)} onRetry={() => openOne(view.back, view.name)} onBack={() => { endDownload(); open(view.back.setupId, view.back.projectId, view.back.projectName, view.back.dir); }} />
           : view.kind === 'folder'
           ? <Folder t={t} v={view} canOpen={read.kind === 'ready' && read.canOpen} onOpen={open} onFile={(name) => openOne(view, name)} onBack={() => { ask.current += 1; setView({ kind: 'choose' }); }} />
           : <Choose t={t} read={read} only={from} onReload={readNow} onPick={(setupId, project) => open(setupId, project.project_id, project.name, [])} />}
-        <div className="border-t border-border pt-4">
-          <Button variant="ghost" onClick={() => { endDownload(); window.location.replace(homeHref); }} data-testid="phone-files-home">{t('home')}</Button>
-        </div>
+        {view.kind === 'choose' && (
+          <div className="border-t border-border pt-4">
+            <Button variant="ghost" onClick={() => { endDownload(); window.location.replace(homeHref); }} data-testid="phone-files-home">{t('home')}</Button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -309,7 +311,7 @@ function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, on
           <Loader2 className="size-4 animate-spin" aria-hidden /> {t('file.loading')}
         </div>
       )}
-      {v.state.kind === 'end' && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
+      {v.state.kind === 'end' && v.dl === null && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
       {canDownload && v.dl === null && v.state.kind === 'end' && v.state.outcome.kind === 'reason' && (v.state.outcome.reason === 'too_big' || v.state.outcome.reason === 'not_text') && <div><Button variant="outline" onClick={onDownload} data-testid="phone-files-download-instead">{t('download.button')}</Button></div>}
       {v.state.kind === 'shown' && v.state.body.kind === 'text' && (
         <div className="space-y-2">

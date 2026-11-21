@@ -33,7 +33,7 @@ function server(over: { ask?: Response; chunk?: (i: number, look: number) => Res
   };
   return calls;
 }
-function deps(answers: Record<string, PhoneAnswer | ((args: Record<string, unknown>) => PhoneAnswer)>, extra: Partial<DownloadDeps> = {}) {
+function deps(answers: Record<string, PhoneAnswer | ((args: Record<string, unknown>) => PhoneAnswer | Promise<PhoneAnswer>)>, extra: Partial<DownloadDeps> = {}) {
   const phoneCall = vi.fn(async (type: string, args: Record<string, unknown> = {}) => { const a = answers[type]; return typeof a === 'function' ? a(args) : a ?? { id: 'x', ok: false, code: 'failed' }; });
   return { phoneCall, newKey: () => KEY, wait: async () => {}, ...extra } as DownloadDeps & { phoneCall: typeof phoneCall };
 }
@@ -67,9 +67,20 @@ describe('[4988] downloadFile — the road', () => {
     expect(JSON.stringify(posted.body)).not.toContain('app.apk');
     expect(calls.filter((c) => c.method === 'GET').map((c) => c.url)).toEqual([0, 1, 2].map((i) => `/api/desktop/computers/${SETUP}/files/${CMD}/chunks/${i}`));
     expect(stepsOf(d)).toEqual([0, 1, 2].map((i) => ({ setup_id: SETUP, project_id: 'proj-1', idempotency_key: KEY, envelope: chunkEnv(i) })));
-    expect(progress).toEqual([{ got: 1, of: 3 }, { got: 2, of: 3 }]);
+    expect(progress).toEqual([{ got: 1, of: 3 }, { got: 2, of: 3 }, { got: 3, of: 3 }]); // (the last one is told BEFORE the shell's final step, which ends only when the share sheet is closed — story 4991 ⑤)
     expect(calls.at(-1)).toEqual({ method: 'DELETE', url: `/api/desktop/computers/${SETUP}/files/${CMD}` });
     expect(types(d)).not.toContain('files.download_cancel'); // (the shell took the whole file: nothing is left in it to drop)
+  });
+
+  it('[4991 ⑤] «all of them» is told BEFORE the last step: that step ends only when the phone\'s share sheet is closed, so the line must already say 3 of 3 while it waits (not «2 of 3» behind the sheet)', async () => {
+    server();
+    const progress: Array<{ got: number; of: number }> = [];
+    let release!: () => void; const sheet = new Promise<void>((r) => { release = r; });
+    const d = deps({ 'files.seal': SEALED, 'files.download_step': async (a) => { const c = (a.envelope as { chunk: number }).chunk; if (c === 0) return MORE(1, 3); if (c === 1) return MORE(2, 3); await sheet; return SAVED; } }, { onProgress: (p) => progress.push(p) });
+    const run = downloadFile(input, d);
+    await vi.waitFor(() => expect(progress).toEqual([{ got: 1, of: 3 }, { got: 2, of: 3 }, { got: 3, of: 3 }])); // (the sheet is still open: the last step has not answered)
+    release();
+    expect(await run).toEqual({ kind: 'saved' });
   });
 
   it('a one-chunk file is one fetch and one step', async () => {

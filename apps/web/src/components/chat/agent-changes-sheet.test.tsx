@@ -66,6 +66,19 @@ describe('AgentChangesSheet — the files line (story 4983 · PO 11-20)', () => 
     await open(d, 'en', 'Mac', HREF);
     expect((q('[data-testid="agent-changes-files"]') as HTMLElement).textContent).toBe(enMessages.chats.agentSession.changes.allFiles);
   });
+  it('[4991 ②] a computer whose «폰에서 파일 보기» is OFF (`not_enabled`) has no «See all files» line — it could only be refused; every other problem keeps the line (the person can still try)', async () => {
+    const { d } = deps([json(200, { state: 'failed', code: 'not_enabled', files: null })]);
+    await open(d, 'ko', 'Mac', HREF);
+    expect(q('[data-testid="agent-changes-problem"]')?.getAttribute('data-problem')).toBe('not_enabled');
+    expect(q('[data-testid="agent-changes-files"]')).toBeNull();
+    expect(q('[data-testid="agent-changes-files-line"]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    for (const code of ['timeout', 'no_folder', 'not_a_repo']) {
+      await open(deps([json(200, { state: 'failed', code, files: null })]).d, 'ko', 'Mac', HREF);
+      expect(q('[data-testid="agent-changes-files"]'), code).not.toBeNull();
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+  });
   it('without an address (a browser · an older app · no computer) there is no line at all', async () => {
     const { d } = deps([json(200, { state: 'done', code: 'ok', more: false, total: 0, files: [] })]);
     await open(d, 'ko', 'Mac', null);

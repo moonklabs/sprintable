@@ -111,7 +111,7 @@ export function AgentChangesSheet({ agentId, sessionKey, deviceName, filesHref, 
             </ul>
           ) : null}
           {state.kind === 'ready' && state.more ? <p className="break-keep px-4 py-3 text-ds-small text-ds-ink-3" data-testid="agent-changes-more">{t('more', { total: state.total })}</p> : null}
-          {filesHref ? (
+          {filesHref && !(state.kind === 'problem' && state.problem === 'not_enabled') ? (
             <div className="px-4 py-3" data-testid="agent-changes-files-line">
               <Button variant="outline" asChild><Link href={filesHref} data-testid="agent-changes-files">{t('allFiles')}</Link></Button>
             </div>
