@@ -14,6 +14,10 @@ import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
+// story 4978 (C1b-phone): the record key handoff and its watch are the pairing screen's NEXT step, tested in their own files — here they are stand-ins (a real watch would look at the server on a timer)
+const handoff = vi.hoisted(() => ({ sendHandoff: vi.fn(async () => ({ kind: 'no_plan' })), startHandoffWatch: vi.fn(), stopHandoffWatch: vi.fn() }));
+vi.mock('@/lib/phone-handoff', () => ({ sendHandoff: handoff.sendHandoff }));
+vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: handoff.startHandoffWatch, stopHandoffWatch: handoff.stopHandoffWatch, AFTER_PAIRING_MS: 600_000, ON_OPEN_MS: 60_000 }));
 const { PhonePairing } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -132,6 +136,26 @@ const NONCE = { state: 'nonce', n_m: 'N'.repeat(22), sig: 'S'.repeat(70) };
 const REVEAL_OK = { ok: true, reveal: { phone_spki: 'S', phone_box_pub: 'B', n_p: 'P', label: 'iPhone', binding_sig: 'G' } };
 
 describe('[4972] the new pairing on the phone screen', () => {
+  it('[4978] once the NEW pairing is real the record key handoff is asked for THIS computer, once — and the watch for what the computer puts is started (long: after a pairing)', async () => {
+    handoff.sendHandoff.mockClear(); handoff.startHandoffWatch.mockClear();
+    installShell();
+    await START(); sessionState = NONCE; await tick(); await tick(); await tick();
+    pairs = [{ setup_id: HEAD.setup_id }]; await tick(); await tick();
+    expect(line()).toContain('페어링했어요 · My Mac');
+    expect(handoff.sendHandoff).toHaveBeenCalledTimes(1);
+    expect((handoff.sendHandoff.mock.calls[0] as unknown as [{ setupId: string }])[0].setupId).toBe(HEAD.setup_id);
+    const afterPairing = () => (handoff.startHandoffWatch.mock.calls as unknown as Array<[{ forMs: number }]>).filter((c) => c[0].forMs === 600_000);
+    expect(afterPairing()).toHaveLength(1); // (the app's own look when it opened — 60 s — is the provider's, not the pairing's)
+    await tick(); await tick(); expect(handoff.sendHandoff).toHaveBeenCalledTimes(1); // a redraw of the same screen asks nothing again
+  });
+  it('[4978] a handoff that fails (throws) does not undo or hide the pairing; the watch still starts', async () => {
+    handoff.sendHandoff.mockReset().mockRejectedValueOnce(new Error('boom')); handoff.startHandoffWatch.mockClear();
+    installShell();
+    await START(); sessionState = NONCE; await tick(); await tick(); await tick();
+    pairs = [{ setup_id: HEAD.setup_id }]; await tick(); await tick();
+    expect(line()).toContain('페어링했어요 · My Mac'); expect((handoff.startHandoffWatch.mock.calls as unknown as Array<[{ forMs: number }]>).filter((c) => c[0].forMs === 600_000)).toHaveLength(1);
+    handoff.sendHandoff.mockReset().mockResolvedValue({ kind: 'no_plan' });
+  });
   it('commit → «확인하는 중» → the computer\'s nonce → ONE reveal → the shell\'s own window for the number (the page draws none) → pinned → «컴퓨터에서 확인하는 중» → paired', async () => {
     installShell();
     await START();

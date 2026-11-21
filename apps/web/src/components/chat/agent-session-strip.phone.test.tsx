@@ -16,6 +16,8 @@ const CONV = '33333333-4444-4555-8666-777777777777';
 const CMD = '44444444-5555-4666-8777-888888888888';
 
 const fetchWithAuth = vi.fn();
+// story 4978 (C1b-phone): the provider's record key handoff watch is a stand-in here (it would ask the shell and the server on its own — its file tests it)
+vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: () => undefined, stopHandoffWatch: () => undefined, ON_OPEN_MS: 60_000, AFTER_PAIRING_MS: 600_000 }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
