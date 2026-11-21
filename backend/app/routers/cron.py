@@ -895,7 +895,16 @@ async def changes_purge(
                 orphans = await end_orphan_cards(session)
         except Exception as exc:
             logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
-        return _ok({"purged": purged, "files_purged": files_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts})
+        # story 4977 B2: a tombstone (a deleted record's ids and counters — no sealed content) past its 7 days; a LIVE record is never aged out. Its own savepoint and try, like the sweep above
+        tombstones: int | None = None
+        try:
+            async with session.begin_nested():
+                from app.services.session_records import purge_tombstones
+
+                tombstones = await purge_tombstones(session)
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · record tombstones): %s", type(exc).__name__)
+        return _ok({"purged": purged, "files_purged": files_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts, "record_tombstones_purged": tombstones})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

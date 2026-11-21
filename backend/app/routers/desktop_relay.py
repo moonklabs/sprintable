@@ -684,6 +684,31 @@ async def put_files(command_id: uuid.UUID, request: Request, setup: DesktopSetup
     return {"bytes": size}
 
 
+@router.put("/relay/records")
+async def put_record(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4977 B2 (alembic 0493): the computer keeps one SEALED record of the person's history (a `chat_line` · an `approval_record` under the record key R_g, which the server never holds) — by (conversation,
+    record id), replaced only by the same writer with a later counter. The body is read and judged here so that no refusal (and no log, no error report) ever carries what it held: a size class, nothing else."""
+    from app.services import session_records
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > session_records.BODY_MAX:
+            raise relay.DesktopRelayError(413, "record_too_large", "the record is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > session_records.BODY_MAX:
+                raise relay.DesktopRelayError(413, "record_too_large", "the record is larger than the server takes")
+        body = session_records.parse_host_write(raw)
+        out = await session_records.write(db, setup, body.envelope, person_must_be_in_room=True)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return JSONResponse(status_code=200 if out["replaced"] else 201, content=out)
+
+
 @router.put("/relay/files/{command_id}/chunks/{i}")
 async def put_files_chunk(command_id: uuid.UUID, request: Request, i: int = Path(ge=0, lt=57), setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """story 4988 (P8): chunk i of the computer's SEALED answer to a DOWNLOAD it was told to do — put once, in order, at most a few ahead of what the phone has read (409 `files_chunks_ahead`: put it again a moment later). The body is read and judged here

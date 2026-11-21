@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import uuid
 
 ENVELOPE_VERSION = 1
 # the kinds a header may carry (design ② §4-1)
@@ -113,4 +114,49 @@ def check_envelope(env: object, *, kind: str | None = None) -> dict:
         _text(rec["conversation_id"], "rec.conversation_id")
         _text(rec["record_id"], "rec.record_id")
         _int(rec["rec_gen"], "rec.rec_gen")
+    return env
+
+
+# story 4977 B2: a RECORD envelope (design ② §4-1b) — the person's history, sealed under the record key R_g, not under a receiver's key: no receiver, no wrap, and always a `rec` (the conversation ·
+# the record id · the key generation). It is a different shape from a transport envelope (`check_envelope` wants 1..16 receivers), so it has its own check: this one and no other lets a record in.
+RECORD_KINDS = frozenset({"chat_line", "approval_record"})
+MAX_REC_GEN = 2**31 - 1  # the database column is an Integer
+MAX_RECORD_CT_BYTES = 32 * 1024  # an instruction is a few KiB (the phone pads to a fixed width inside this) · an approval's outcome is a few hundred bytes
+
+
+def check_record_envelope(env: object) -> dict:
+    """The record envelope unchanged, or ValueError. The server checks only what it can see: the agreed header, `to` and `wraps` EMPTY, a `rec` of the agreed shape (a conversation id that is a UUID · a
+    record id · a generation of 1 or more), canonical base64url fields and a size over the limit refused before anything is decoded. It never opens `ct` and cannot verify `sig` — the readers do, on every read."""
+    if not isinstance(env, dict):
+        raise ValueError("envelope: not an object")
+    if any(not isinstance(k, str) for k in env) or set(env) - _HEADER_KEYS or _HEADER_KEYS - set(env):  # `rec` is NOT optional here
+        raise ValueError("envelope: unknown or missing fields")
+    if type(env["v"]) is not int or env["v"] != ENVELOPE_VERSION:
+        raise ValueError("envelope: unknown version")
+    if not isinstance(env["kind"], str) or env["kind"] not in RECORD_KINDS:
+        raise ValueError("envelope: kind not accepted here")
+    for k in ("setup_id", "session_key", "command_id", "from"):
+        _text(env[k], k)
+    if not env["from"]:
+        raise ValueError("envelope: an empty writer id")
+    for k in ("expires_at", "epoch", "ctr", "ts"):
+        _int(env[k], k)
+    if env["to"] != [] or env["wraps"] != []:
+        raise ValueError("envelope: a record has no receivers")
+    _b64(env["nonce"], exact_bytes=16, what="nonce")
+    _b64(env["ct"], min_bytes=20, max_bytes=MAX_RECORD_CT_BYTES + 16, what="body")
+    _b64(env["sig"], min_bytes=8, max_bytes=80, what="signature")
+    rec = env["rec"]
+    if not isinstance(rec, dict) or set(rec) != {"conversation_id", "record_id", "rec_gen"}:
+        raise ValueError("envelope: rec is not the agreed shape")
+    cid = _text(rec["conversation_id"], "rec.conversation_id")
+    try:
+        if str(uuid.UUID(cid)) != cid:
+            raise ValueError
+    except ValueError:
+        raise ValueError("envelope: rec.conversation_id is not a conversation id") from None
+    if not _text(rec["record_id"], "rec.record_id"):
+        raise ValueError("envelope: an empty record id")
+    if not 1 <= _int(rec["rec_gen"], "rec.rec_gen") <= MAX_REC_GEN:
+        raise ValueError("envelope: a record key generation is 1 or more and fits the column")
     return env

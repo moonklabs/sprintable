@@ -16,6 +16,7 @@ from app.models.desktop_setup_closure import DesktopSetupClosure
 from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.agent_allowed_host import AgentAllowedHost
+from app.models.session_record import SessionRecord  # story 4977 B2 (0493)
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog

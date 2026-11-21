@@ -145,7 +145,8 @@ async def test_account_delete_updates_org_and_team_members():
         # + story #4767: the computers the person confirmed are looked up (the closer's one query when there are none) before the memberships close = 9 … 10 with the
         #   cut-off upsert, which is the last call; story #4769 adds the person's seat lock before it = 11; story 4782 adds the person's session lock TWICE (first of all, before the account row
         #   is locked — and again as the first thing the revoke does: the same transaction-level lock, re-taken for free) = 13
-        assert session.execute.call_count == 13
+        #   + story 4977 B2: the person's sealed records (their history) are deleted right after the closer = 14
+        assert session.execute.call_count == 14
         # story 4782: the person's session lock comes BEFORE the account row is locked (a token being issued holds that lock while it writes the same row — the other order is a deadlock)
         assert "pg_advisory_xact_lock" in str(session.execute.call_args_list[0].args[0]) and "pg_advisory_xact_lock_shared" not in str(session.execute.call_args_list[0].args[0])
         assert "FROM users" in str(session.execute.call_args_list[1].args[0])
@@ -158,6 +159,7 @@ async def test_account_delete_updates_org_and_team_members():
         window = str(session.execute.call_args_list[6].args[0])
         assert "org_members" in str(session.execute.call_args_list[7].args[0]) and "FOR UPDATE" in str(session.execute.call_args_list[7].args[0])   # the person's seats, locked before the closer
         assert "desktop_setups" in str(session.execute.call_args_list[8].args[0])   # story #4767: the person's open computers, looked up right after the seats
+        assert "session_records" in str(session.execute.call_args_list[9].args[0])   # story 4977 B2: and then the person's sealed records go
         assert "UPDATE refresh_tokens" in window and "expires_at" in window
     finally:
         app.dependency_overrides.clear()
