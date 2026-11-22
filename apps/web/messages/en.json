@@ -1908,9 +1908,11 @@
         "notPairedComputer": "This computer isn't paired with the computer the agent runs on, so it couldn't start — pair it with that computer, then press again",
         "remoteOff": "Remote control is off, so it couldn't start — an owner or admin can turn it on",
         "noScreenLock": "A phone without a screen lock can't start agents — turn on a screen lock in Settings",
+        "noScreenLockComputer": "This computer can't use a safe place for its key (the keychain or similar), so it can't start agents — make the computer's secure storage usable, then press again",
         "biometricRequired": "This phone can only start agents with a fingerprint — add one in Settings, then tap again",
         "keyInvalidated": "This phone's lock settings changed, so it can't start agents — pair it with the computer again",
         "notRegistered": "This phone is no longer registered — pair it with the computer again",
+        "notRegisteredComputer": "This computer is no longer registered — pair it with the computer the agent runs on again",
         "signedOut": "You were signed out, so it couldn't start — sign in again, then tap",
         "unknown": "We don't know yet whether it started — tap [Check result] in a moment",
         "check": "Check result",
@@ -2216,10 +2218,14 @@
     "tabNotifications": "Notifications",
     "desktopTab": "Get the desktop app",
     "tabThisPhone": "This phone",
+    "tabThisComputer": "This computer",
     "thisPhoneTitle": "Phone check number",
+    "thisComputerTitle": "Computer check number",
     "thisPhoneHint": "If it matches the phone check number in the web «Desktop app › Remote devices» list, that entry is this phone. If this phone isn't paired with a computer yet, pair it first, then compare.",
+    "thisComputerHint": "If it matches the check number in the web «Desktop app › Remote devices» list, that entry is this computer. If this computer isn't paired with the computer the agent runs on yet, pair it first, then compare.",
     "thisPhoneReading": "Loading the number…",
     "thisPhoneNoScreenLock": "This phone has no screen lock, so it can't make a phone check number — turn on a screen lock in the phone's settings, then open this screen again.",
+    "thisComputerNoScreenLock": "This computer can't use a safe place for its key (the keychain or similar), so it can't make a check number — make the computer's secure storage usable, then open this screen again.",
     "thisPhoneFailed": "Couldn't load the number.",
     "thisPhoneRetry": "Load again",
     "tabSupport": "Contact & Support",
@@ -5556,7 +5562,9 @@
         "unrecognized": "This page doesn't know this state yet — reloading may show it",
         "instructNotNow": "Instructions can't go into this agent's current turn — send it in this conversation and it's read when its turn comes",
         "remoteOffOwner": "Remote control is off, so you can't stop or instruct from a phone",
-        "remoteOffOthers": "Remote control is off, so no one can stop or instruct from a phone — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
+        "remoteOffOwnerComputer": "Remote control is off, so you can't stop or instruct from this computer",
+        "remoteOffOthers": "Remote control is off, so no one can stop or instruct from a phone — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on",
+        "remoteOffOthersComputer": "Remote control is off, so no one can stop or instruct from this computer — an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on"
       },
       "button": {
         "stop": "Stop",
@@ -5605,8 +5613,10 @@
           "notPairedComputer": "This computer isn't paired with the computer the agent runs on, so it wasn't stopped — use a paired device or that computer",
           "keyInvalidated": "This phone's lock settings changed, so it can't stop it from here — pair this phone with the computer again",
           "notRegistered": "This phone is no longer registered, so it can't stop it from here — pair this phone with the computer again",
+          "notRegisteredComputer": "This computer is no longer registered, so it can't stop it from here — pair this computer with the computer the agent runs on again",
           "biometricRequired": "This phone can stop it only with a fingerprint — add one in the phone's settings, then press again",
-          "noScreenLock": "Stopping needs a screen lock on this phone — turn one on in the phone's settings"
+          "noScreenLock": "Stopping needs a screen lock on this phone — turn one on in the phone's settings",
+          "noScreenLockComputer": "This computer can't use a safe place for its key (the keychain or similar), so it can't stop it — make the computer's secure storage usable, then press again"
         },
         "send": {
           "cancelled": "Not sent",
@@ -5616,12 +5626,15 @@
           "notPairedComputer": "This computer isn't paired with the computer the agent runs on, so it wasn't sent — use a paired device or that computer",
           "keyInvalidated": "This phone's lock settings changed, so it can't send from here — pair this phone with the computer again",
           "notRegistered": "This phone is no longer registered, so it can't send from here — pair this phone with the computer again",
+          "notRegisteredComputer": "This computer is no longer registered, so it can't send from here — pair this computer with the computer the agent runs on again",
           "biometricRequired": "This phone can send only with a fingerprint — add one in the phone's settings, then press again",
-          "noScreenLock": "Sending needs a screen lock on this phone — turn one on in the phone's settings"
+          "noScreenLock": "Sending needs a screen lock on this phone — turn one on in the phone's settings",
+          "noScreenLockComputer": "This computer can't use a safe place for its key (the keychain or similar), so it can't send — make the computer's secure storage usable, then press again"
         },
         "sentAsMessageNotNow": "It couldn't go into the current turn, so it went in as a message — it's read when its turn comes",
         "sealedNotTaken": "This session can't take an instruction right now, so it wasn't sent — what you wrote is still here. Send it again later, or send it in the conversation",
         "sealedPairMissing": "This phone has no secure pairing with this computer, so it wasn't sent — what you wrote is still here. Pair this phone with the computer again, then send it",
+        "sealedPairMissingComputer": "This computer has no secure pairing with the computer the agent runs on, so it wasn't sent — what you wrote is still here. Pair this computer with that computer again, then send it",
         "hiddenText": "Not sent: the text contains invisible characters. Please paste the text again or type it out, then send."
       },
       "changes": {
@@ -8103,9 +8116,11 @@
     },
     "line": {
       "answerOnPhone": "You can answer from a paired phone",
+      "answerOnComputer": "You can answer from a paired device",
       "expired": "The time has passed, so it can't be answered here — answer in that computer's terminal",
       "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
       "noPairedPhone": "No phone is paired with that computer, so it can't be answered here — answer in that computer's terminal",
+      "noPairedComputer": "No device is paired with that computer, so it can't be answered here — answer in that computer's terminal",
       "terminalOnly": "This question can only be answered in that computer's terminal",
       "remoteControlOff": "Remote control is off, so it can't be answered here — answer in that computer's terminal"
     },
@@ -8124,12 +8139,16 @@
       "cancelled": "Not sent — the request is still open",
       "failed": "Couldn't send it — the request is still open. Please press again",
     "notReady": "The phone isn't ready yet — please press again in a moment. The request is still open",
+    "notReadyComputer": "This computer isn't ready yet — please press again in a moment. The request is still open",
     "cannotOpen": "This phone can't open this request — it is still open. Please answer it in that computer's terminal",
+    "cannotOpenComputer": "This computer can't open this request — it is still open. Please answer it in the terminal of the computer the agent runs on",
       "screenLockConfirms": "No fingerprint or face is set up, so your screen lock confirms it",
       "biometricRequired": "This phone can answer only with a fingerprint — add one in the phone's settings, then press again",
       "noScreenLock": "Answers need a screen lock on this phone — turn one on in the phone's settings",
+      "noScreenLockComputer": "This computer can't use a safe place for its key (the keychain or similar), so it can't answer — make the computer's secure storage usable, then come back to this window",
       "keyInvalidated": "This phone's lock settings changed, so it can't answer from here — pair this phone with the computer again",
       "notRegistered": "This phone is no longer registered, so it can't answer from here — pair this phone with the computer again",
+      "notRegisteredComputer": "This computer is no longer registered, so it can't answer from here — pair this computer with the computer the agent runs on again",
       "openSettings": "Open settings",
       "pairAgain": "Pair again",
       "signedOut": "You were signed out, so it wasn't sent — the request is still open. Sign in again, then press it",

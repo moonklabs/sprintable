@@ -159,7 +159,7 @@ export default function SettingsPage() {
   // (lib/auth/internal-path: internal paths only — story 4936), and put back together by the URL API with `?p=<new>` and without the retry mark. `return=chats` keeps its own meaning and wins when both are present.
   const nextRaw = searchParamsHook.get('next');
   const { orgId: ctxOrgId, orgMemberships, navV3Flags } = useDashboardContext();
-  const { inPhoneApp } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app
+  const { inPhoneApp, deviceKind } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app (story 4994: «이 컴퓨터» in the guest desktop app)
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab'), inPhoneApp));
   // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
   // 읽다 실패하면 «이유 없이» 조용히 사라졌다. 섹션은 그대로 두고(각자의 「모름」 렌더
@@ -769,7 +769,7 @@ export default function SettingsPage() {
     }
   };
 
-  const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
+  const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, deviceKind, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
   const activeLabelKey = navGroups.flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === activeTab)?.labelKey;
 
   // suppress unused variable warning — createdProjectMembership used in future flows

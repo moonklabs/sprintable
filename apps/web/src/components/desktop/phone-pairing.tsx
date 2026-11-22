@@ -99,7 +99,8 @@ export function PhonePairing({ returnTo = null }: { returnTo?: string | null } =
 }
 
 function Pairing({ returnTo }: { returnTo: string | null }) {
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
+  const computer = deviceKind === 'computer'; // story 4994: the guest desktop app — no «phone» words, and no [설정 열기] (its shell opens no settings)
   const t = useTranslations('phonePairing');
   const tp = useTranslations('agentPermissions.phone');
   const tr = useTranslations('desktop.remoteDevices');
@@ -354,7 +355,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'failed': return t('failed');
     }
   };
-  const settings = <Button variant="secondary" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
+  const settings = computer ? null : <Button variant="secondary" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
   const rescan = <Button variant="primary" onClick={() => void scan()}>{t('rescan')}</Button>;
   // story 4780: [Close] goes back where the pairing was started from (`returnTo` is the entry's page, checked by the page); with none it is the Mac screen as it always was
   const close = <Button variant="secondary" asChild><a href={flat(returnTo ?? '/desktop')}>{t('close')}</a></Button>;
@@ -441,7 +442,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           {/* story 4932: this is a refusal BEFORE anything was sent (the phone's key cannot be made without a screen lock / a fingerprint) — it was read as the pairing's result. So it says first that nothing is paired
               yet and nothing was sent, then what to do, then that the QR lives only 5 minutes (setting a lock takes a while — the same QR is often gone by the time the person comes back). */}
           <Line focus>{t('notSentYet')}</Line>
-          <Line>{view.kind === 'noScreenLock' ? tp('noScreenLock') : tp('biometricRequired')}</Line>
+          <Line>{view.kind === 'noScreenLock' ? tp(computer ? 'noScreenLockComputer' : 'noScreenLock') : tp('biometricRequired')}</Line>
           <Line>{t('qrFiveMinutes')}</Line>
           <Actions>{settings}{rescan}</Actions>
         </Shell>

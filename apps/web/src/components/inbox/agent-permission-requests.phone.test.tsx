@@ -311,6 +311,29 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(buttons()).toEqual([]);
   });
 
+  it('story 4994: in the guest desktop app (a COMPUTER) no screen lock / not registered / not ready / cannot open say «이 컴퓨터» — never «폰» — and there is no [설정 열기] that would open nothing', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      // before any press: the shell says no screen lock (the key store is not usable)
+      auth = 'no_screen_lock'; __resetPhoneBridgeForTest(); installShell(); await render([req()]);
+      expect(phoneLines()).toEqual([koMessages.agentPermissions.phone.noScreenLockComputer]);
+      expect(buttons(), 'no settings button on a computer').toEqual([]);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      auth = 'biometric';
+      for (const [answer, text] of [
+        [{ ok: false, code: 'no_screen_lock' }, koMessages.agentPermissions.phone.noScreenLockComputer],
+        [{ ok: false, code: 'not_registered' }, koMessages.agentPermissions.phone.notRegisteredComputer],
+        [{ ok: false, code: 'vault_unavailable' }, koMessages.agentPermissions.phone.notReadyComputer],
+        [{ ok: false, code: 'card_refused' }, koMessages.agentPermissions.phone.cannotOpenComputer],
+      ] as const) {
+        signAnswer = answer; __resetPhoneBridgeForTest(); installShell(); await render([req()]); await press('허용');
+        expect(phoneLines(), JSON.stringify(answer)).toEqual([text]);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+    } finally { ua.mockRestore(); }
+    for (const m of [koMessages, enMessages]) for (const k of ['noScreenLockComputer', 'notRegisteredComputer', 'notReadyComputer', 'cannotOpenComputer'] as const) expect(m.agentPermissions.phone[k], k).not.toMatch(/폰|phone/i);
+  });
+
   it('story 4994 (D-3): in the guest desktop app (a COMPUTER) the removed-device line does not call it a phone — ko and en', async () => {
     const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
     const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
@@ -452,6 +475,22 @@ describe('[4604] the question\'s words only while it asks', () => {
     await remount();
     await render([net()]); // a browser: the request still asks (answered on the phone) — its words stay
     expect(askLine()?.textContent).toBe(ko.net.askLine);
+  });
+
+  it('story 4994: the card\'s read-only line in the guest desktop app (a COMPUTER) does not send the person to «a phone»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      await remount(); installShell();
+      await render([net({ recipient_reason: 'no_paired_phone' } as Partial<PermissionRequest>)]);
+      expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(koMessages.agentPermissions.line.noPairedComputer);
+      __resetPhoneBridgeForTest();
+      // pending, answerable by nobody here: the «answer on a paired device» line (no «폰»)
+      await remount(); installShell();
+      await render([net({ answerable: false } as Partial<PermissionRequest>)]);
+      expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(koMessages.agentPermissions.line.answerOnComputer);
+      __resetPhoneBridgeForTest();
+      for (const m of [koMessages, enMessages]) for (const k of ['noPairedComputer', 'answerOnComputer'] as const) expect(m.agentPermissions.line[k], k).not.toMatch(/폰|phone/i);
+    } finally { ua.mockRestore(); }
   });
 
   it('(Yuna 4987) pending, but no button can come — no word from the computer · no paired phone → no «press [허용…]» line, the card\'s own line says why', async () => {

@@ -21,10 +21,10 @@ beforeEach(() => { host = document.createElement('div'); document.body.append(ho
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
 
 type Answer = { id: string; ok: boolean; code?: string; [k: string]: unknown };
-async function draw(phoneCall: (type: string, args?: Record<string, unknown>) => Promise<Answer>, opts: { inPhoneApp?: boolean; messages?: typeof koMessages; locale?: string } = {}) {
+async function draw(phoneCall: (type: string, args?: Record<string, unknown>) => Promise<Answer>, opts: { inPhoneApp?: boolean; messages?: typeof koMessages; locale?: string; deviceKind?: 'phone' | 'computer' } = {}) {
   await act(async () => {
     root.render(
-      <PhoneBridgeContext.Provider value={{ inPhoneApp: opts.inPhoneApp ?? true, phoneCall }}>
+      <PhoneBridgeContext.Provider value={{ inPhoneApp: opts.inPhoneApp ?? true, ...(opts.deviceKind ? { deviceKind: opts.deviceKind } : {}), phoneCall }}>
         <NextIntlClientProvider locale={opts.locale ?? 'ko'} messages={opts.messages ?? koMessages} timeZone="UTC"><ThisPhoneCard /></NextIntlClientProvider>
       </PhoneBridgeContext.Provider>,
     );
@@ -171,5 +171,22 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     }
     await draw(async () => answer({ ok: false, code: 'no_screen_lock' }), { messages: enMessages as never, locale: 'en' });
     expect(q('this-phone-no-screen-lock')?.textContent).toBe(enMessages.settings.thisPhoneNoScreenLock);
+  });
+});
+
+describe('[SID:4994] ThisPhoneCard in the guest desktop app (a COMPUTER)', () => {
+  it('the title · the hint · the no-secure-storage line say «컴퓨터» (ko and en) and never «폰/phone»; a phone is unchanged', async () => {
+    for (const [locale, messages] of [['ko', koMessages], ['en', enMessages]] as const) {
+      await draw(async () => answer({ key_number: '018 604' }), { deviceKind: 'computer', messages: messages as typeof koMessages, locale });
+      expect(host.querySelector('h2')?.textContent, locale).toBe(messages.settings.thisComputerTitle);
+      expect(q('this-phone-hint')?.textContent, locale).toBe(messages.settings.thisComputerHint);
+      await act(async () => { root.unmount(); }); root = createRoot(host);
+      await draw(async () => ({ id: 'w', ok: false, code: 'no_screen_lock' }), { deviceKind: 'computer', messages: messages as typeof koMessages, locale });
+      expect(q('this-phone-no-screen-lock')?.textContent, locale).toBe(messages.settings.thisComputerNoScreenLock);
+      await act(async () => { root.unmount(); }); root = createRoot(host);
+      for (const k of ['thisComputerTitle', 'thisComputerHint', 'thisComputerNoScreenLock'] as const) expect(messages.settings[k], `${locale} ${k}`).not.toMatch(/폰|phone/i);
+    }
+    await draw(async () => answer({ key_number: '018 604' }), { deviceKind: 'phone' });
+    expect(host.querySelector('h2')?.textContent).toBe(koMessages.settings.thisPhoneTitle);
   });
 });

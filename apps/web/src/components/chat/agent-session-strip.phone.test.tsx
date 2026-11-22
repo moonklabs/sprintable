@@ -30,6 +30,8 @@ vi.mock('@/lib/phone-bridge', () => ({
   claimPhoneBridge: () => {},
   subscribePhoneApp: () => () => {},
 }));
+let remoteOffNow: { owner: boolean; names: { owners: string; hasOwners: 'yes' | 'no' }; connectedSetups: number } | null = null; // story 4994: the org's «remote control off» (null = on · not known)
+vi.mock('@/components/desktop/remote-off', async (orig) => ({ ...(await orig<typeof import('@/components/desktop/remote-off')>()), useRemoteOff: () => remoteOffNow }));
 const { AgentSessionStrip } = await import('./agent-session-strip');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -56,6 +58,7 @@ let root: Root;
 beforeEach(() => {
   window.localStorage?.clear(); // drafts (useFieldDraft) do not leak between cases
   phone = true;
+  remoteOffNow = null;
   phoneCall.mockReset();
   fetchWithAuth.mockReset();
   sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
@@ -491,6 +494,95 @@ describe('[4534] the strip inside the phone app', () => {
       expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value, `${code}: what was written stays`).toBe('x');
     }
     expect(fetchWithAuth.mock.calls.some(([u, i]) => String(u).endsWith('/desktop-commands') && (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
+  });
+
+  it('story 4994: in the guest desktop app (a COMPUTER) not registered · no screen lock · no sealed pairing say «이 컴퓨터» (stop and send, ko and en) and the no-screen-lock line has no settings button', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+        for (const [code, stopLine, sendLine, action] of [
+          ['not_registered', m.command.stop.notRegisteredComputer, m.command.send.notRegisteredComputer, m.command.pairAgain],
+          ['no_screen_lock', m.command.stop.noScreenLockComputer, m.command.send.noScreenLockComputer, null],
+        ] as const) {
+          server(res(201, {}));
+          phoneCall.mockResolvedValue({ id: 'w', ok: false, code });
+          await act(async () => { root.unmount(); }); root = createRoot(container);
+          await render(locale);
+          await press(m.button.stop);
+          expect(commandLine()?.textContent, `${locale} ${code} stop`).toBe(stopLine);
+          expect(commandLine()?.parentElement?.querySelector('a,button')?.textContent ?? null, `${locale} ${code} action`).toBe(action);
+          await press(m.button.instruct);
+          const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+          await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'x'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+          await press(m.sheet.send);
+          expect(commandLine()?.textContent, `${locale} ${code} send`).toBe(sendLine);
+        }
+        // a sealed instruction with no secure pairing: the shell's own refusal word
+        server(res(201, {}));
+        phoneCall.mockResolvedValue({ id: 'w', ok: false, code: 'sealed_pair_missing' });
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render(locale);
+        await press(m.button.instruct);
+        const box2 = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+        await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box2, 'x'); box2.dispatchEvent(new Event('input', { bubbles: true })); });
+        await press(m.sheet.send);
+        expect(commandLine()?.textContent, `${locale} sealed_pair_missing`).toBe(m.command.sealedPairMissingComputer);
+      }
+    } finally { ua.mockRestore(); }
+    for (const lang of [ko, enMessages.chats.agentSession as typeof ko]) {
+      for (const text of [lang.command.stop.notRegisteredComputer, lang.command.send.notRegisteredComputer, lang.command.stop.noScreenLockComputer, lang.command.send.noScreenLockComputer, lang.command.sealedPairMissingComputer]) expect(text).not.toMatch(/폰|phone/i);
+    }
+  });
+
+  it('story 4994: remote control off in the guest desktop app (a COMPUTER): the status line says «이 컴퓨터», not «폰»; a non-phone window keeps the old words', async () => {
+    server(res(201, {}));
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+        phone = true; sessionView = { ...sessionView, remote_control: false };
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render(locale);
+        const text = container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '';
+        expect(text, locale).toContain(locale === 'ko' ? '이 컴퓨터에서 멈추거나 지시할 수 없어요' : 'from this computer');
+        expect(text, locale).not.toMatch(/폰|phone/i);
+        expect(m.line.remoteOffOwnerComputer, locale).not.toMatch(/폰|phone/i); expect(m.line.remoteOffOthersComputer, locale).not.toMatch(/폰|phone/i);
+        sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
+      }
+      // not the phone app (a plain window with an Electron UA but no bridge): the old words stay
+      phone = false; sessionView = { ...sessionView, remote_control: false };
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await render('ko');
+      expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '').toContain('폰에서 멈추거나 지시할 수 없어요');
+    } finally { ua.mockRestore(); }
+  });
+
+  it('story 4994: remote control off for an owner / someone else in the guest desktop app (a COMPUTER): the status line AND a refused command say «이 컴퓨터»; a phone keeps «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const owner of [true, false]) {
+        remoteOffNow = { owner, names: { owners: '민', hasOwners: 'yes' }, connectedSetups: 1 };
+        // the status line (the session says remote control is off)
+        sessionView = { ...sessionView, remote_control: false };
+        server(res(201, {}));
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render();
+        const line = container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '';
+        expect(line, `status owner=${owner}`).toContain('이 컴퓨터에서 멈추거나 지시할 수 없어요');
+        expect(line).not.toMatch(/폰/);
+        // the command line (the server refuses a stop with remote_control_off)
+        sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
+        server(res(409, { error: { code: 'remote_control_off' } }));
+        phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'x' });
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render();
+        await press(ko.button.stop); await settle();
+        const cmd = commandLine()?.textContent ?? '';
+        expect(cmd, `command owner=${owner}`).toContain('이 컴퓨터에서 멈추거나 지시할 수 없어요');
+        expect(cmd).not.toMatch(/폰/);
+      }
+    } finally { ua.mockRestore(); remoteOffNow = null; }
   });
 
   it('story 4994 (D-3): the server says 409 phone_not_paired — in a phone the line says «이 폰», in the guest desktop app (a COMPUTER) it says «이 컴퓨터» (stop and send, ko and en)', async () => {
