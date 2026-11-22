@@ -129,7 +129,7 @@ const press = async (label: string) => {
 const tick = async () => { await act(async () => { vi.advanceTimersByTime(1_500); }); await settle(); };
 
 
-const START = async () => { await render(); await press('QR 찍기'); await press('페어링'); };
+const START = async () => { await render(); await press(/Electron\//.test(window.navigator.userAgent) ? '코드 붙여넣기' : 'QR 찍기'); await press('페어링'); }; // (the guest desktop app's button opens the paste window: «코드 붙여넣기»)
 const sentTypes = () => sent.map((s) => s.type);
 
 const NONCE = { state: 'nonce', n_m: 'N'.repeat(22), sig: 'S'.repeat(70) };
@@ -550,6 +550,7 @@ describe('[SID:4994 D-3d] the pairing screen in the guest desktop app', () => {
   it('start screen · the commitment refused (key store not ready) · paired', async () => {
     installShell(); await render();
     expect(text()).toContain(T.startComputer); noPhone();
+    expect(buttons()).toEqual([T.scanComputer]); // «코드 붙여넣기» (the phone's «QR 찍기» opens the camera; the guest's opens the paste window)
     await act(async () => { root.unmount(); }); root = createRoot(container);
     installShell(); shell['pair.commit'] = { ok: false, code: 'vault_unavailable' };
     await START();
@@ -580,6 +581,7 @@ describe('[SID:4994 D-3d] the pairing screen in the guest desktop app', () => {
     for (const [answer, key] of [[{ ok: false, code: 'no_receipt' }, 'noReceiptComputer'], [{ ok: false, code: 'receipt_invalid' }, 'receiptInvalidComputer'], [{ ok: false, code: 'not_confirmed' }, 'hostNoComputer']] as const) {
       await WINDOW_OVER_C(answer);
       expect(line(), key).toBe(T[key]); noPhone();
+      expect(buttons(), key).toEqual([T.rescanComputer]);
       await act(async () => { root.unmount(); }); root = createRoot(container);
     }
     installShell(); readStatus = 503;
