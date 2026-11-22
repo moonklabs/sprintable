@@ -1,0 +1,13 @@
+{
+  "_about": "How a press becomes the ROW the same-network direct road sends (story 4993 · web PR 5a). The web builds the row from the very body it would post to the server; the server builds the Mac's payload for the same press from the same body — so the two must agree, and this ONE file is what the web's test (apps/web/src/lib/phone-direct.test.ts) and the server's test (backend/tests/test_4993_direct_rows_realdb.py) both read. A plain (non-sealed) instruction never rides the direct road. The row's command_id is the press's idempotency key; its created_at is the phone's clock.",
+  "row_keys": ["command_id", "kind", "session_key", "payload", "created_at"],
+  "command_id_from": "idempotency_key",
+  "cases": [
+    { "name": "a sealed instruction", "kind": "send_prompt", "sealed": true, "payload_from_body": ["session_key", "conversation_id", "envelope"] },
+    { "name": "a signed stop", "kind": "stop_session", "sealed": false, "payload_from_body": ["session_key", "signed"] },
+    { "name": "a signed end of the session", "kind": "end_session", "sealed": false, "payload_from_body": ["session_key", "signed"] }
+  ],
+  "never_direct": [
+    { "name": "a plain instruction (the words in text)", "kind": "send_prompt", "sealed": false }
+  ]
+}
