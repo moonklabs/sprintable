@@ -314,10 +314,10 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, not
       case 'unreachable': return t('result.unreachable');
       case 'not_paired': return t(deviceKind === 'computer' ? 'result.notPairedComputer' : 'result.notPaired'); // (story 4994 D-3: the guest desktop app is a computer)
       case 'remote_off': return t('result.remoteOff');
-      case 'no_screen_lock': return t('result.noScreenLock');
+      case 'no_screen_lock': return t(deviceKind === 'computer' ? 'result.noScreenLockComputer' : 'result.noScreenLock');
       case 'biometric_required': return t('result.biometricRequired');
       case 'key_invalidated': return t('result.keyInvalidated');
-      case 'not_registered': return t('result.notRegistered');
+      case 'not_registered': return t(deviceKind === 'computer' ? 'result.notRegisteredComputer' : 'result.notRegistered');
       case 'signed_out': return t('result.signedOut');
       case 'unknown': return t('result.unknown');
       case 'failed': return t('result.failed');

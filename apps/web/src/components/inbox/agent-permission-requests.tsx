@@ -269,6 +269,8 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
 }) {
   const t = useTranslations('agentPermissions');
   const locale = useLocale();
+  const bridgeKind = usePhoneBridge().deviceKind;
+  const computerGuest = phone && bridgeKind === 'computer'; // story 4994: the guest desktop app — its read-only lines do not send the person to «a phone»
   const sealed = r.sealed === true; // story 4972: the words are in an envelope only the paired phone opens — the server holds none
   const tool = shownToolName(r, locale); // story 4542: the server's name by the one rule (never the machine value from a known table)
   const line = permissionLine(r);
@@ -276,8 +278,8 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
     : line === 'remoteControlOff' ? t('line.remoteControlOff') // story #4589: no link here — the off line above the list has it
       : line === 'unknown' ? t('line.unknown')
         : line === 'terminalOnly' ? t('line.terminalOnly')
-          : line === 'noPairedPhone' ? t('line.noPairedPhone')
-            : t('line.answerOnPhone');
+          : line === 'noPairedPhone' ? t(computerGuest ? 'line.noPairedComputer' : 'line.noPairedPhone')
+            : t(computerGuest ? 'line.answerOnComputer' : 'line.answerOnPhone');
   const notes = [r.masked ? t('maskedNote') : null, r.truncated ? t('truncatedNote') : null].filter(Boolean);
   // the phone app answers here; everything else keeps the one read-only line
   const answersHere = phone && (answer !== null || (line === 'answerOnPhone' && r.state === 'pending' && r.answerable));
@@ -378,13 +380,14 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
       <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
     </div>
   );
-  const settings = (
+  const computer = deviceKind === 'computer'; // (story 4994: the guest desktop app — its words say «이 컴퓨터», and it has no phone settings to open)
+  const settings = computer ? null : (
     <div><Button size="sm" variant="outline" onClick={() => void phoneCall('app.settings')}>{t('phone.openSettings')}</Button></div>
   );
 
   if (a === null) {
     if (auth === 'biometric_required' || auth === 'no_screen_lock') {
-      return <><Line>{auth === 'no_screen_lock' ? t('phone.noScreenLock') : t('phone.biometricRequired')}</Line>{settings}</>;
+      return <><Line>{auth === 'no_screen_lock' ? t(computer ? 'phone.noScreenLockComputer' : 'phone.noScreenLock') : t('phone.biometricRequired')}</Line>{settings}</>;
     }
     return <>{buttons}{auth === 'screen_lock' ? <Line>{t('phone.screenLockConfirms')}</Line> : null}</>;
   }
@@ -402,12 +405,12 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
     case 'unreachable': return <Line focus>{t('line.unknown')}</Line>;
     case 'not_paired': return <Line focus>{t(deviceKind === 'computer' ? 'phone.notPairedComputer' : 'phone.notPaired')}</Line>; // (story 4994 D-3: the guest desktop app is a computer)
     case 'biometric_required': return <><Line focus>{t('phone.biometricRequired')}</Line>{settings}</>;
-    case 'no_screen_lock': return <><Line focus>{t('phone.noScreenLock')}</Line>{settings}</>;
+    case 'no_screen_lock': return <><Line focus>{t(computer ? 'phone.noScreenLockComputer' : 'phone.noScreenLock')}</Line>{settings}</>;
     case 'key_invalidated':
     case 'not_registered':
       return (
         <>
-          <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t('phone.notRegistered')}</Line>
+          <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t(computer ? 'phone.notRegisteredComputer' : 'phone.notRegistered')}</Line>
           <div><Button size="sm" variant="outline" asChild><a href={pairHref}>{t('phone.pairAgain')}</a></Button></div>
         </>
       );
@@ -421,14 +424,15 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
       );
     case 'cancelled': return <>{buttons}<Line focus={pressed}>{t('phone.cancelled')}</Line></>;
     // story 4972: the key store was not answering — the buttons stay, with the words «try again in a moment»; a card the shell would not open has no button that could change that — the line says where it is answered
-    case 'not_ready': return <>{buttons}<Line focus={pressed}>{t('phone.notReady')}</Line></>;
-    case 'cannot_open': return <Line focus>{t('phone.cannotOpen')}</Line>;
+    case 'not_ready': return <>{buttons}<Line focus={pressed}>{t(computer ? 'phone.notReadyComputer' : 'phone.notReady')}</Line></>;
+    case 'cannot_open': return <Line focus>{t(computer ? 'phone.cannotOpenComputer' : 'phone.cannotOpen')}</Line>;
     default: return <>{buttons}<Line focus={pressed}>{t('phone.failed')}</Line></>;
   }
 }
 
 /** story 4972: a sealed terminal-only question inside the phone app — nothing to answer here, only to read: [앱에서 열기] shows it on the shell's sheet */
 function SealedOpenPlace({ onOpen, lineText }: { onOpen: () => Promise<OpenOutcome>; lineText: string }) {
+  const computer = usePhoneBridge().deviceKind === 'computer';
   const t = useTranslations('agentPermissions');
   const [result, setResult] = useState<OpenOutcome['kind'] | 'opening' | null>(null);
   return (
@@ -440,7 +444,7 @@ function SealedOpenPlace({ onOpen, lineText }: { onOpen: () => Promise<OpenOutco
         </div>
       )}
       <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">{lineText}</p>
-      {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'not_ready' ? <Line focus>{t('phone.notReady')}</Line> : result === 'cannot_open' ? <Line focus>{t('phone.cannotOpen')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
+      {result === 'closed' ? <Line focus>{t('phone.closed')}</Line> : result === 'not_ready' ? <Line focus>{t(computer ? 'phone.notReadyComputer' : 'phone.notReady')}</Line> : result === 'cannot_open' ? <Line focus>{t(computer ? 'phone.cannotOpenComputer' : 'phone.cannotOpen')}</Line> : result === 'failed' ? <Line focus>{t('phone.failed')}</Line> : null}
     </>
   );
 }

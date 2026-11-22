@@ -119,6 +119,35 @@ describe('[4972] a sealed card', () => {
     expect(phoneLines()).toEqual(['허용했어요']);
   });
 
+  it('story 4994: a terminal-only sealed card in the guest desktop app (a COMPUTER): not ready · cannot open say «이 컴퓨터», not «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      installShell();
+      await render([sealedReq({ answerable: false, terminal_only: true, input_hash: null, session_key: null })]);
+      const answerWith = async (code: string) => { shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code }); await press('앱에서 열기'); };
+      await answerWith('vault_unavailable');
+      expect(phoneLines()).toEqual(['이 컴퓨터가 아직 준비되지 않았어요 — 잠시 뒤 다시 눌러 주세요. 요청은 그대로예요']);
+      await answerWith('card_refused');
+      expect(phoneLines()).toEqual(['이 컴퓨터에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 에이전트가 도는 컴퓨터의 터미널에서 답해 주세요']);
+      expect(buttons()).toEqual([]);
+    } finally { ua.mockRestore(); }
+  });
+
+  it('story 4994: in the guest desktop app (a COMPUTER) the same two refusals say «이 컴퓨터», not «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'vault_unavailable' });
+      installShell();
+      await render([sealedReq()]);
+      await press('앱에서 열기');
+      expect(phoneLines()).toEqual(['이 컴퓨터가 아직 준비되지 않았어요 — 잠시 뒤 다시 눌러 주세요. 요청은 그대로예요']);
+      shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: false, code: 'card_refused' });
+      await press('앱에서 열기');
+      expect(buttons()).toEqual([]);
+      expect(phoneLines()).toEqual(['이 컴퓨터에서는 이 요청을 열 수 없어요 — 요청은 그대로예요. 에이전트가 도는 컴퓨터의 터미널에서 답해 주세요']);
+    } finally { ua.mockRestore(); }
+  });
+
   it('the person denied on the sheet → «거부했어요» and a deny is posted', async () => {
     shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : { ok: true, signed: 'SIGNED', phone_key_id: 'k-1', decision: 'deny' });
     installShell();

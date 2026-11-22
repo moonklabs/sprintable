@@ -458,6 +458,22 @@ describe('[4532] phone pairing screen', () => {
     expect(sent.at(-1)).toEqual({ type: 'app.settings', args: {} });
   });
 
+  it('story 4994: the guest desktop app (a COMPUTER) with no secure storage → the same refusal in «이 컴퓨터» words and NO [설정 열기] (its shell opens no settings)', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
+      installShell();
+      await render();
+      await press('QR 찍기');
+      await press('페어링');
+      expect(lines()[0]).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요');
+      expect(lines()[1]).toBe(koMessages.agentPermissions.phone.noScreenLockComputer);
+      expect(lines()[1]).not.toMatch(/폰/);
+      expect(buttons()).toEqual(['다시 찍기']);
+      expect(nothingSent()).toBe(true);
+    } finally { ua.mockRestore(); }
+  });
+
   it('⭐a phone that can answer only with a fingerprint is refused the same way: «아직 페어링하지 않았어요 …» first, its own line second, the 5 minutes third', async () => {
     shell['device.key.info'] = { ok: false, code: 'biometric_required' };
     installShell();

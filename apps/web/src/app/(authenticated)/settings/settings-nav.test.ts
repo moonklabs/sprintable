@@ -69,3 +69,13 @@ describe('settingsNavGroups — which sections the list draws (story 4891)', () 
     expect(pending.find((x) => x.id === 'billing')).toMatchObject({ items: [], pending: 2 });
   });
 });
+
+describe('[SID:4994] the «this phone» tab in the guest desktop app (a COMPUTER)', () => {
+  it('is «이 컴퓨터» with the desktop icon in the guest app, and unchanged (smartphone · «이 폰») in a phone and without a device kind', () => {
+    const find = (deviceKind?: 'phone' | 'computer') => settingsNavGroups({ adminChecked: false, isAdmin: false, inPhoneApp: true, supportWidget: false, billing: false, ...(deviceKind ? { deviceKind } : {}) })
+      .flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === 'this-phone');
+    expect(find('computer')).toMatchObject({ labelKey: 'tabThisComputer', icon: 'desktop_windows' });
+    expect(find('phone')).toMatchObject({ labelKey: 'tabThisPhone', icon: 'smartphone' });
+    expect(find()).toMatchObject({ labelKey: 'tabThisPhone', icon: 'smartphone' });
+  });
+});

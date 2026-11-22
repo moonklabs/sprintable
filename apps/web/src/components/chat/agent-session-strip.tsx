@@ -452,7 +452,7 @@ function ResultLine({ result }: { result: Result }) {
     // story 4976 A3: a sealed instruction the session could not take — not sent, not turned into a message, the words stay in the box
     case 'sealed_not_taken': return line(t('command.sealedNotTaken'));
     // story 4990: this phone has no sealed pairing with that computer — not sent (the words stay in the box), and the way to pair again is right here
-    case 'sealed_pair_missing': return line(t('command.sealedPairMissing'), pairAgain);
+    case 'sealed_pair_missing': return line(deviceKind === 'computer' ? t('command.sealedPairMissingComputer') : t('command.sealedPairMissing'), pairAgain);
     // story 4633 (Yuna 4633-hidden-text-copy.md · web line): refused for invisible characters — nothing went in, nothing was sent as a message
     case 'hidden_text': return line(t('command.hiddenText'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
@@ -464,17 +464,18 @@ function ResultLine({ result }: { result: Result }) {
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     // story #4583 (Yuna copy.md row 3): the same words as the strip's line — the owner gets the way to the switch
     case 'remote_off': return remoteOff?.owner
-      ? line(t('line.remoteOffOwner'), <RemoteControlLink />)
-      : line(t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
+      ? line(t(deviceKind === 'computer' ? 'line.remoteOffOwnerComputer' : 'line.remoteOffOwner'), <RemoteControlLink />)
+      : line(t(deviceKind === 'computer' ? 'line.remoteOffOthersComputer' : 'line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
     case 'conversation_not_found': return line(t('command.conversationNotFound'));
     case 'cancelled': return line(stop ? t('command.stop.cancelled') : t('command.send.cancelled'));
     // story 4994 (D-3): the guest desktop app is a COMPUTER — its words do not call it a phone
     case 'not_paired': return line(deviceKind === 'computer' ? (stop ? t('command.stop.notPairedComputer') : t('command.send.notPairedComputer')) : (stop ? t('command.stop.notPaired') : t('command.send.notPaired')));
     case 'signed_out': return line(stop ? t('command.stop.signedOut') : t('command.send.signedOut'), signIn);
     case 'key_invalidated': return line(stop ? t('command.stop.keyInvalidated') : t('command.send.keyInvalidated'), pairAgain);
-    case 'not_registered': return line(stop ? t('command.stop.notRegistered') : t('command.send.notRegistered'), pairAgain);
+    case 'not_registered': return line(deviceKind === 'computer' ? (stop ? t('command.stop.notRegisteredComputer') : t('command.send.notRegisteredComputer')) : (stop ? t('command.stop.notRegistered') : t('command.send.notRegistered')), pairAgain);
     case 'biometric_required': return line(stop ? t('command.stop.biometricRequired') : t('command.send.biometricRequired'), settings);
-    case 'no_screen_lock': return line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
+    // (the guest desktop app has no phone settings to open: its words say what is missing and there is no button that would do nothing)
+    case 'no_screen_lock': return deviceKind === 'computer' ? line(stop ? t('command.stop.noScreenLockComputer') : t('command.send.noScreenLockComputer')) : line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
     default: return line(stop ? t('command.stop.failed') : t('command.send.failed'));
   }
 }
@@ -564,6 +565,8 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const tPermissions = useTranslations('agentPermissions'); // story #4590: the terminal-only line is the card's own key (Yuna §2)
   const locale = useLocale();
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
+  const bridgeKind = usePhoneBridge().deviceKind;
+  const computerGuest = phone && bridgeKind === 'computer'; // story 4994: the guest desktop app — its lines say «이 컴퓨터», not «폰»
   // story 4979 (PO 11-18): a computer that is no longer heard says WHEN it was last seen («연결이 끊겼어요 · 마지막으로 본 지 N분 전»; under a minute = «방금 전») — «상태 모름» alone when the server has no such time
   if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{lastSeenLine(t, view.last_heard_at, now) ?? t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
@@ -598,12 +601,12 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
     if (remoteOff?.owner) {
       return (
         <div className="flex w-full flex-col gap-1">
-          <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOwner')}</p>
+          <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t(computerGuest ? 'line.remoteOffOwnerComputer' : 'line.remoteOffOwner')}</p>
           <RemoteControlLink />
         </div>
       );
     }
-    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t(computerGuest ? 'line.remoteOffOthersComputer' : 'line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
   }
   if (view.state === 'waiting_permission') {
     // story #4590 (Yuna §2): a question only that computer's terminal answers — the card's own line (one key for both), no inbox link:

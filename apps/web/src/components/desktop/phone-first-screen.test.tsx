@@ -621,6 +621,19 @@ describe('[4714] branch 5 — the result lines', () => {
     expect(line()?.textContent).toBe('이 프로젝트는 Mac에서 아직 폴더를 고르지 않았어요 — Mac 앞에서 폴더를 골라 주세요');
   });
 
+  it('story 4994: no screen lock / not registered in the guest desktop app (a COMPUTER) say «이 컴퓨터», not «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      signAnswer = { id: 's', ok: false, code: 'no_screen_lock' };
+      await start();
+      expect(line()?.textContent).toBe(koMessages.onboarding.phone.result.noScreenLockComputer);
+      signAnswer = { id: 's', ok: false, code: 'not_registered' };
+      await press(byId('onboarding-phone-start-go'));
+      expect(line()?.textContent).toBe(koMessages.onboarding.phone.result.notRegisteredComputer);
+      for (const k of ['noScreenLockComputer', 'notRegisteredComputer'] as const) { expect(koMessages.onboarding.phone.result[k], k).not.toMatch(/폰/); expect(enMessages.onboarding.phone.result[k], k).not.toMatch(/phone/i); }
+    } finally { ua.mockRestore(); }
+  });
+
   it('story 4994 (D-3): phone_not_paired in the guest desktop app (a COMPUTER) says «이 컴퓨터», not «이 폰»', async () => {
     const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
     const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
@@ -873,7 +886,7 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
   });
   it('the refusals reuse the phone lines\' shape: each ends in an instruction (a started start has only the «waiting to connect» line · a cancelled one none)', () => {
     expect(Object.keys(ko).filter((k) => k.startsWith('result.')).sort()).toEqual([
-      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired', 'result.notPairedComputer',
+      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.noScreenLockComputer', 'result.notPaired', 'result.notPairedComputer', 'result.notRegisteredComputer',
       'result.notRegistered', 'result.openChat', 'result.readFailed', 'result.remoteOff', 'result.retry', 'result.signedOut', 'result.unknown', 'result.unreachable',
     ].sort());
   });

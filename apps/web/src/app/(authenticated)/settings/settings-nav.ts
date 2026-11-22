@@ -10,6 +10,8 @@ export interface SettingsNavGates {
   isAdmin: boolean;
   /** inside the phone app (story 4762): the «이 폰» section exists */
   inPhoneApp: boolean;
+  /** story 4994: the guest desktop app is a computer — its tab says «이 컴퓨터» */
+  deviceKind?: 'phone' | 'computer';
   /** isSupportWidgetEnabled() */
   supportWidget: boolean;
   /** isEEEnabled() — the billing section exists */
@@ -46,7 +48,7 @@ export function settingsNavGroups(g: SettingsNavGates): SettingsNavGroup[] {
     { kind: 'tab', id: 'notifications', labelKey: 'tabNotifications', icon: 'notifications' },
     { kind: 'tab', id: 'desktop', labelKey: 'desktopTab', icon: 'desktop_windows' }, // reopens the onboarding's «get the desktop app» (story 4668) — no flag
   ];
-  if (g.inPhoneApp) account.push({ kind: 'tab', id: 'this-phone', labelKey: 'tabThisPhone', icon: 'smartphone' }); // story 4762
+  if (g.inPhoneApp) account.push({ kind: 'tab', id: 'this-phone', labelKey: g.deviceKind === 'computer' ? 'tabThisComputer' : 'tabThisPhone', icon: g.deviceKind === 'computer' ? 'desktop_windows' : 'smartphone' }); // story 4762 (story 4994: the guest desktop app is a computer)
   if (g.supportWidget) account.push({ kind: 'tab', id: 'support', labelKey: 'tabSupport', icon: 'support' });
   groups.push({ id: 'account', labelKey: 'myAccount', items: account, pending: 0 });
 
