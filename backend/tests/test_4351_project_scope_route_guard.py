@@ -37,6 +37,7 @@ _KNOWN = {
     # story #4951 — the same device token: its «changed files» list for one read command (the row is that device's own: command id + the token's setup id; a session of an agent it reads names, never a project's entity)
     "app/routers/desktop_relay.py::put_changes",
     # story 4983 — the same device token: its SEALED answer to one files request (the row is that device's own: command id + the token's setup id; the server cannot open the envelope; the PERSON's routes judge the project access, on ask and on read)
+    "app/routers/desktop_relay.py::put_direct",
     "app/routers/desktop_relay.py::put_files",
     # story 4988 — the same device token: ONE chunk of its SEALED answer to a DOWNLOAD (the row is that device's own: command id + the token's setup id; in order, a few ahead of the phone at most; the server cannot open the envelope; the PERSON's route judges the project)
     "app/routers/desktop_relay.py::put_files_chunk",

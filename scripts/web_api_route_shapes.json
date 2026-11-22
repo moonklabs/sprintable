@@ -896,6 +896,21 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/desktop/computers/{}/direct",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/computers/{}/direct/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/direct/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/desktop/computers/{}/files",
 "kind": "unknown"
 },
@@ -997,6 +1012,11 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/commands/{}/result",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/direct/{}",
 "kind": "unknown"
 },
 {

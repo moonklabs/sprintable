@@ -1059,6 +1059,13 @@ class ReadChangesPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
 
 
+class DirectOpenPayload(_Payload):
+    """story 4993 (P2): a paired phone's sealed ASK for a same-network direct door on this computer — exactly {envelope}. No session, no address, no key in the clear: the one-time key and the time are inside the signed envelope (the shape is
+    `envelope_shape.check_envelope`'s, judged where the person asks)."""
+
+    envelope: dict
+
+
 class FileListPayload(_Payload):
     """story 4983 (P5): a person's sealed request to list a folder of a project of this computer — exactly {project_id, envelope}. No session, no folder, no path, nothing readable: the computer maps the project to a folder of
     its own and opens the envelope itself (the shape of an envelope is `envelope_shape.check_envelope`'s, judged where the person asks)."""
@@ -1078,6 +1085,7 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "file_list": FileListPayload,
     "file_read": FileListPayload,  # story 4983 (P6): the same two fields — the project and the sealed request (the file's name is inside it)
     "file_download": FileListPayload,  # story 4988 (P8): the same two fields again
+    "direct_open": DirectOpenPayload,  # story 4993 (P2): {envelope} only
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -1241,7 +1249,7 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         .limit(100)
     )).scalars().all()
     now = _now()
-    if any(r.kind in ("read_changes", "file_list", "file_read", "file_download") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too — a list and an open)
+    if any(r.kind in ("read_changes", "file_list", "file_read", "file_download", "direct_open") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too — a list and an open)
         from app.services.desktop_changes import reject_stale_commands
 
         rows = await reject_stale_commands(db, rows, now=now)
