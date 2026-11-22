@@ -267,20 +267,31 @@ function Line({ t, text, testId, onRetry }: { t: T; text: string; testId: string
 }
 
 /** what an end that is not a list says — one line per closed word (the computer's refusal words are `reason.*`) */
-function endLine(t: T, o: Exclude<FilesOutcome, { kind: 'list' }>): string {
+function endLine(t: T, o: Exclude<FilesOutcome, { kind: 'list' }>, computer = false): string {
   if (o.kind === 'reason') return t(`reason.${o.reason}`);
+  if (computer) { // story 4994: the guest desktop app — the codes it can raise say «이 컴퓨터» (it never raises biometric_required · key_invalidated)
+    if (o.kind === 'key') {
+      switch (o.code) {
+        case 'key_failed': return t('key.keyFailedComputer');
+        case 'no_key': case 'not_registered': return t('key.keyNotConnectedComputer');
+        case 'no_screen_lock': return t('key.keyNoScreenLockComputer');
+        default: break;
+      }
+    } else if (o.kind === 'not_paired') return t('outcome.notPairedComputer');
+  }
   if (o.kind === 'key') return t(`key.${o.code}`);
   return t(`outcome.${o.kind}`);
 }
 
 /** what an end of an OPEN says — the closed words of the contract, said for one file */
-function fileEndLine(t: T, o: Ended): string {
+function fileEndLine(t: T, o: Ended, computer = false): string {
   if (o.kind === 'reason') return t(`fileReason.${o.reason}`);
-  return endLine(t, o);
+  return endLine(t, o, computer);
 }
 
 /** story 4988 (P8): what a download says — «받는 중 3/57» while it runs, one line when it ended (saved, or why not) */
 function DownloadLine({ t, dl, onStop, onRetry }: { t: T; dl: Download; onStop: () => void; onRetry: () => void }) {
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994 (a guest has no download cap; kept whole so no «폰» line can come from a shell that offers it)
   if (dl.kind === 'running') {
     return (
       <div role="status" className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground" data-testid="phone-files-download-running">
@@ -291,12 +302,13 @@ function DownloadLine({ t, dl, onStop, onRetry }: { t: T; dl: Download; onStop: 
   }
   const o = dl.outcome;
   if (o.kind === 'saved') return <p role="status" className="text-sm text-foreground" data-testid="phone-files-download-saved">{t('download.saved')}</p>;
-  const line = o.kind === 'incomplete' ? t('download.reason.incomplete') : o.kind === 'save_failed' ? t('download.saveFailed') : o.kind === 'reason' ? t(`download.reason.${o.reason}`) : o.kind === 'cancelled' ? t('outcome.cancelled') : endLine(t, o);
+  const line = o.kind === 'incomplete' ? t('download.reason.incomplete') : o.kind === 'save_failed' ? t('download.saveFailed') : o.kind === 'reason' ? t(`download.reason.${o.reason}`) : o.kind === 'cancelled' ? t('outcome.cancelled') : endLine(t, o, computer);
   const again = o.kind === 'incomplete' || o.kind === 'save_failed' || o.kind === 'cancelled' || (o.kind === 'reason' ? o.reason === 'busy' || o.reason === 'timeout' || o.reason === 'changed_while_reading' : retryable(o));
   return <Line t={t} text={line} testId="phone-files-download-end" onRetry={again ? onRetry : undefined} />;
 }
 
 function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, onBack }: { t: T; v: FileView; canDownload: boolean; onDownload: () => void; onStopDownload: () => void; onRetry: () => void; onBack: () => void }) {
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994
   const crumbs = [v.projectName, ...v.dir, v.name].join(' › ');
   return (
     <div className="space-y-3" data-testid="phone-files-open">
@@ -308,10 +320,10 @@ function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, on
       {v.dl && <DownloadLine t={t} dl={v.dl} onStop={onStopDownload} onRetry={onDownload} />}
       {v.state.kind === 'loading' && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-file-loading">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> {t('file.loading')}
+          <Loader2 className="size-4 animate-spin" aria-hidden /> {t(computer ? 'file.loadingComputer' : 'file.loading')}
         </div>
       )}
-      {v.state.kind === 'end' && v.dl === null && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
+      {v.state.kind === 'end' && v.dl === null && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome, computer)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
       {canDownload && v.dl === null && v.state.kind === 'end' && v.state.outcome.kind === 'reason' && (v.state.outcome.reason === 'too_big' || v.state.outcome.reason === 'not_text') && <div><Button variant="outline" onClick={onDownload} data-testid="phone-files-download-instead">{t('download.button')}</Button></div>}
       {v.state.kind === 'shown' && v.state.body.kind === 'text' && (
         <div className="space-y-2">
@@ -330,6 +342,7 @@ function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, on
 }
 
 function Folder({ t, v, canOpen, onOpen, onFile, onBack }: { t: T; v: FolderView; canOpen: boolean; onFile: (name: string) => void; onOpen: (setupId: string, projectId: string, projectName: string, dir: string[], cursor?: string, keep?: FileEntry[]) => void; onBack: () => void }) {
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994
   const here = (dir: string[], cursor?: string, keep?: FileEntry[]) => onOpen(v.setupId, v.projectId, v.projectName, dir, cursor, keep);
   const crumbs = [v.projectName, ...v.dir].join(' › ');
   return (
@@ -341,12 +354,12 @@ function Folder({ t, v, canOpen, onOpen, onFile, onBack }: { t: T; v: FolderView
       </div>
       {v.state.kind === 'loading' && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-loading">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> {t('loading')}
+          <Loader2 className="size-4 animate-spin" aria-hidden /> {t(computer ? 'loadingComputer' : 'loading')}
         </div>
       )}
       {v.state.kind === 'end' && (v.state.outcome.kind === 'cancelled'
         ? <Line t={t} text={t('outcome.cancelled')} testId="phone-files-end" onRetry={() => here(v.dir)} />
-        : <Line t={t} text={endLine(t, v.state.outcome)} testId="phone-files-end" onRetry={retryable(v.state.outcome) ? () => here(v.dir) : undefined} />)}
+        : <Line t={t} text={endLine(t, v.state.outcome, computer)} testId="phone-files-end" onRetry={retryable(v.state.outcome) ? () => here(v.dir) : undefined} />)}
       {v.state.kind === 'list' && <List t={t} list={v.state.list} canOpen={canOpen} onFile={onFile} onFolder={(n) => here([...v.dir, n])} onMore={() => here(v.dir, v.state.kind === 'list' ? v.state.list.cursor : undefined, v.state.kind === 'list' ? v.state.list.entries : undefined)} />}
     </div>
   );

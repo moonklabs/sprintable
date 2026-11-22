@@ -44,10 +44,10 @@ function server(opts: { devices: Array<{ id: string; confirm_number: string }>; 
   });
 }
 
-async function draw(phoneCall: Call, opts: { inPhoneApp?: boolean; locale?: 'ko' | 'en'; strict?: boolean } = {}) {
+async function draw(phoneCall: Call, opts: { inPhoneApp?: boolean; locale?: 'ko' | 'en'; strict?: boolean; deviceKind?: 'phone' | 'computer' } = {}) {
   const messages = opts.locale === 'en' ? enMessages : koMessages;
   const tree = (
-    <PhoneBridgeContext.Provider value={{ inPhoneApp: opts.inPhoneApp ?? true, phoneCall }}>
+    <PhoneBridgeContext.Provider value={{ inPhoneApp: opts.inPhoneApp ?? true, ...(opts.deviceKind ? { deviceKind: opts.deviceKind } : {}), phoneCall }}>
       <NextIntlClientProvider locale={opts.locale ?? 'ko'} messages={messages} timeZone="UTC"><TodayPairCard /></NextIntlClientProvider>
     </PhoneBridgeContext.Provider>
   );
@@ -212,3 +212,20 @@ describe('[SID:4773] TodayPairCard — a phone paired with nothing gets one line
     expect(q('today-pair-link')?.textContent).toBe('Pair with a computer');
   });
 });
+
+describe('[SID:4994 D-3d] TodayPairCard in the guest desktop app (a computer)', () => {
+  it('says «이 컴퓨터는 아직 다른 컴퓨터와 …» (ko · en), never «폰»; a phone keeps its line', async () => {
+    for (const locale of ['ko', 'en'] as const) {
+      const m = locale === 'ko' ? koMessages : enMessages;
+      server({ devices: [] });
+      await draw(async () => key(), { deviceKind: 'computer', locale });
+      expect(q('today-pair-note')?.textContent, locale).toBe(m.phonePairing.todayNoteComputer);
+      expect(m.phonePairing.todayNoteComputer, locale).not.toMatch(/폰|phone/i);
+      await act(async () => { root.unmount(); }); root = createRoot(host);
+    }
+    server({ devices: [] });
+    await draw(async () => key(), { deviceKind: 'phone' });
+    expect(q('today-pair-note')?.textContent).toBe(koMessages.phonePairing.todayNote);
+  });
+});
+

@@ -1,6 +1,6 @@
 // story 4994 (P4-d · D-3): which device the shell's web view runs on, and the computer's name for the host's list. Each test goes red without the line it names.
 import { describe, expect, it } from 'vitest';
-import { computerLabel, deviceKindOf } from './device-kind';
+import { computerLabel, deviceKindOf, isComputerLabel } from './device-kind';
 
 const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) sprintable-desktop/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
 const WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
@@ -23,3 +23,11 @@ describe('[SID:4994] device kind', () => {
     expect(computerLabel(MAC)).toBe('Mac'); expect(computerLabel(WIN)).toBe('Windows PC'); expect(computerLabel(LIN)).toBe('Linux PC');
   });
 });
+
+describe('isComputerLabel — the host list row of a computer (story 4994 D-3d)', () => {
+  it('is true for exactly the names `computerLabel` makes, false for a phone\'s model name and for nothing', () => {
+    expect([computerLabel(MAC), computerLabel(WIN), computerLabel(LIN)].every((l) => isComputerLabel(l))).toBe(true);
+    for (const l of ['iPhone', 'Galaxy S24', 'Android', 'mac', 'Mac mini', 'Windows', '', undefined]) expect(isComputerLabel(l), String(l)).toBe(false);
+  });
+});
+

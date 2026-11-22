@@ -444,12 +444,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   'desktop.devices.pairGap <-> desktop.devices.setupCount', // (the guard's pair key is in key order)
   'desktop.setup.recipe <-> desktop.setup.room.shortNone',
   'desktop.setup.recipe <-> desktop.setup.room.short',
-  // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
-  // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
-  // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
-  // device place — the very thing the section lists — on purpose (the two removals, a pair vs the phone itself, are told apart by
-  // that word). Look again if the title ever carries a count («원격 기기 · {n}»).
-  'desktop.remoteDevices.confirmRemovePhone <-> desktop.remoteDevices.title',
   // story #4630 (Yuna «4630» ①) — the result line «다른 로그인 {n}개를 끝냈어요 — 길어야 1시간 안에 로그아웃되고, …» contains
   // «로그아웃», the confirmation dialog's button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
   // another): the button is a verb inside the dialog, the line a sentence under the card's own button; «로그아웃» is the same act on

@@ -531,3 +531,79 @@ describe('[4972] the new pairing on the phone screen', () => {
     expect(serverCalls.some((c) => c.includes('pairing-sessions'))).toBe(false);
   });
 });
+
+// story 4994 (D-3d): the same screens in the guest desktop app (a COMPUTER) say «이 컴퓨터» / «그 컴퓨터» — never «폰» — whichever line the pairing ends in
+describe('[SID:4994 D-3d] the pairing screen in the guest desktop app', () => {
+  const T = (koMessages as unknown as { phonePairing: Record<string, string> }).phonePairing;
+  const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+  let ua: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP); });
+  afterEach(() => { ua.mockRestore(); });
+  const noPhone = () => expect(container.textContent ?? '').not.toMatch(/폰/);
+  const WINDOW_OVER_C = async (answer: Record<string, unknown>) => {
+    installShell(); shell['pair.finish'] = { ...answer };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(HEAD.expires_at) + 10 * 60_000);
+    try { await tick(); await tick(); } finally { spy.mockRestore(); }
+  };
+
+  it('start screen · the commitment refused (key store not ready) · paired', async () => {
+    installShell(); await render();
+    expect(text()).toContain(T.startComputer); noPhone();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    installShell(); shell['pair.commit'] = { ok: false, code: 'vault_unavailable' };
+    await START();
+    expect(line()).toBe(T.notReadyComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    installShell(); shell['pair.commit'] = { ok: true, commit: 'C'.repeat(43) };
+    await START(); sessionState = NONCE; await tick(); await tick();
+    pairs = [{ setup_id: HEAD.setup_id }]; await tick();
+    expect(line()).toBe(T.pairedComputer.replace('{device}', 'My Mac')); noPhone();
+  });
+
+  it('the shell\'s window: while it is up · busy · the key store not answering', async () => {
+    installShell(); slow.add('pair.compare');
+    await START(); sessionState = NONCE; await tick(); await tick();
+    expect(line()).toBe(T.compareOpenComputer); noPhone();
+    release['pair.compare'](); await settle();
+    await act(async () => { root.unmount(); }); root = createRoot(container); slow.clear();
+    installShell(); shell['pair.compare'] = { ok: false, code: 'busy' };
+    await START(); sessionState = NONCE; await tick();
+    expect(line()).toBe(T.compareBusyComputer); noPhone();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    installShell(); shell['pair.compare'] = { ok: false, code: 'vault_unavailable' };
+    await START(); sessionState = NONCE; await tick();
+    expect(text()).toContain(T.notReadyComputer); noPhone();
+  });
+
+  it('the ends: no confirmation · a confirmation that does not fit · not finished on the other computer · the server not reachable', async () => {
+    for (const [answer, key] of [[{ ok: false, code: 'no_receipt' }, 'noReceiptComputer'], [{ ok: false, code: 'receipt_invalid' }, 'receiptInvalidComputer'], [{ ok: false, code: 'not_confirmed' }, 'hostNoComputer']] as const) {
+      await WINDOW_OVER_C(answer);
+      expect(line(), key).toBe(T[key]); noPhone();
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+    installShell(); readStatus = 503;
+    await START(); for (let i = 0; i < 5; i++) await tick();
+    expect(line()).toBe(T.serverUnreachableComputer); noPhone();
+  });
+
+  it('the registration refusals (another account · another organization, with and without its name) and «register again»', async () => {
+    for (const [post, expected] of [
+      [() => res(409, { error: { code: 'remote_device_taken' } }), T.takenComputer],
+      [() => res(409, { error: { code: 'remote_device_other_org' } }), T.takenOtherOrgComputer],
+      [() => res(409, { error: { code: 'remote_device_other_org', detail: { org_name: 'Moonklabs' } } }), T.takenOtherOrgNamedComputer.replace('{org}', 'Moonklabs')],
+    ] as const) {
+      installShell(); registerPost = post;
+      await START();
+      expect(line(), String(expected)).toBe(expected); noPhone();
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+  });
+
+  it('every new computer message (ko · en) has no «폰» / «phone»', () => {
+    const E = (enMessages as unknown as { phonePairing: Record<string, string> }).phonePairing;
+    for (const k of Object.keys(T).filter((x) => x.endsWith('Computer'))) { expect(T[k], k).not.toMatch(/폰/); expect(E[k], k).not.toMatch(/phone/i); }
+    expect(Object.keys(E).filter((x) => x.endsWith('Computer')).sort()).toEqual(Object.keys(T).filter((x) => x.endsWith('Computer')).sort());
+  });
+});
+

@@ -13,3 +13,8 @@ export function computerLabel(userAgent: string): string {
   if (/Macintosh|Mac OS X/.test(userAgent)) return 'Mac';
   return 'Linux PC';
 }
+
+/** whether a host-list row's label is one of `computerLabel`'s names — the server keeps no kind for a device, the label the guest registered with is the only hint (a phone's label is its own model name) */
+export function isComputerLabel(label: string | undefined): boolean {
+  return label === 'Mac' || label === 'Windows PC' || label === 'Linux PC';
+}
