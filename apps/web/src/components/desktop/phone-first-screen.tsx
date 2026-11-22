@@ -141,6 +141,7 @@ type MailState = { kind: 'idle' } | { kind: 'sending' } | { kind: 'sent'; email:
 
 function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boolean }) {
   const t = useTranslations('onboarding.phone');
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994: the guest desktop app — the first thing it sees says «computer», not «phone»
   const alive = useAlive();
   const [mail, setMail] = useState<MailState>({ kind: 'idle' });
   const sending = mail.kind === 'sending';
@@ -160,8 +161,8 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
   return (
     <div className="space-y-4" data-testid="onboarding-phone-no-mac">
       <div className="text-center">
-        <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t('noMac.title')}</h1>
-        <p className="mt-2 break-keep text-sm text-muted-foreground">{t('noMac.body')}</p>
+        <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t(computer ? 'noMac.titleComputer' : 'noMac.title')}</h1>
+        <p className="mt-2 break-keep text-sm text-muted-foreground">{t(computer ? 'noMac.bodyComputer' : 'noMac.body')}</p>
       </div>
       {showMail ? (
         <div className="space-y-2 text-center" data-testid="onboarding-phone-mail">
@@ -186,7 +187,7 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
       ) : null}
       {/* the pairing page is the existing one (the shell has the camera and the key); a text link, drawn in every state */}
       <p className="text-center">
-        <Button variant="link" size="sm" asChild className="h-auto whitespace-normal px-0 py-0 text-sm"><a href={pairHref} data-testid="onboarding-phone-pair">{t('noMac.pair')}</a></Button>
+        <Button variant="link" size="sm" asChild className="h-auto whitespace-normal px-0 py-0 text-sm"><a href={pairHref} data-testid="onboarding-phone-pair">{t(computer ? 'noMac.pairComputer' : 'noMac.pair')}</a></Button>
       </p>
     </div>
   );
@@ -194,6 +195,7 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
 
 function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: () => void }) {
   const t = useTranslations('onboarding.phone');
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994
   const alive = useAlive();
   const [rc, setRc, readFailed] = useOrgRemoteControl(orgId);
   const [busy, setBusy] = useState(false);
@@ -221,7 +223,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
           </div>
         ) : null
       ) : (
-        <p className="text-sm text-muted-foreground">{canChange ? t('off.bodyOwner') : t('off.bodyOther')}</p>
+        <p className="text-sm text-muted-foreground">{canChange ? t(computer ? 'off.bodyOwnerComputer' : 'off.bodyOwner') : t(computer ? 'off.bodyOtherComputer' : 'off.bodyOther')}</p>
       )}
       {canChange ? (
         <div className="space-y-1">
