@@ -1016,6 +1016,11 @@
 },
 {
 "method": "PUT",
+"path": "/api/v2/desktop/relay/direct-count",
+"kind": "unknown"
+},
+{
+"method": "PUT",
 "path": "/api/v2/desktop/relay/direct/{}",
 "kind": "unknown"
 },

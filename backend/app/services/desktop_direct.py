@@ -21,9 +21,10 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.desktop_relay import DesktopCommand, DesktopDirectAsk
+from app.models.desktop_relay import DesktopCommand, DesktopDirectAsk, DesktopDirectCount
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_changes import OPEN_COMMAND_STATES, may_read, take_limit_locks
 from app.services.desktop_relay import DesktopRelayError
@@ -306,3 +307,54 @@ async def forget(db: AsyncSession, setup_ids: list[uuid.UUID], *, lock: bool = T
         if lock:
             await db.execute(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids)).order_by(DesktopSetup.id).with_for_update())
         await db.execute(delete(DesktopDirectAsk).where(DesktopDirectAsk.setup_id.in_(setup_ids)))
+
+
+# ── ④ how many (story 4993 P3b) ───────────────────────────────────────────────────────────────────────────────────────────
+
+COUNT_MAX = 1_000_000_000  # a total past this is not a count a person's computer makes
+COUNT_EPOCHS_PER_COMPUTER = 20  # the newest runs of the host kept per computer
+COUNT_KEEP = timedelta(days=30)  # a run not reported for this long goes
+
+
+class CountReport(BaseModel):
+    """What a computer says of its direct road: nothing but two numbers and the name of the run they are counted over (a random word the host makes at start)"""
+    model_config = ConfigDict(extra="forbid")
+
+    epoch: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
+    commands: int = Field(strict=True, ge=0, le=COUNT_MAX)  # a number — never the text «1» or true
+    doors: int = Field(strict=True, ge=0, le=COUNT_MAX)
+
+
+COUNT_BODY_MAX = 512  # a report is a few dozen bytes; over this it is refused before it is parsed
+
+
+def parse_count(raw: bytes) -> CountReport:
+    """the body of a computer's report, judged by size BEFORE it is parsed and without ever putting what it holds into an error"""
+    from pydantic import ValidationError
+
+    if len(raw) > COUNT_BODY_MAX:
+        raise DesktopRelayError(413, "direct_count_too_large", "the report is larger than the server takes")
+    try:
+        return CountReport.model_validate_json(raw)
+    except ValidationError as exc:
+        raise DesktopRelayError(422, "invalid_direct_count", exc.errors(include_url=False, include_input=False, include_context=False)[0]["msg"]) from exc
+
+
+async def apply_count(db: AsyncSession, setup: DesktopSetup, body: CountReport) -> None:
+    """The computer's running totals for one run: kept as the GREATER of what is there and what came (a report again changes nothing; an older, lower one never lowers the total). A computer keeps at most
+    COUNT_EPOCHS_PER_COMPUTER runs — the least recently reported go first. The caller commits."""
+    # one report at a time per computer: two reports of NEW runs that arrive together would each see only their own row, prune nothing, and commit past the bound (the lock is held to the commit)
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"direct-count:{setup.id}", 0))))
+    stmt = pg_insert(DesktopDirectCount).values(setup_id=setup.id, epoch=body.epoch, commands=body.commands, doors=body.doors)
+    await db.execute(stmt.on_conflict_do_update(
+        index_elements=[DesktopDirectCount.setup_id, DesktopDirectCount.epoch],
+        set_={"commands": func.greatest(DesktopDirectCount.commands, stmt.excluded.commands), "doors": func.greatest(DesktopDirectCount.doors, stmt.excluded.doors), "updated_at": func.now()},
+    ))
+    keep = select(DesktopDirectCount.epoch).where(DesktopDirectCount.setup_id == setup.id).order_by(DesktopDirectCount.updated_at.desc(), DesktopDirectCount.epoch).limit(COUNT_EPOCHS_PER_COMPUTER)
+    await db.execute(delete(DesktopDirectCount).where(DesktopDirectCount.setup_id == setup.id, DesktopDirectCount.epoch.not_in(keep)))
+
+
+async def purge_counts(db: AsyncSession, *, now: datetime | None = None) -> int:
+    """Every run not reported for COUNT_KEEP goes (the minute job)"""
+    out = await db.execute(delete(DesktopDirectCount).where(DesktopDirectCount.updated_at <= (now or _now()) - COUNT_KEEP).returning(DesktopDirectCount.setup_id))
+    return len(out.all())

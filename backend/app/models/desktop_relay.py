@@ -327,6 +327,24 @@ class DesktopDirectAsk(Base):
     written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+class DesktopDirectCount(Base):
+    """story 4993 (0496 · P3b): HOW MANY, nothing else — what a computer says of its own same-network direct road: the direct commands it took (`commands`) and the doors it opened (`doors`), counted since one run of the
+    host (`epoch`, a random word the host makes at start). The numbers are the host's running totals, so a report that comes again (a timeout, a retry) changes nothing and a lower one never lowers a higher one (the
+    row keeps the greater). No command, no phone, no address, no time of any one of them: a count. A row is kept 30 days after its last report and at most 20 runs per computer; it goes with the computer's row."""
+
+    __tablename__ = "desktop_direct_counts"
+    __table_args__ = (
+        CheckConstraint("commands >= 0 AND doors >= 0", name="ck_desktop_direct_counts_nonneg"),
+        Index("ix_desktop_direct_counts_updated_at", "updated_at"),
+    )
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True)
+    epoch: Mapped[str] = mapped_column(String(64), primary_key=True)
+    commands: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    doors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class DesktopFileChunk(Base):
     """story 4988 (0492 · P8): one SEALED chunk of a download (`payload` = {"envelope": …}: the server cannot open it — no name, no word, no byte of the file). Put by the computer once, deleted the moment the person reads it; it hangs from its
     request's row (`desktop_file_reads.command_id`, ON DELETE CASCADE) so every end of that row takes its chunks with it."""
