@@ -621,6 +621,33 @@ describe('[4714] branch 5 — the result lines', () => {
     expect(line()?.textContent).toBe('이 프로젝트는 Mac에서 아직 폴더를 고르지 않았어요 — Mac 앞에서 폴더를 골라 주세요');
   });
 
+  it('story 4994: the first screen of the guest desktop app (a COMPUTER) — «no computer paired yet» and «remote control off» (owner · others) say «컴퓨터», not «폰»; the phone keeps its words', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    const T = (koMessages as unknown as { onboarding: { phone: { off: Record<string, string>; noMac: Record<string, string> } } }).onboarding.phone;
+    const E = (enMessages as unknown as { onboarding: { phone: { off: Record<string, string>; noMac: Record<string, string> } } }).onboarding.phone;
+    try {
+      world.devices = [{ id: 'x', confirm_number: '000 000' }];
+      await screen();
+      expect(byId('onboarding-phone-no-mac')).not.toBeNull();
+      expect(text()).toContain(T.noMac.titleComputer);
+      expect(text()).toContain(T.noMac.bodyComputer);
+      expect(byId('onboarding-phone-pair')?.textContent).toBe(T.noMac.pairComputer);
+      expect(byId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair');
+      expect(text()).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container); world.devices = undefined as never;
+      world.startable = { remote_control: false, computers: [computer()] };
+      await screen();
+      expect(text()).toContain(T.off.bodyOwnerComputer);
+      expect(text()).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      world.remote = { data: { enabled: false, enabled_at: null, can_change: false } };
+      await screen();
+      expect(text()).toContain(T.off.bodyOtherComputer);
+      expect(text()).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
+    for (const [k, v] of [['off.bodyOwnerComputer', E.off.bodyOwnerComputer], ['off.bodyOtherComputer', E.off.bodyOtherComputer], ['noMac.titleComputer', E.noMac.titleComputer], ['noMac.bodyComputer', E.noMac.bodyComputer], ['noMac.pairComputer', E.noMac.pairComputer]] as const) expect(v, k).not.toMatch(/phone/i);
+  });
+
   it('story 4994: no screen lock / not registered in the guest desktop app (a COMPUTER) say «이 컴퓨터», not «폰»', async () => {
     const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
     try {

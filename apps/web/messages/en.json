@@ -1861,14 +1861,19 @@
       "off": {
         "title": "Remote control is off for this organization",
         "bodyOwner": "Turn it on to start agents from this phone.",
+        "bodyOwnerComputer": "Turn it on to start agents from this computer.",
         "bodyOther": "Once an owner or admin turns it on, you can start agents from this phone.",
+        "bodyOtherComputer": "Once an owner or admin turns it on, you can start agents from this computer.",
         "action": "Turn on remote control",
         "failed": "Couldn't turn it on — tap again"
       },
       "noMac": {
         "title": "Agents run on your Mac",
+        "titleComputer": "Agents run on another computer",
         "body": "Get the app on your Mac, sign in with the same account, start an agent there and pair this phone — then you can answer, stop and instruct agents from here.",
+        "bodyComputer": "Get the app on the computer the agent runs on, sign in with the same account, start an agent there and pair this computer — then you can answer, stop and instruct agents from here.",
         "pair": "I already have the app on my Mac — pair",
+        "pairComputer": "I already have the app on that computer — pair",
         "mail": "Email me a link to open on my Mac",
         "mailSending": "Sending…",
         "mailSent": "Sent to {email} — open the email on your Mac and click the link.",
