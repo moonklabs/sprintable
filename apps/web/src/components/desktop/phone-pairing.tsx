@@ -356,7 +356,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     }
   };
   const settings = computer ? null : <Button variant="secondary" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
-  const rescan = <Button variant="primary" onClick={() => void scan()}>{t('rescan')}</Button>;
+  const rescan = <Button variant="primary" onClick={() => void scan()}>{t(computer ? 'rescanComputer' : 'rescan')}</Button>;
   // story 4780: [Close] goes back where the pairing was started from (`returnTo` is the entry's page, checked by the page); with none it is the Mac screen as it always was
   const close = <Button variant="secondary" asChild><a href={flat(returnTo ?? '/desktop')}>{t('close')}</a></Button>;
 
@@ -365,7 +365,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       return (
         <Shell>
           <p className="text-ds-body text-ds-ink">{t(computer ? 'startComputer' : 'start')}</p>
-          <Actions><Button variant="primary" onClick={() => void scan()}>{t('scan')}</Button></Actions>
+          <Actions><Button variant="primary" onClick={() => void scan()}>{t(computer ? 'scanComputer' : 'scan')}</Button></Actions>
         </Shell>
       );
     case 'busy':
@@ -470,7 +470,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
             </ul>
           )}
           {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
-          {view.freed ? <Line>{t('limit.after')}</Line> : null}
+          {view.freed ? <Line>{t(computer ? 'limit.afterComputer' : 'limit.after')}</Line> : null}
           <Actions>{rescan}<a href={flat('/desktop')} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 touch:min-h-11" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
         </Shell>
       );

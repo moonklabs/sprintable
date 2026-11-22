@@ -231,13 +231,13 @@ describe('[4532] phone pairing screen', () => {
     const T = koMessages.phonePairing as unknown as Record<string, string>;
     try {
       offerPost = () => res(404, { error: { code: 'phone_key_not_found' } });
-      installShell(); await render(); await press('QR 찍기'); await press('페어링');
+      installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
       expect(line()).toBe(T.registerAgainComputer);
       await act(async () => { root.unmount(); }); root = createRoot(container);
       for (const owner of [true, false]) {
         remoteOffNow = { owner, names: { owners: '민', hasOwners: 'yes' }, connectedSetups: 1 };
         offerPost = () => res(409, { error: { code: 'remote_control_off' } });
-        installShell(); await render(); await press('QR 찍기'); await press('페어링');
+        installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
         expect(line(), `owner=${owner}`).toBe(owner ? T.remoteOffOwnerComputer : '원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자(민)가 켜면 다시 할 수 있어요');
         expect(line()).not.toMatch(/폰/);
         await act(async () => { root.unmount(); }); root = createRoot(container);
@@ -245,7 +245,7 @@ describe('[4532] phone pairing screen', () => {
       // English: «this computer», not «this phone» (the Korean «others» line has no device word to tell the two apart)
       remoteOffNow = { owner: false, names: { owners: 'Min', hasOwners: 'yes' }, connectedSetups: 1 };
       offerPost = () => res(409, { error: { code: 'remote_control_off' } });
-      installShell(); await render('en'); await press('Scan QR'); await press('Pair');
+      installShell(); await render('en'); await press('Paste code'); await press('Pair');
       expect(line()).toBe("Remote control is off, so this computer can't be paired — you can try again once an organization owner (Min) turns it on");
       expect(line()).not.toMatch(/phone/i);
     } finally { ua.mockRestore(); remoteOffNow = null; }
@@ -342,7 +342,7 @@ describe('[4532] phone pairing screen', () => {
       });
       installShell();
       await render();
-      await press('QR 찍기');
+      await press('코드 붙여넣기');
       await press('페어링');
       const rows = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')] as HTMLElement[];
       expect(rows.map((r) => r.querySelector('button')?.textContent)).toEqual(['이 기기 빼기', '이 폰 빼기']);
@@ -354,7 +354,7 @@ describe('[4532] phone pairing screen', () => {
         if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: [{ id: 'g-2', label: 'Windows PC', last_used_at: null, pairs: [{ device_name: 'Studio' }] }] });
         return base(url, init);
       });
-      installShell(); await render(); await press('QR 찍기'); await press('페어링');
+      installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
       await act(async () => { (container.querySelector('[data-testid="pairing-limit-phone"] button') as HTMLButtonElement).click(); });
       expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).toContain('이 기기를 뺄까요? · Windows PC — 빼면 그 기기로는');
       expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).not.toMatch(/폰/);
@@ -379,6 +379,32 @@ describe('[4532] phone pairing screen', () => {
     expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
     expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
     expect(document.body.textContent).not.toContain('뺐어요');
+  });
+
+  it('story 4994 (D-3e): in the guest desktop app (a computer) a freed place says [다시 붙여넣기] / [Paste again] — the button it really has — never [다시 찍기]', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+        let removed = false;
+        const base = fetchWithAuth.getMockImplementation()!;
+        fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+          if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? [] : [{ id: 'g-1', label: 'Mac', last_used_at: null, pairs: [] }] });
+          if (url === '/api/remote-devices/g-1' && init?.method === 'DELETE') { removed = true; return res(200, { removed: true }); }
+          return base(url, init);
+        });
+        installShell();
+        await render(locale);
+        await press(locale === 'ko' ? '코드 붙여넣기' : 'Paste code'); await press(locale === 'ko' ? '페어링' : 'Pair');
+        for (let i = 0; i < 2; i++) await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="pairing-limit-phone"] button')!.click(); });
+        await settle();
+        const m = (locale === 'ko' ? koMessages : enMessages).phonePairing as unknown as Record<string, string> & { limit: Record<string, string> };
+        expect(document.body.textContent).toContain(m.limit.afterComputer);
+        expect(document.body.textContent).not.toMatch(locale === 'ko' ? /다시 찍기/ : /Scan again/);
+        expect(buttons()).toContain(m.rescanComputer);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+    } finally { ua.mockRestore(); }
   });
 
   it('three phones → one [이 폰 빼기] → confirm → the place is free → [다시 찍기] starts the scan again (story #4624 · 까디르)', async () => {
@@ -521,12 +547,12 @@ describe('[4532] phone pairing screen', () => {
       shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
       installShell();
       await render();
-      await press('QR 찍기');
+      await press('코드 붙여넣기');
       await press('페어링');
       expect(lines()[0]).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요');
       expect(lines()[1]).toBe(koMessages.agentPermissions.phone.noScreenLockComputer);
       expect(lines()[1]).not.toMatch(/폰/);
-      expect(buttons()).toEqual(['다시 찍기']);
+      expect(buttons()).toEqual(['다시 붙여넣기']);
       expect(nothingSent()).toBe(true);
     } finally { ua.mockRestore(); }
   });
