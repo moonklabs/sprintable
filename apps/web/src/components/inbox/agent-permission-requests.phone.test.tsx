@@ -311,6 +311,22 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(buttons()).toEqual([]);
   });
 
+  it('story 4994 (D-3): in the guest desktop app (a COMPUTER) the removed-device line does not call it a phone — ko and en', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
+    try {
+      for (const [locale, text] of [['ko', koMessages.agentPermissions.phone.notPairedComputer], ['en', enMessages.agentPermissions.phone.notPairedComputer]] as const) {
+        answerResponse = () => new Response(JSON.stringify({ error: { code: 'phone_not_paired' } }), { status: 409 });
+        installShell();
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render([req()], locale);
+        await press(locale === 'ko' ? '허용' : 'Allow');
+        expect(phoneLines(), locale).toEqual([text]);
+        expect(text, locale).not.toMatch(/폰|phone/i);
+      }
+    } finally { ua.mockRestore(); }
+  });
+
   it('reads in English', async () => {
     auth = 'screen_lock';
     installShell();

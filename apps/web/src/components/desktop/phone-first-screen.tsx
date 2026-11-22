@@ -235,7 +235,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
 
 function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, note, onNoteSeen, computers, onPickComputer }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void; onListChanged: () => void; note: boolean; onNoteSeen: () => void; computers: StartableComputer[] | null; onPickComputer: (setupId: string) => void }) {
   const t = useTranslations('onboarding.phone');
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
   const [agentId, setAgentId] = useState<string | null>(agents.length === 1 ? agents[0].agent_member_id : null); // one agent → picked already
   const agent: StartableAgent | undefined = agents.find((a) => a.agent_member_id === agentId);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -312,7 +312,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, not
       case 'no_folder': return t('result.noFolder');
       case 'already_running': return t('result.alreadyRunning');
       case 'unreachable': return t('result.unreachable');
-      case 'not_paired': return t('result.notPaired');
+      case 'not_paired': return t(deviceKind === 'computer' ? 'result.notPairedComputer' : 'result.notPaired'); // (story 4994 D-3: the guest desktop app is a computer)
       case 'remote_off': return t('result.remoteOff');
       case 'no_screen_lock': return t('result.noScreenLock');
       case 'biometric_required': return t('result.biometricRequired');

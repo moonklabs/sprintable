@@ -354,6 +354,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   /** story 4972: a sealed card — one button opens it on the shell's own sheet, where the person answers; the result lines name no tool (none is known here) */
   sealed?: boolean;
 }) {
+  const { deviceKind } = usePhoneBridge();
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('agentPermissions');
   const pairHref = usePairHref(); // story 4780: [Close] of the pairing screen comes back to the inbox
@@ -399,7 +400,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
     case 'closed': return <Line focus>{t('phone.closed')}</Line>;
     case 'expired': return <Line focus>{t('line.expired')}</Line>;
     case 'unreachable': return <Line focus>{t('line.unknown')}</Line>;
-    case 'not_paired': return <Line focus>{t('phone.notPaired')}</Line>;
+    case 'not_paired': return <Line focus>{t(deviceKind === 'computer' ? 'phone.notPairedComputer' : 'phone.notPaired')}</Line>; // (story 4994 D-3: the guest desktop app is a computer)
     case 'biometric_required': return <><Line focus>{t('phone.biometricRequired')}</Line>{settings}</>;
     case 'no_screen_lock': return <><Line focus>{t('phone.noScreenLock')}</Line>{settings}</>;
     case 'key_invalidated':

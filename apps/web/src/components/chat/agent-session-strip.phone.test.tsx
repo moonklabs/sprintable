@@ -493,6 +493,31 @@ describe('[4534] the strip inside the phone app', () => {
     expect(fetchWithAuth.mock.calls.some(([u, i]) => String(u).endsWith('/desktop-commands') && (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
   });
 
+  it('story 4994 (D-3): the server says 409 phone_not_paired — in a phone the line says «이 폰», in the guest desktop app (a COMPUTER) it says «이 컴퓨터» (stop and send, ko and en)', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    for (const guest of [false, true]) {
+      const ua = guest ? vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP) : null;
+      try {
+        for (const locale of ['ko', 'en'] as const) {
+          const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+          server(res(409, { error: { code: 'phone_not_paired' } }));
+          phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'x' });
+          await act(async () => { root.unmount(); }); root = createRoot(container);
+          await render(locale);
+          await press(m.button.stop); await settle();
+          expect(commandLine()?.textContent, `${locale} guest=${guest} stop`).toBe(guest ? m.command.stop.notPairedComputer : m.command.stop.notPaired);
+          await press(m.button.instruct);
+          await act(async () => { const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'x'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+          await press(m.sheet.send); await settle();
+          expect(commandLine()?.textContent, `${locale} guest=${guest} send`).toBe(guest ? m.command.send.notPairedComputer : m.command.send.notPaired);
+        }
+      } finally { ua?.mockRestore(); }
+    }
+    for (const lang of [ko, enMessages.chats.agentSession as typeof ko]) {
+      expect(lang.command.stop.notPairedComputer).not.toMatch(/폰|phone/i); expect(lang.command.send.notPairedComputer).not.toMatch(/폰|phone/i);
+    }
+  });
+
   it('reads in English', async () => {
     server(res(201, {}));
     await render('en');

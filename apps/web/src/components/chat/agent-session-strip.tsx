@@ -423,7 +423,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 }
 
 function ResultLine({ result }: { result: Result }) {
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
   const t = useTranslations('chats.agentSession');
   const pairHref = usePairHref(); // story 4780: the pairing screen's [Close] comes back to this conversation
   const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on
@@ -468,7 +468,8 @@ function ResultLine({ result }: { result: Result }) {
       : line(t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
     case 'conversation_not_found': return line(t('command.conversationNotFound'));
     case 'cancelled': return line(stop ? t('command.stop.cancelled') : t('command.send.cancelled'));
-    case 'not_paired': return line(stop ? t('command.stop.notPaired') : t('command.send.notPaired'));
+    // story 4994 (D-3): the guest desktop app is a COMPUTER — its words do not call it a phone
+    case 'not_paired': return line(deviceKind === 'computer' ? (stop ? t('command.stop.notPairedComputer') : t('command.send.notPairedComputer')) : (stop ? t('command.stop.notPaired') : t('command.send.notPaired')));
     case 'signed_out': return line(stop ? t('command.stop.signedOut') : t('command.send.signedOut'), signIn);
     case 'key_invalidated': return line(stop ? t('command.stop.keyInvalidated') : t('command.send.keyInvalidated'), pairAgain);
     case 'not_registered': return line(stop ? t('command.stop.notRegistered') : t('command.send.notRegistered'), pairAgain);

@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
+import { deviceKindOf } from '@/lib/device-kind';
 import { __resetOrgRemoteControlForTest } from '@/lib/org-remote-control';
 
 const fetchWithAuth = vi.fn();
@@ -93,7 +94,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { 
 async function renderIn(ui: React.ReactElement, { phone = true, locale = 'ko' as 'ko' | 'en' } = {}) {
   await act(async () => {
     root.render(
-      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, phoneCall: phoneCall as never }}>
+      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, deviceKind: deviceKindOf(navigator.userAgent), phoneCall: phoneCall as never }}>
         <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages}>{ui}</NextIntlClientProvider>
       </PhoneBridgeContext.Provider>,
     );
@@ -620,6 +621,17 @@ describe('[4714] branch 5 — the result lines', () => {
     expect(line()?.textContent).toBe('이 프로젝트는 Mac에서 아직 폴더를 고르지 않았어요 — Mac 앞에서 폴더를 골라 주세요');
   });
 
+  it('story 4994 (D-3): phone_not_paired in the guest desktop app (a COMPUTER) says «이 컴퓨터», not «이 폰»', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
+    try {
+      world.post = json({ error: { code: 'phone_not_paired' } }, 409);
+      await start();
+      expect(line()?.textContent).toBe('이 컴퓨터는 에이전트가 도는 컴퓨터와 페어링되어 있지 않아 시작하지 못했어요 — 그 컴퓨터와 페어링한 뒤 다시 눌러 주세요');
+      expect(line()?.textContent).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
+  });
+
   it('device_unreachable · phone_not_paired · a shell refusal each get their own line', async () => {
     world.post = json({ error: { code: 'device_unreachable' } }, 409);
     await start();
@@ -861,7 +873,7 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
   });
   it('the refusals reuse the phone lines\' shape: each ends in an instruction (a started start has only the «waiting to connect» line · a cancelled one none)', () => {
     expect(Object.keys(ko).filter((k) => k.startsWith('result.')).sort()).toEqual([
-      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired',
+      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired', 'result.notPairedComputer',
       'result.notRegistered', 'result.openChat', 'result.readFailed', 'result.remoteOff', 'result.retry', 'result.signedOut', 'result.unknown', 'result.unreachable',
     ].sort());
   });

@@ -5,6 +5,7 @@
 // MAC with that secret, and the pairing number from the phone's own key. Each step here is one outcome kind — the screen turns it
 // into the spec's line. No step ever sees the secret or the key bytes.
 
+import { computerLabel, deviceKindOf } from '@/lib/device-kind';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
@@ -91,8 +92,9 @@ async function read(res: Response): Promise<{ code: string; body: Record<string,
   }
 }
 
-/** The phone's name as the computer shows it (≤ 64) — the app's own web view says what phone it runs on. */
+/** The device's name as the computer shows it (≤ 64) — the app's own web view says what it runs on. story 4994: the GUEST DESKTOP app is an Electron window — it is named for its computer (device-kind.ts), never a phone's name (it was shown as «Android», the fall-through below). */
 export function phoneLabel(userAgent: string): string {
+  if (deviceKindOf(userAgent) === 'computer') return computerLabel(userAgent);
   if (/iPad/.test(userAgent)) return 'iPad';
   if (/iPhone/.test(userAgent)) return 'iPhone';
   const model = /Android [^;)]*;\s*([^;)]+?)(?:\s+Build\/[^;)]*)?[;)]/.exec(userAgent)?.[1]?.trim();

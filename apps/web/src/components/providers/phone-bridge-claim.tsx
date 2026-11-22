@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { deviceKindOf } from '@/lib/device-kind';
 import { claimPhoneBridge, isPhoneApp, phoneCall, subscribePhoneApp } from '@/lib/phone-bridge';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 import { ON_OPEN_MS, startHandoffWatch, stopHandoffWatch } from '@/lib/phone-handoff-watch';
@@ -14,7 +15,8 @@ import { ON_OPEN_MS, startHandoffWatch, stopHandoffWatch } from '@/lib/phone-han
 export function PhoneBridgeClaim({ children }: { children: ReactNode }) {
   claimPhoneBridge();
   const inPhoneApp = useSyncExternalStore(subscribePhoneApp, isPhoneApp, () => false);
-  const value = useMemo(() => ({ inPhoneApp, phoneCall }), [inPhoneApp]);
+  const deviceKind = typeof navigator === 'undefined' ? 'phone' : deviceKindOf(navigator.userAgent); // (read where the page runs: the guest desktop app's window says `Electron/`)
+  const value = useMemo(() => ({ inPhoneApp, deviceKind, phoneCall }), [inPhoneApp, deviceKind]);
   // story 4978 (C1b-phone): in the phone app, a look for the record key handoffs computers put for this phone — when the app opens and each time it comes back to the front (a computer may have sealed a new envelope while it was away), for a short while.
   // Outside the phone app nothing is looked for; a page that goes away ends the watch.
   useEffect(() => {
