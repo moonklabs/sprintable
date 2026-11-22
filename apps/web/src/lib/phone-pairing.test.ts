@@ -37,6 +37,10 @@ describe('[4532] phoneLabel', () => {
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 15; SM-S938N Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36')).toBe('SM-S938N');
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 15; SM-S938N) AppleWebKit/537.36')).toBe('SM-S938N');
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36')).toBe('Android'); // reduced UA
+    // story 4994: the guest desktop app (an Electron window) is named for its computer — it was shown as «Android» (the fall-through)
+    expect(phoneLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) sprintable-desktop/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Mac');
+    expect(phoneLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Windows PC');
+    expect(phoneLabel('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Linux PC');
   });
 });
 
