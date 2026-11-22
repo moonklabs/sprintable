@@ -317,10 +317,12 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   };
   const run = async (verb: Verb, text?: string) => {
     setResult({ verb, busy: true });
+    // story 4993 (5a): the computer this session runs on — the shell may take the press over the same-network direct road to it (the server's POST is the road when it does not)
+    const setupId = typeof view.setup_id === 'string' && view.setup_id !== '' ? view.setup_id : undefined;
     settle(verb, await commandOnPhone(
-      verb === 'stop' ? { agentId, kind: 'stop_session' }
-        : verb === 'end' ? { agentId, kind: 'end_session' }
-          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId, computerOpensSealed: view.sealed_prompt === true }, deps,
+      verb === 'stop' ? { agentId, kind: 'stop_session', ...(setupId ? { setupId } : {}) }
+        : verb === 'end' ? { agentId, kind: 'end_session', ...(setupId ? { setupId } : {}) }
+          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId, computerOpensSealed: view.sealed_prompt === true, ...(setupId ? { setupId } : {}) }, deps,
     ));
   };
   // [결과 확인]: the same command followed again — no signature, no sheet

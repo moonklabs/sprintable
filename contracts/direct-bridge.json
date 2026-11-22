@@ -1,0 +1,76 @@
+{
+  "_about": "The ONE contract of the direct road's WEB ↔ SHELL bridge (story 4993 · 4c-1). The web (a page the SERVER serves) asks the shell — which owns the socket — to open a direct road to one paired computer, to send ONE command over it and to read how a command came out. The shell decides what may ride the road (the web is not trusted with that), and everything that goes back to the web is a CLOSED WORD or a number: never an address, a port, a ticket, a key, nor a free text. Both the shell's lib/directBridge.js and the web's wiring (PR 5) read this file; a change of any word here is a new bridge version.",
+  "version": 1,
+  "calls": {
+    "direct.open": {
+      "args": { "setup_id": "uuid" },
+      "reply": { "ok": "boolean", "why": "open_why word (only when ok is false)", "code": "refusal word (only when why is 'refused')" },
+      "note": "Try to have a direct road to that computer (the shell asks the Mac for a door through the relay, connects, and verifies the Mac's proof). ok:false is not an error: the web goes on by the server as it does today. A computer that failed a moment ago answers why 'cooling' at once (five quiet minutes)."
+    },
+    "direct.send": {
+      "args": { "setup_id": "uuid", "row": "command_row" },
+      "reply": { "sent": "boolean", "why": "send_why word (only when sent is false)" },
+      "note": "Send ONE command row over the open road. `sent:true` only after the Mac's SIGNED receipt of exactly that command was verified; anything else is sent:false and the web posts the same row (same command_id) to the server — the Mac never runs one command id twice. The shell judges what may ride (see `allowed`) BEFORE a byte is written."
+    },
+    "direct.result": {
+      "args": { "setup_id": "uuid", "command_id": "command_id" },
+      "reply": { "state": "pending | done | failed | rejected | unknown", "code": "result_code word (only for failed or rejected)" },
+      "note": "How a command sent over the direct road came out (the Mac says it in a `result` frame; the shell keeps the last 64 for five minutes). `unknown` = the shell has none for that id (never sent that way, forgotten, or the road ended): the web asks the server as before."
+    },
+    "direct.close": {
+      "args": { "setup_id": "uuid" },
+      "reply": { "ok": true },
+      "note": "End the road to that computer (the person left the screen). Never a failure. Commands still waiting for a word read as `unknown` afterwards (the web asks the server, as it does for any command it did not send this way)."
+    },
+    "direct.status": {
+      "args": { "setup_id": "uuid" },
+      "reply": { "state": "road_state word" },
+      "note": "Where the road to that computer is now; the web uses it to decide whether to try a send."
+    }
+  },
+  "command_row": {
+    "keys": ["command_id", "kind", "session_key", "payload", "created_at"],
+    "command_id": "^[A-Za-z0-9_-]{8,100}$",
+    "session_key": "null, or a string of 1..200 characters",
+    "created_at": "an ISO 8601 text (YYYY-MM-DDThh:mm:ss[.fraction](Z|±hh:mm)) of a real moment in the years 2000..2999, 20..40 characters",
+    "payload": "an object",
+    "max_json_bytes": 65519
+  },
+  "allowed": {
+    "_note": "Decided by the SHELL, from the row's own bytes. The direct road is a plain TCP line on a LAN (until the AEAD wiring lands it shows the whole command; after it, only a length): an instruction's words ride it only sealed, and every kind that has a signature rides it only with one. The Mac judges the same again (a plain send_prompt is refused there too).",
+    "kinds": ["start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock"],
+    "send_prompt": { "payload_keys": ["session_key", "conversation_id", "envelope"], "envelope": "an object" },
+    "signed_kinds": { "kinds": ["start_session", "answer_approval", "stop_session", "end_session", "clock"], "payload_has": "signed: a non-empty string of at most 16384 characters" }
+  },
+  "words": {
+    "road_state": ["idle", "asking", "connecting", "proving", "ready"],
+    "open_why": ["cooling", "busy", "closed", "ask_not_made", "ask_not_sent", "no_answer", "answer_bad", "refused", "stale", "connect", "proof", "protocol", "no_road", "bad_request"],
+    "send_why": ["not_open", "busy", "too_big", "closed", "ack", "protocol", "not_allowed", "bad_row", "no_road"],
+    "refusal_code": ["DIR_DISABLED", "DIR_OPEN_STALE", "DIR_RATE_MINUTE", "DIR_RATE_HOUR", "DIR_BUSY_PHONE", "DIR_BUSY_MAC", "DIR_NO_NETWORK", "DIR_LISTEN_FAILED", "DIR_NO_IDENTITY", "DIR_STOPPED", "DIR_BAD_FIELD"],
+    "result_state": ["done", "failed", "rejected"],
+    "result_code": ["schema_rejected", "not_allowed", "not_supported", "expired", "unknown_session", "unknown_agent", "unsigned", "bad_signature", "stopped", "unavailable", "error"]
+  },
+  "result_frame": {
+    "_note": "What the Mac writes into a `result` frame (inside the connection's cipher once wired): ONE JSON object, exactly these keys, closed words only. The shell drops anything else.",
+    "keys": ["command_id", "state", "code"],
+    "spelling": "{\"command_id\":\"<id>\",\"state\":\"done|failed|rejected\"[,\"code\":\"<word>\"]} — exactly this text: keys in this order, no space, `code` only after failed or rejected",
+    "code_optional": true,
+    "keep": { "max": 64, "ttl_ms": 300000 }
+  },
+  "vectors": {
+    "rows_allowed": [
+      { "name": "a sealed instruction", "row": { "command_id": "cmd-seal-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "conversation_id": "33333333-2222-4333-8444-555555555555", "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" } },
+      { "name": "a signed stop", "row": { "command_id": "cmd-stop-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
+      { "name": "a signed approval", "row": { "command_id": "cmd-appr-0001", "kind": "answer_approval", "session_key": null, "payload": { "request_id": "r-1", "decision": "allow", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
+      { "name": "a signed clock press", "row": { "command_id": "cmd-clock-0001", "kind": "clock", "session_key": null, "payload": { "action": "in", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } }
+    ],
+    "rows_not_allowed": [
+      { "name": "a plain instruction (the words in text)", "row": { "command_id": "cmd-plain-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "text": "words", "conversation_id": "33333333-2222-4333-8444-555555555555", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "an instruction with text AND an envelope", "row": { "command_id": "cmd-both-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "conversation_id": "33333333-2222-4333-8444-555555555555", "envelope": { "v": 1 }, "text": "words" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a stop with no signature", "row": { "command_id": "cmd-nosig-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a kind that stays on the server (a files read)", "row": { "command_id": "cmd-file-0001", "kind": "file_list", "session_key": null, "payload": { "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a door ask is not sent over a road", "row": { "command_id": "cmd-door-0001", "kind": "direct_open", "session_key": "direct", "payload": { "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a row with a key that is not a command's", "row": { "command_id": "cmd-xtra-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z", "extra": 1 }, "why": "bad_row" }
+    ]
+  }
+}

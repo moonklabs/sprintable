@@ -1027,3 +1027,36 @@ describe('[4977] the «기록» button of the strip', () => {
     expect(container.querySelector('[data-testid="agent-changes-buttons"] [data-testid="agent-records-open"]')).not.toBeNull();
   });
 });
+
+// story 4993 (5a): the strip names the computer the session runs on — the shell may take the press over the same-network direct road (and the server's POST is the road when it does not)
+describe('[4993 5a] the strip and the direct road', () => {
+  const SETUP = '0f0e0d0c-0b0a-4908-8706-050403020100';
+  const shellAnswering = (extra: Record<string, unknown> = {}) => phoneCall.mockImplementation(async (type: string) => {
+    if (type === 'command.sign') return { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' };
+    if (type === 'shell.caps') return { id: 'c', ok: true, caps: { direct: 1 } };
+    if (type === 'direct.status') return { id: 's', ok: true, state: 'ready' };
+    if (type === 'direct.send') return { id: 'x', ok: true, sent: true };
+    if (type === 'direct.result') return { id: 'r', ok: true, state: 'done', ...extra };
+    throw new Error(`unexpected ${type}`);
+  });
+  it('a session that names its computer: [멈춤] goes over the direct road — the shell is told which computer, and the server\'s command line is not posted to', async () => {
+    vi.useFakeTimers(); sessionView = { ...sessionView, setup_id: SETUP };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]); shellAnswering();
+    await render(); await press(ko.button.stop); await poll(1);
+    const send = phoneCall.mock.calls.find((c) => c[0] === 'direct.send')!; expect(send[1]).toMatchObject({ setup_id: SETUP, row: { kind: 'stop_session', session_key: 's-9', payload: { session_key: 's-9', signed: 'S' } } });
+    expect(commandLine()?.textContent).toBe(ko.command.stopped);
+    expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands'))).toBe(false);
+  });
+  it('a session that does not name its computer: the shell is never asked about the road and the server gets the post as ever', async () => {
+    vi.useFakeTimers(); const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]); shellAnswering();
+    await render(); await press(ko.button.stop); await poll(1);
+    expect(phoneCall.mock.calls.map((c) => c[0])).toEqual(['command.sign']); expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands'))).toBe(true); expect(commandLine()?.textContent).toBe(ko.command.stopped);
+  });
+  it('the direct road refuses (a closed word): the same press is posted to the server with the same signature — the person sees the same line', async () => {
+    vi.useFakeTimers(); sessionView = { ...sessionView, setup_id: SETUP };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    phoneCall.mockImplementation(async (type: string) => (type === 'command.sign' ? { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' } : type === 'shell.caps' ? { id: 'c', ok: true, caps: { direct: 1 } } : type === 'direct.status' ? { id: 's', ok: true, state: 'ready' } : { id: 'x', ok: true, sent: false, why: 'ack' }));
+    await render(); await press(ko.button.stop); await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.stopped); expect(calls.filter((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands')).length).toBe(1);
+  });
+});
