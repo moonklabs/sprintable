@@ -10,6 +10,7 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import { DESKTOP_CLOCK_ACTIONS } from '@/lib/desktop-clock-keys';
 import type { PhoneAnswer } from './phone-bridge';
+import { REPLAY_WORDS, followDirectResult, openFired, tryDirect } from './phone-direct';
 import type { Flow } from './phone-start';
 
 export type ClockAction = (typeof DESKTOP_CLOCK_ACTIONS)[number];
@@ -163,7 +164,11 @@ export type PressOutcome =
 /** `computer: true` (story 4734 B): the press of the WHOLE computer (every setup of it the person may press) — from the setup named; never with an agent */
 export interface PressInput { setupId: string; action: ClockAction; agentId?: string; computer?: true }
 /** a press the web posted (or tried to): what the next look follows again — the same key and body, its id once known */
-export interface Pending { setupId: string; key: string; body: Record<string, unknown>; commandId?: string }
+export interface Pending { setupId: string; key: string; body: Record<string, unknown>; commandId?: string;
+  /** story 4993 (5b-1): the press went (or may have gone) over the SAME-NETWORK direct road to this computer — the server has no row for it: it is followed by the shell's `direct.result`, never posted to the server */
+  direct?: true;
+  /** story 4993 (5b-1): the road said «not sent» AFTER the frame may have reached the computer and the press went to the server: a «replay» word there means the computer already had it (unknown, not a failure) */
+  afterDirectMiss?: true }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 export interface PressDeps {
@@ -232,7 +237,35 @@ export async function pressClock(input: PressInput, deps: PressDeps): Promise<Pr
     // closed: the action + the agent the person picked + the shell's two values — never a text · name · path (the signature covers the rest)
     body: { action: input.action, signed: signed.signed, phone_key_id: signed.phone_key_id, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}), ...(input.computer ? { computer: true } : {}) },
   };
+  return route(pending, deps);
+}
+
+/** story 4993 (5b-1): the same-network direct road FIRST for a clock press of one agent (the Mac takes `clock` on it); the press of the whole computer, an edit, a shell without the road, no road yet (opened behind the press, never waited for) · a refusal → the server, as it always did */
+async function route(pending: Pending, deps: PressDeps): Promise<PressOutcome> {
+  const went = await tryDirect(pending.setupId, { verb: 'clock', key: pending.key, body: pending.body }, { ...deps, openFired });
+  if (went === 'sent' || went === 'maybe') return followDirect({ ...pending, direct: true }, deps);
+  if (went === 'missed') return post({ ...pending, afterDirectMiss: true }, deps);
   return post(pending, deps);
+}
+
+/** the end of a clock command as the daemon said it (the server's line or the shell's `direct.result` — the same words): an outcome, or `null` = not an end yet */
+function outcomeOfResult(r: { state?: string; result_code?: string | null }, pending: Pending): PressOutcome | null {
+  if ((pending.afterDirectMiss || pending.direct) && r.state === 'rejected' && typeof r.result_code === 'string' && REPLAY_WORDS.has(r.result_code)) return { kind: 'unknown', pending }; // the computer already had it
+  if (r.state === 'done') {
+    const result = (CLOCK_RESULTS as readonly unknown[]).includes(r.result_code) ? (r.result_code as ClockResult) : null;
+    return result ? { kind: 'done', result } : { kind: 'failed' }; // a word this page does not know is not read as a success
+  }
+  if (r.state === 'rejected' || r.state === 'failed') return r.result_code === 'remote_control_off' ? { kind: 'remote_off' } : { kind: 'failed' };
+  return null;
+}
+
+/** story 4993 (5b-1): follow a clock press that went over the road — the shell's word, asked as the server's line is (every 1.5 s · the window of a press); never posted. «Never taken within its life» (`expired`) is the server's word for a queued row: a road has none, so the end of the window is `unknown` */
+async function followDirect(pending: Pending, deps: PressDeps): Promise<PressOutcome> {
+  return followDirectResult<PressOutcome>(pending.setupId, pending.key, {
+    phoneCall: deps.phoneCall, wait: deps.wait, now: deps.now, pollMs: deps.pollMs ?? PRESS_POLL_MS, pollMaxMs: deps.pollMaxMs ?? PRESS_POLL_MAX_MS,
+    decide: (r) => outcomeOfResult({ state: r.state, result_code: r.code }, pending), unknown: () => ({ kind: 'unknown', pending }),
+    halted: () => (deps.flow?.stopped ? { kind: 'stopped' } : null),
+  });
 }
 
 export type ClockEditFields = { done?: string; plan?: string; blockers?: string };
@@ -274,6 +307,7 @@ export async function editClock(input: EditInput, deps: PressDeps): Promise<Pres
 /** the next look at a press whose end is not known: its id when known (follow it), else the same post (same key: the server gives back the command it made, if any) */
 export async function checkPress(pending: Pending, deps: PressDeps): Promise<PressOutcome> {
   if (deps.flow?.stopped) return { kind: 'stopped' };
+  if (pending.direct) return followDirect(pending, deps); // (a direct press is asked of the shell again — never posted: the server has no row for it)
   return pending.commandId ? follow(pending, deps) : post(pending, deps);
 }
 
@@ -330,14 +364,8 @@ async function follow(pending: Pending, deps: PressDeps): Promise<PressOutcome> 
     if (!r || typeof r !== 'object') continue;
     if (r.state === 'delivered' || r.state === 'acked') everTaken = true;
     if (r.state === 'queued') queuedAt = now();
-    if (r.state === 'done') {
-      const result = (CLOCK_RESULTS as readonly unknown[]).includes(r.result_code) ? (r.result_code as ClockResult) : null;
-      return result ? { kind: 'done', result } : { kind: 'failed' }; // a word this page does not know is not read as a success
-    }
-    if (r.state === 'rejected' || r.state === 'failed') {
-      if (r.result_code === 'remote_control_off') return { kind: 'remote_off' };
-      return { kind: 'failed' };
-    }
+    const end = outcomeOfResult(r, pending);
+    if (end) return end;
   }
   // «nothing was stopped» is said only when a look made AFTER the command's life (120 s) still found it queued and never anything else: it was never taken and never will
   // be. A queued look from early on, followed by reads that failed, proves nothing — the computer may have taken it in between: that is `unknown`.

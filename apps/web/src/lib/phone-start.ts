@@ -10,6 +10,7 @@
 
 import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
+import { REPLAY_WORDS, followDirectResult, openFired, tryDirect } from './phone-direct';
 
 export interface StartableProject { project_id: string; name: string }
 /** `running` (story 4714): true a session lives · false none / all over · null the computer has not been heard from — or a server that does not say (never read as «not running») */
@@ -164,7 +165,11 @@ export type StartOutcome =
 
 export interface StartInput { setupId: string; agentId: string; projectId: string }
 /** a start the web posted (or tried to): what [결과 확인] follows again — the same key and body, its id once known */
-export interface Pending { agentId: string; key: string; body: Record<string, unknown>; commandId?: string }
+export interface Pending { agentId: string; key: string; body: Record<string, unknown>; commandId?: string;
+  /** story 4993 (5b-1): the start went (or may have gone) over the SAME-NETWORK direct road to this computer — the server has no row for it: it is followed by the shell's `direct.result`, never posted to the server */
+  direct?: { setupId: string };
+  /** story 4993 (5b-1): the road said «not sent» AFTER the frame may have reached the computer and the press went to the server: a «replay» word there means the computer already had it (unknown, not a failure) */
+  afterDirectMiss?: true }
 
 export interface StartDeps {
   phoneCall: Call;
@@ -225,12 +230,21 @@ export async function startOnPhone(input: StartInput, deps: StartDeps): Promise<
     // closed: the three ids the person picked + the shell's two values — never a path · mode · arguments · runtime
     body: { setup_id: input.setupId, project_id: input.projectId, signed: signed.signed, phone_key_id: signed.phone_key_id },
   };
+  return route(pending, deps, input.setupId);
+}
+
+/** story 4993 (5b-1): the same-network direct road FIRST for a signed start (the Mac takes `start_session` on it); a press that is not sent by it — no shell support · no road yet (the road is opened behind the press, never waited for) · a refusal — goes to the server as it always did */
+async function route(pending: Pending, deps: StartDeps, setupId: string): Promise<StartOutcome> {
+  const went = await tryDirect(setupId, { verb: 'start', key: pending.key, body: pending.body, agentId: pending.agentId }, { ...deps, openFired });
+  if (went === 'sent' || went === 'maybe') return followDirect({ ...pending, direct: { setupId } }, deps);
+  if (went === 'missed') return post({ ...pending, afterDirectMiss: true }, deps);
   return post(pending, deps);
 }
 
 /** [결과 확인]: the same start again — its id when known (follow it), else the same post (same key: the server gives back the command it made, if any) */
 export async function checkStart(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
   if (deps.flow?.stopped) return { kind: 'stopped' }; // nobody is on the page: no re-post, no poll
+  if (pending.direct) return followDirect(pending, deps); // (a direct start is asked of the shell again — never posted: the server has no row for it)
   return pending.commandId ? follow(pending, deps) : post(pending, deps);
 }
 
@@ -262,6 +276,31 @@ async function post(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
   return follow({ ...pending, commandId: made.command_id }, deps);
 }
 
+/** the end of a start as the daemon said it (a result line of the server's, or the shell's `direct.result` — the same words): an outcome, or `null` = not an end yet */
+function outcomeOfResult(r: { state?: string; result_code?: string | null }, pending: Pending): StartOutcome | null {
+  // a press the road MISSED after the frame may have reached the computer, then taken by the server's line (or one that went over the road): «replay» says the computer already had it — not a failure of what ran
+  if ((pending.afterDirectMiss || pending.direct) && r.state === 'rejected' && r.result_code !== null && r.result_code !== undefined && REPLAY_WORDS.has(r.result_code)) return { kind: 'unknown', pending };
+  if (r.state === 'done') return { kind: 'started' };
+  if (r.state === 'rejected' || r.state === 'failed') {
+    if (r.result_code === 'remote_control_off') return { kind: 'remote_off' }; // switched off while the command was on its way — the screen goes back to branch 1
+    if (r.state === 'rejected' && r.result_code === 'already_running') return { kind: 'already_running' };
+    if (r.state === 'rejected' && r.result_code === 'no_folder') return { kind: 'no_folder' };
+    if (r.state === 'failed' && r.result_code === 'workdir_refused') return { kind: 'no_folder' }; // the mapping changed before the spawn
+    return { kind: 'failed' };
+  }
+  return null;
+}
+
+/** story 4993 (5b-1): follow a start that went over the direct road — the shell's word (`direct.result`), the same times as the server's line (every 1.5 s · two minutes); the same screen's words, never posted */
+async function followDirect(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
+  const setupId = pending.direct?.setupId; if (!setupId) return { kind: 'unknown', pending };
+  return followDirectResult<StartOutcome>(setupId, pending.key, {
+    phoneCall: deps.phoneCall, wait: deps.wait, now: deps.now, pollMs: deps.pollMs ?? START_POLL_MS, pollMaxMs: deps.pollMaxMs ?? START_POLL_MAX_MS,
+    decide: (r) => outcomeOfResult({ state: r.state, result_code: r.code }, pending), unknown: () => ({ kind: 'unknown', pending }),
+    halted: () => (deps.flow?.stopped ? { kind: 'stopped' } : null), // every ask is preceded by this: a stopped flow makes no further request
+  });
+}
+
 // follow it: done · the daemon's closed reasons · any other end · two minutes on the wall clock without an end
 async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
   const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -281,14 +320,8 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
       continue;
     }
     if (!r || typeof r !== 'object') continue; // a body that is not an object is not an end — ask again
-    if (r.state === 'done') return { kind: 'started' };
-    if (r.state === 'rejected' || r.state === 'failed') {
-      if (r.result_code === 'remote_control_off') return { kind: 'remote_off' }; // switched off while the command was on its way — the screen goes back to branch 1
-      if (r.state === 'rejected' && r.result_code === 'already_running') return { kind: 'already_running' };
-      if (r.state === 'rejected' && r.result_code === 'no_folder') return { kind: 'no_folder' };
-      if (r.state === 'failed' && r.result_code === 'workdir_refused') return { kind: 'no_folder' }; // the mapping changed before the spawn
-      return { kind: 'failed' };
-    }
+    const end = outcomeOfResult(r, pending);
+    if (end) return end;
   }
   return { kind: 'unknown', pending };
 }
