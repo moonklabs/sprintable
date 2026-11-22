@@ -337,21 +337,21 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'unreachable': return t('unreachable');
       case 'setupNotFound': return t('setupNotFound');
       case 'offerUsed': return t('offerUsed');
-      case 'registerAgain': return t('registerAgain');
+      case 'registerAgain': return t(computer ? 'registerAgainComputer' : 'registerAgain');
       case 'integrity': return t('integrity');
       case 'offerGone': return t('offerGone');
       case 'startedAlready': return t('startedAlready');
       case 'forbidden': return t('forbidden');
       case 'signedOut': return t('signedOut');
-      case 'serverUnreachable': return t('serverUnreachable');
-      case 'receiptInvalid': return t('receiptInvalid');
-      case 'noReceipt': return t('noReceipt');
+      case 'serverUnreachable': return t(computer ? 'serverUnreachableComputer' : 'serverUnreachable');
+      case 'receiptInvalid': return t(computer ? 'receiptInvalidComputer' : 'receiptInvalid');
+      case 'noReceipt': return t(computer ? 'noReceiptComputer' : 'noReceipt');
       case 'qrUnreadable': return t('qrUnreadable');
-      case 'hostNo': return t('hostNo');
+      case 'hostNo': return t(computer ? 'hostNoComputer' : 'hostNo');
       case 'limit': return t('limit.title');
-      case 'taken': return t('taken');
-      case 'takenOtherOrg': return org ? t('takenOtherOrgNamed', { org }) : t('takenOtherOrg');
-      case 'notReady': return t('notReady');
+      case 'taken': return t(computer ? 'takenComputer' : 'taken');
+      case 'takenOtherOrg': return org ? t(computer ? 'takenOtherOrgNamedComputer' : 'takenOtherOrgNamed', { org }) : t(computer ? 'takenOtherOrgComputer' : 'takenOtherOrg');
+      case 'notReady': return t(computer ? 'notReadyComputer' : 'notReady');
       case 'failed': return t('failed');
     }
   };
@@ -364,7 +364,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     case 'start':
       return (
         <Shell>
-          <p className="text-ds-body text-ds-ink">{t('start')}</p>
+          <p className="text-ds-body text-ds-ink">{t(computer ? 'startComputer' : 'start')}</p>
           <Actions><Button variant="primary" onClick={() => void scan()}>{t('scan')}</Button></Actions>
         </Shell>
       );
@@ -413,7 +413,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       return (
         <Shell>
           {/* the number and the two buttons are in the phone app's own window (never drawn here: this page comes from the server) */}
-          <Line focus>{view.note === 'open' ? t('compareOpen') : view.note === 'notReady' ? t('notReady') : view.note === 'busy' ? t('compareBusy') : view.note === 'failed' ? t('failed') : t('compareClosed')}</Line>
+          <Line focus>{view.note === 'open' ? t(computer ? 'compareOpenComputer' : 'compareOpen') : view.note === 'notReady' ? t(computer ? 'notReadyComputer' : 'notReady') : view.note === 'busy' ? t(computer ? 'compareBusyComputer' : 'compareBusy') : view.note === 'failed' ? t('failed') : t('compareClosed')}</Line>
           <Actions>
             {view.note !== 'open' ? <Button variant="primary" onClick={() => setView({ ...view, note: 'open' })}>{t('compareAgain')}</Button> : null}
             <Button variant="secondary" onClick={() => abandon(view)}>{t('cancel')}</Button>
@@ -428,13 +428,13 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         </Shell>
       );
     case 'paired':
-      return <Shell><Line focus>{t('paired', { device: view.device })}</Line><Actions>{close}</Actions></Shell>;
+      return <Shell><Line focus>{t(computer ? 'pairedComputer' : 'paired', { device: view.device })}</Line><Actions>{close}</Actions></Shell>;
     case 'alreadyPaired':
       return <Shell><Line focus>{t('alreadyPaired', { device: view.device })}</Line><Actions>{close}</Actions></Shell>;
     case 'remoteOff':
       // story #4583 (Yuna copy.md row 1): the owner gets the way to the switch (and may still close) · anyone else the owner's name
-      if (remoteOff?.owner) return <Shell><Line focus>{t('remoteOffOwner')}</Line><Actions><RemoteControlLink variant="button" />{close}</Actions></Shell>;
-      return <Shell><Line focus>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</Line><Actions>{close}</Actions></Shell>;
+      if (remoteOff?.owner) return <Shell><Line focus>{t(computer ? 'remoteOffOwnerComputer' : 'remoteOffOwner')}</Line><Actions><RemoteControlLink variant="button" />{close}</Actions></Shell>;
+      return <Shell><Line focus>{t(computer ? 'remoteOffOthersComputer' : 'remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</Line><Actions>{close}</Actions></Shell>;
     case 'noScreenLock':
     case 'biometricRequired':
       return (

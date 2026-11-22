@@ -97,10 +97,10 @@ afterEach(async () => {
 });
 
 const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
-async function screen({ phone = true, locale = 'ko' as 'ko' | 'en', entry }: { phone?: boolean; locale?: 'ko' | 'en'; entry?: { setupId: string; agentId: string } } = {}) {
+async function screen({ phone = true, locale = 'ko' as 'ko' | 'en', entry, deviceKind }: { phone?: boolean; locale?: 'ko' | 'en'; entry?: { setupId: string; agentId: string }; deviceKind?: 'phone' | 'computer' } = {}) {
   await act(async () => {
     root.render(
-      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, phoneCall: phoneCall as never }}>
+      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, ...(deviceKind ? { deviceKind } : {}), phoneCall: phoneCall as never }}>
         <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages}><PhoneFilesPage homeHref="/today" entry={entry} /></NextIntlClientProvider>
       </PhoneBridgeContext.Provider>,
     );
@@ -926,3 +926,76 @@ describe('[4988 P8] a file is downloaded from its screen', () => {
     }
   });
 });
+
+// ── story 4994 (D-3d): the guest desktop app is a computer ──
+describe('[SID:4994 D-3d] the files page in the guest desktop app (a computer)', () => {
+  const kc = koMessages.phoneFiles as unknown as Record<string, unknown> & { key: Record<string, string>; outcome: Record<string, string>; file: Record<string, string> };
+  const ec = enMessages.phoneFiles as unknown as typeof kc;
+  const openC = async () => { await screen({ deviceKind: 'computer' }); await press(byId('phone-files-project-proj-1')); };
+  const again = async () => { await act(async () => { root.unmount(); }); root = createRoot(container); };
+
+  it('the key words the guest can raise: not confirmed · not connected · no secure storage; not paired; the held «asking» line', async () => {
+    for (const [code, word] of [['key_failed', kc.key.keyFailedComputer], ['no_key', kc.key.keyNotConnectedComputer], ['not_registered', kc.key.keyNotConnectedComputer], ['no_screen_lock', kc.key.keyNoScreenLockComputer]] as const) {
+      sealAnswer = () => ({ id: 's', ok: false, code });
+      await openC();
+      expect(byId('phone-files-end')?.textContent, code).toContain(word);
+      expect(byId('phone-files-end')?.textContent, code).not.toMatch(/폰/);
+      await again();
+    }
+    sealAnswer = (args) => ({ id: 's', ok: true, envelope: { v: 1, kind: 'file_list' }, phone_key_id: KEYID, idempotency_key: args.idempotency_key });
+    world.post = json({ error: { code: 'phone_not_paired' } }, 409);
+    await openC();
+    expect(byId('phone-files-end')?.textContent).toContain(kc.outcome.notPairedComputer);
+    await again(); world.post = undefined;
+    // the line while the computer is asked
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    world.hold = gate;
+    await screen({ deviceKind: 'computer' });
+    await act(async () => { (byId('phone-files-project-proj-1') as HTMLElement).click(); }); await flush();
+    expect(text()).toContain(kc.loadingComputer as unknown as string);
+    expect(text()).not.toMatch(/폰/);
+    release(); await flush(); await settle();
+  });
+
+  it('a file being fetched says «이 컴퓨터에서 확인해 주세요»', async () => {
+    world.hold = undefined; world.caps = OPENS;
+    await screen({ deviceKind: 'computer' }); await press(byId('phone-files-project-proj-1'));
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    const orig = phoneCall.getMockImplementation()! as (type: string, args?: Record<string, unknown>) => Promise<unknown>;
+    phoneCall.mockImplementation(async (type: string, args?: Record<string, unknown>) => { if (type === 'files.seal') await gate; return orig(type, args); });
+    await act(async () => { all('phone-files-file')[0]!.click(); }); await flush();
+    expect(byId('phone-files-file-loading')?.textContent).toContain(kc.file.loadingComputer);
+    release(); await flush(); await settle();
+  });
+
+  it('a file whose open ends in a key word says «이 컴퓨터» too (the file screen\'s own end line)', async () => {
+    world.hold = undefined; world.caps = OPENS;
+    await screen({ deviceKind: 'computer' }); await press(byId('phone-files-project-proj-1'));
+    const ok = sealAnswer;
+    sealAnswer = () => ({ id: 's', ok: false, code: 'no_key' });
+    await act(async () => { all('phone-files-file')[0]!.click(); }); await flush(); await settle();
+    expect(byId('phone-files-file-end')?.textContent).toContain(kc.key.keyNotConnectedComputer);
+    expect(byId('phone-files-file-end')?.textContent).not.toMatch(/폰/);
+    sealAnswer = ok;
+  });
+
+  it('a download that ends in a key word (a shell that offers downloads — the guest\'s own caps do not) says «이 컴퓨터» too', async () => {
+    world.hold = undefined; world.caps = { sealed_prompt: 1, files: 1, file_read: 1, file_download: 1 }; world.read = { v: 1, kind: 'read', ok: true, form: 'text', s: 5, masked: 0, text: 'hello' };
+    await screen({ deviceKind: 'computer' }); await press(byId('phone-files-project-proj-1')); await press(all('phone-files-file')[0]!);
+    const ok = sealAnswer;
+    sealAnswer = (args) => (args.download === true ? { id: 's', ok: false, code: 'no_key' } : ok(args));
+    await press(byId('phone-files-download'));
+    expect(byId('phone-files-download-end')?.textContent).toContain(kc.key.keyNotConnectedComputer);
+    expect(byId('phone-files-download-end')?.textContent).not.toMatch(/폰/);
+    sealAnswer = ok;
+  });
+
+  it('every new computer message (ko · en) has no «폰» / «phone»; a phone keeps its words', async () => {
+    for (const [k, v] of [...Object.entries(kc.key), ...Object.entries(kc.outcome), ...Object.entries(kc.file), ['loadingComputer', kc.loadingComputer as unknown as string]] as Array<[string, string]>) if (k.endsWith('Computer')) expect(v, k).not.toMatch(/폰/);
+    for (const [k, v] of [...Object.entries(ec.key), ...Object.entries(ec.outcome), ...Object.entries(ec.file), ['loadingComputer', ec.loadingComputer as unknown as string]] as Array<[string, string]>) if (k.endsWith('Computer')) expect(v, k).not.toMatch(/phone/i);
+    sealAnswer = () => ({ id: 's', ok: false, code: 'no_key' });
+    await screen({ deviceKind: 'phone' }); await press(byId('phone-files-project-proj-1'));
+    expect(byId('phone-files-end')?.textContent).toContain(koMessages.phoneFiles.key.no_key);
+  });
+});
+

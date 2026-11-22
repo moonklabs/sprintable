@@ -359,3 +359,61 @@ describe('DesktopRemoteDevices — the computer is the unit (story 4734)', () =>
     expect(text()).toContain('페어링된 컴퓨터 2대와 모두 끊겨요');
   });
 });
+
+// ── story 4994 (D-3d): a row whose label is a computer's (the guest desktop app registered with «Mac» · «Windows PC» · «Linux PC») is not «a phone» ──
+describe('[SID:4994 D-3d] a computer\'s row in the host\'s device list', () => {
+  const D = koMessages.desktop.remoteDevices as unknown as Record<string, string>;
+  const E = enMessages.desktop.remoteDevices as unknown as Record<string, string>;
+  const mac = (over: Record<string, unknown> = {}) => phone({ id: 'g1', label: 'Mac', ...over });
+
+  it('the head: check number · its hint · [이 기기 빼기] — a phone\'s row beside it keeps «폰»', async () => {
+    answers([mac(), phone({ id: 'p9', label: 'iPhone' })]);
+    await render();
+    const head = container.querySelector('[data-testid="desktop-remote-phone"]')!.textContent ?? '';
+    expect(head).toContain(D.confirmNumberComputer.replace('{number}', '482 917'));
+    expect(head).not.toContain('폰 확인 숫자'); // (a phone's text contains the computer's as its tail — the row itself must not be the phone's)
+    expect(container.querySelector(`[title="${D.confirmNumberHintComputer}"]`)).not.toBeNull();
+    expect(button(D.removePhoneComputer)).toHaveLength(1);
+    expect(button('이 폰 빼기')).toHaveLength(1); // the phone's own row
+    expect(text()).toContain('폰 확인 숫자 482 917');
+  });
+
+  it('the confirmations (with pairs · without) and the pair line', async () => {
+    answers([mac({ pairs: [...phone().pairs, { setup_id: 's2', device_name: 'Studio', paired_at: '2026-09-30T03:00:00Z' }] })]);
+    await render();
+    await act(async () => { button(D.removePhoneComputer)[0].click(); });
+    expect(text()).toContain(D.confirmRemovePhoneComputer.replace('{phone}', 'Mac').replace('{n}', '2'));
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    answers([mac({ pairs: [] })]);
+    await render();
+    await act(async () => { button(D.removePhoneComputer)[0].click(); });
+    expect(text()).toContain(D.confirmRemovePhoneUnpairedComputer.replace('{phone}', 'Mac'));
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    answers([mac()]);
+    await render();
+    await act(async () => { button('Remove')[0]?.click(); button('빼기')[0]?.click(); });
+    expect(text()).toContain(D.confirmRemoveComputer.replace('{phone}', 'Mac').replace('{device}', 'SYJ-MacBook-Pro'));
+  });
+
+  it('the results: login ended · login not found', async () => {
+    const removeWith = async (answer: Record<string, unknown>) => {
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      answers([mac()]);
+      await render();
+      await act(async () => { button(D.removePhoneComputer)[0].click(); });
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (init?.method === 'DELETE' ? json(answer) : url === '/api/remote-devices' ? json({ devices: [] }) : json({ data: { enabled: true } })));
+      await act(async () => { (container.querySelector('[role="group"] button') as HTMLButtonElement).click(); });
+      await flush();
+    };
+    await removeWith({ removed: true, session: 'ended' });
+    expect(status()).toBe(D.phoneRemovedSignedOutComputer.replace('{phone}', 'Mac'));
+    await removeWith({ removed: true, session: 'not_found' });
+    expect(status()).toContain('뺐어요 · Mac — 원격 기기 자리 하나가 비었어요. 그 기기의 로그인은 찾지 못했어요');
+  });
+
+  it('every new computer message (ko · en) has no «폰» / «phone»; the same keys in both languages', () => {
+    for (const k of Object.keys(D).filter((x) => x.endsWith('Computer'))) { expect(D[k], k).not.toMatch(/폰/); expect(E[k]!.replace(/\{phone\}/g, ''), k).not.toMatch(/phone/i); } // («{phone}» is the placeholder's name, not a word shown)
+    expect(Object.keys(E).filter((x) => x.endsWith('Computer')).sort()).toEqual(Object.keys(D).filter((x) => x.endsWith('Computer')).sort());
+  });
+});
+

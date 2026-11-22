@@ -19,6 +19,8 @@ const handoff = vi.hoisted(() => ({ sendHandoff: vi.fn(async () => ({ kind: 'no_
 vi.mock('@/lib/phone-handoff', () => ({ sendHandoff: handoff.sendHandoff }));
 vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: handoff.startHandoffWatch, stopHandoffWatch: handoff.stopHandoffWatch, AFTER_PAIRING_MS: 600_000, ON_OPEN_MS: 60_000 }));
 
+let remoteOffNow: { owner: boolean; names: { owners: string; hasOwners: 'yes' | 'no' }; connectedSetups: number } | null = null; // story 4994: the org's «remote control off» (null = not read here)
+vi.mock('@/components/desktop/remote-off', async (orig) => ({ ...(await orig<typeof import('@/components/desktop/remote-off')>()), useRemoteOff: () => remoteOffNow }));
 const { PhonePairing, PhonePairEntry } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -224,6 +226,31 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toEqual(left);
   });
 
+  it('story 4994 (D-3d): in the guest desktop app (a computer) «register again» and «remote control off» (owner · others) say «이 컴퓨터»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    const T = koMessages.phonePairing as unknown as Record<string, string>;
+    try {
+      offerPost = () => res(404, { error: { code: 'phone_key_not_found' } });
+      installShell(); await render(); await press('QR 찍기'); await press('페어링');
+      expect(line()).toBe(T.registerAgainComputer);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      for (const owner of [true, false]) {
+        remoteOffNow = { owner, names: { owners: '민', hasOwners: 'yes' }, connectedSetups: 1 };
+        offerPost = () => res(409, { error: { code: 'remote_control_off' } });
+        installShell(); await render(); await press('QR 찍기'); await press('페어링');
+        expect(line(), `owner=${owner}`).toBe(owner ? T.remoteOffOwnerComputer : '원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자(민)가 켜면 다시 할 수 있어요');
+        expect(line()).not.toMatch(/폰/);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+      // English: «this computer», not «this phone» (the Korean «others» line has no device word to tell the two apart)
+      remoteOffNow = { owner: false, names: { owners: 'Min', hasOwners: 'yes' }, connectedSetups: 1 };
+      offerPost = () => res(409, { error: { code: 'remote_control_off' } });
+      installShell(); await render('en'); await press('Scan QR'); await press('Pair');
+      expect(line()).toBe("Remote control is off, so this computer can't be paired — you can try again once an organization owner (Min) turns it on");
+      expect(line()).not.toMatch(/phone/i);
+    } finally { ua.mockRestore(); remoteOffNow = null; }
+  });
+
   it('already paired with that computer → «이미 페어링된 컴퓨터예요 · {컴퓨터}» + [닫기], nothing offered', async () => {
     pairs = [{ setup_id: HEAD.setup_id }];
     installShell();
@@ -302,6 +329,36 @@ describe('[4532] phone pairing screen', () => {
     await press('페어링');
     const row = container.querySelector('[data-testid="pairing-limit-phone"]');
     expect(row?.textContent).not.toContain('아직 안 씀');
+  });
+
+  it('story 4994 (D-3d): the limit screen in the guest desktop app — a computer\'s own row (label «Mac») says «이 기기 빼기» and its confirmation says «기기»; a phone\'s row beside it stays «이 폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+      const base = fetchWithAuth.getMockImplementation()!;
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: [{ id: 'g-1', label: 'Mac', last_used_at: null, pairs: [] }, { id: 'p-1', label: 'iPhone', last_used_at: null, pairs: [] }] });
+        return base(url, init);
+      });
+      installShell();
+      await render();
+      await press('QR 찍기');
+      await press('페어링');
+      const rows = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')] as HTMLElement[];
+      expect(rows.map((r) => r.querySelector('button')?.textContent)).toEqual(['이 기기 빼기', '이 폰 빼기']);
+      await act(async () => { rows[0]!.querySelector('button')!.click(); });
+      expect(rows[0]!.textContent).toContain('이 기기를 뺄까요? · Mac');
+      expect(rows[0]!.textContent).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: [{ id: 'g-2', label: 'Windows PC', last_used_at: null, pairs: [{ device_name: 'Studio' }] }] });
+        return base(url, init);
+      });
+      installShell(); await render(); await press('QR 찍기'); await press('페어링');
+      await act(async () => { (container.querySelector('[data-testid="pairing-limit-phone"] button') as HTMLButtonElement).click(); });
+      expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).toContain('이 기기를 뺄까요? · Windows PC — 빼면 그 기기로는');
+      expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
   });
 
   it('a removal that fails shows no «자리가 하나 비었어요» line (story #4624 · 까디르)', async () => {
