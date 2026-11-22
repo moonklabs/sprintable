@@ -1,0 +1,39 @@
+{
+ "_about": "The negotiation of the same-network direct road (design ③ §2-1): the phone's sealed ASK (kind direct_open) and the Mac's sealed ANSWER (kind direct_offer) as CANONICAL plaintexts. The Mac reads this file in desktop-host/test/direct-offer.test.ts; the phone twin (lib/directOffer.js, a later step) reads the SAME file. Each text is the one spelling — a reader refuses any other.",
+ "constants": {
+  "session_key": "direct",
+  "frame_version": 1,
+  "open_ct_max": 1024,
+  "offer_bucket": 512,
+  "offer_ttl_ms": 60000,
+  "command_kind": "direct_open",
+  "put_path": "/api/v2/desktop/relay/direct/<command_id>",
+  "request_hash_label": "sprintable/v1/direct-open"
+ },
+ "phone_pub_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+ "ticket_hex": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7",
+ "open_text": "{\"phone_pub\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"v\":1}",
+ "request_sig_text": "a signature of some bytes",
+ "request_hash": "vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48",
+ "offer_text": "{\"body\":{\"expires_at\":1800000020000,\"host\":\"192.168.1.23\",\"ok\":true,\"port\":54321,\"ticket\":\"yMnKy8zNzs_Q0dLT1NXW1w\"},\"req\":\"vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48\",\"v\":1}",
+ "refusal_text": "{\"body\":{\"code\":\"DIR_NO_NETWORK\",\"ok\":false},\"req\":\"vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48\",\"v\":1}",
+ "open_bad": [
+  " {\"phone_pub\":\"x\"}",
+  "{\"v\":1,\"phone_pub\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\"}",
+  "{\"phone_pub\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"v\":2}",
+  "{\"phone_pub\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"v\":1,\"x\":1}"
+ ],
+ "refusal_codes": [
+  "DIR_DISABLED",
+  "DIR_OPEN_STALE",
+  "DIR_RATE_MINUTE",
+  "DIR_RATE_HOUR",
+  "DIR_BUSY_PHONE",
+  "DIR_BUSY_MAC",
+  "DIR_NO_NETWORK",
+  "DIR_LISTEN_FAILED",
+  "DIR_NO_IDENTITY",
+  "DIR_STOPPED",
+  "DIR_BAD_FIELD"
+ ]
+}

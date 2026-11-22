@@ -20,7 +20,8 @@ from app.core.database import Base
 # story 4983 (0488 · P5): `file_list` — a person's SEALED request to list a folder of a project on their own computer; payload exactly {project_id, envelope} (no session, no path — the computer maps the project to a folder of its own)
 # story 4983 (0491 · P6): `file_read` — the same road to OPEN one file of a project (text or a small picture); payload exactly the same {project_id, envelope}: the folder and the file's name are inside the sealed request
 # story 4988 (0492 · P8): `file_download` — the same road to DOWNLOAD one file (up to 8 MiB, as sealed chunks); payload exactly the same {project_id, envelope}
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download")
+# story 4993 (0495 · P2 same-network direct): `direct_open` — a paired phone's SEALED ask for a short-lived door on its own computer; payload exactly {envelope} (no session, no address: the computer answers with a sealed `direct_offer`)
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download", "direct_open")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -302,6 +303,29 @@ class DesktopFileRead(Base):
     chunks_written: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     chunks_read: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
+
+
+class DesktopDirectAsk(Base):
+    """story 4993 (0495 · P2): one short-lived ASK for a same-network direct door. Who asked (`viewer_id`), which computer (`setup_id`) and the press's own key are written when the row is made; the computer's SEALED answer (`payload` =
+    {"envelope": …} — the server cannot open it: no address, no port, no ticket) is written once and is deleted the moment its person reads it, at `expires_at` (asked + 60 seconds: the door itself lives 20), with its command, and when its
+    computer is disconnected / its pairing person's account is closed / the organization's remote control is turned off. Nothing of it is kept in a log."""
+
+    __tablename__ = "desktop_direct_asks"
+    __table_args__ = (
+        CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_direct_asks_written"),
+        Index("ix_desktop_direct_asks_expires_at", "expires_at"),
+        Index("ix_desktop_direct_asks_setup_created", "setup_id", "created_at"),
+    )
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_commands.id", ondelete="CASCADE"), primary_key=True)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    press_key: Mapped[str] = mapped_column(String(100), nullable=False)  # the press's own key: the answer's header `command_id` must be it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class DesktopFileChunk(Base):
     """story 4988 (0492 · P8): one SEALED chunk of a download (`payload` = {"envelope": …}: the server cannot open it — no name, no word, no byte of the file). Put by the computer once, deleted the moment the person reads it; it hangs from its

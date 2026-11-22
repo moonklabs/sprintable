@@ -145,6 +145,9 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
         from app.services import desktop_files
 
         await desktop_files.forget(db, setup_ids)  # story 4983 — nor a sealed files answer
+        from app.services import desktop_direct
+
+        await desktop_direct.forget(db, setup_ids)  # story 4993 — nor a sealed answer to an ask for a direct door
         from app.services import desktop_record_handoff
 
         await desktop_record_handoff.forget(db, setup_ids)  # story 4978 — nor a sealed record-key handoff

@@ -743,13 +743,14 @@ async def _reclaim_unproved_account(
     from app.services import desktop_clock
 
     await desktop_clock.forget(session, cut_ids)
-    from app.services import desktop_changes, desktop_files
+    from app.services import desktop_changes, desktop_direct, desktop_files
 
     from app.services.desktop_relay import forget_prompts
 
     await forget_prompts(session, cut_ids)  # story 4976 — nor the words of an instruction a cut-off computer still holds
     await desktop_changes.forget(session, cut_ids)  # story #4951 — no changed-file list stays for a computer cut off (the default lock: asked again on rows this transaction already holds — nothing waits)
     await desktop_files.forget(session, cut_ids)  # story 4983 — nor a sealed files answer
+    await desktop_direct.forget(session, cut_ids)  # story 4993 — nor a sealed answer to an ask for a direct door
     from app.services import desktop_record_handoff
 
     await desktop_record_handoff.forget(session, cut_ids)  # story 4978 — nor a sealed record-key handoff for a computer cut off

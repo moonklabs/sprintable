@@ -26,7 +26,7 @@ MAX_CT_BYTES = 256 * 1024
 # story 4976: a phone's instruction into the running turn is at most INSTRUCT_NOW_MAX (400) characters — a few KiB at 4 bytes a character; the phone pads to a fixed width inside this cap
 # story 4983: a files request (a list or an open) is a short list of names (the padded frame is at most 4096 bytes, contract `envelope.request.ct_max_bytes` · `envelope.request_read.ct_max_bytes`); its answer is the full cap
 HANDOFF_CT_BYTES = 14608  # story 4978: a `record_handoff` body is ONE fixed width (the 14,592-byte frame + the 16-byte tag — 256 key generations and 32 record writers' worth, whatever travels): the server cannot learn how many of either
-MAX_CT_BYTES_BY_KIND = {"record_handoff": HANDOFF_CT_BYTES, "approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024, "file_download": 4 * 1024}
+MAX_CT_BYTES_BY_KIND = {"record_handoff": HANDOFF_CT_BYTES, "approval_card": 16 * 1024, "send_prompt": 8 * 1024, "file_list": 4 * 1024, "file_read": 4 * 1024, "file_download": 4 * 1024, "direct_open": 1024, "direct_offer": 1024}  # story 4993: an ask is a short canonical text padded to 256 B; an answer is padded to whole 512 B buckets (an address, a port, a ticket — or a refusal)
 MAX_TO = 16
 MAX_TEXT = 256
 MAX_SAFE_INT = 2**53 - 1

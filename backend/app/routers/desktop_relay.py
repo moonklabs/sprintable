@@ -684,6 +684,30 @@ async def put_files(command_id: uuid.UUID, request: Request, setup: DesktopSetup
     return {"bytes": size}
 
 
+@router.put("/relay/direct/{command_id}")
+async def put_direct(command_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4993 (P2): the computer's SEALED answer to one ask for a direct door it was told to do — written once into a row of this computer. The body is read and judged here so that no refusal (and no log, no error report) ever carries
+    what it held; it is an envelope the server cannot open: a size class, nothing else."""
+    from app.services import desktop_direct
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_direct.ANSWER_BODY_MAX:
+            raise relay.DesktopRelayError(413, "direct_too_large", "the answer is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_direct.ANSWER_BODY_MAX:
+                raise relay.DesktopRelayError(413, "direct_too_large", "the answer is larger than the server takes")
+        size = await desktop_direct.write_answer(db, setup, command_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer)
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"bytes": size}
+
+
 @router.put("/relay/records")
 async def put_record(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """story 4977 B2 (alembic 0493): the computer keeps one SEALED record of the person's history (a `chat_line` · an `approval_record` under the record key R_g, which the server never holds) — by (conversation,

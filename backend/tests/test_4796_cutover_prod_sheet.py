@@ -1035,6 +1035,18 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0494 = (_ROOT / "backend/alembic/versions/0494_desktop_record_handoffs.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|drop_constraint|drop_index|create_check_constraint", up0494), "0494's upgrade() changes no row, no column and no existing table"
     assert up0494.count("op.create_table(") == 1 and '"desktop_record_handoffs"' in up0494 and up0494.count('ondelete="CASCADE"') == 2, "the one new table, hanging from the computer and the phone"
+    # story 4993 (P3): 0495 is 0491's shape plus ONE NEW table — one more word in the command-kind CHECK (`direct_open`: dropped and made again; the new CHECK is the old one plus exactly ONE word, so an old revision that never writes the word
+    # still passes it with every value it does write — it lives with the new schema), one partial index over `desktop_commands` that only the new word's rows ever enter (the old revision never names it), and the new table `desktop_direct_asks`
+    # (a short-lived sealed answer slot, 60 seconds; hanging from the command and the computer by two cascading foreign keys; its CHECK is inside the `create_table`, on a table that is new and empty) with its two indexes. The reading lists exactly
+    # these five lines — the CHECK swap and the three index builds — nothing else. No row is changed, nothing is dropped or renamed besides the CHECK made again; the downgrade() is not read.
+    direct_open = [h for h in hits if h.startswith("0495_")]
+    assert len(direct_open) == 5, direct_open
+    assert sum("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in direct_open) == 1 and sum("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in direct_open) == 1, direct_open
+    assert sum("create_index" in h for h in direct_open) == 3, direct_open
+    up0495 = (_ROOT / "backend/alembic/versions/0495_desktop_direct_open.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|drop_index", up0495), "0495's upgrade() changes no row, no column and no existing table"
+    assert up0495.count("op.create_table(") == 1 and '"desktop_direct_asks"' in up0495 and up0495.count('ondelete="CASCADE"') == 2, "the one new table, hanging from the command and the computer"
+    assert "_NEW = _OLD + (" in (_ROOT / "backend/alembic/versions/0495_desktop_direct_open.py").read_text(), "the new CHECK is the old words plus ONE — an old revision lives with it"
     # story 4976 (A5): 0489 is FOUR lines of upgrade() the reading lists: ONE data `UPDATE` (the backfill: a computer whose capabilities already hold `sealed_prompt` gets `sealed_prompts_at = now()`; restricted by `capabilities @>` to those rows, row locks only —
     # a few computers), the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_prompts_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds
     # (`sealed_prompts_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never names the column, so every UPDATE it makes to a `desktop_setups` row leaves the value as it was
@@ -1055,7 +1067,7 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
     up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_"))]
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

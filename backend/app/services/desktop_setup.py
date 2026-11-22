@@ -1321,6 +1321,9 @@ async def _retire_same_machine(
         from app.services import desktop_files
 
         await desktop_files.forget(db, [o.id for o in old], lock=False)  # story 4983 — nor a sealed files answer
+        from app.services import desktop_direct
+
+        await desktop_direct.forget(db, [o.id for o in old], lock=False)  # story 4993 — nor a sealed answer to an ask for a direct door
         from app.services import desktop_record_handoff
 
         await desktop_record_handoff.forget(db, [o.id for o in old], lock=False)  # story 4978 — nor a sealed record-key handoff
@@ -1653,6 +1656,9 @@ async def _disconnect_setup(
     from app.services import desktop_files
 
     await desktop_files.forget(db, [setup.id], lock=False)  # story 4983 — nor a sealed files answer (the same row lock)
+    from app.services import desktop_direct
+
+    await desktop_direct.forget(db, [setup.id], lock=False)  # story 4993 — nor a sealed answer to an ask for a direct door (the same row lock)
     from app.services import desktop_record_handoff
 
     await desktop_record_handoff.forget(db, [setup.id], lock=False)  # story 4978 — nor a sealed record-key handoff (the same row lock)

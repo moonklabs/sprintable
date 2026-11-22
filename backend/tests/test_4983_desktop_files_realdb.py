@@ -676,13 +676,17 @@ def test_15_the_command_words_of_the_code_and_the_migration_are_the_same():
 
     from app.models.desktop_relay import COMMAND_KINDS
 
-    # the CHECK as the LATEST migration that changed it leaves it (0492 added `file_download`): the code's words and that migration's are the same
-    spec = util.spec_from_file_location("m0492", Path(__file__).parent.parent / "alembic" / "versions" / "0492_desktop_file_download.py")
-    mod = util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert tuple(mod._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS and "file_download" in COMMAND_KINDS
-    assert tuple(mod._OLD) + ("file_download",) == tuple(COMMAND_KINDS), "0492 adds exactly one word to what 0491 left"
-    spec = util.spec_from_file_location("m0491", Path(__file__).parent.parent / "alembic" / "versions" / "0491_desktop_file_read_kind.py")
-    old = util.module_from_spec(spec)
-    spec.loader.exec_module(old)
+    # the CHECK as the LATEST migration that changed it leaves it (0495 added `direct_open`): the code's words and that migration's are the same
+    def _load(name, file):
+        spec = util.spec_from_file_location(name, Path(__file__).parent.parent / "alembic" / "versions" / file)
+        mod = util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    m0495 = _load("m0495", "0495_desktop_direct_open.py")
+    assert tuple(m0495._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS and "file_download" in COMMAND_KINDS and "direct_open" in COMMAND_KINDS
+    assert tuple(m0495._OLD) + ("direct_open",) == tuple(COMMAND_KINDS), "0495 adds exactly one word to what 0492 left"
+    mod = _load("m0492", "0492_desktop_file_download.py")
+    assert tuple(mod._NEW) == tuple(m0495._OLD) and tuple(mod._OLD) + ("file_download",) == tuple(mod._NEW), "0492 adds exactly one word to what 0491 left, and 0495 starts where 0492 ended"
+    old = _load("m0491", "0491_desktop_file_read_kind.py")
     assert tuple(old._NEW) == tuple(mod._OLD) and tuple(old._OLD) + ("file_read",) == tuple(old._NEW), "0491 adds exactly one word to what 0488 left, and 0492 starts where 0491 ended"
