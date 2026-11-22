@@ -684,6 +684,30 @@ async def put_files(command_id: uuid.UUID, request: Request, setup: DesktopSetup
     return {"bytes": size}
 
 
+@router.put("/relay/direct-count")
+async def put_direct_count(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4993 (P3b): the computer's running totals of its same-network direct road — `{epoch, commands, doors}`, numbers only (no command, no phone, no address). Idempotent: the greater total is kept. A body past a few
+    hundred bytes is refused before it is parsed; nothing of it is logged."""
+    from app.services import desktop_direct
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_direct.COUNT_BODY_MAX:
+            raise relay.DesktopRelayError(413, "direct_count_too_large", "the report is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_direct.COUNT_BODY_MAX:
+                raise relay.DesktopRelayError(413, "direct_count_too_large", "the report is larger than the server takes")
+        body = desktop_direct.parse_count(raw)
+        await desktop_direct.apply_count(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.put("/relay/direct/{command_id}")
 async def put_direct(command_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """story 4993 (P2): the computer's SEALED answer to one ask for a direct door it was told to do — written once into a row of this computer. The body is read and judged here so that no refusal (and no log, no error report) ever carries
