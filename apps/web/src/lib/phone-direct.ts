@@ -210,6 +210,8 @@ export async function tryDirect(setupId: string, pending: PendingLike, deps: Dir
 export async function followDirectResult<T>(setupId: string, key: string, o: {
   phoneCall: Call; wait?: (ms: number) => Promise<void>; now?: () => number; pollMs: number; pollMaxMs: number;
   decide: (r: { state: string; code: string | null }) => Promise<T | null> | T | null; unknown: () => T; halted?: () => T | null;
+  /** story 4993 (file direct): a `pending` that carries the shell's count — pieces taken of pieces there are (whole numbers, 1 ≤ got ≤ of; anything else is no count) — so the screen can draw «n of m» as the server's road does. Never asked for bytes: there are none in it. */
+  onPending?: (p: { got: number; of: number }) => void;
 }): Promise<T> {
   const wait = o.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = o.now ?? Date.now;
@@ -226,7 +228,10 @@ export async function followDirectResult<T>(setupId: string, key: string, o: {
     if (now() >= deadline || Date.now() >= realDeadline) break; // (the wait itself may have been the end of the two minutes: no ask is started on borrowed time)
     const a = await callWithin(o.phoneCall, 'direct.result', { setup_id: setupId, command_id: key }, Math.max(1, Math.min(DIRECT_RESULT_CALL_MS, deadline - now(), realDeadline - Date.now())));
     if (!a || a.ok !== true) continue; // a call that did not answer is not an end — ask again
-    if (a.state === 'pending') continue;
+    if (a.state === 'pending') {
+      if (o.onPending && Number.isSafeInteger(a.got) && Number.isSafeInteger(a.of) && (a.got as number) >= 1 && (a.got as number) <= (a.of as number)) { try { o.onPending({ got: a.got as number, of: a.of as number }); } catch { /* a drawing that fails is not the download's end */ } }
+      continue;
+    }
     if (a.state === 'unknown') return o.unknown();
     if (a.state !== 'done' && a.state !== 'failed' && a.state !== 'rejected') continue;
     const end = await o.decide({ state: a.state, code: typeof a.code === 'string' ? a.code : null });

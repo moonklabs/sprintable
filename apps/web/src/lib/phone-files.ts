@@ -378,6 +378,7 @@ export async function downloadFile(input: { setupId: string; projectId: string; 
     return followDirectResult<ByRoad>(input.setupId, mine, {
       phoneCall: deps.phoneCall, ...(deps.wait ? { wait: deps.wait } : {}), ...(deps.now ? { now: deps.now } : {}), pollMs: deps.pollMs ?? DOWNLOAD_DIRECT_POLL_MS, pollMaxMs: DOWNLOAD_MAX_MS,
       halted: () => (stopped() ? { kind: 'cancelled' } : null),
+      onPending: (p) => { if (!stopped()) deps.onProgress?.(p); }, // (the shell's count of pieces, as the server's road shows its chunks: the screen is the same on both roads)
       unknown: () => ({ kind: 'server_road' }), // (the road ended · the shell has no word: nothing came — the server's road, from the start)
       decide: async (r) => {
         if (r.state === 'done') {

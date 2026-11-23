@@ -6,12 +6,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { downloadFile, type DownloadDeps } from './phone-files';
 import { directRow } from './phone-direct';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type { PhoneAnswer } from './phone-bridge';
 
 let serverCalls: Array<{ method: string; url: string; body?: unknown }> = [];
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('the server must not be called'); };
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestInit) => { serverCalls.push({ method: init?.method ?? 'GET', url, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) }); return currentFetch(url, init); } }));
 
+const BRIDGE = JSON.parse(readFileSync(path.resolve(__dirname, '../../../../contracts/direct-bridge.json'), 'utf8')) as { version: number; calls: Record<string, { reply: Record<string, string> }> };
 const SETUP = '22222222-3333-4444-8555-666666666666';
 const CMD = '44444444-5555-4666-8777-888888888888';
 const K1 = 'press-key-0001'; const K2 = 'press-key-0002';
@@ -188,6 +191,35 @@ describe('[4993 file direct] the direct road is the first road', () => {
     const out = await downloadFile(input, s.deps);
     expect(out).toEqual({ kind: 'saved' }); expect(s.of('files.seal').length).toBe(1);
   }, 10_000);
+});
+
+describe('[4993 file direct] the screen is the same on both roads: «n of m» from the shell\'s count', () => {
+  const at = (got: unknown, of: unknown): PhoneAnswer => ({ id: 'r', ok: true, state: 'pending', got, of });
+  it('every pending that carries pieces-taken of pieces-there-are is told to the screen, in order, and only those', async () => {
+    reset(); const seen: Array<{ got: number; of: number }> = []; const s = shell({ results: [pending, at(1, 3), at(1, 3), at(2, 3), at(3, 3), DONE] });
+    expect(await downloadFile(input, { ...s.deps, onProgress: (p) => seen.push(p) })).toEqual({ kind: 'saved' });
+    expect(seen).toEqual([{ got: 1, of: 3 }, { got: 1, of: 3 }, { got: 2, of: 3 }, { got: 3, of: 3 }]); // (a plain pending — before the first piece — says nothing)
+    expect(serverCalls).toEqual([]);
+  });
+  it('anything that is not a count (strings · fractions · zero · more taken than there are · negative · missing one) is not told', async () => {
+    const bad: Array<[unknown, unknown]> = [['1', '3'], [1.5, 3], [0, 3], [4, 3], [-1, 3], [1, undefined], [undefined, 3], [null, null], [Number.NaN, 3], [Infinity, Infinity], [1, 0]];
+    reset(); const seen: unknown[] = []; const s = shell({ results: [...bad.map(([g, o]) => at(g, o)), DONE] });
+    expect(await downloadFile(input, { ...s.deps, onProgress: (p) => seen.push(p) })).toEqual({ kind: 'saved' });
+    expect(seen).toEqual([]);
+  });
+  it('a count that arrives after the screen was left is not drawn', async () => {
+    reset(); let stop = false; const seen: unknown[] = []; const s = shell({ results: [at(1, 3)] }, { 'direct.result': () => { stop = true; return at(2, 3); } });
+    expect(await downloadFile(input, { ...s.deps, stopped: () => stop, onProgress: (p) => seen.push(p) })).toEqual({ kind: 'cancelled' });
+    expect(seen).toEqual([]);
+  });
+  it('a screen whose drawing throws does not end the download', async () => {
+    reset(); const s = shell({ results: [at(1, 2), DONE] });
+    expect(await downloadFile(input, { ...s.deps, onProgress: () => { throw new Error('draw'); } })).toEqual({ kind: 'saved' });
+  });
+  it('the contract copy names the two numbers as additive fields of the pending word (the shell\'s side wrote them there first)', () => {
+    expect(Object.keys(BRIDGE.calls['direct.result'].reply)).toEqual(['state', 'code', 'got', 'of']);
+    expect(BRIDGE.calls['direct.result'].reply.got).toMatch(/only for a file download that is `pending`/); expect(BRIDGE.version).toBe(3);
+  });
 });
 
 describe('[4993 file direct] the row of a download', () => {

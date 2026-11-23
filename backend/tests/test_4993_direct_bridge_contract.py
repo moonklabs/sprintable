@@ -11,7 +11,7 @@ from app.models.desktop_relay import COMMAND_KINDS
 
 _DIR = Path(__file__).resolve().parents[2] / "contracts"
 # the sha256 of the bytes as the mobile repository committed them (mobile `contracts/direct-bridge.json`, story 4993 · file direct, version 3) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
-_BRIDGE_SHA256 = "07c89af975fcf283c39f6e88cdf7c81a0a585db8b8b852c233875e9beab99157"
+_BRIDGE_SHA256 = "3ba5217c63df8d7083eafb093b519b3493a10b92b97debf811b9b9c20f2b1a98"
 
 
 def test_the_bridge_copy_is_the_same_bytes_as_the_mobile_repositorys_file() -> None:
