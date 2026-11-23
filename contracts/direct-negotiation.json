@@ -1,5 +1,5 @@
 {
- "_about": "The negotiation of the same-network direct road (design ③ §2-1): the phone's sealed ASK (kind direct_open) and the Mac's sealed ANSWER (kind direct_offer) as CANONICAL plaintexts. The Mac reads this file in desktop-host/test/direct-offer.test.ts; the phone twin (lib/directOffer.js, a later step) reads the SAME file. Each text is the one spelling — a reader refuses any other.",
+ "_about": "The negotiation of the same-network direct road (design \u2462 \u00a72-1): the phone's sealed ASK (kind direct_open) and the Mac's sealed ANSWER (kind direct_offer) as CANONICAL plaintexts. The Mac reads this file in desktop-host/test/direct-offer.test.ts; the phone twin (lib/directOffer.js, a later step) reads the SAME file. Each text is the one spelling \u2014 a reader refuses any other. (2b: the offer also carries `mac_pub` \u2014 the Mac's one-time X25519 key of this connection (43 characters, one spelling of 32 bytes), between `host` and `ok`: it is in the Mac-SIGNED sealed answer, so the phone's key agreement is with THIS Mac.)",
  "constants": {
   "session_key": "direct",
   "frame_version": 1,
@@ -15,7 +15,7 @@
  "open_text": "{\"phone_pub\":\"AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\",\"v\":1}",
  "request_sig_text": "a signature of some bytes",
  "request_hash": "vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48",
- "offer_text": "{\"body\":{\"expires_at\":1800000020000,\"host\":\"192.168.1.23\",\"ok\":true,\"port\":54321,\"ticket\":\"yMnKy8zNzs_Q0dLT1NXW1w\"},\"req\":\"vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48\",\"v\":1}",
+ "offer_text": "{\"body\":{\"expires_at\":1800000020000,\"host\":\"192.168.1.23\",\"mac_pub\":\"CxAVGh8kKS4zOD1CR0xRVltgZWpvdHl-g4iNkpecoaY\",\"ok\":true,\"port\":54321,\"ticket\":\"yMnKy8zNzs_Q0dLT1NXW1w\"},\"req\":\"vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48\",\"v\":1}",
  "refusal_text": "{\"body\":{\"code\":\"DIR_NO_NETWORK\",\"ok\":false},\"req\":\"vce6z-zRXMpEeo-_Byrdt3WDqaHjr-oRql_7NbTSI48\",\"v\":1}",
  "open_bad": [
   " {\"phone_pub\":\"x\"}",
@@ -35,5 +35,6 @@
   "DIR_NO_IDENTITY",
   "DIR_STOPPED",
   "DIR_BAD_FIELD"
- ]
+ ],
+ "mac_pub_hex": "0b10151a1f24292e33383d42474c51565b60656a6f74797e83888d92979ca1a6"
 }

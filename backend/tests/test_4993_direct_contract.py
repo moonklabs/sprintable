@@ -13,8 +13,8 @@ from app.services import desktop_direct
 from app.services.envelope_shape import ENVELOPE_KINDS, MAX_CT_BYTES_BY_KIND
 
 _FILE = Path(__file__).resolve().parents[2] / "contracts" / "direct-negotiation.json"
-# the sha256 of the file's bytes as the mobile repository committed it (mobile `contracts/direct-negotiation.json`, main d0e291bf) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
-_SHA256 = "907a513c4d5438776087accea8f2c12465428d052a9e3a028c4aa8bfe878623a"
+# the sha256 of the file's bytes as the mobile repository committed it (mobile `contracts/direct-negotiation.json`, main fad389f7) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
+_SHA256 = "2299edb8eb28c5c25f30eaa9c941920e73568e9327427223567890700a6d1780"
 
 
 def _contract() -> dict:
