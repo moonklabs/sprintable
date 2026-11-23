@@ -13,7 +13,7 @@ let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestInit) => { serverCalls.push({ url, init }); return currentFetch(url, init); } }));
 
 const ROOT = path.resolve(__dirname, '../../../..');
-type Other = { name: string; verb: 'start' | 'clock' | 'approval'; kind: string; session_key: string | null; body_extra?: Record<string, unknown>; payload_keys: string[] };
+type Other = { name: string; verb: 'start' | 'clock' | 'approval' | 'download'; kind: string; session_key: string | null; body_extra?: Record<string, unknown>; payload_keys: string[] };
 const ROWS = JSON.parse(readFileSync(path.join(ROOT, 'contracts', 'direct-rows.json'), 'utf8')) as { row_keys: string[]; other_routes: Other[]; never_direct_other: Array<{ name: string; verb: 'clock'; body_extra: Record<string, unknown> }> };
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
@@ -44,6 +44,7 @@ describe('[4993 5b-1] the rows (contracts/direct-rows.json other_routes)', () =>
     start: { setup_id: 'S', project_id: PROJECT, signed: 'SIGNED-X', phone_key_id: 'k-1' },
     clock: { action: 'out_open', signed: 'SIGNED-X', phone_key_id: 'k-1', agent_member_id: AGENT },
     approval: { session_key: 's-9', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd', decision: 'allow', signed: 'SIGNED-A', phone_key_id: 'k-1' },
+    download: { project_id: PROJECT, idempotency_key: 'press-key-0003', phone_key_id: 'k-1', envelope: { v: 1, kind: 'file_download' } },
   };
   for (const c of ROWS.other_routes) {
     it(`${c.name}: the payload is exactly ${c.payload_keys.join(' · ')}, the row has no session, the command id is the press's key`, () => {

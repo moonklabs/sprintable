@@ -15,7 +15,8 @@
     { "name": "a signed clock press of one agent", "verb": "clock", "kind": "clock", "session_key": null, "payload_keys": ["action", "signed", "agent_member_id"] },
     { "name": "a signed clock press of the computer's setup (no agent named)", "verb": "clock", "kind": "clock", "session_key": null, "payload_keys": ["action", "signed"] },
     { "name": "a signed answer to a permission request", "verb": "approval", "kind": "answer_approval", "session_key": "the request's own", "payload_keys": ["session_key", "request_id", "decision", "signed"] },
-    { "name": "the second (confirm) answer of the network question — it carries the host the person saw", "verb": "approval", "kind": "answer_approval", "session_key": "the request's own", "body_extra": { "stage": "confirm", "host": "gitlab.com" }, "payload_keys": ["session_key", "request_id", "decision", "signed", "stage", "host"] }
+    { "name": "the second (confirm) answer of the network question — it carries the host the person saw", "verb": "approval", "kind": "answer_approval", "session_key": "the request's own", "body_extra": { "stage": "confirm", "host": "gitlab.com" }, "payload_keys": ["session_key", "request_id", "decision", "signed", "stage", "host"] },
+    { "name": "a download of one file (the sealed request the device key signed for THIS download)", "verb": "download", "kind": "file_download", "session_key": null, "payload_keys": ["project_id", "envelope"] }
   ],
   "never_direct_other": [
     { "name": "the clock press of the WHOLE computer", "verb": "clock", "body_extra": { "computer": true } },

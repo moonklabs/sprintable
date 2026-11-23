@@ -12,6 +12,7 @@
 
 import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
+import { callWithin, followDirectResult, openFired, tryDirect } from './phone-direct';
 
 /** the closed words a computer's refusal ends in (the mobile repository's contract `reasons`) */
 export const FILE_REASONS = [
@@ -329,13 +330,26 @@ export interface DownloadDeps extends Omit<FilesDeps, 'window'> {
 export const DOWNLOAD_CHUNK_WAIT_MS = 60_000;
 export const DOWNLOAD_MAX_MS = 5 * 60_000;
 
+/** how often the direct road's word is asked for (the shell says `pending` until the whole file is in and checked) */
+export const DOWNLOAD_DIRECT_POLL_MS = 400;
+/** how long the shell's drop of a spent request is waited for before the second one is sealed */
+export const DOWNLOAD_DROP_WAIT_MS = 3_000;
+/** what a computer's refusal over the direct road says of the FILE (the same words the server road ends in): these end the download as they are — a second road would say the same. Any other word (a road that broke · is full · a Mac that cannot do it this way) is the road's, not the file's: the server's road follows, from the start */
+const FILE_FACT_REASONS: ReadonlySet<string> = new Set(['not_enabled', 'no_folder', 'not_found', 'is_link', 'hidden_name', 'looks_secret', 'too_big', 'not_text', 'not_plain', 'multi_linked', 'other_device', 'changed_while_reading', 'denied', 'unsupported']);
+type ByRoad = DownloadOutcome | { kind: 'server_road' };
+
 /**
- * One file downloaded: the shell seals and signs a `file_download` (the person confirms on the OS prompt — on EVERY download, a window never covers it) → the web posts it → the web fetches chunk 0, 1, 2 … IN ORDER from the server (each is
- * handed over once) and gives each to the shell (`files.download_step`), which opens it, keeps the train, checks the whole file and puts it into the phone's share sheet. The web never sees a byte of the file: the shell answers progress only.
+ * One file downloaded. The shell seals and signs a `file_download` (the person confirms on the OS prompt — on EVERY download, a window never covers it). Then:
+ *  · DIRECT FIRST (story 4993, file direct): when the shell has a ready road to the computer, the sealed request goes on it and the file comes back on the same connection, in pieces the SHELL joins and checks (`direct.result` says `done` only for a whole file whose
+ *    sha-256 is the one the computer named); `direct.download_save` then hands it to the phone's share sheet. Nothing about the file is on the server, and nothing about it is ever in this page.
+ *  · THE SERVER'S ROAD otherwise (no road · a shell that does not ride a download · a road that was not used at all): the web posts the same sealed request, fetches chunk 0, 1, 2 … IN ORDER from the server (each is handed over once) and gives each to the shell
+ *    (`files.download_step`). The web never sees a byte on either road.
+ * A direct download that BREAKS (the road ends · the computer's word is the road's own · the file does not come whole) is not resumed: the server's road gives the same file from the start, with a NEW confirmation (the first request was spent on the computer — one
+ * request, one signature, one use). A computer's refusal about the FILE (too big · not found · …) ends the download as it is.
  * Whatever ends it — or the screen leaving — the shell is told to drop what it held and the server to delete what it holds (best effort: a miss ends by itself in ten minutes).
  */
 export async function downloadFile(input: { setupId: string; projectId: string; dir: string[]; name: string }, deps: DownloadDeps): Promise<DownloadOutcome> {
-  const key = deps.newKey();
+  let key = deps.newKey();
   const stopped = deps.stopped ?? (() => false);
   const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = deps.now ?? Date.now;
@@ -350,20 +364,63 @@ export async function downloadFile(input: { setupId: string; projectId: string; 
     await Promise.all(drops);
   };
   deps.onCleanup?.(cleanup);
+  /** the shell seals one request (an OS confirmation) — the outcome when it does not, else the sealed press */
+  const seal = async (): Promise<{ end: DownloadOutcome } | { envelope: Record<string, unknown>; phoneKeyId: string }> => {
+    const sealed = await deps.phoneCall('files.seal', { setup_id: input.setupId, project_id: input.projectId, dir: input.dir, name: input.name, idempotency_key: key, download: true });
+    if (!sealed.ok) return { end: fromShell(sealed.code ?? '') as Ended };
+    sealedDone = true; // (the shell holds this press from here on: whatever ends the road drops it — once, by the cleanup below)
+    if (!isObj(sealed.envelope) || typeof sealed.phone_key_id !== 'string' || sealed.idempotency_key !== key) return { end: { kind: 'failed' } };
+    return { envelope: sealed.envelope, phoneKeyId: sealed.phone_key_id };
+  };
+  /** the direct road, after the request went on it (or may have): the shell's word until it is an end — `server_road` = this road did not give the file */
+  const byRoad = async (): Promise<ByRoad> => {
+    const mine = key;
+    return followDirectResult<ByRoad>(input.setupId, mine, {
+      phoneCall: deps.phoneCall, ...(deps.wait ? { wait: deps.wait } : {}), ...(deps.now ? { now: deps.now } : {}), pollMs: deps.pollMs ?? DOWNLOAD_DIRECT_POLL_MS, pollMaxMs: DOWNLOAD_MAX_MS,
+      halted: () => (stopped() ? { kind: 'cancelled' } : null),
+      unknown: () => ({ kind: 'server_road' }), // (the road ended · the shell has no word: nothing came — the server's road, from the start)
+      decide: async (r) => {
+        if (r.state === 'done') {
+          const saved = await deps.phoneCall('direct.download_save', { setup_id: input.setupId, idempotency_key: mine });
+          if (saved.ok === true && saved.state === 'saved') { finished = true; return { kind: 'saved' }; } // (the shell dropped the press with the save)
+          const code = typeof saved.code === 'string' ? saved.code : '';
+          if (code === 'cancelled') { finished = true; return { kind: 'cancelled' }; }
+          if (code === 'save_failed') { finished = true; return { kind: 'save_failed' }; }
+          return { kind: 'server_road' }; // (the file was not there to hand over: it is not resumed — the server gives it from the start)
+        }
+        // the computer's own refusal word: one about the FILE ends the download (the server would say the same), any other is the road's
+        const reason = r.code !== null && FILE_FACT_REASONS.has(r.code) ? (r.code as FilesReason) : null;
+        return reason ? { kind: 'reason', reason } : { kind: 'server_road' };
+      },
+    });
+  };
   try {
     if (stopped()) return { kind: 'cancelled' };
-    const sealed = await deps.phoneCall('files.seal', { setup_id: input.setupId, project_id: input.projectId, dir: input.dir, name: input.name, idempotency_key: key, download: true });
-    if (!sealed.ok) return fromShell(sealed.code ?? '') as Ended;
-    sealedDone = true; // (the shell holds this press from here on: whatever ends the road drops it — once, by the cleanup below)
-    if (!isObj(sealed.envelope) || typeof sealed.phone_key_id !== 'string' || sealed.idempotency_key !== key) return { kind: 'failed' };
+    let press = await seal();
+    if ('end' in press) return press.end;
     if (stopped()) return { kind: 'cancelled' };
+
+    // the direct road FIRST: the same sealed request, on the road the shell already has to this computer. A road that is not there (or a shell that does not ride a download) says «not sent» and nothing has gone out: the server's road takes THIS request
+    const went = await tryDirect(input.setupId, { verb: 'download', key, body: { project_id: input.projectId, envelope: press.envelope } }, { phoneCall: deps.phoneCall, ...(deps.now ? { now: deps.now } : {}), ...(deps.wait ? { wait: deps.wait } : {}), openFired });
+    if (went !== 'not_sent') {
+      const out = await byRoad();
+      if (out.kind !== 'server_road') return out;
+      // the direct road did not give the file: nothing is resumed. The request is spent on the computer — the shell drops it and seals ANOTHER (a second confirmation), and the server's road gives the file from the start
+      if (stopped()) return { kind: 'cancelled' };
+      // (the shell is told FIRST and waited for — at most this long: it holds one press at a time, and a new seal asked while the spent one is still held could be refused as «busy»)
+      shellDropped = true; await callWithin(deps.phoneCall, 'files.download_cancel', { idempotency_key: key }, DOWNLOAD_DROP_WAIT_MS);
+      key = deps.newKey(); shellDropped = false; sealedDone = false;
+      press = await seal();
+      if ('end' in press) return press.end;
+      if (stopped()) return { kind: 'cancelled' };
+    }
 
     let res: Response;
     try {
       res = await fetchWithAuth(`/api/desktop/computers/${input.setupId}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: input.projectId, idempotency_key: key, phone_key_id: sealed.phone_key_id, envelope: sealed.envelope }),
+        body: JSON.stringify({ project_id: input.projectId, idempotency_key: key, phone_key_id: press.phoneKeyId, envelope: press.envelope }),
       });
     } catch {
       return { kind: 'timeout' }; // the ask may have reached the server: never said as «refused»

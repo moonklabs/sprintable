@@ -63,6 +63,11 @@ export function directRow(pending: PendingLike, nowMs: number): Record<string, u
     if (typeof pending.agentId !== 'string' || pending.agentId === '' || typeof b.project_id !== 'string' || b.project_id === '' || typeof b.signed !== 'string' || b.signed === '') return null;
     return rowOf(pending, nowMs, 'start_session', null, { agent_member_id: pending.agentId, project_id: b.project_id, signed: b.signed });
   }
+  if (pending.verb === 'download') {
+    // story 4993 (file direct): ONE file's download — the server's payload for it is {project_id, envelope} (the sealed, device-key-signed request; the press has no session). The bytes come back on the same connection, and only the SHELL reads them
+    if (typeof b.project_id !== 'string' || b.project_id === '' || !b.envelope || typeof b.envelope !== 'object' || Array.isArray(b.envelope)) return null;
+    return rowOf(pending, nowMs, 'file_download', null, { project_id: b.project_id, envelope: b.envelope });
+  }
   if (pending.verb === 'clock') {
     // story 4993 (5b-1): a CLOCK press of ONE agent (or of the computer's setup without the whole-computer mark) — the server's payload is {action, signed[, agent_member_id]}. The press of the WHOLE computer (`computer: true`: the server counts the agents itself and
     // writes a `scope` the web cannot) and an edit (`edit`: a draft's fields) never ride the road — the server's way, as before

@@ -270,8 +270,8 @@ describe('[4988] downloadFile — what is dropped, whatever ends it', () => {
 
   it('the shell and the server are dropped TOGETHER: a bridge that never answers `files.download_cancel` does not hold the server\'s DELETE (nor the end of the download)', async () => {
     const calls = server({ chunk: () => json(404, {}) });
-    const phoneCall = vi.fn(async (type: string) => { if (type === 'files.seal') return SEALED; return new Promise<PhoneAnswer>(() => {}); }); // every other call hangs
-    const out = await Promise.race([downloadFile(input, { phoneCall, newKey: () => KEY, wait: async () => {} } as DownloadDeps), new Promise((r) => setTimeout(() => r('hung'), 500))]);
+    const phoneCall = vi.fn(async (type: string) => { if (type === 'files.seal') return SEALED; return new Promise<PhoneAnswer>(() => {}); }); // every other call hangs (the shell's `shell.caps` question is boxed at one second: a bridge that never answers it costs the download that second, then the server's road)
+    const out = await Promise.race([downloadFile(input, { phoneCall, newKey: () => KEY, wait: async () => {} } as DownloadDeps), new Promise((r) => setTimeout(() => r('hung'), 3000))]);
     expect(out).toEqual({ kind: 'timeout' });
     expect(phoneCall).toHaveBeenCalledWith('files.download_cancel', { idempotency_key: KEY });
     expect(calls.some((c) => c.method === 'DELETE')).toBe(true);
