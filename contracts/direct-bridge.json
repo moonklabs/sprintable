@@ -1,6 +1,6 @@
 {
   "_about": "The ONE contract of the direct road's WEB ↔ SHELL bridge (story 4993 · 4c-1). The web (a page the SERVER serves) asks the shell — which owns the socket — to open a direct road to one paired computer, to send ONE command over it and to read how a command came out. The shell decides what may ride the road (the web is not trusted with that), and everything that goes back to the web is a CLOSED WORD or a number: never an address, a port, a ticket, a key, nor a free text. Both the shell's lib/directBridge.js and the web's wiring (PR 5) read this file; a change of any word here is a new bridge version.",
-  "version": 2,
+  "version": 3,
   "calls": {
     "direct.ask": {
       "args": { "setup_id": "uuid" },
@@ -31,6 +31,11 @@
       "args": { "setup_id": "uuid" },
       "reply": { "state": "road_state word" },
       "note": "Where the road to that computer is now; the web uses it to decide whether to try a send."
+    },
+    "direct.download_save": {
+      "args": { "setup_id": "uuid", "idempotency_key": "command_id" },
+      "reply": { "ok": "boolean", "state": "'saved' (only when ok)", "code": "a closed code of the files road: unknown_request · busy · incomplete · cancelled · save_failed (only when ok is false)" },
+      "note": "(version 3 · file direct) A download the web sent over the road (a `file_download` row by `direct.send`) is whole and checked when `direct.result` says `done` (with its `size`): this hands the file to the OS share sheet under the name the shell kept when the person picked it, exactly as the server road's `files.download_step` does — the page never sees a byte. `direct.result` for a download answers `pending` · `done` (only for a whole file whose sha-256 is the one the Mac named) · `failed`/`rejected` with the Mac's closed word (`too_big`, `not_enabled`, `road_full`, `bad_file`, `incomplete`, `timeout` …) · `unknown` (the road ended: ask the server for the file from the start — there is no resume). One download at a time (`direct.send` says `busy` for a second)."
     }
   },
   "command_row": {
@@ -43,7 +48,8 @@
   },
   "allowed": {
     "_note": "Decided by the SHELL, from the row's own bytes. The direct road is a plain TCP line on a LAN (until the AEAD wiring lands it shows the whole command; after it, only a length): an instruction's words ride it only sealed, and every kind that has a signature rides it only with one. The Mac judges the same again (a plain send_prompt is refused there too).",
-    "kinds": ["start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock"],
+    "kinds": ["start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "file_download"],
+    "file_download": { "payload_keys": ["project_id", "envelope"], "session_key": null, "project_id": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", "envelope": "an object (the phone's own sealed, device-key-signed request — the Mac opens it by the same pin · signature · replay mark as on the relay)" },
     "send_prompt": { "payload_keys": ["session_key", "conversation_id", "envelope"], "envelope": "an object" },
     "signed_kinds": { "kinds": ["start_session", "answer_approval", "stop_session", "end_session", "clock"], "payload_has": "signed: a non-empty string of at most 16384 characters" }
   },
@@ -54,7 +60,7 @@
     "refusal_code": ["DIR_DISABLED", "DIR_OPEN_STALE", "DIR_RATE_MINUTE", "DIR_RATE_HOUR", "DIR_BUSY_PHONE", "DIR_BUSY_MAC", "DIR_NO_NETWORK", "DIR_LISTEN_FAILED", "DIR_NO_IDENTITY", "DIR_STOPPED", "DIR_BAD_FIELD"],
     "result_state": ["done", "failed", "rejected"],
     "result_code_shape": "^[a-z0-9_]{1,64}$",
-    "result_code_known": ["schema_rejected", "not_allowed", "not_supported", "expired", "unknown_session", "unknown_agent", "unsigned", "bad_signature", "stopped", "unavailable", "error"]
+    "result_code_known": ["schema_rejected", "not_allowed", "not_supported", "expired", "unknown_session", "unknown_agent", "unsigned", "bad_signature", "stopped", "unavailable", "error", "road_full", "bad_file", "incomplete", "timeout", "busy", "closed", "not_enabled", "no_folder", "not_found", "is_link", "hidden_name", "looks_secret", "too_big", "not_text", "not_plain", "multi_linked", "other_device", "changed_while_reading", "denied", "unsupported", "envelope_not_supported", "envelope_unknown_sender", "envelope_bad_signature", "envelope_replay", "envelope_stale", "envelope_expired", "envelope_open_failed", "envelope_mismatch", "envelope_malformed", "envelope_guard_unavailable"]
   },
   "result_frame": {
     "_note": "What the Mac writes into a `result` frame (inside the connection's cipher): ONE JSON object, exactly these keys, shape-closed words only. The shell drops anything else.",
@@ -68,7 +74,8 @@
       { "name": "a sealed instruction", "row": { "command_id": "cmd-seal-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "conversation_id": "33333333-2222-4333-8444-555555555555", "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" } },
       { "name": "a signed stop", "row": { "command_id": "cmd-stop-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
       { "name": "a signed approval", "row": { "command_id": "cmd-appr-0001", "kind": "answer_approval", "session_key": null, "payload": { "request_id": "r-1", "decision": "allow", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
-      { "name": "a signed clock press", "row": { "command_id": "cmd-clock-0001", "kind": "clock", "session_key": null, "payload": { "action": "in", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } }
+      { "name": "a signed clock press", "row": { "command_id": "cmd-clock-0001", "kind": "clock", "session_key": null, "payload": { "action": "in", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
+      { "name": "a download request (sealed · signed by the phone, no session)", "row": { "command_id": "cmd-dl-0001", "kind": "file_download", "session_key": null, "payload": { "project_id": "proj-1", "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" } }
     ],
     "result_frames": {
       "_note": "What the Mac writes (state, code → text) and what the shell takes (text → state, code): the same texts both ways. `code` is dropped when it is not the shape; a failed or rejected one without a good word is written with `error`.",
@@ -100,7 +107,11 @@
       { "name": "a stop with no signature", "row": { "command_id": "cmd-nosig-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
       { "name": "a kind that stays on the server (a files read)", "row": { "command_id": "cmd-file-0001", "kind": "file_list", "session_key": null, "payload": { "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
       { "name": "a door ask is not sent over a road", "row": { "command_id": "cmd-door-0001", "kind": "direct_open", "session_key": "direct", "payload": { "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
-      { "name": "a row with a key that is not a command's", "row": { "command_id": "cmd-xtra-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z", "extra": 1 }, "why": "bad_row" }
+      { "name": "a row with a key that is not a command's", "row": { "command_id": "cmd-xtra-0001", "kind": "stop_session", "session_key": "s-1", "payload": { "session_key": "s-1", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z", "extra": 1 }, "why": "bad_row" },
+      { "name": "a download with a session key", "row": { "command_id": "cmd-dlsk-0001", "kind": "file_download", "session_key": "s-1", "payload": { "project_id": "proj-1", "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a download with a key that is not its own", "row": { "command_id": "cmd-dlxk-0001", "kind": "file_download", "session_key": null, "payload": { "project_id": "proj-1", "envelope": { "v": 1 }, "name": "a.txt" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a download of a project id that is no id", "row": { "command_id": "cmd-dlpid-0001", "kind": "file_download", "session_key": null, "payload": { "project_id": "../etc", "envelope": { "v": 1 } }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
+      { "name": "a download whose envelope is not an object", "row": { "command_id": "cmd-dlenv-0001", "kind": "file_download", "session_key": null, "payload": { "project_id": "proj-1", "envelope": "x" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" }
     ]
   }
 }

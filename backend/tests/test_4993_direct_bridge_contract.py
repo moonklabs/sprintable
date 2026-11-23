@@ -10,8 +10,8 @@ from pathlib import Path
 from app.models.desktop_relay import COMMAND_KINDS
 
 _DIR = Path(__file__).resolve().parents[2] / "contracts"
-# the sha256 of the bytes as the mobile repository committed them (mobile `contracts/direct-bridge.json`, story 4993 · 4c-2, version 2) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
-_BRIDGE_SHA256 = "9501fb6ff32c8af79b14191abb6d5e80ffe5030a9688fd1292e622f2d766f355"
+# the sha256 of the bytes as the mobile repository committed them (mobile `contracts/direct-bridge.json`, story 4993 · file direct, version 3) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
+_BRIDGE_SHA256 = "07c89af975fcf283c39f6e88cdf7c81a0a585db8b8b852c233875e9beab99157"
 
 
 def test_the_bridge_copy_is_the_same_bytes_as_the_mobile_repositorys_file() -> None:
@@ -27,3 +27,12 @@ def test_the_kinds_the_direct_road_takes_are_kinds_the_server_makes_commands_of(
         assert case["kind"] in COMMAND_KINDS and case["kind"] in bridge["allowed"]["kinds"], case["name"]
     assert rows["row_keys"] == bridge["command_row"]["keys"], "the row the web builds has the keys the bridge's judgement takes"
     assert "direct_open" not in bridge["allowed"]["kinds"] and "file_list" not in bridge["allowed"]["kinds"], "a door ask and a files read stay on the server's road"
+
+
+def test_a_download_rides_the_direct_road_with_the_payload_the_server_makes_of_it() -> None:
+    """story 4993 (file direct): the bridge (version 3) takes `file_download`, and the row file says its payload is exactly what the server's ask for a download stores — {project_id, envelope} (test_4988_desktop_file_download_realdb test_01 asserts the server's side of the same two keys)."""
+    bridge = json.loads((_DIR / "direct-bridge.json").read_text(encoding="utf-8"))
+    rows = json.loads((_DIR / "direct-rows.json").read_text(encoding="utf-8"))
+    assert bridge["version"] == 3 and "file_download" in bridge["allowed"]["kinds"] and "file_download" in COMMAND_KINDS
+    [route] = [r for r in rows["other_routes"] if r["verb"] == "download"]
+    assert route["kind"] == "file_download" and route["session_key"] is None and route["payload_keys"] == ["project_id", "envelope"]

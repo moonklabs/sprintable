@@ -9,7 +9,7 @@ import type { PhoneAnswer } from './phone-bridge';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const read = (f: string) => readFileSync(path.join(ROOT, 'contracts', f));
-const BRIDGE_SHA = '9501fb6ff32c8af79b14191abb6d5e80ffe5030a9688fd1292e622f2d766f355'; // mobile `contracts/direct-bridge.json` (story 4993 · 4c-2, version 2) — a copy that drifts is a failure, not a quiet divergence
+const BRIDGE_SHA = '07c89af975fcf283c39f6e88cdf7c81a0a585db8b8b852c233875e9beab99157'; // mobile `contracts/direct-bridge.json` (story 4993 · file direct, version 3) — a copy that drifts is a failure, not a quiet divergence
 const ROWS = JSON.parse(read('direct-rows.json').toString('utf8')) as { row_keys: string[]; cases: Array<{ name: string; kind: string; sealed: boolean; payload_from_body: string[] }>; never_direct: Array<{ name: string; kind: string; sealed: boolean }> };
 const BRIDGE = JSON.parse(read('direct-bridge.json').toString('utf8'));
 
@@ -24,9 +24,10 @@ const pendingOf = (c: { kind: string; sealed: boolean }, over: Record<string, un
 
 describe('[4993 5a] the contract copies', () => {
   it('direct-bridge.json is the mobile repository\'s file byte for byte', () => { expect(createHash('sha256').update(read('direct-bridge.json')).digest('hex')).toBe(BRIDGE_SHA); });
-  it('the bridge names the six calls the web uses and the closed words it relies on', () => {
-    expect(Object.keys(BRIDGE.calls).sort()).toEqual(['direct.ask', 'direct.close', 'direct.offer', 'direct.result', 'direct.send', 'direct.status']);
-    expect(BRIDGE.allowed.kinds).toEqual(expect.arrayContaining(['send_prompt', 'stop_session', 'end_session']));
+  it('the bridge names the seven calls the web uses and the closed words it relies on', () => {
+    expect(Object.keys(BRIDGE.calls).sort()).toEqual(['direct.ask', 'direct.close', 'direct.download_save', 'direct.offer', 'direct.result', 'direct.send', 'direct.status']);
+    expect(BRIDGE.allowed.kinds).toEqual(expect.arrayContaining(['send_prompt', 'stop_session', 'end_session', 'file_download'])); // (version 3: a download rides the road)
+    expect(BRIDGE.version).toBe(3);
     expect(BRIDGE.command_row.keys).toEqual(ROWS.row_keys);
   });
 });
