@@ -13,7 +13,7 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import { hiddenCharsChange } from './instruction-text';
 import type { PhoneAnswer } from './phone-bridge';
-import { DIRECT_RESULT_CALL_MS, callWithin, tryDirect } from './phone-direct';
+import { followDirectResult, openFired, tryDirect } from './phone-direct';
 
 export type CommandOutcome =
   | { kind: 'stopped' } // the daemon interrupted the turn — the session lives on
@@ -182,9 +182,6 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   return route(input.agentId, pending, deps, input.setupId);
 }
 
-/** when `direct.open` was last fired, by computer — all presses of the page share it (a press never opens a road another press is already asking for) */
-const openFired = new Map<string, number>();
-
 /** story 4993 (5a): the same-network direct road FIRST, for the three kinds the shell and the Mac take on it (a sealed instruction · a stop · an end); anything that does not go that way — no shell support, no road within the time box, a refusal — is the server's POST, exactly as before. The direct road never turns a failure into a quiet drop: `not_sent` is certain, `maybe` is followed, never re-posted. */
 async function route(agentId: string, pending: Pending, deps: CommandDeps, setupId: string | undefined): Promise<CommandOutcome> {
   if (setupId) {
@@ -311,24 +308,8 @@ async function outcomeOfResult(r: { state?: string; result_code?: string | null 
 async function followDirect(agentId: string, pending: Pending, deps: CommandDeps, maybe: boolean): Promise<CommandOutcome> {
   void agentId; void maybe;
   const setupId = pending.direct?.setupId; if (!setupId) return { kind: 'unknown', pending };
-  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const now = deps.now ?? Date.now;
-  const every = deps.pollMs ?? COMMAND_POLL_MS;
-  const maxMs = deps.pollMaxMs ?? COMMAND_POLL_MAX_MS; const deadline = now() + maxMs;
-  // the two minutes are the wall clock's; the count of asks is a second belt (a clock that does not move — a stand-in that waits for nothing — can never hold a press for ever)
-  const askMax = Math.ceil(maxMs / Math.max(1, every)) + 2;
-  const realDeadline = Date.now() + maxMs; // (the page's own clock too: `deps.now` is injectable, and a frozen one must not turn two minutes into six)
-  for (let asked = 0; now() < deadline && Date.now() < realDeadline && asked < askMax; asked++) {
-    // the wait is cut at the two minutes' end too: a page that is hidden (a wait that never comes back) cannot hold a press past it
-    await Promise.race([wait(every), new Promise<void>((r) => setTimeout(r, Math.max(1, Math.min(deadline - now(), realDeadline - Date.now()))))]);
-    if (now() >= deadline || Date.now() >= realDeadline) break; // (the wait itself may have been the end of the two minutes: no ask is started on borrowed time)
-    const a = await callWithin(deps.phoneCall, 'direct.result', { setup_id: setupId, command_id: pending.key }, Math.max(1, Math.min(DIRECT_RESULT_CALL_MS, deadline - now(), realDeadline - Date.now())));
-    if (!a || a.ok !== true) continue; // a call that did not answer is not an end — ask again
-    if (a.state === 'pending') continue;
-    if (a.state === 'unknown') return { kind: 'unknown', pending };
-    if (a.state !== 'done' && a.state !== 'failed' && a.state !== 'rejected') continue;
-    const end = await outcomeOfResult({ state: a.state, result_code: typeof a.code === 'string' ? a.code : null }, pending, deps);
-    if (end) return end;
-  }
-  return { kind: 'unknown', pending };
+  return followDirectResult<CommandOutcome>(setupId, pending.key, {
+    phoneCall: deps.phoneCall, wait: deps.wait, now: deps.now, pollMs: deps.pollMs ?? COMMAND_POLL_MS, pollMaxMs: deps.pollMaxMs ?? COMMAND_POLL_MAX_MS,
+    decide: (r) => outcomeOfResult({ state: r.state, result_code: r.code }, pending, deps), unknown: () => ({ kind: 'unknown', pending }),
+  });
 }

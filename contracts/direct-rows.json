@@ -1,5 +1,5 @@
 {
-  "_about": "How a press becomes the ROW the same-network direct road sends (story 4993 · web PR 5a). The web builds the row from the very body it would post to the server; the server builds the Mac's payload for the same press from the same body — so the two must agree, and this ONE file is what the web's test (apps/web/src/lib/phone-direct.test.ts) and the server's test (backend/tests/test_4993_direct_rows_realdb.py) both read. A plain (non-sealed) instruction never rides the direct road. The row's command_id is the press's idempotency key; its created_at is the phone's clock.",
+  "_about": "(5b-1: `other_routes` — a signed START, posted to /agents/{agent}/desktop-start where the agent comes from the URL so the payload's agent_member_id is the press's agent, and a signed CLOCK press of one agent or of a computer's setup, posted to /desktop/setups/{sid}/clock, ride the road too, their rows with session_key null; `never_direct_other`: the press of the WHOLE computer and an edit never ride it.) How a press becomes the ROW the same-network direct road sends (story 4993 · web PR 5a). The web builds the row from the very body it would post to the server; the server builds the Mac's payload for the same press from the same body — so the two must agree, and this ONE file is what the web's test (apps/web/src/lib/phone-direct.test.ts) and the server's test (backend/tests/test_4993_direct_rows_realdb.py) both read. A plain (non-sealed) instruction never rides the direct road. The row's command_id is the press's idempotency key; its created_at is the phone's clock.",
   "row_keys": ["command_id", "kind", "session_key", "payload", "created_at"],
   "command_id_from": "idempotency_key",
   "cases": [
@@ -9,5 +9,14 @@
   ],
   "never_direct": [
     { "name": "a plain instruction (the words in text)", "kind": "send_prompt", "sealed": false }
+  ],
+  "other_routes": [
+    { "name": "a signed start", "verb": "start", "kind": "start_session", "session_key": null, "payload_keys": ["agent_member_id", "project_id", "signed"] },
+    { "name": "a signed clock press of one agent", "verb": "clock", "kind": "clock", "session_key": null, "payload_keys": ["action", "signed", "agent_member_id"] },
+    { "name": "a signed clock press of the computer's setup (no agent named)", "verb": "clock", "kind": "clock", "session_key": null, "payload_keys": ["action", "signed"] }
+  ],
+  "never_direct_other": [
+    { "name": "the clock press of the WHOLE computer", "verb": "clock", "body_extra": { "computer": true } },
+    { "name": "a clock edit", "verb": "clock", "body_extra": { "edit": { "plan": "x" } } }
   ]
 }
