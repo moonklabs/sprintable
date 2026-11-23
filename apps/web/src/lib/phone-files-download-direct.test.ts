@@ -218,7 +218,7 @@ describe('[4993 file direct] the screen is the same on both roads: «n of m» fr
   });
   it('the contract copy names the two numbers as additive fields of the pending word (the shell\'s side wrote them there first)', () => {
     expect(Object.keys(BRIDGE.calls['direct.result'].reply)).toEqual(['state', 'code', 'got', 'of']);
-    expect(BRIDGE.calls['direct.result'].reply.got).toMatch(/only for a file download that is `pending`/); expect(BRIDGE.version).toBe(3);
+    expect(BRIDGE.calls['direct.result'].reply.got).toMatch(/only for a file download that is `pending`/); expect(BRIDGE.version).toBe(4);
   });
 });
 

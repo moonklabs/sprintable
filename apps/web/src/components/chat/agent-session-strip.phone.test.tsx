@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+import { __resetDirectKeepForTest } from '@/lib/phone-direct-keep';
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const CONV = '33333333-4444-4555-8666-777777777777';
@@ -64,7 +65,7 @@ beforeEach(() => {
   sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { vi.useRealTimers(); await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; });
+afterEach(async () => { await act(async () => { root.unmount(); }); __resetDirectKeepForTest(); /* (the direct road's keeper is one per computer for the page's life: a test's screen must not leave it — or its timers — for the next; reset while the fake timers are still the ones it used) */ vi.useRealTimers(); container.remove(); document.body.innerHTML = ''; });
 
 async function settle(n = 6) { for (let i = 0; i < n; i++) await act(async () => { await Promise.resolve(); }); }
 async function render(locale: 'ko' | 'en' = 'ko') {
@@ -929,6 +930,26 @@ describe('[4977] the «기록» button of the strip', () => {
   const caps = (records: unknown) => phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: records === undefined ? {} : { records } } : { id: 'c', ok: false, code: 'bad_request' }));
   const recordsButton = () => container.querySelector('[data-testid="agent-records-open"]') as HTMLButtonElement | null;
 
+  // story 4993 (PO ⓐ): the strip is a screen of that computer — in the phone app, with a shell that says `direct: 1` + `direct_keep: 1`, its room keeps the computer's direct road (`direct.keep` with THAT computer's id); outside the phone app, or with a session that names no computer, nothing is asked
+  it('the direct road: the strip of a session that names its computer asks `direct.keep` for that computer — only inside the phone app', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: { direct: 1, direct_keep: 1 } } : type === 'direct.keep' ? { id: 'k', state: 'ready' } : { id: 'c', ok: false, code: 'bad_request' }));
+    await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep')).toEqual([['direct.keep', { setup_id: SETUP }]]);
+  });
+
+  it('the direct road: a session that names no computer, or a page outside the phone app, asks the shell nothing about a road', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: '' };
+    phoneCall.mockImplementation(async () => ({ id: 'c', ok: false, code: 'bad_request' }));
+    await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep' || c[0] === 'direct.status')).toEqual([]);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    phone = false; sessionView = { ...sessionView, setup_id: SETUP }; phoneCall.mockClear(); await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep' || c[0] === 'direct.status' || c[0] === 'direct.close' || c[0] === 'shell.caps')).toEqual([]); // (outside the phone app: not even the capability probe)
+  });
+
   it('the phone app · a shell that says `records: 1` · a session that names its computer → [기록] sits with the other buttons', async () => {
     server(res(201, {}));
     sessionView = { ...sessionView, setup_id: SETUP };
@@ -936,7 +957,7 @@ describe('[4977] the «기록» button of the strip', () => {
     await render();
     expect(recordsButton()?.textContent).toBe(ko.records.button);
     expect(buttons()).toEqual([ko.records.button, ko.button.stop, ko.button.instruct]);
-    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toHaveLength(1); // read ONCE, not at every render
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toHaveLength(2); // read ONCE by the strip's records button, and ONCE by the direct road's keeper (story 4993 · PO ⓐ: a different question, once per computer) — neither at every render
   });
 
   it('[기록] opens the sheet of THIS chat (its title and its lead) and reads through the shell\'s own words only', async () => {

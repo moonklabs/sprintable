@@ -1,6 +1,6 @@
 {
   "_about": "The ONE contract of the direct road's WEB ↔ SHELL bridge (story 4993 · 4c-1). The web (a page the SERVER serves) asks the shell — which owns the socket — to open a direct road to one paired computer, to send ONE command over it and to read how a command came out. The shell decides what may ride the road (the web is not trusted with that), and everything that goes back to the web is a CLOSED WORD or a number: never an address, a port, a ticket, a key, nor a free text. Both the shell's lib/directBridge.js and the web's wiring (PR 5) read this file; a change of any word here is a new bridge version.",
-  "version": 3,
+  "version": 4,
   "calls": {
     "direct.ask": {
       "args": { "setup_id": "uuid" },
@@ -31,6 +31,11 @@
       "args": { "setup_id": "uuid" },
       "reply": { "state": "road_state word" },
       "note": "Where the road to that computer is now; the web uses it to decide whether to try a send."
+    },
+    "direct.keep": {
+      "args": { "setup_id": "uuid" },
+      "reply": { "state": "road_state word" },
+      "note": "Story 4993 (PO keep-alive): the screen of that computer is in front — a READY road gets one `ping` frame (the Mac only restarts its idle clock; a ping is not a command), any other road gets nothing. The reply is the road's state AFTER the call (no `ok`, as direct.status): the web opens the road when it is `idle` and waits while it is being made. About every 30 s per open screen; announced by `shell.caps` `direct_keep: 1`."
     },
     "direct.download_save": {
       "args": { "setup_id": "uuid", "idempotency_key": "command_id" },

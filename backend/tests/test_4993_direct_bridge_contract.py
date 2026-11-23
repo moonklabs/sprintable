@@ -10,8 +10,8 @@ from pathlib import Path
 from app.models.desktop_relay import COMMAND_KINDS
 
 _DIR = Path(__file__).resolve().parents[2] / "contracts"
-# the sha256 of the bytes as the mobile repository committed them (mobile `contracts/direct-bridge.json`, story 4993 · file direct, version 3) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
-_BRIDGE_SHA256 = "3ba5217c63df8d7083eafb093b519b3493a10b92b97debf811b9b9c20f2b1a98"
+# the sha256 of the bytes as the mobile repository committed them (mobile `contracts/direct-bridge.json`, story 4993 · keep-alive, version 4) — a copy that drifts is RED, and so is a change of the file that did not change this line with it
+_BRIDGE_SHA256 = "698863953821f193d872d2ffb45a45825fa5457e4e4c8ec33978b6c5960079af"
 
 
 def test_the_bridge_copy_is_the_same_bytes_as_the_mobile_repositorys_file() -> None:
@@ -30,9 +30,9 @@ def test_the_kinds_the_direct_road_takes_are_kinds_the_server_makes_commands_of(
 
 
 def test_a_download_rides_the_direct_road_with_the_payload_the_server_makes_of_it() -> None:
-    """story 4993 (file direct): the bridge (version 3) takes `file_download`, and the row file says its payload is exactly what the server's ask for a download stores — {project_id, envelope} (test_4988_desktop_file_download_realdb test_01 asserts the server's side of the same two keys)."""
+    """story 4993 (file direct): the bridge (version 4 — 3 added `file_download`, 4 the keep-alive call) takes `file_download`, and the row file says its payload is exactly what the server's ask for a download stores — {project_id, envelope} (test_4988_desktop_file_download_realdb test_01 asserts the server's side of the same two keys)."""
     bridge = json.loads((_DIR / "direct-bridge.json").read_text(encoding="utf-8"))
     rows = json.loads((_DIR / "direct-rows.json").read_text(encoding="utf-8"))
-    assert bridge["version"] == 3 and "file_download" in bridge["allowed"]["kinds"] and "file_download" in COMMAND_KINDS
+    assert bridge["version"] == 4 and "file_download" in bridge["allowed"]["kinds"] and "file_download" in COMMAND_KINDS
     [route] = [r for r in rows["other_routes"] if r["verb"] == "download"]
     assert route["kind"] == "file_download" and route["session_key"] is None and route["payload_keys"] == ["project_id", "envelope"]
