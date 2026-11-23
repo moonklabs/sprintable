@@ -1,11 +1,16 @@
 {
   "_about": "The ONE contract of the direct road's WEB ↔ SHELL bridge (story 4993 · 4c-1). The web (a page the SERVER serves) asks the shell — which owns the socket — to open a direct road to one paired computer, to send ONE command over it and to read how a command came out. The shell decides what may ride the road (the web is not trusted with that), and everything that goes back to the web is a CLOSED WORD or a number: never an address, a port, a ticket, a key, nor a free text. Both the shell's lib/directBridge.js and the web's wiring (PR 5) read this file; a change of any word here is a new bridge version.",
-  "version": 1,
+  "version": 2,
   "calls": {
-    "direct.open": {
+    "direct.ask": {
       "args": { "setup_id": "uuid" },
+      "reply": { "ok": "boolean", "command_id": "the press key of this ask (only when ok)", "envelope": "the sealed ask — the page POSTs it to the server (only when ok)", "phone_key_id": "this phone's key id for that POST (only when ok)", "why": "open_why word (only when ok is false)" },
+      "note": "(version 2 · 4c-2) The PAGE carries the negotiation through the server; the shell only seals and opens. This makes the sealed ASK for a door (box-proved, with a one-time key of this try) and holds the try for its minute: the page POSTs the envelope to /desktop/computers/{id}/direct and reads the Mac's sealed answer back. ok:false is not an error: the web goes on by the server. A computer that failed a moment ago answers why 'cooling' at once (five quiet minutes); a try already held or a road already open answers 'busy'."
+    },
+    "direct.offer": {
+      "args": { "setup_id": "uuid", "command_id": "command_id", "envelope": "the Mac's sealed answer exactly as the server gave it" },
       "reply": { "ok": "boolean", "why": "open_why word (only when ok is false)", "code": "refusal word (only when why is 'refused')" },
-      "note": "Try to have a direct road to that computer (the shell asks the Mac for a door through the relay, connects, and verifies the Mac's proof). ok:false is not an error: the web goes on by the server as it does today. A computer that failed a moment ago answers why 'cooling' at once (five quiet minutes)."
+      "note": "The Mac's sealed answer, as the page read it from the server, opened HERE against THAT ask — the pinned computer's signature, the hash of the ask, a private address, then the key agreement; only then the shell dials, says its AEAD hello and verifies the Mac's proof (ok:true = the road is open). The shell judges the answer as bytes: a changed byte, an answer of another ask or another computer, a refusal, a stale one → nothing is dialled and the Mac rests five minutes. The try is SPENT by this call: the same answer again (or any answer for a press key the shell does not hold) answers why 'no_ask' and dials nothing."
     },
     "direct.send": {
       "args": { "setup_id": "uuid", "row": "command_row" },
@@ -44,7 +49,7 @@
   },
   "words": {
     "road_state": ["idle", "asking", "connecting", "proving", "ready"],
-    "open_why": ["cooling", "busy", "closed", "ask_not_made", "ask_not_sent", "no_answer", "answer_bad", "refused", "stale", "connect", "proof", "protocol", "no_road", "bad_request"],
+    "open_why": ["cooling", "busy", "closed", "ask_not_made", "ask_not_sent", "no_answer", "answer_bad", "refused", "stale", "connect", "proof", "protocol", "no_road", "bad_request", "no_ask"],
     "send_why": ["not_open", "busy", "too_big", "closed", "ack", "protocol", "not_allowed", "bad_row", "no_road"],
     "refusal_code": ["DIR_DISABLED", "DIR_OPEN_STALE", "DIR_RATE_MINUTE", "DIR_RATE_HOUR", "DIR_BUSY_PHONE", "DIR_BUSY_MAC", "DIR_NO_NETWORK", "DIR_LISTEN_FAILED", "DIR_NO_IDENTITY", "DIR_STOPPED", "DIR_BAD_FIELD"],
     "result_state": ["done", "failed", "rejected"],
