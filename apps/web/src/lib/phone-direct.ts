@@ -151,6 +151,27 @@ function openBehind(deps: DirectDeps, setupId: string): void {
   negotiate(setupId, deps).catch(() => undefined);
 }
 
+const capsSayDirect = (caps: PhoneAnswer): boolean => caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { direct?: unknown }).direct === 1;
+/** how long a road-opening that came late (a slow shell) waits for the shell's answers in all — its own end, so a shell that never answers leaves nothing waiting */
+export const DIRECT_LATE_OPEN_MAX_MS = 10_000;
+/** open the road behind a press unless one was started lately for this computer (the note is shared by all presses; checked and set in one step) */
+function openIfNotLately(deps: DirectDeps, setupId: string): void {
+  const fired = deps.openFired; const last = fired?.get(setupId);
+  if (last === undefined || Date.now() - last >= DIRECT_OPEN_AGAIN_MS) { fired?.set(setupId, Date.now()); openBehind(deps, setupId); }
+}
+/** the shell answered slower than the press's box (story 4993 wheel): the press has gone to the server already; the questions are finished here, with a longer end of their own, and a road that is idle is opened exactly as the fast path would have */
+function openLate(deps: DirectDeps, setupId: string, capsCall: Promise<PhoneAnswer> | null, statusCall: Promise<PhoneAnswer> | null): void {
+  void (async () => {
+    try {
+      const end = Date.now() + DIRECT_LATE_OPEN_MAX_MS; const room = () => Math.max(1, end - Date.now());
+      if (capsCall) { const c = await within(capsCall, room()); if (c === TIMED_OUT || !capsSayDirect(c)) return; }
+      const st = await within(statusCall ?? start(deps.phoneCall, 'direct.status', { setup_id: setupId }), room());
+      if (st === TIMED_OUT || st.ok !== true || st.state !== 'idle') return;
+      openIfNotLately(deps, setupId);
+    } catch { /* a late look that fails is not anybody's business */ }
+  })();
+}
+
 /** try the direct road for ONE press (see the head of this file) */
 export async function tryDirect(setupId: string, pending: PendingLike, deps: DirectDeps): Promise<Went> {
   const now = deps.now ?? Date.now;
@@ -158,18 +179,19 @@ export async function tryDirect(setupId: string, pending: PendingLike, deps: Dir
   if (!row) return 'not_sent';
   // ONE small box for the two local questions (caps · status) — on the real clock: `deps.now` is the command's wall clock, which a test may move by leaps
   const t0 = Date.now(); const probeBudget = deps.budget?.probe ?? DIRECT_PROBE_BUDGET_MS; const left = () => probeBudget - (Date.now() - t0);
-  const caps = await within(start(deps.phoneCall, 'shell.caps', {}), Math.max(1, left()));
-  if (caps === TIMED_OUT || caps.ok !== true || !caps.caps || typeof caps.caps !== 'object' || (caps.caps as { direct?: unknown }).direct !== 1) return 'not_sent';
-  if (left() <= 0) return 'not_sent';
-  const status = await within(start(deps.phoneCall, 'direct.status', { setup_id: setupId }), Math.max(1, left()));
-  if (status === TIMED_OUT || status.ok !== true) return 'not_sent';
+  const capsCall = start(deps.phoneCall, 'shell.caps', {});
+  const caps = await within(capsCall, Math.max(1, left()));
+  if (caps === TIMED_OUT) { openLate(deps, setupId, capsCall, null); return 'not_sent'; } // (the box is for SENDING: a slow shell costs this press its road, never the road itself — the late answer still opens it)
+  if (!capsSayDirect(caps)) return 'not_sent';
+  if (left() <= 0) { openLate(deps, setupId, null, null); return 'not_sent'; }
+  const statusCall = start(deps.phoneCall, 'direct.status', { setup_id: setupId });
+  const status = await within(statusCall, Math.max(1, left()));
+  if (status === TIMED_OUT) { openLate(deps, setupId, null, statusCall); return 'not_sent'; }
+  if (status.ok !== true) return 'not_sent';
   if (status.state !== 'ready') {
     // NO ROAD YET: this press goes to the server AT ONCE (the person never waits for a door to be made — the way there is the server, a turn to the computer and back, 1–4 s). The road is opened BEHIND it so the next press finds it ready; a road already being made
     // (asking · connecting · proving) is not opened again, and what the open says is nobody's business here (a refusal is the shell's five quiet minutes)
-    if (status.state === 'idle') {
-      const fired = deps.openFired; const last = fired?.get(setupId);
-      if (last === undefined || Date.now() - last >= DIRECT_OPEN_AGAIN_MS) { fired?.set(setupId, Date.now()); openBehind(deps, setupId); }
-    }
+    if (status.state === 'idle') openIfNotLately(deps, setupId);
     return 'not_sent';
   }
   if (left() <= 0) return 'not_sent'; // (the box is spent: the road is not used on borrowed time)
