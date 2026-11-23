@@ -13,7 +13,7 @@ let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (url: string, init?: RequestInit) => { serverCalls.push({ url, init }); return currentFetch(url, init); } }));
 
 const ROOT = path.resolve(__dirname, '../../../..');
-type Other = { name: string; verb: 'start' | 'clock'; kind: string; session_key: null; payload_keys: string[] };
+type Other = { name: string; verb: 'start' | 'clock' | 'approval'; kind: string; session_key: string | null; body_extra?: Record<string, unknown>; payload_keys: string[] };
 const ROWS = JSON.parse(readFileSync(path.join(ROOT, 'contracts', 'direct-rows.json'), 'utf8')) as { row_keys: string[]; other_routes: Other[]; never_direct_other: Array<{ name: string; verb: 'clock'; body_extra: Record<string, unknown> }> };
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
@@ -43,20 +43,29 @@ describe('[4993 5b-1] the rows (contracts/direct-rows.json other_routes)', () =>
   const bodies: Record<string, Record<string, unknown>> = {
     start: { setup_id: 'S', project_id: PROJECT, signed: 'SIGNED-X', phone_key_id: 'k-1' },
     clock: { action: 'out_open', signed: 'SIGNED-X', phone_key_id: 'k-1', agent_member_id: AGENT },
+    approval: { session_key: 's-9', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd', decision: 'allow', signed: 'SIGNED-A', phone_key_id: 'k-1' },
   };
   for (const c of ROWS.other_routes) {
     it(`${c.name}: the payload is exactly ${c.payload_keys.join(' · ')}, the row has no session, the command id is the press's key`, () => {
-      const body = { ...bodies[c.verb]! }; if (c.verb === 'clock' && !c.payload_keys.includes('agent_member_id')) delete body.agent_member_id;
+      const body = { ...bodies[c.verb]!, ...(c.body_extra ?? {}) }; if (c.verb === 'clock' && !c.payload_keys.includes('agent_member_id')) delete body.agent_member_id;
       const row = directRow({ verb: c.verb, key: 'press-key-0003', body, ...(c.verb === 'start' ? { agentId: AGENT } : {}) }, Date.UTC(2026, 10, 23, 9, 0, 0))!;
       expect(Object.keys(row)).toEqual(ROWS.row_keys);
-      expect(row.kind).toBe(c.kind); expect(row.session_key).toBeNull(); expect(row.command_id).toBe('press-key-0003');
+      expect(row.kind).toBe(c.kind); expect(row.session_key).toBe(typeof c.session_key === 'string' ? 's-9' : null); expect(row.command_id).toBe('press-key-0003');
       expect(Object.keys(row.payload as object)).toEqual(c.payload_keys);
       expect(row.payload).toEqual(Object.fromEntries(c.payload_keys.map((k) => [k, k === 'agent_member_id' ? AGENT : body[k]])));
+      expect(Object.keys(row.payload as object)).not.toContain('phone_key_id');
     });
   }
   for (const c of ROWS.never_direct_other) {
     it(`${c.name} never rides the road`, () => { expect(directRow({ verb: c.verb, key: 'press-key-0003', body: { ...bodies.clock!, ...c.body_extra } }, Date.now())).toBeNull(); });
   }
+  it('an ANSWER to a permission request: nothing without its session · request id · a decision of the two words · a signature; a stage of another word is no row; a first answer never carries a host', () => {
+    const ok = bodies.approval!; const row = (over: Record<string, unknown>) => directRow({ verb: 'approval', key: 'press-key-0003', body: { ...ok, ...over } }, Date.now());
+    expect(row({})).not.toBeNull();
+    for (const over of [{ session_key: undefined }, { session_key: '' }, { request_id: undefined }, { request_id: '' }, { decision: 'maybe' }, { decision: undefined }, { signed: undefined }, { signed: '' }, { stage: 'bogus' }, { stage: 'confirm' }, { stage: 'confirm', host: '' }]) expect(row(over), JSON.stringify(over)).toBeNull();
+    expect(row({ stage: 'ask', host: 'gitlab.com' })!.payload).not.toHaveProperty('host'); expect(row({ host: 'gitlab.com' })!.payload).not.toHaveProperty('stage');
+    expect(row({ stage: 'confirm', host: 'gitlab.com' })!.payload).toMatchObject({ stage: 'confirm', host: 'gitlab.com' });
+  });
   it('nothing without the signature or the ids a row must carry', () => {
     expect(directRow({ verb: 'start', key: 'press-key-0003', body: { ...bodies.start!, signed: '' }, agentId: AGENT }, Date.now())).toBeNull();
     expect(directRow({ verb: 'start', key: 'press-key-0003', body: bodies.start! }, Date.now())).toBeNull(); // (no agent)

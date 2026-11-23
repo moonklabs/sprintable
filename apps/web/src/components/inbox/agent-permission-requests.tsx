@@ -183,7 +183,9 @@ export function useAgentPermissionRequests() {
     const put = (a: Answer) => setAnswers((m) => new Map(m).set(row.id, { row, answer: a, at: Date.now() }));
     put({ kind: 'sending', decision });
     // story 4972: a sealed card is answered on the shell's own sheet — what is posted is what the shell says it signed
-    put(await answerOnPhone(row.id, decision, { phoneCall }, { sealed: row.sealed === true }));
+    // story 4993 (5b-2): the request's own values go with it so the answer can take the same-network direct road (an answerable request carries its session; the server's way stays the fallback)
+    const direct = row.session_key ? { setupId: row.setup_id, sessionKey: row.session_key, requestId: row.request_id, stage: row.stage, host: row.host } : undefined;
+    put(await answerOnPhone(row.id, decision, { phoneCall }, { sealed: row.sealed === true, ...(direct ? { direct } : {}) }));
   };
   // story 4972: «open it in the app» — a sealed card read on the shell's sheet with nothing to sign (a terminal-only question)
   const open = (row: PermissionRequest): Promise<OpenOutcome> => openOnPhone(row.id, { phoneCall });

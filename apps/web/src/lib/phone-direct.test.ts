@@ -9,7 +9,7 @@ import type { PhoneAnswer } from './phone-bridge';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const read = (f: string) => readFileSync(path.join(ROOT, 'contracts', f));
-const BRIDGE_SHA = 'd779c8541da41fb2db9bb4e5d4350dbce441eda967abd01a0ad17e01eb9389a1'; // mobile `contracts/direct-bridge.json` (story 4993 · 4c-1) — a copy that drifts is a failure, not a quiet divergence
+const BRIDGE_SHA = '894f8fde28cefdd0592360ad21d86a55b49fb0192f26f765ee2af9cf8674425c'; // mobile `contracts/direct-bridge.json` (story 4993 · 4c-1) — a copy that drifts is a failure, not a quiet divergence
 const ROWS = JSON.parse(read('direct-rows.json').toString('utf8')) as { row_keys: string[]; cases: Array<{ name: string; kind: string; sealed: boolean; payload_from_body: string[] }>; never_direct: Array<{ name: string; kind: string; sealed: boolean }> };
 const BRIDGE = JSON.parse(read('direct-bridge.json').toString('utf8'));
 
