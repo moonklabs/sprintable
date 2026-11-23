@@ -99,9 +99,9 @@ describe('[4993 5b-1] a start over the road', () => {
     vi.useFakeTimers();
     try {
       reset(); currentFetch = async (_u, init) => (init?.method === 'POST' ? json(201, { command_id: CMD, state: 'queued' }) : json(200, { state: 'done' }));
-      const setup = freshSetup(); const s = shell({ 'command.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
+      const setup = freshSetup(); const s = shell({ 'command.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
       const out = startOnPhone(startIn(setup), startDeps(s.phoneCall)); await expect(out).resolves.toEqual({ kind: 'started' });
-      expect(posts().length).toBe(1); expect(s.count('direct.open')).toBe(1); expect(s.count('direct.send')).toBe(0);
+      expect(posts().length).toBe(1); expect(s.count('direct.ask')).toBe(1); expect(s.count('direct.send')).toBe(0);
     } finally { vi.useRealTimers(); }
   });
   it('a shell without the road, a road that is being made, and a refusal of the send all go to the server — the signature is made once', async () => {
@@ -182,9 +182,9 @@ describe('[4993 5b-1] a clock press over the road', () => {
     vi.useFakeTimers();
     try {
       reset(); currentFetch = async (_u, init) => (init?.method === 'POST' ? json(201, { command_id: CMD, state: 'queued' }) : json(200, { state: 'done', result_code: 'ok' }));
-      const s = shell({ 'command.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
+      const s = shell({ 'command.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
       await expect(pressClock(clockIn(freshSetup()), clockDeps(s.phoneCall))).resolves.toEqual({ kind: 'done', result: 'ok' });
-      expect(posts().length).toBe(1); expect(s.count('direct.open')).toBe(1);
+      expect(posts().length).toBe(1); expect(s.count('direct.ask')).toBe(1);
     } finally { vi.useRealTimers(); }
   });
   it('MISSED: to the server marked, its «replay» is unknown; a replay word over the road is unknown too; the end of the window over the road is unknown, never «expired»', async () => {

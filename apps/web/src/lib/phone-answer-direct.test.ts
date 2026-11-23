@@ -63,9 +63,9 @@ describe('[4993 5b-2] an answer over the direct road', () => {
     vi.useFakeTimers();
     try {
       reset(); currentFetch = async () => json(200, { ok: true }); const setup = freshSetup();
-      const s = shell({ 'approval.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
+      const s = shell({ 'approval.sign': SIGNED, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': new Promise<PhoneAnswer>(() => {}) as unknown as PhoneAnswer });
       await expect(answerOnPhone('r-1', 'allow', deps(s.phoneCall), { direct: where(setup) })).resolves.toEqual({ kind: 'answered', decision: 'allow' });
-      expect(posts().length).toBe(1); expect(s.count('direct.open')).toBe(1); expect(s.count('direct.send')).toBe(0);
+      expect(posts().length).toBe(1); expect(s.count('direct.ask')).toBe(1); expect(s.count('direct.send')).toBe(0);
     } finally { vi.useRealTimers(); }
   });
   it('a shell without the road, a road being made, a refusal of the send: the server\'s way — the signature is made once', async () => {

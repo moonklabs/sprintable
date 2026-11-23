@@ -8,6 +8,7 @@
 //       sent:true → 'sent' · sent:false for a word that says nothing was written (not_open · busy · too_big · not_allowed · bad_row · no_road) → 'not_sent' · sent:false for a word after the frame may have reached the Mac (ack · closed · protocol) → 'missed'
 //       (the server's POST follows, and a «replay» refused there is NOT told as a failure — see `outcomeOfResult`) · no answer in time → 'maybe' (it may have gone: followed, never posted)
 // Nothing about the road (address · port · ticket) is ever in what comes back to this page — the contract says so, the shell keeps to it.
+import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
 /** the two LOCAL questions before a press may use the road (does this shell have it · is it ready) share this box; a press never waits for a road to be MADE — it goes to the server at once and the road is opened behind it */
@@ -19,15 +20,26 @@ export const DIRECT_RESULT_CALL_MS = 5_000;
 export const DIRECT_FIRST_ASK_MS = 200;
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
-/** how long after one `direct.open` another is not fired for the same computer: two presses together (or one right after the other) ask the shell once */
+/** how long after one road-making (`direct.ask`) another is not started for the same computer: two presses together (or one right after the other) ask the shell once */
 export const DIRECT_OPEN_AGAIN_MS = 5_000;
-export interface DirectDeps { phoneCall: Call; now?: () => number; budget?: { probe?: number; send?: number }; /** the times `direct.open` was last fired, by computer (the page keeps one for all presses) */ openFired?: Map<string, number> }
+/** story 4993 (4c-2): the negotiation the page CARRIES — the shell seals the ask, the page POSTs it to the server and reads the Mac's sealed answer back (the server holds both unread), the shell opens the answer itself. The door the Mac opens lives 20 s, so the page waits at most this long for an answer */
+export const DIRECT_NEGOTIATE_MAX_MS = 25_000;
+/** one look for the answer: the server takes one a half second (`POLL_INTERVAL`) — a look sooner is a 429 */
+export const DIRECT_NEGOTIATE_POLL_MS = 600;
+/** one call of the shell during the negotiation (`direct.ask` · `direct.offer`) — a local call that never answers is «no road» */
+export const DIRECT_NEGOTIATE_CALL_MS = 10_000;
+export interface DirectDeps {
+  phoneCall: Call; now?: () => number; budget?: { probe?: number; send?: number };
+  /** the times a road was last started, by computer (the page keeps one for all presses) */ openFired?: Map<string, number>;
+  /** story 4993 (4c-2): how the page talks to the server during the negotiation (default: the page's own authenticated fetch) · its waiting (default: timers) · its limits */
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>; wait?: (ms: number) => Promise<void>; negotiate?: { maxMs?: number; pollMs?: number };
+}
 /** sent · not_sent (certainly nothing went out) · maybe (no answer in time: it may have gone) · missed (the shell said «not sent» for a reason after the frame may have reached the Mac — no verified receipt · the road broke · a frame that was not understood) */
 type Went = 'sent' | 'not_sent' | 'maybe' | 'missed';
 const MAY_HAVE_ARRIVED = new Set(['ack', 'closed', 'protocol']);
 interface PendingLike { verb: string; key: string; body: Record<string, unknown>; sealed?: true; /** a start names its agent here (the server takes it from the URL, not the body) */ agentId?: string }
 
-/** when `direct.open` was last fired, by computer — ALL presses of the page (an instruction · a stop · a start · a clock press) share it: a press never opens a road another press is already asking for */
+/** when a road (`direct.ask`) was last started, by computer — ALL presses of the page (an instruction · a stop · a start · a clock press) share it: a press never opens a road another press is already asking for */
 export const openFired = new Map<string, number>();
 
 const TIMED_OUT = Symbol('timed out');
@@ -85,9 +97,53 @@ function rowOf(pending: PendingLike, nowMs: number, kind: string, sessionKey: st
   return { command_id: pending.key, kind, session_key: sessionKey, payload, created_at: new Date(nowMs).toISOString() };
 }
 
-/** ask the shell to open the road — and look away: a call that throws at once or a promise that rejects is nobody's business here (the press has gone to the server already) */
-function openBehind(call: Call, setupId: string): void {
-  start(call, 'direct.open', { setup_id: setupId }).catch(() => undefined);
+const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * story 4993 (4c-2 · PO decision B): make the road BEHIND a press — the page carries the negotiation, the shell judges it:
+ *   `direct.ask` (the shell seals the ask: the envelope, the press key, the phone's key id) → POST it to the server (/api/desktop/computers/{id}/direct: the server holds it for the Mac and reads nothing) → look for the Mac's SEALED answer
+ *   (GET · every NEGOTIATE_POLL_MS · at most NEGOTIATE_MAX_MS) → `direct.offer` hands that answer to the shell EXACTLY as the server gave it: the shell opens it against its own ask (the Mac's signature · a private address · the key agreement) and only then dials.
+ * What the page never does: read the envelope, change it, keep it, hand over anything but what the server gave for THIS ask, hand it over twice (the shell refuses the second), or tell the person anything (a road that was not made is the server's way, as before). Never throws.
+ */
+async function negotiate(setupId: string, deps: DirectDeps): Promise<void> {
+  const call = deps.phoneCall; const send = deps.fetch ?? fetchWithAuth;
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = deps.now ?? Date.now; const maxMs = deps.negotiate?.maxMs ?? DIRECT_NEGOTIATE_MAX_MS; const pollMs = deps.negotiate?.pollMs ?? DIRECT_NEGOTIATE_POLL_MS;
+  const asked = await callWithin(call, 'direct.ask', { setup_id: setupId }, DIRECT_NEGOTIATE_CALL_MS);
+  if (!asked || asked.ok !== true || typeof asked.command_id !== 'string' || asked.command_id === '' || !isObj(asked.envelope) || typeof asked.phone_key_id !== 'string' || asked.phone_key_id === '') return; // (no ask was made: the server's way)
+  const pressKey = asked.command_id; const envelope = asked.envelope;
+  let serverId: string | null = null;
+  try {
+    const res = await send(`/api/desktop/computers/${setupId}/direct`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotency_key: pressKey, phone_key_id: asked.phone_key_id, envelope }) });
+    if (!res.ok) return; // (a refusal: the server's way; the shell's held try runs out by itself)
+    const made = (await res.json()) as { command_id?: unknown };
+    if (typeof made.command_id !== 'string' || made.command_id === '') return;
+    serverId = made.command_id;
+  } catch { return; }
+  const url = `/api/desktop/computers/${setupId}/direct/${serverId}`;
+  let read = false; // the server hands the answer over ONCE and deletes it on reading — a row that was read needs no DELETE
+  try {
+    const deadline = now() + maxMs; const realDeadline = Date.now() + maxMs;
+    while (now() < deadline && Date.now() < realDeadline) {
+      await wait(pollMs);
+      let r: { state?: unknown; envelope?: unknown };
+      try {
+        const got = await send(url);
+        if (got.status === 404) { read = true; return; } // (the row ended: nothing more will come — and nothing is left to delete)
+        if (!got.ok) continue; // a look that failed (a «too fast» 429 · a 5xx) is not an end
+        r = (await got.json()) as typeof r;
+      } catch { continue; }
+      if (isObj(r.envelope)) { read = true; await callWithin(call, 'direct.offer', { setup_id: setupId, command_id: pressKey, envelope: r.envelope }, DIRECT_NEGOTIATE_CALL_MS); return; } // (what the shell says of it is its own: ok or a closed word — nothing here depends on it)
+      if (r.state === 'rejected' || r.state === 'failed' || r.state === 'done') { read = true; return; } // (the Mac ended without an answer: the server already deleted the row)
+    }
+  } finally {
+    if (!read) { try { await send(url, { method: 'DELETE' }); } catch { /* the row has its own end (60 s) */ } } // (gave up: the row goes now)
+  }
+}
+
+/** start the road — and look away: a call that throws at once or a promise that rejects is nobody's business here (the press has gone to the server already) */
+function openBehind(deps: DirectDeps, setupId: string): void {
+  negotiate(setupId, deps).catch(() => undefined);
 }
 
 /** try the direct road for ONE press (see the head of this file) */
@@ -107,7 +163,7 @@ export async function tryDirect(setupId: string, pending: PendingLike, deps: Dir
     // (asking · connecting · proving) is not opened again, and what the open says is nobody's business here (a refusal is the shell's five quiet minutes)
     if (status.state === 'idle') {
       const fired = deps.openFired; const last = fired?.get(setupId);
-      if (last === undefined || Date.now() - last >= DIRECT_OPEN_AGAIN_MS) { fired?.set(setupId, Date.now()); openBehind(deps.phoneCall, setupId); }
+      if (last === undefined || Date.now() - last >= DIRECT_OPEN_AGAIN_MS) { fired?.set(setupId, Date.now()); openBehind(deps, setupId); }
     }
     return 'not_sent';
   }

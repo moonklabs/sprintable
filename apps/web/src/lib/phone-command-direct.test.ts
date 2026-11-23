@@ -81,9 +81,9 @@ describe('[4993 5a] when the direct road does not take it, the server does — e
     reset(); vi.useFakeTimers();
     try {
       currentFetch = async (_u, init) => (init?.method === 'POST' ? json(201, { command_id: CMD, state: 'queued' }) : json(200, { state: 'done' }));
-      const s = shell({ 'command.sign': SIGN_STOP, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': () => new Promise<PhoneAnswer>(() => {}) });
+      const s = shell({ 'command.sign': SIGN_STOP, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': () => new Promise<PhoneAnswer>(() => {}) });
       const p = commandOnPhone(stop, deps(s.phoneCall)); await vi.advanceTimersByTimeAsync(0); // (microtasks only: no time passes)
-      expect(serverCalls.filter((c) => c.init?.method === 'POST').length).toBe(1); expect(s.log.map((l) => l.type)).toEqual(['command.sign', 'shell.caps', 'direct.status', 'direct.open']);
+      expect(serverCalls.filter((c) => c.init?.method === 'POST').length).toBe(1); expect(s.log.map((l) => l.type)).toEqual(['command.sign', 'shell.caps', 'direct.status', 'direct.ask']);
       await expect(p).resolves.toEqual({ kind: 'stopped' });
     } finally { vi.useRealTimers(); }
   });
@@ -95,14 +95,14 @@ describe('[4993 5a] when the direct road does not take it, the server does — e
   it('two presses together on a road that is not there ask the shell to open it ONCE (the page keeps the guard for all presses)', async () => {
     reset(); currentFetch = async (_u, init) => (init?.method === 'POST' ? json(201, { command_id: CMD, state: 'queued' }) : json(200, { state: 'done' }));
     const OTHER_SETUP = '22222222-0b0a-4908-8706-050403020100'; // (a computer of its own: the guard is per computer, and the test above used the first one)
-    const s = shell({ 'command.sign': SIGN_STOP, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': { id: 'o', ok: true } });
+    const s = shell({ 'command.sign': SIGN_STOP, 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': { id: 'o', ok: true } });
     await Promise.all([commandOnPhone({ ...stop, setupId: OTHER_SETUP }, deps(s.phoneCall)), commandOnPhone({ ...stop, setupId: OTHER_SETUP }, deps(s.phoneCall))]);
-    expect(s.count('direct.open')).toBe(1); expect(serverCalls.filter((c) => c.init?.method === 'POST').length).toBe(2);
+    expect(s.count('direct.ask')).toBe(1); expect(serverCalls.filter((c) => c.init?.method === 'POST').length).toBe(2);
   });
   it('a shell without the road · a refused open · a closed word on the send → one POST with the same key and body as ever', async () => {
     for (const map of [
       { 'shell.caps': CAPS_NO_DIRECT } as Record<string, Handler>,
-      { 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.open': { id: 'o', ok: false, why: 'cooling' } } as Record<string, Handler>,
+      { 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'idle' }, 'direct.ask': { id: 'o', ok: false, why: 'cooling' } } as Record<string, Handler>,
       { 'shell.caps': CAPS, 'direct.status': { id: 's', ok: true, state: 'ready' }, 'direct.send': { id: 'x', ok: true, sent: false, why: 'ack' } } as Record<string, Handler>,
     ]) {
       reset(); server(); const s = shell({ 'command.sign': SIGN_STOP, ...map }); await expect(commandOnPhone(stop, deps(s.phoneCall))).resolves.toEqual({ kind: 'stopped' });
