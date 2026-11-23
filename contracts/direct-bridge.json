@@ -19,7 +19,7 @@
     },
     "direct.result": {
       "args": { "setup_id": "uuid", "command_id": "command_id" },
-      "reply": { "state": "pending | done | failed | rejected | unknown", "code": "the word the Mac's flow ended in (shape [a-z0-9_]{1,64}; after a done, a failed or a rejected one; absent for pending · unknown · a plain done)" },
+      "reply": { "state": "pending | done | failed | rejected | unknown", "code": "the word the Mac's flow ended in (shape [a-z0-9_]{1,64}; after a done, a failed or a rejected one; absent for pending · unknown · a plain done)", "got": "(only for a file download that is `pending`, once its first piece is in; absent otherwise — a reader that does not know it ignores it) how many pieces of the file the shell has taken: a whole number, 1..of", "of": "(with `got`) how many pieces the whole file is: ceil(size / 48 KiB), 1..171. Numbers only — never a byte, a name or a hash" },
       "note": "How a command sent over the direct road came out (the Mac says it in a `result` frame; the shell keeps the last 64 for five minutes). `unknown` = the shell has none for that id (never sent that way, forgotten, or the road ended): the web asks the server as before."
     },
     "direct.close": {
