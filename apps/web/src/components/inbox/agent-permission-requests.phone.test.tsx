@@ -115,6 +115,17 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(document.activeElement?.textContent).toBe('허용됨 · Bash'); // the result takes the pressed button's focus
   });
 
+  it('[4993 5b-2] with the same-network road ready, [허용] goes to the computer over it — the request\'s own session and id in the row — and the server\'s answer route is not called; the same «허용됨» line', async () => {
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : type === 'approval.sign' ? signAnswer : type === 'shell.caps' ? { ok: true, caps: { direct: 1 } } : type === 'direct.status' ? { ok: true, state: 'ready' } : type === 'direct.send' ? { ok: true, sent: true } : type === 'direct.result' ? { ok: true, state: 'done' } : { ok: true });
+    installShell();
+    await render([req({ setup_id: '0f0e0d0c-0b0a-4908-8706-050403020100', session_key: 's-77', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd' })]);
+    await press('허용'); await vi.waitFor(() => expect(phoneLines()).toEqual(['허용됨 · Bash'])); // (the computer\'s word is asked for 200 ms after the send)
+    const row = sent.find((x) => x.type === 'direct.send')!.args.row as { kind: string; session_key: string; payload: Record<string, unknown> };
+    expect(row.kind).toBe('answer_approval'); expect(row.session_key).toBe('s-77'); expect(row.payload).toEqual({ session_key: 's-77', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd', decision: 'allow', signed: 'SIGNED' });
+    expect(fetchWithAuth.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
+    expect(phoneLines()).toEqual(['허용됨 · Bash']); expect(buttons()).toEqual([]);
+  });
+
   it('[4612] a change frame for a request answered HERE is not read on (its result line stays) — one for another request reads at once', async () => {
     installShell();
     await render([req({ id: 'r1' }), req({ id: 'r2', request_id: 'q2' })]);

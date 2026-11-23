@@ -7,6 +7,7 @@
 
 import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
+import { followDirectResult, openFired, tryDirect } from './phone-direct';
 
 export type AnswerOutcome =
   | { kind: 'answered'; decision: 'allow' | 'deny' }
@@ -35,7 +36,14 @@ type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer
  *  · a shell that says nothing (older): the pressed one — unless `opts.sealed` (the pressed value is only the call's stand-in shape then) → `failed`.
  * Nothing is ever posted that the person did not choose.
  */
-export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: { phoneCall: Call }, opts: { sealed?: boolean } = {}): Promise<AnswerOutcome> {
+/** story 4993 (5b-2): what an answer needs to go over the same-network direct road instead of the server — the request's own values (the list carries them while it is answerable) */
+export interface DirectAnswer { setupId: string; sessionKey: string; requestId: string; stage?: 'ask' | 'confirm'; host?: string | null }
+export interface AnswerDeps { phoneCall: Call; newKey?: () => string; wait?: (ms: number) => Promise<void>; now?: () => number; pollMs?: number; pollMaxMs?: number }
+/** an answer's end is looked for every 1.5 s, two minutes at most (the same times as a command's) */
+export const ANSWER_POLL_MS = 1_500;
+export const ANSWER_POLL_MAX_MS = 120_000;
+
+export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps: AnswerDeps, opts: { sealed?: boolean; direct?: DirectAnswer } = {}): Promise<AnswerOutcome> {
   const signed = await deps.phoneCall('approval.sign', { id, decision });
   if (!signed.ok) {
     switch (signed.code) {
@@ -67,6 +75,20 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
     return { kind: 'failed' };
   } else {
     decision = said;
+  }
+  // story 4993 (5b-2): the same-network direct road FIRST — the person's answer reaches the computer over the phone's own Wi-Fi when the shell and the computer can, and the server's POST follows only when they cannot (no road yet: at once, the road opened behind it).
+  // The computer takes an answer to a request ONCE: a second one (another phone's) is its own `already_answered` — the same «already answered» line the server gives. The server's row closes when the computer reports the request resolved (its usual report).
+  if (opts.direct?.setupId) {
+    const d = opts.direct; const key = deps.newKey ? deps.newKey() : (globalThis.crypto?.randomUUID?.() ?? '');
+    const body: Record<string, unknown> = { session_key: d.sessionKey, request_id: d.requestId, decision, signed: signed.signed, ...(d.stage === 'confirm' ? { stage: 'confirm', host: d.host } : {}) };
+    const went = await tryDirect(d.setupId, { verb: 'approval', key, body }, { ...deps, openFired });
+    if (went === 'sent' || went === 'maybe') {
+      return followDirectResult<AnswerOutcome>(d.setupId, key, {
+        phoneCall: deps.phoneCall, wait: deps.wait, now: deps.now, pollMs: deps.pollMs ?? ANSWER_POLL_MS, pollMaxMs: deps.pollMaxMs ?? ANSWER_POLL_MAX_MS,
+        decide: (r) => outcomeOfDirectResult(r, decision), unknown: () => ({ kind: 'failed' }), // (the end is not known: the request is left as it was — the card's own read settles it)
+      });
+    }
+    // a miss after the frame may have reached the computer, or no road: the server's way, as before (a replay there is the computer saying it already had it)
   }
   let res: Response;
   try {
@@ -107,4 +129,21 @@ export async function openOnPhone(id: string, deps: { phoneCall: Call }): Promis
   if (r.code === 'vault_unavailable') return { kind: 'not_ready' };
   if (r.code === 'card_refused') return { kind: 'cannot_open' };
   return { kind: 'failed' };
+}
+
+/**
+ * story 4993 (5b-2): how the computer's word for a direct answer reads as the card's line — the same lines the server's answer gives: taken → answered · «already answered» → the server's `answered_by` (no name · no decision: a computer does not say them) ·
+ * an unknown request (it left the computer) → closed · the window passed (`expired` · the host's `answer_expired`) → expired · remote control off → closed · anything else → failed (the request stays; the card's read settles it)
+ */
+function outcomeOfDirectResult(r: { state: string; code: string | null }, decision: 'allow' | 'deny'): AnswerOutcome | null {
+  if (r.state === 'done') return { kind: 'answered', decision };
+  if (r.state !== 'rejected' && r.state !== 'failed') return null;
+  switch (r.code) {
+    case 'already_answered': return { kind: 'answered_by', name: null, decision: null };
+    case 'unknown_request': return { kind: 'closed' };
+    case 'expired':
+    case 'answer_expired': return { kind: 'expired' };
+    case 'remote_control_off': return { kind: 'closed' };
+    default: return { kind: 'failed' }; // (a signature the computer refused · a replay — it already had this very answer — · any other word: the request is left as it was)
+  }
 }

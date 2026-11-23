@@ -187,8 +187,8 @@ describe('[4993 5a] a press that MAY have gone is followed, never posted', () =>
       // ten seconds, asked every second: every ask is boxed at 5 s, the last one at what is left — the whole press ends at 10 s, not at 12
       const a = hung(); const t0 = Date.now(); let ended = -1; const p = commandOnPhone(stop, deps(a.phoneCall, { pollMs: 1_000, pollMaxMs: 10_000, wait: (ms) => new Promise<void>((r) => setTimeout(r, ms)) })); void p.then(() => { ended = Date.now() - t0; });
       await vi.advanceTimersByTimeAsync(30_000); expect(ended).toBeGreaterThanOrEqual(9_000); expect(ended).toBeLessThanOrEqual(10_000);
-      // a wait longer than the time that is left: the time is over when it ends, and no ask is made at all
-      const b = hung(); const q = commandOnPhone(stop, deps(b.phoneCall, { pollMs: 2_000, pollMaxMs: 1_500, wait: (ms) => new Promise<void>((r) => setTimeout(r, ms)) })); await vi.advanceTimersByTimeAsync(10_000);
+      // a wait longer than the time that is left (the FIRST ask comes 200 ms after the send — 5b-2 — so the time left is 150 ms): the time is over when it ends, and no ask is made at all
+      const b = hung(); const q = commandOnPhone(stop, deps(b.phoneCall, { pollMs: 2_000, pollMaxMs: 150, wait: (ms) => new Promise<void>((r) => setTimeout(r, ms)) })); await vi.advanceTimersByTimeAsync(10_000);
       await expect(q).resolves.toMatchObject({ kind: 'unknown' }); expect(b.count('direct.result')).toBe(0);
     } finally { vi.useRealTimers(); }
   });

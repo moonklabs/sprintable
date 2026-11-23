@@ -31,7 +31,17 @@ from tests.test_4714_start_realdb import (  # noqa: F401 — the start's own hel
 )
 from tests.test_4733_clock_realdb import _post as _clock_post, _press, _setup as _clock_setup
 from tests.test_4424_desktop_setup_realdb import OWNER, PROJ  # noqa: F401
-from tests.test_4529_desktop_relay_realdb import _tok
+from tests.test_4529_desktop_relay_realdb import _device, _tok
+from tests.test_4533_agent_permissions_realdb import (  # noqa: F401 — the permission-request helpers (its autouse fixture too)
+    REQS,
+    _answer,
+    _ask,
+    _pair,
+    _post_ask,
+    _register,
+    _with_session,
+)
+from tests.test_4580_agent_allowed_hosts_realdb import _confirm, _later, _network_ask, _set_runtime
 
 pytestmark = pytest.mark.anyio
 _ROWS = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "direct-rows.json").read_text(encoding="utf-8"))
@@ -77,8 +87,8 @@ async def _row(cid):
 
 async def test_a_start_and_a_clock_press_make_the_payload_and_the_empty_session_the_direct_rows_carry(world):
     """story 4993 (5b-1): `other_routes` of contracts/direct-rows.json — a signed START and a signed CLOCK press ride the road with the payload the server makes for the same press and NO session; the press of the whole computer and an edit never do."""
-    cases = {c["verb"] + ":" + ",".join(c["payload_keys"]): c for c in _ROWS["other_routes"]}
-    assert len(cases) == len(_ROWS["other_routes"]) == 3
+    cases = {c["verb"] + ":" + ",".join(c["payload_keys"]): c for c in _ROWS["other_routes"] if c["verb"] in ("start", "clock")}
+    assert len(cases) == 3
     async with _client() as c:
         # a START
         device, agent, phone, _der = await _start_setup(c, "d4993 rows start")
@@ -111,3 +121,39 @@ async def test_a_start_and_a_clock_press_make_the_payload_and_the_empty_session_
         assert payload == {"action": "out_cancel", "signed": "eyJ2IjoxfQ.signed-by-the-phone"} and set(payload) == set(case["payload_keys"])
         for never in _ROWS["never_direct_other"]:  # (the whole-computer press gets a `scope` the SERVER computes from its own data — tests 4734 — and an edit carries a draft's fields: neither is a payload the web can write, so neither rides the road)
             assert never["verb"] == "clock" and ("computer" in never["body_extra"] or "edit" in never["body_extra"])
+
+
+async def test_an_answer_to_a_permission_request_makes_the_payload_and_the_session_the_direct_row_carries(world):
+    """story 4993 (5b-2): `other_routes` verb `approval` — the server fills session_key and request_id from the ROW (the web's values are the row's own: the list carries them), so the payload and the command's own session are what the direct row sends for the same press; the confirm stage of the network question adds {stage, host}."""
+    cases = {c["name"]: c for c in _ROWS["other_routes"] if c["verb"] == "approval"}
+    assert len(cases) == 2
+    ask_case = next(c for c in cases.values() if "body_extra" not in c)
+    confirm_case = next(c for c in cases.values() if "body_extra" in c)
+    async with _client() as c:
+        device = await _device(c, name="d4993 rows approval")
+        token, sid = device["device_token"], device["setup_id"]
+        agent = await _with_session(c, device)
+        await _set_runtime(agent, "claude-code")
+        phone, der = await _register(c)
+        await _pair(c, token, der)
+        # the first stage: a plain tool request
+        body = _ask(agent); made = await _post_ask(c, device, body)
+        assert made.status_code == 201, made.text
+        [view] = [v for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"] if v["request_id"] == body["request_id"]]
+        assert view["session_key"] == body["session_key"], "the list carries the session the web puts in the row"
+        blob = "eyJ2IjoxfQ.signed-by-the-phone-A"
+        ok = await c.post(f"{REQS}/{made.json()['id']}/answer", json=_answer(phone, "deny", signed=blob), headers=_person(OWNER))
+        assert ok.status_code == 200, ok.text
+        [(payload, session_key)] = [(p, k) for p, k in await _sql(fetch=f"SELECT payload, session_key FROM desktop_commands WHERE setup_id = '{sid}' AND idempotency_key = 'perm:{body['request_id']}'")]
+        assert payload == {"session_key": body["session_key"], "request_id": body["request_id"], "decision": "deny", "signed": blob}
+        assert set(payload) == set(ask_case["payload_keys"]), "the file's keys are the row's keys (their ORDER is the web test's: a stored JSON object does not keep one)"
+        assert session_key == body["session_key"], "the command's own session is the request's"
+        # the second stage: the network question's confirm answer carries the host the person saw
+        rid, pk = await _network_ask(c, device, agent)
+        assert (await c.post(f"{REQS}/{pk}/answer", json=_answer(phone), headers=_person(OWNER))).status_code == 200
+        assert (await c.post(_confirm(rid), json={"host": "gitlab.com", "expires_at": _later()}, headers=_tok(token))).status_code == 200
+        second = "eyJ2IjoxfQ.second-answer"
+        assert (await c.post(f"{REQS}/{pk}/answer", json=_answer(phone, signed=second), headers=_person(OWNER))).status_code == 200
+        [(payload2, session_key2)] = [(p, k) for p, k in await _sql(fetch=f"SELECT payload, session_key FROM desktop_commands WHERE setup_id = '{sid}' AND idempotency_key = 'perm:{rid}:confirm'")]
+        assert payload2 == {"session_key": "s-1", "request_id": rid, "decision": "allow", "signed": second, "stage": "confirm", "host": confirm_case["body_extra"]["host"]}
+        assert set(payload2) == set(confirm_case["payload_keys"]) and session_key2 == "s-1"

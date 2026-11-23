@@ -15,6 +15,8 @@ export const DIRECT_PROBE_BUDGET_MS = 1_000;
 export const DIRECT_SEND_BUDGET_MS = 10_000;
 /** one ask of the shell for a command's word (`direct.result`) waits this long; a bridge that never answers is «no answer», asked again until the two minutes are up */
 export const DIRECT_RESULT_CALL_MS = 5_000;
+/** the FIRST ask of a direct press's word comes at most this long after the send — never LATER than the flow's own pace, and earlier only when that pace is faster (the computer says it within tens of milliseconds on a Wi-Fi; waiting a whole poll for it would take the road's speed away); the asks after it keep the flow's own pace */
+export const DIRECT_FIRST_ASK_MS = 200;
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 /** how long after one `direct.open` another is not fired for the same computer: two presses together (or one right after the other) ask the shell once */
@@ -55,6 +57,14 @@ export function directRow(pending: PendingLike, nowMs: number): Record<string, u
     if (b.computer !== undefined || b.edit !== undefined || typeof b.action !== 'string' || b.action === '' || typeof b.signed !== 'string' || b.signed === '') return null;
     if (b.agent_member_id !== undefined && (typeof b.agent_member_id !== 'string' || b.agent_member_id === '')) return null;
     return rowOf(pending, nowMs, 'clock', null, { action: b.action, signed: b.signed, ...(b.agent_member_id !== undefined ? { agent_member_id: b.agent_member_id } : {}) });
+  }
+  if (pending.verb === 'approval') {
+    // story 4993 (5b-2): an ANSWER to an agent's permission request — the server's payload for it is {session_key, request_id, decision, signed} and, for the network question's second answer, {…, stage: 'confirm', host}; the command's own session is the request's
+    if (typeof b.session_key !== 'string' || b.session_key === '' || typeof b.request_id !== 'string' || b.request_id === '' || (b.decision !== 'allow' && b.decision !== 'deny') || typeof b.signed !== 'string' || b.signed === '') return null;
+    const confirm = b.stage === 'confirm';
+    if (b.stage !== undefined && b.stage !== 'ask' && b.stage !== 'confirm') return null;
+    if (confirm && (typeof b.host !== 'string' || b.host === '')) return null;
+    return rowOf(pending, nowMs, 'answer_approval', b.session_key, { session_key: b.session_key, request_id: b.request_id, decision: b.decision, signed: b.signed, ...(confirm ? { stage: 'confirm', host: b.host } : {}) });
   }
   const kind = b.kind; const sessionKey = b.session_key;
   if (typeof sessionKey !== 'string' || sessionKey === '') return null;
@@ -127,7 +137,8 @@ export async function followDirectResult<T>(setupId: string, key: string, o: {
   const realDeadline = Date.now() + maxMs; // (the page's own clock too: `deps.now` is injectable, and a frozen one must not turn two minutes into six)
   for (let asked = 0; now() < deadline && Date.now() < realDeadline && asked < askMax; asked++) {
     // the wait is cut at the two minutes' end too: a page that is hidden (a wait that never comes back) cannot hold a press past it
-    await Promise.race([wait(every), new Promise<void>((r) => setTimeout(r, Math.max(1, Math.min(deadline - now(), realDeadline - Date.now()))))]);
+    const gap = asked === 0 ? Math.min(DIRECT_FIRST_ASK_MS, every) : every;
+    await Promise.race([wait(gap), new Promise<void>((r) => setTimeout(r, Math.max(1, Math.min(deadline - now(), realDeadline - Date.now()))))]);
     const stopped = o.halted?.(); if (stopped) return stopped; // (every ask is preceded by this: a flow that was left makes no further ask)
     if (now() >= deadline || Date.now() >= realDeadline) break; // (the wait itself may have been the end of the two minutes: no ask is started on borrowed time)
     const a = await callWithin(o.phoneCall, 'direct.result', { setup_id: setupId, command_id: key }, Math.max(1, Math.min(DIRECT_RESULT_CALL_MS, deadline - now(), realDeadline - Date.now())));

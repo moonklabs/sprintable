@@ -14,7 +14,7 @@
     },
     "direct.result": {
       "args": { "setup_id": "uuid", "command_id": "command_id" },
-      "reply": { "state": "pending | done | failed | rejected | unknown", "code": "result_code word (only for failed or rejected)" },
+      "reply": { "state": "pending | done | failed | rejected | unknown", "code": "the word the Mac's flow ended in (shape [a-z0-9_]{1,64}; after a done, a failed or a rejected one; absent for pending · unknown · a plain done)" },
       "note": "How a command sent over the direct road came out (the Mac says it in a `result` frame; the shell keeps the last 64 for five minutes). `unknown` = the shell has none for that id (never sent that way, forgotten, or the road ended): the web asks the server as before."
     },
     "direct.close": {
@@ -48,12 +48,13 @@
     "send_why": ["not_open", "busy", "too_big", "closed", "ack", "protocol", "not_allowed", "bad_row", "no_road"],
     "refusal_code": ["DIR_DISABLED", "DIR_OPEN_STALE", "DIR_RATE_MINUTE", "DIR_RATE_HOUR", "DIR_BUSY_PHONE", "DIR_BUSY_MAC", "DIR_NO_NETWORK", "DIR_LISTEN_FAILED", "DIR_NO_IDENTITY", "DIR_STOPPED", "DIR_BAD_FIELD"],
     "result_state": ["done", "failed", "rejected"],
-    "result_code": ["schema_rejected", "not_allowed", "not_supported", "expired", "unknown_session", "unknown_agent", "unsigned", "bad_signature", "stopped", "unavailable", "error"]
+    "result_code_shape": "^[a-z0-9_]{1,64}$",
+    "result_code_known": ["schema_rejected", "not_allowed", "not_supported", "expired", "unknown_session", "unknown_agent", "unsigned", "bad_signature", "stopped", "unavailable", "error"]
   },
   "result_frame": {
-    "_note": "What the Mac writes into a `result` frame (inside the connection's cipher once wired): ONE JSON object, exactly these keys, closed words only. The shell drops anything else.",
+    "_note": "What the Mac writes into a `result` frame (inside the connection's cipher): ONE JSON object, exactly these keys, shape-closed words only. The shell drops anything else.",
     "keys": ["command_id", "state", "code"],
-    "spelling": "{\"command_id\":\"<id>\",\"state\":\"done|failed|rejected\"[,\"code\":\"<word>\"]} — exactly this text: keys in this order, no space, `code` only after failed or rejected",
+    "spelling": "{\"command_id\":\"<id>\",\"state\":\"done|failed|rejected\"[,\"code\":\"<word>\"]} — exactly this text: keys in this order, no space; `code` is `[a-z0-9_]{1,64}` (the shape the server itself accepts for a command's result — the whole union of the words the Mac's flows end in): it follows a done too (a stop's commands_running · an instruction's after_step · a clock press's words) and a failed or a rejected one always has it",
     "code_optional": true,
     "keep": { "max": 64, "ttl_ms": 300000 }
   },
@@ -64,6 +65,30 @@
       { "name": "a signed approval", "row": { "command_id": "cmd-appr-0001", "kind": "answer_approval", "session_key": null, "payload": { "request_id": "r-1", "decision": "allow", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } },
       { "name": "a signed clock press", "row": { "command_id": "cmd-clock-0001", "kind": "clock", "session_key": null, "payload": { "action": "in", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" } }
     ],
+    "result_frames": {
+      "_note": "What the Mac writes (state, code → text) and what the shell takes (text → state, code): the same texts both ways. `code` is dropped when it is not the shape; a failed or rejected one without a good word is written with `error`.",
+      "good": [
+        { "name": "a plain done", "id": "cmd-stop-0001", "state": "done", "text": "{\"command_id\":\"cmd-stop-0001\",\"state\":\"done\"}" },
+        { "name": "a done with its word", "id": "cmd-prompt-0001", "state": "done", "code": "after_step", "text": "{\"command_id\":\"cmd-prompt-0001\",\"state\":\"done\",\"code\":\"after_step\"}" },
+        { "name": "a rejected one", "id": "cmd-stop-0002", "state": "rejected", "code": "bad_signature", "text": "{\"command_id\":\"cmd-stop-0002\",\"state\":\"rejected\",\"code\":\"bad_signature\"}" },
+        { "name": "a failed one", "id": "cmd-start-0001", "state": "failed", "code": "workdir_refused", "text": "{\"command_id\":\"cmd-start-0001\",\"state\":\"failed\",\"code\":\"workdir_refused\"}" },
+        { "name": "an answer already given (the other phone's)", "id": "cmd-appr-0001", "state": "rejected", "code": "already_answered", "text": "{\"command_id\":\"cmd-appr-0001\",\"state\":\"rejected\",\"code\":\"already_answered\"}" }
+      ],
+      "written_as": [
+        { "name": "a failed one with no word is written with `error`", "id": "cmd-start-0002", "state": "failed", "text": "{\"command_id\":\"cmd-start-0002\",\"state\":\"failed\",\"code\":\"error\"}" },
+        { "name": "a rejected one with a word that is not the shape is written with `error`", "id": "cmd-start-0003", "state": "rejected", "code": "Bad Word", "text": "{\"command_id\":\"cmd-start-0003\",\"state\":\"rejected\",\"code\":\"error\"}" },
+        { "name": "a done with a word that is not the shape is written plain", "id": "cmd-start-0004", "state": "done", "code": "192.168.1.23", "text": "{\"command_id\":\"cmd-start-0004\",\"state\":\"done\"}" }
+      ],
+      "bad": [
+        "{\"command_id\":\"cmd-x-0001\",\"state\":\"done\",\"code\":\"A\"}",
+        "{\"state\":\"done\",\"command_id\":\"cmd-x-0001\"}",
+        "{\"command_id\":\"cmd-x-0001\",\"state\":\"acked\"}",
+        "{\"command_id\":\"cmd-x-0001\",\"state\":\"failed\"}",
+        "{\"command_id\":\"cmd-x-0001\", \"state\":\"done\"}",
+        "{\"command_id\":\"x\",\"state\":\"done\"}",
+        "{\"command_id\":\"cmd-x-0001\",\"state\":\"done\",\"extra\":1}"
+      ]
+    },
     "rows_not_allowed": [
       { "name": "a plain instruction (the words in text)", "row": { "command_id": "cmd-plain-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "text": "words", "conversation_id": "33333333-2222-4333-8444-555555555555", "signed": "c2lnbmVk" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
       { "name": "an instruction with text AND an envelope", "row": { "command_id": "cmd-both-0001", "kind": "send_prompt", "session_key": "s-1", "payload": { "session_key": "s-1", "conversation_id": "33333333-2222-4333-8444-555555555555", "envelope": { "v": 1 }, "text": "words" }, "created_at": "2026-11-23T09:00:00.000Z" }, "why": "not_allowed" },
