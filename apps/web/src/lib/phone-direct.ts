@@ -151,6 +151,11 @@ function openBehind(deps: DirectDeps, setupId: string): void {
   negotiate(setupId, deps).catch(() => undefined);
 }
 
+/**
+ * the shell's three direct answers that have NO `ok` (contracts/direct-bridge.json: `direct.status` → {state} · `direct.send` → {sent, why?} · `direct.result` → {state, code?, got?, of?}). They are real answers when the call was not refused:
+ * the bridge's own refusals (a bad shape · `page_hidden` · a failed call) are `ok:false`. So «answered» is «no `ok` word, or `ok:true`» (anything else — `false` or a word that is no boolean — is not an answer), never `ok === true` alone, which these three replies do not carry (the road was never opened on the real shell for that: found by the PR 6 wheel).
+ */
+const notRefused = (a: PhoneAnswer | null | undefined): a is PhoneAnswer => !!a && typeof a === 'object' && (a.ok === undefined || a.ok === true);
 const capsSayDirect = (caps: PhoneAnswer): boolean => caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { direct?: unknown }).direct === 1;
 /** how long a road-opening that came late (a slow shell) waits for the shell's answers in all — its own end, so a shell that never answers leaves nothing waiting */
 export const DIRECT_LATE_OPEN_MAX_MS = 10_000;
@@ -166,7 +171,7 @@ function openLate(deps: DirectDeps, setupId: string, capsCall: Promise<PhoneAnsw
       const end = Date.now() + DIRECT_LATE_OPEN_MAX_MS; const room = () => Math.max(1, end - Date.now());
       if (capsCall) { const c = await within(capsCall, room()); if (c === TIMED_OUT || !capsSayDirect(c)) return; }
       const st = await within(statusCall ?? start(deps.phoneCall, 'direct.status', { setup_id: setupId }), room());
-      if (st === TIMED_OUT || st.ok !== true || st.state !== 'idle') return;
+      if (st === TIMED_OUT || !notRefused(st) || st.state !== 'idle') return;
       openIfNotLately(deps, setupId);
     } catch { /* a late look that fails is not anybody's business */ }
   })();
@@ -187,7 +192,7 @@ export async function tryDirect(setupId: string, pending: PendingLike, deps: Dir
   const statusCall = start(deps.phoneCall, 'direct.status', { setup_id: setupId });
   const status = await within(statusCall, Math.max(1, left()));
   if (status === TIMED_OUT) { openLate(deps, setupId, null, statusCall); return 'not_sent'; }
-  if (status.ok !== true) return 'not_sent';
+  if (!notRefused(status)) return 'not_sent';
   if (status.state !== 'ready') {
     // NO ROAD YET: this press goes to the server AT ONCE (the person never waits for a door to be made — the way there is the server, a turn to the computer and back, 1–4 s). The road is opened BEHIND it so the next press finds it ready; a road already being made
     // (asking · connecting · proving) is not opened again, and what the open says is nobody's business here (a refusal is the shell's five quiet minutes)
@@ -198,8 +203,8 @@ export async function tryDirect(setupId: string, pending: PendingLike, deps: Dir
   let call: Promise<PhoneAnswer>; try { call = Promise.resolve(deps.phoneCall('direct.send', { setup_id: setupId, row })); } catch { return 'not_sent'; } // (the bridge threw before it took the row: nothing went out — the server's POST)
   const sent = await within(call, deps.budget?.send ?? DIRECT_SEND_BUDGET_MS);
   if (sent === TIMED_OUT) return 'maybe'; // it may have gone out: it is followed, never posted
-  if (sent.ok === true && sent.sent === true) return 'sent';
-  return sent.ok === true && sent.sent === false && typeof sent.why === 'string' && MAY_HAVE_ARRIVED.has(sent.why) ? 'missed' : 'not_sent';
+  if (notRefused(sent) && sent.sent === true) return 'sent';
+  return notRefused(sent) && sent.sent === false && typeof sent.why === 'string' && MAY_HAVE_ARRIVED.has(sent.why) ? 'missed' : 'not_sent';
 }
 
 /**
@@ -227,7 +232,7 @@ export async function followDirectResult<T>(setupId: string, key: string, o: {
     const stopped = o.halted?.(); if (stopped) return stopped; // (every ask is preceded by this: a flow that was left makes no further ask)
     if (now() >= deadline || Date.now() >= realDeadline) break; // (the wait itself may have been the end of the two minutes: no ask is started on borrowed time)
     const a = await callWithin(o.phoneCall, 'direct.result', { setup_id: setupId, command_id: key }, Math.max(1, Math.min(DIRECT_RESULT_CALL_MS, deadline - now(), realDeadline - Date.now())));
-    if (!a || a.ok !== true) continue; // a call that did not answer is not an end — ask again
+    if (!notRefused(a)) continue; // a call that did not answer (refused · hidden · failed) is not an end — ask again
     if (a.state === 'pending') {
       if (o.onPending && Number.isSafeInteger(a.got) && Number.isSafeInteger(a.of) && (a.got as number) >= 1 && (a.got as number) <= (a.of as number)) { try { o.onPending({ got: a.got as number, of: a.of as number }); } catch { /* a drawing that fails is not the download's end */ } }
       continue;
