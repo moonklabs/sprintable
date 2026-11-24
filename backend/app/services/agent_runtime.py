@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated
@@ -25,6 +26,34 @@ from typing import Annotated
 from pydantic import AfterValidator
 
 SKILL_MODEL_MEDIATED = "model-mediated"
+
+# story 5011 (5008 audit): what a run profile may name for a runtime — kept IN the registry row, so turning a runtime on can never leave the model / effort tables
+# behind (the old tables were two static dicts of the first two runtimes: an enabled new runtime saved with a model was a KeyError → 500).
+_CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_CODEX_SOL_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+_CODEX_LUNA_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_CODEX_COMMON_EFFORTS = ("low", "medium", "high", "xhigh")  # what every Codex model takes
+# a typed-in model name goes on a command line: no space, quote, `=`, `;`, bracket, nor a leading `-` (§2)
+MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+# Claude takes its 1M-context id as the name with a «[1m]» tail · that one tail only, Claude only — the daemon's rule too (tests/fixtures/model-name-vectors.json)
+CLAUDE_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
+
+
+@dataclass(frozen=True)
+class RunProfileChoices:
+    """The model and effort a run profile of one runtime may name. EMPTY (NO_CHOICES) is allowed: that runtime's profile is saved as «model · effort not named» only."""
+
+    models: tuple[tuple[str, tuple[str, ...]], ...] = ()  # the listed models, each with the efforts it takes (order = the list the web shows)
+    custom_efforts: tuple[str, ...] = ()  # the efforts for a typed-in model name or no model (the runtime's own default)
+    model_pattern: re.Pattern[str] | None = None  # what a typed-in model name must match; None = no model may be named
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.models and not self.custom_efforts and self.model_pattern is None
+
+
+NO_CHOICES = RunProfileChoices()
+
 
 @dataclass(frozen=True)
 class DesktopRuntime:
@@ -35,17 +64,29 @@ class DesktopRuntime:
     enabled: bool  # an app is offered this runtime today (the name is allowed in the tables either way)
     capability: str | None = None  # an app must say it can take it when it asks for a code; None = every app can
     agent_name: str = ""  # what a new agent of this runtime is called when the person picked it (the solo start)
+    # story 5011: the run profile's model · effort lists. None = the row forgot it (a test turns red for an ENABLED row); NO_CHOICES = none to name, said on purpose
+    choices: RunProfileChoices | None = None
 
 
 # story 5008 (A1 · plan 796e269f): the desktop runtimes — the ONE list. Everything below is derived from it: the id → member type table, the names the
 # check constraints of the three relay tables allow (migration 0497), the capability words a setup code may carry, the request-body validator.
 # To add an agent: put it here with enabled=False (the name is then allowed in the tables and nothing else changes), build its adapter, flip enabled.
 DESKTOP_RUNTIME_REGISTRY: tuple[DesktopRuntime, ...] = (
-    DesktopRuntime("claude", "claude-code", True, None, "Claude Code"),
-    DesktopRuntime("codex", "codex", True, None, "Codex"),
-    DesktopRuntime("opencode", "opencode", False, "rt-opencode", "OpenCode"),
-    DesktopRuntime("gemini", "gemini", False, "rt-gemini", "Gemini CLI"),
-    DesktopRuntime("cursor", "cursor", False, "rt-cursor", "Cursor"),
+    # Listed = a start with it opens the conversation with no question (민 19:32Z · 4540-ac0 model-probe): gpt-5.5 is left out (its TUI stops at a retirement notice before any thread starts).
+    # A typed-in name is still allowed (checked at its first start · 명세 C-5). Bracketed aliases (`opus[1m]`) are not listed. Codex efforts are per model (`codex debug models`).
+    DesktopRuntime("claude", "claude-code", True, None, "Claude Code", RunProfileChoices(
+        models=(("fable", _CLAUDE_EFFORTS), ("opus", _CLAUDE_EFFORTS), ("sonnet", _CLAUDE_EFFORTS)),
+        custom_efforts=_CLAUDE_EFFORTS, model_pattern=CLAUDE_MODEL_NAME)),
+    DesktopRuntime("codex", "codex", True, None, "Codex", RunProfileChoices(
+        models=(
+            ("gpt-6.1-sol", _CODEX_SOL_EFFORTS), ("gpt-6-astra", _CODEX_SOL_EFFORTS), ("gpt-6-sol", _CODEX_SOL_EFFORTS), ("gpt-6-luna", _CODEX_LUNA_EFFORTS),
+            ("gpt-5.6-sol", _CODEX_SOL_EFFORTS), ("gpt-5.6-terra", _CODEX_SOL_EFFORTS), ("gpt-5.6-luna", _CODEX_LUNA_EFFORTS),
+        ),
+        custom_efforts=_CODEX_COMMON_EFFORTS, model_pattern=MODEL_NAME)),
+    # the other three name no model or effort for now (their lists are filled when their adapter lands) — saved as «not named» only
+    DesktopRuntime("opencode", "opencode", False, "rt-opencode", "OpenCode", NO_CHOICES),
+    DesktopRuntime("gemini", "gemini", False, "rt-gemini", "Gemini CLI", NO_CHOICES),
+    DesktopRuntime("cursor", "cursor", False, "rt-cursor", "Cursor", NO_CHOICES),
 )
 
 # every name a relay table may hold (the check constraints' set — enabled or not)
@@ -58,6 +99,14 @@ DESKTOP_RUNTIME_TYPES: dict[str, str] = {r.id: r.member_type for r in DESKTOP_RU
 
 # the capability words an app may add to a setup code to say «I can drive this runtime» (a server that does not know the word drops it)
 RUNTIME_CAPABILITIES: tuple[str, ...] = tuple(r.capability for r in DESKTOP_RUNTIME_REGISTRY if r.capability)
+
+
+def run_profile_choices(member_type: str) -> RunProfileChoices:
+    """What a run profile of the runtime with this members.runtime_type may name. A runtime the registry does not know (a test's «newer» one) names nothing."""
+    for r in DESKTOP_RUNTIME_REGISTRY:
+        if r.member_type == member_type:
+            return r.choices or NO_CHOICES
+    return NO_CHOICES
 
 
 def runtime_offered_to(runtime_id: str, capabilities: list[str] | None) -> bool:
