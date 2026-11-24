@@ -148,3 +148,37 @@ def test_the_run_profile_table_is_the_registrys_enabled_rows_the_other_way_round
     from app.services.agent_run_profile import DESKTOP_RUNTIMES
 
     assert DESKTOP_RUNTIMES == {"claude-code": "claude", "codex": "codex"}
+
+
+# ── the capability gate is on EVERY path that picks a runtime for a setup (codex QA round 1: it was on the solo start only) ───────────────────
+def test_a_recipe_role_may_name_a_runtime_that_needs_a_word_only_when_the_app_said_it(monkeypatch):
+    monkeypatch.setitem(ar.DESKTOP_RUNTIME_TYPES, "opencode", "opencode")  # a «newer server»: opencode switched on
+    rows = [{"role": "dev", "kind": "agent"}]
+    asked = [ds.RoleChoice(role="dev", runtime="opencode")]
+    for caps in (None, [], ["move", "solo"]):  # an app from before: no runtime word
+        with pytest.raises(ds.DesktopSetupError) as e:
+            ds.bind_setup_roles(rows, asked, caps)
+        assert e.value.code == "roles_invalid"
+    assert ds.bind_setup_roles(rows, asked, ["solo", "rt-opencode"]).agent_runtimes == {"dev": "opencode"}  # an app that said it
+    # claude and codex need no word: every app, old or new
+    assert ds.bind_setup_roles(rows, [ds.RoleChoice(role="dev", runtime="codex")], None).agent_runtimes == {"dev": "codex"}
+
+
+@pytest.mark.anyio
+async def test_an_existing_agent_on_a_runtime_that_needs_a_word_is_attachable_only_by_an_app_that_said_it(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    monkeypatch.setitem(ar.DESKTOP_RUNTIME_TYPES, "opencode", "opencode")
+    monkeypatch.setattr("app.services.project_auth.project_accessible_member_ids", AsyncMock(return_value={uuid.UUID(int=1)}))
+    db = MagicMock()
+    result = MagicMock()
+    result.first.return_value = SimpleNamespace(type="agent", is_active=True, runtime_type="opencode")
+    db.execute = AsyncMock(return_value=result)
+    kw = dict(org_id=uuid.UUID(int=9), project_id=uuid.UUID(int=8), agent_id=uuid.UUID(int=1))
+    for caps in (None, ["move", "solo"]):
+        with pytest.raises(ds.DesktopSetupError) as e:
+            await ds._attachable_runtime(db, capabilities=caps, **kw)
+        assert e.value.code == "agent_not_found"  # reads the same as no agent (the card's rule for a runtime the app cannot run)
+    assert await ds._attachable_runtime(db, capabilities=["move", "rt-opencode"], **kw) == "opencode"
+

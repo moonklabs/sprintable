@@ -255,7 +255,7 @@ SETUP_MAX_ROLES = 50
 SETUP_ROLE_NAME_MAX = 200
 
 
-def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
+def bind_setup_roles(rows: list[dict], roles: list[RoleChoice], capabilities: list[str] | None = None) -> RoleBinding:
     """The one place a confirmation body is checked against a recipe's setup rows (`setup_role_rows`) — every confirmation
     route uses it. A human row is never sent (it is the person); an agent row needs a runtime; an either row takes a runtime or
     owner «me». Anything else (an unknown or repeated role, a human row sent, «me» on an agent row, both or neither of runtime
@@ -293,7 +293,7 @@ def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
             existing[r.role] = agent
         elif r.owner == "me" and k == "either":
             person.add(r.role)
-        elif r.owner is None and r.runtime in RUNTIME_TYPES:
+        elif r.owner is None and runtime_offered_to(r.runtime, capabilities):  # story 5008: enabled, and — for a runtime that needs it — the app said it can drive it
             runtimes[r.role] = r.runtime
         else:
             raise DesktopSetupError("roles_invalid", f"role {r.role!r} / runtime {r.runtime!r} / owner {r.owner!r}")
@@ -536,7 +536,7 @@ async def _put_agent_on_team(db: AsyncSession, *, user_id: uuid.UUID, project_id
     return True
 
 
-async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> str:
+async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, capabilities: list[str] | None = None) -> str:
     """story #4565 — the runtime (claude · codex) of an agent the confirming person may attach, or a closed code. An id that
     is not an active agent of THIS org is `agent_not_found` (another org's agent and no agent at all read the same — whether it
     exists elsewhere never shows), and so does one on a runtime the desktop cannot run (Qadir lens · the card); not yet in the
@@ -550,7 +550,7 @@ async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id
     if row is None or row.type != "agent" or not row.is_active:
         raise DesktopSetupError("agent_not_found")
     runtime = {v: k for k, v in RUNTIME_TYPES.items()}.get(row.runtime_type or "")
-    if runtime is None:
+    if runtime is None or not runtime_offered_to(runtime, capabilities):  # story 5008: a runtime that needs the app's word is not attachable by an app that did not say it
         raise DesktopSetupError("agent_not_found")  # Qadir lens (card): another runtime reads the same as no agent
     if agent_id not in await project_accessible_member_ids(db, org_id, project_id):
         raise DesktopSetupError("agent_not_in_project")
@@ -675,7 +675,7 @@ async def confirm_move_setup(
     added: list[uuid.UUID] = []  # story 4832: the agents this confirmation put on the project's team (who, not just how many — the event names them)
     for agent_id in agent_ids:
         try:
-            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
         except DesktopSetupError as e:
             # story 4832 (PO 11-03 «팀에 넣고 옮기기»): only a row that ASKED for it, and only for «not on the team yet» — every other refusal (another org's agent,
             # an agent with no desktop runtime, …) stays as it was, and the checks before the team's are `_attachable_runtime`'s own (it is asked again after the grant)
@@ -683,7 +683,7 @@ async def confirm_move_setup(
                 raise
             if await _put_agent_on_team(db, user_id=user_id, project_id=project_id, agent_id=agent_id):
                 added.append(agent_id)
-            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
         name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
         # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
         members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120],
@@ -1028,7 +1028,7 @@ async def confirm_setup(
 
     # the same rows GET /desktop/recipes hands the web (one function — PO 16:03Z)
     rows = setup_role_rows(definition)
-    binding = bind_setup_roles(rows, roles)
+    binding = bind_setup_roles(rows, roles, setup.capabilities)
     role_order = binding.order
     human_roles = binding.person_roles  # human rows and either rows chosen as «me»
     choices = dict(binding.agent_runtimes)
@@ -1036,7 +1036,7 @@ async def confirm_setup(
     # their runtime is their own. Nothing is made for them and the plan's agent count does not move.
     existing = binding.existing_agents
     for role, agent_id in existing.items():
-        choices[role] = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+        choices[role] = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
 
     person_member_id: uuid.UUID | None = None
     if human_roles:
