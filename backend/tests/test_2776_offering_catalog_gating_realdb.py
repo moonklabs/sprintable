@@ -23,6 +23,7 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 pytestmark = [
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
     pytest.mark.anyio,
+    pytest.mark.usefixtures("free_caps_on"),  # story 5000: this file tests the cap mechanism — the old free numbers are put back
 ]
 
 

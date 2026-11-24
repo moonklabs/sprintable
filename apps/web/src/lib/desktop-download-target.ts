@@ -8,7 +8,7 @@
 // a time-out · a body that is not JSON), the last checked url of that bucket (one that passed `ourDownloadUrl`) is still served, for at most DOWNLOAD_STALE_MAX_MS (the versioned dmg stays in the bucket when
 // `latest` moves on); the 502 is for a bucket that never gave a good answer (or whose last one is older than that). When the manifest WAS read and its url is NOT ours, nothing stale is served (an explicit refusal,
 // not an outage). The logged-in card's manifest route is not touched (it stays «past any front cache», no-store).
-import { fetchDesktopDownloadManifest, ourDownloadUrl } from '@/lib/desktop-downloads';
+import { fetchDesktopDownloadManifest, ourDownloadUrl, type DesktopPlatform } from '@/lib/desktop-downloads';
 
 export const DOWNLOAD_TARGET_TTL_MS = 45_000;
 export const DOWNLOAD_FETCH_TIMEOUT_MS = 5_000;
@@ -33,10 +33,10 @@ type Read = { kind: 'ok'; target: string } | { kind: 'unreadable' } | { kind: 'r
 const logUnreadable = (err: unknown): void => console.error('desktop_downloads.public_redirect_unavailable', err instanceof Error ? err.name : 'unknown'); // the error NAME only (Kadir): a message may carry a url or a token
 
 /** `ok`: a checked url · `unreadable`: the manifest could not be read (error · time-out · not JSON) · `refused`: it was read and its url is not ours */
-async function readTarget(bucket: string, fetchImpl: typeof fetch): Promise<Read> {
+async function readTarget(bucket: string, fetchImpl: typeof fetch, platform: DesktopPlatform): Promise<Read> {
   let body: string;
   try {
-    body = await fetchDesktopDownloadManifest(withTimeout(fetchImpl), bucket);
+    body = await fetchDesktopDownloadManifest(withTimeout(fetchImpl), bucket, platform);
   } catch (err) {
     logUnreadable(err);
     return { kind: 'unreadable' };
@@ -52,36 +52,40 @@ async function readTarget(bucket: string, fetchImpl: typeof fetch): Promise<Read
   return target ? { kind: 'ok', target } : { kind: 'refused' };
 }
 
-/** the last checked url of `bucket` while it is young enough to stand in for a refresh that could not read the manifest */
-function staleTarget(bucket: string): string | null {
-  const last = answers.get(bucket);
+/** the cache key: the platform and the bucket (the Mac's file is never served for the Windows door, and a changed bucket is never served the old bucket's file) */
+const keyOf = (bucket: string, platform: DesktopPlatform): string => `${platform}|${bucket}`;
+
+/** the last checked url of `key` while it is young enough to stand in for a refresh that could not read the manifest */
+function staleTarget(key: string): string | null {
+  const last = answers.get(key);
   return last && performance.now() - last.at < DOWNLOAD_STALE_MAX_MS ? last.target : null;
 }
 
-/** The checked download url inside `bucket` — fresh, or (when the refresh could not read the manifest) the last checked one; null when there is none (never read · refused · too old). */
-export function publicDownloadTarget(bucket: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
-  const kept = answers.get(bucket);
+/** The checked download url inside `bucket` for `platform` (default the Mac) — fresh, or (when the refresh could not read the manifest) the last checked one; null when there is none (never read · refused · too old). */
+export function publicDownloadTarget(bucket: string, fetchImpl: typeof fetch = fetch, platform: DesktopPlatform = 'macos'): Promise<string | null> {
+  const key = keyOf(bucket, platform);
+  const kept = answers.get(key);
   if (kept && performance.now() - kept.at < DOWNLOAD_TARGET_TTL_MS) return Promise.resolve(kept.target);
-  const running = reading.get(bucket);
+  const running = reading.get(key);
   if (running) return running;
-  const failed = failedAt.get(bucket);
-  if (failed !== undefined && performance.now() - failed < DOWNLOAD_FAILURE_MEMORY_MS) return Promise.resolve(staleTarget(bucket)); // the bucket failed a moment ago: the same answer, no new read
-  const promise: Promise<string | null> = readTarget(bucket, fetchImpl)
+  const failed = failedAt.get(key);
+  if (failed !== undefined && performance.now() - failed < DOWNLOAD_FAILURE_MEMORY_MS) return Promise.resolve(staleTarget(key)); // the bucket failed a moment ago: the same answer, no new read
+  const promise: Promise<string | null> = readTarget(bucket, fetchImpl, platform)
     .then((read) => {
       if (read.kind === 'ok') {
-        answers.set(bucket, { target: read.target, at: performance.now() }); // (an old failure mark is older than its rest by now — nothing to clear)
+        answers.set(key, { target: read.target, at: performance.now() }); // (an old failure mark is older than its rest by now — nothing to clear)
         return read.target;
       }
-      failedAt.set(bucket, performance.now()); // only the fact that it failed, for a moment
+      failedAt.set(key, performance.now()); // only the fact that it failed, for a moment
       if (read.kind === 'refused') {
-        answers.delete(bucket); // the manifest was read and its url is not ours: nothing stale is served for an explicit refusal
+        answers.delete(key); // the manifest was read and its url is not ours: nothing stale is served for an explicit refusal
         return null;
       }
-      return staleTarget(bucket); // could not read: the last checked url if it is young enough (and it is NOT replaced — a failure is never kept as an answer)
+      return staleTarget(key); // could not read: the last checked url if it is young enough (and it is NOT replaced — a failure is never kept as an answer)
     })
     .finally(() => {
-      if (reading.get(bucket) === promise) reading.delete(bucket);
+      if (reading.get(key) === promise) reading.delete(key);
     });
-  reading.set(bucket, promise);
+  reading.set(key, promise);
   return promise;
 }
