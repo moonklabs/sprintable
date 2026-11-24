@@ -20,12 +20,63 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Annotated
+
+from pydantic import AfterValidator
 
 SKILL_MODEL_MEDIATED = "model-mediated"
 
-# story 4680 (UX-1 · D2): the desktop app's runtime ids → members.runtime_type — the ONE place (desktop_setup.py binds with it,
-# runtime_capabilities carries its inverse as `desktop_runtime`, so the web never keeps a table of its own).
-DESKTOP_RUNTIME_TYPES: dict[str, str] = {"claude": "claude-code", "codex": "codex"}
+@dataclass(frozen=True)
+class DesktopRuntime:
+    """One row of the desktop runtime registry (story 5008 · A1)."""
+
+    id: str  # the id the desktop app uses on the wire
+    member_type: str  # members.runtime_type
+    enabled: bool  # an app is offered this runtime today (the name is allowed in the tables either way)
+    capability: str | None = None  # an app must say it can take it when it asks for a code; None = every app can
+    agent_name: str = ""  # what a new agent of this runtime is called when the person picked it (the solo start)
+
+
+# story 5008 (A1 · plan 796e269f): the desktop runtimes — the ONE list. Everything below is derived from it: the id → member type table, the names the
+# check constraints of the three relay tables allow (migration 0497), the capability words a setup code may carry, the request-body validator.
+# To add an agent: put it here with enabled=False (the name is then allowed in the tables and nothing else changes), build its adapter, flip enabled.
+DESKTOP_RUNTIME_REGISTRY: tuple[DesktopRuntime, ...] = (
+    DesktopRuntime("claude", "claude-code", True, None, "Claude Code"),
+    DesktopRuntime("codex", "codex", True, None, "Codex"),
+    DesktopRuntime("opencode", "opencode", False, "rt-opencode", "OpenCode"),
+    DesktopRuntime("gemini", "gemini", False, "rt-gemini", "Gemini CLI"),
+    DesktopRuntime("cursor", "cursor", False, "rt-cursor", "Cursor"),
+)
+
+# every name a relay table may hold (the check constraints' set — enabled or not)
+DESKTOP_RUNTIME_IDS: tuple[str, ...] = tuple(r.id for r in DESKTOP_RUNTIME_REGISTRY)
+
+# story 4680 (UX-1 · D2): the desktop app's runtime ids → members.runtime_type — the ENABLED rows of the registry (desktop_setup.py binds with it,
+# runtime_capabilities carries its inverse as `desktop_runtime`, so the web never keeps a table of its own). A mutable dict on purpose: a test
+# puts a «newer» runtime into it to show an older reader's behaviour.
+DESKTOP_RUNTIME_TYPES: dict[str, str] = {r.id: r.member_type for r in DESKTOP_RUNTIME_REGISTRY if r.enabled}
+
+# the capability words an app may add to a setup code to say «I can drive this runtime» (a server that does not know the word drops it)
+RUNTIME_CAPABILITIES: tuple[str, ...] = tuple(r.capability for r in DESKTOP_RUNTIME_REGISTRY if r.capability)
+
+
+def runtime_offered_to(runtime_id: str, capabilities: list[str] | None) -> bool:
+    """May a setup that said these capabilities be given this runtime? (enabled, and — when the runtime needs one — the app said it can)."""
+    if runtime_id not in DESKTOP_RUNTIME_TYPES:
+        return False
+    cap = next((r.capability for r in DESKTOP_RUNTIME_REGISTRY if r.id == runtime_id), None)
+    return cap is None or cap in (capabilities or [])
+
+
+def _is_offered_runtime(value: str) -> str:
+    if value not in DESKTOP_RUNTIME_TYPES:
+        raise ValueError("runtime_unsupported")  # one closed word, not a list of the names we do have
+    return value
+
+
+# a runtime id an APP sends us (request bodies): any enabled one; anything else is «runtime_unsupported».
+# A runtime id WE send back (response models) is a plain `str`: a name a table holds must never turn an answer into a 500 for a reader that does not know it.
+DesktopRuntimeId = Annotated[str, AfterValidator(_is_offered_runtime)]
 
 
 def desktop_runtime_of(runtime_type: str) -> str | None:

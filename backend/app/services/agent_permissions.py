@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.agent_runtime import DesktopRuntimeId
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
@@ -830,7 +831,7 @@ class PermissionRequestReport(BaseModel):
     request_id: uuid.UUID
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     agent_member_id: uuid.UUID
-    runtime: Literal["claude", "codex"]
+    runtime: DesktopRuntimeId
     tool: str | None = Field(default=None, pattern=_TOOL_PATTERN)
     summary: str | None = Field(default=None, min_length=1, max_length=200)
     masked: bool = False

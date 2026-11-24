@@ -23,13 +23,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.ownership import assert_agent_owner_mutable
+from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as _DESKTOP_RUNTIME_TYPES  # story 5008: one registry
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.agent_deployment import AgentPersona
 from app.models.member import Member
 
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
-DESKTOP_RUNTIMES = {"claude-code": "claude", "codex": "codex"}
+DESKTOP_RUNTIMES = {member_type: runtime_id for runtime_id, member_type in _DESKTOP_RUNTIME_TYPES.items()}
 
 _CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 _CODEX_SOL_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")

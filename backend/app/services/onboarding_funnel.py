@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.onboarding_event import OnboardingEvent
+from app.services.agent_runtime import DESKTOP_RUNTIME_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,9 @@ DESKTOP_SHELL_EMIT_EVENTS = frozenset({
 # instead of one isinstance per read. The readers keep their own guards for rows stored before this check. The app's copy of
 # the names is desktop-electron/src/shell-events.ts (sprintable-mobile); a name here needs a shape here (test pins it).
 BLOCKED_REASONS = frozenset({"managed_mcp"})
-BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_RUNTIMES = frozenset(DESKTOP_RUNTIME_IDS)  # story 5008: the registry's names (an app build that knows a newer runtime reports it; an older reader reads unknown values as none)
 BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
-AGENT_RUNTIMES = frozenset({"claude", "codex"})
+AGENT_RUNTIMES = frozenset(DESKTOP_RUNTIME_IDS)
 EXIT_CODE_RANGE = range(-(2**31), 2**31)
 # story #4452 — why the shell could not start an agent: its reason, and for a refusal the daemon's closed code (desktop-protocol:
 # adapter_prepare_failed · spawn_failed split out of profile_invalid so the reason is the real one) or the first agent's wait

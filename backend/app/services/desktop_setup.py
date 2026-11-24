@@ -70,6 +70,7 @@ from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses) — story 4680: the table lives in
 # agent_runtime.py (runtime_capabilities carries its inverse); this name stays for the readers here
 from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as RUNTIME_TYPES  # noqa: E402
+from app.services.agent_runtime import DESKTOP_RUNTIME_REGISTRY, RUNTIME_CAPABILITIES, runtime_offered_to  # noqa: E402
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
 _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
@@ -99,7 +100,8 @@ def _now() -> datetime:
 # story #4576 — what an app may say it can take when it asks for a code; anything else it names is left out (a newer app's word
 # this server does not know yet is no error)
 # story 4711: «solo» = the first setup in three steps (one new agent for the folder the person chose · no recipe)
-KNOWN_CAPABILITIES = ("move", "solo")
+# story 5008 (A1): + one word per runtime that needs the app to say it can drive it («rt-opencode» …) — an older server drops the word, an older app never sends it
+KNOWN_CAPABILITIES = ("move", "solo", *RUNTIME_CAPABILITIES)
 
 
 async def create_setup_code(
@@ -749,7 +751,7 @@ async def setup_project_room(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.
     return None
 
 
-SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
+SOLO_AGENT_NAMES = {r.id: r.agent_name for r in DESKTOP_RUNTIME_REGISTRY}  # story 4711 (Yuna): the agent is called what the person picked (story 5008: the registry carries the names)
 
 
 _KEY_IGNORED = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\u2800")  # draw as nothing but are not format characters: grapheme joiner, Hangul/Khmer fillers, braille blank
@@ -851,7 +853,7 @@ async def confirm_solo_setup(
         raise DesktopSetupError("already_confirmed")
     if "solo" not in (setup.capabilities or []):
         raise DesktopSetupError("app_cannot_solo")
-    if runtime not in RUNTIME_TYPES:
+    if not runtime_offered_to(runtime, setup.capabilities):  # story 5008: enabled, and — for a runtime that needs it — the app said it can drive it
         raise DesktopSetupError("roles_invalid", "unknown runtime")
     # `not org_locked`: a member promoted between the first look and this one is refused this time (they press again) — never let a caller past without the lock
     if not org_locked or not await is_org_owner_or_admin(db, user_id, org_id):

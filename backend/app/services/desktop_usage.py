@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_relay import DesktopUsage
+from app.services.agent_runtime import DesktopRuntimeId
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError, touch_heard
 
@@ -69,7 +70,7 @@ class UsageWindowReport(BaseModel):
 class UsageEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    runtime: Literal["claude", "codex"]
+    runtime: DesktopRuntimeId
     account: str = Field(pattern=ACCOUNT_PATTERN)
     seen_at: OffsetDatetime
     state: Literal["windows", "unavailable"]

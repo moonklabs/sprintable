@@ -626,7 +626,7 @@ class SetupMember(BaseModel):
     role: str | None = None
     member_id: str
     kind: Literal["agent", "human"]
-    runtime: Literal["claude", "codex"] | None = None
+    runtime: str | None = None  # story 5008: a plain string in an ANSWER (a name the registry knows later must not turn it into a 500); the value is the registry's
     name: str | None = None  # story #4576: a move's agent, by its own name
 
 
@@ -763,7 +763,7 @@ async def get_setup_recipes_for_new_org(
 class AttachableAgent(BaseModel):
     id: uuid.UUID
     name: str
-    runtime: Literal["claude", "codex"]
+    runtime: str  # story 5008: see above
     live_keys: int
     last_used_at: datetime | None = None
     in_project: bool
@@ -822,7 +822,7 @@ class AgentEnded(BaseModel):
     """story #4433 — an agent whose session ended early: its last report and the person's last restart (None if never)."""
     member_id: str
     at: datetime
-    runtime: Literal["claude", "codex"] | None = None
+    runtime: str | None = None  # story 5008
     exit_code: int | None = None
     restarted_at: datetime | None = None
 
@@ -831,7 +831,7 @@ class AgentSignIn(BaseModel):
     """story #4658 — an agent that asks for a sign-in now (cleared by its «signed in»): when it asked, and the runtime's name when known."""
     member_id: str
     at: datetime
-    runtime: Literal["claude", "codex"] | None = None
+    runtime: str | None = None  # story 5008
 
 
 class AgentStartFailed(BaseModel):
@@ -844,7 +844,7 @@ class AgentStartFailed(BaseModel):
         "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
         "not_connected", "bad_reply", "ended", "timeout",
     ] | None = None
-    runtime: Literal["claude", "codex"] | None = None
+    runtime: str | None = None  # story 5008
     limit: int | None = None
     first_member_id: str | None = None
 

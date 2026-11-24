@@ -4,8 +4,10 @@
  * words — the same ones as the strip's «마지막으로 본 지 N분 전» (4979): under a minute → «방금 전», under an hour → minutes, under a day → hours, else days.
  * The numbers are shown, never decided by: nothing here gates or switches anything.
  */
+import type { EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+
 export type UsageKind = 'five_hour' | 'seven_day' | 'other';
-export type UsageRuntime = 'claude' | 'codex';
+export type UsageRuntime = EnabledDesktopRuntimeId; // story 5008 (A1)
 /** the reasons a CLI has no numbers to show — a closed list, each with its own sentence (the server's words) */
 export type UsageWhy = 'api_key' | 'not_read';
 
