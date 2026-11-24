@@ -134,7 +134,13 @@ const EMBEDDED_BUILD = process.env['SPRINTABLE_EMBEDDED_BUILD'] === '1';
 // CI, the Cloud Run build and the desktop build never do, and keep the check.
 const SKIP_BUILD_TYPECHECK = process.env['SPRINTABLE_SKIP_BUILD_TYPECHECK'] === '1';
 
+// story 5006 (the server folder for Linux, built twice from one commit to see whether the two results are the same) — Next gives every build a RANDOM build id and writes it into the build manifests, the names of
+// the folders of the static files and the client reference manifests: two builds of one commit then differ in ~100 files for no reason. The folder build hands the commit it builds from as SPRINTABLE_BUILD_ID (hex only);
+// without it (CI · the VM image build · local) Next keeps its own id.
+const BUILD_ID = /^[0-9a-f]{7,64}$/.test(process.env['SPRINTABLE_BUILD_ID'] ?? '') ? (process.env['SPRINTABLE_BUILD_ID'] as string) : null;
+
 const nextConfig: NextConfig = {
+  ...(BUILD_ID ? { generateBuildId: async () => BUILD_ID } : {}),
   ...(EMBEDDED_BUILD ? { experimental: { proxyClientMaxBodySize: '100mb' } } : {}),
   ...(SKIP_BUILD_TYPECHECK ? { typescript: { ignoreBuildErrors: true } } : {}),
   // Allow dev server access from non-localhost origins (e.g. Tailscale, LAN)

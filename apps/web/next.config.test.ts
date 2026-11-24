@@ -264,3 +264,31 @@ describe('next.config.ts — SPRINTABLE_SKIP_BUILD_TYPECHECK (story 4917)', () =
     for (const v of ['0', 'true', 'yes', ' 1']) expect(await typescriptOption(v), v).toBeUndefined();
   });
 });
+
+// story 5006 — the build id of a folder build is the commit it is built from (two builds of one commit are then the same files), and only when it is given and looks like a commit
+describe('next.config.ts — SPRINTABLE_BUILD_ID (story 5006)', () => {
+  const KEY = 'SPRINTABLE_BUILD_ID';
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+    vi.resetModules();
+  });
+  async function buildId(value: string | undefined): Promise<string | null | undefined> {
+    vi.resetModules();
+    if (value === undefined) delete process.env[KEY];
+    else process.env[KEY] = value;
+    const mod = (await import('./next.config')) as { default: { generateBuildId?: () => Promise<string | null> } };
+    return mod.default.generateBuildId ? await mod.default.generateBuildId() : undefined;
+  }
+
+  it('a commit sha (hex, 7 to 64 characters) becomes the build id', async () => {
+    expect(await buildId('155161b9077769657798515692b020fa02928eb4')).toBe('155161b9077769657798515692b020fa02928eb4');
+    expect(await buildId('155161b')).toBe('155161b');
+  });
+
+  it('unset · empty · not hex · too short · too long: no generateBuildId at all — Next keeps its own id (CI · the VM image build · local)', async () => {
+    for (const v of [undefined, '', 'main', '../../etc', '155161', 'A'.repeat(20), '1'.repeat(65), '1551 61b9']) expect(await buildId(v), String(v)).toBeUndefined();
+  });
+});
+
