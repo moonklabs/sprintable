@@ -146,6 +146,14 @@ describe('[4993 ⓐ] codex round 3 of the web PR: a close that outlives its keep
   });
 });
 
+describe('[4993 ⓐ-3] several screens of one computer are one road', () => {
+  it('a room · an approval card · a files screen of the SAME computer all hold it: an hour of it is ONE keeper — shell.caps once, the same 6 roads (the hourly bound is the page\'s, not the screen\'s)', async () => {
+    const w = world(); holdDirectRoad(SETUP, w.env); holdDirectRoad(SETUP, w.env); holdDirectRoad(SETUP, w.env); await run(1);
+    for (let t = 0; t < 3_590_000; t += 10_000) await run(10_000);
+    expect(w.calls.filter((c) => c === 'shell.caps')).toHaveLength(1); expect(w.asks()).toBe(6); expect(w.roadState()).toBe('ready');
+  });
+});
+
 describe('[4993 ⓐ] a screen that comes back while a look is running · no close without a road · a reset that leaves nothing', () => {
   it('a screen that comes back while a look is on its way: the look that follows is made as soon as the first ends (not 30 s later)', async () => {
     const w = world(); holdDirectRoad(SETUP, w.env); await run(1); w.setKeepDelay(3_000); // (the look at 30 s will take 3 s to be answered)

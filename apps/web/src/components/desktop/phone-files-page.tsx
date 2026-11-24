@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { useDirectRoad } from '@/components/chat/use-direct-road';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 import { groupByComputer, readStartable, type StartableComputer } from '@/lib/phone-start';
 import { closeWindow, downloadFile, listFolder, openFile, shellTakesFileDownload, shellTakesFileRead, shellTakesFileWindow, shellTakesFiles, type DownloadOutcome, type Ended, type FileEntry, type FilesList, type FilesOutcome, type OpenOutcome } from '@/lib/phone-files';
@@ -63,6 +64,7 @@ export function PhoneFilesPage({ homeHref, entry }: { homeHref: string; entry?: 
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   const [read, setRead] = useState<Read>({ kind: 'reading' });
   const [view, setView] = useState<View>({ kind: 'choose' });
+  useDirectRoad(view.kind === 'folder' || view.kind === 'file' ? view.setupId : undefined); // story 4993 (ⓐ-3): the computer whose files are on screen keeps its same-network road (a download goes over it first)
   const [win, setWin] = useState<WindowNow | null>(null);
   const [clock, setClock] = useState(0); // the screen's «now» for the count-down: set when a window is heard and once a second after (never read from the clock during a render)
   const alive = useRef(true);
