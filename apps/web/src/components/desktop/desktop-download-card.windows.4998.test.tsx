@@ -145,6 +145,17 @@ describe('DesktopDownloadCard — [SID:4998] the Windows download', () => {
     }
   });
 
+  it('a late phone claim (the bridge claims after the mount): the page is no Windows browser any more — the Windows block is dropped, and the card says what it says in the phone app', async () => {
+    vi.stubGlobal('fetch', answering({ '/desktop/downloads/macos.json': MAC_MANIFEST, '/desktop/downloads/windows.json': WIN_MANIFEST }));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-windows-button"]')).not.toBeNull();
+    inPhoneApp = true; await act(async () => { for (const l of phoneListeners) l(); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-windows-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-windows-unsigned-notice"]')).toBeNull();
+  });
+
   it('isWindowsBrowser: a Windows NT browser outside the phone app only', () => {
     expect(isWindowsBrowser(WINDOWS, false)).toBe(true);
     expect(isWindowsBrowser(WINDOWS, true)).toBe(false);

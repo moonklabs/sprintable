@@ -128,22 +128,27 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
         setManifest(json?.version && url ? { ...json, url } : null);
         setLoading(false);
       });
-    // [SID:4998] a Windows browser also asks for the Windows installer's manifest (the same checks: a link only into our bucket · a version) — a failure is «none», the card then says what it said before
-    if (isWindows) {
-      fetch('/desktop/downloads/windows.json')
-        .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopWindowsManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
-        .catch(() => null)
-        .then((got: { json: DesktopWindowsManifest; bucket: string | null } | null) => {
-          if (!alive) return;
-          const json = got?.json ?? null;
-          const url = ourDownloadUrl(json?.url, got?.bucket);
-          setWin(json?.version && url ? { ...json, url } : null);
-          setWinLoading(false);
-        });
-    }
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once at mount, like the Mac manifest (the device does not change under a mounted card)
   }, []);
+
+  // [SID:4998] a Windows browser also asks for the Windows installer's manifest (the same checks: a link only into our bucket · a version) — a failure is «none», the card then says what it said before.
+  // Its own effect, kept by `isWindows`: when the phone bridge claims after the mount (a late claim), the page is no Windows browser any more — nothing is asked, and what was asked is dropped.
+  useEffect(() => {
+    if (desktopApp() || !isWindows) { setWin(null); setWinLoading(false); return; }
+    let alive = true;
+    setWinLoading(true);
+    fetch('/desktop/downloads/windows.json')
+      .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopWindowsManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
+      .catch(() => null)
+      .then((got: { json: DesktopWindowsManifest; bucket: string | null } | null) => {
+        if (!alive) return;
+        const json = got?.json ?? null;
+        const url = ourDownloadUrl(json?.url, got?.bucket);
+        setWin(json?.version && url ? { ...json, url } : null);
+        setWinLoading(false);
+      });
+    return () => { alive = false; };
+  }, [isWindows]);
 
   if (loading || winLoading) {
     return (
