@@ -9,7 +9,7 @@ import type { PhoneAnswer } from './phone-bridge';
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const read = (f: string) => readFileSync(path.join(ROOT, 'contracts', f));
-const BRIDGE_SHA = '3ba5217c63df8d7083eafb093b519b3493a10b92b97debf811b9b9c20f2b1a98'; // mobile `contracts/direct-bridge.json` (story 4993 · file direct, version 3) — a copy that drifts is a failure, not a quiet divergence
+const BRIDGE_SHA = '698863953821f193d872d2ffb45a45825fa5457e4e4c8ec33978b6c5960079af'; // mobile `contracts/direct-bridge.json` (story 4993 · keep-alive, version 4) — a copy that drifts is a failure, not a quiet divergence
 const ROWS = JSON.parse(read('direct-rows.json').toString('utf8')) as { row_keys: string[]; cases: Array<{ name: string; kind: string; sealed: boolean; payload_from_body: string[] }>; never_direct: Array<{ name: string; kind: string; sealed: boolean }> };
 const BRIDGE = JSON.parse(read('direct-bridge.json').toString('utf8'));
 
@@ -24,10 +24,10 @@ const pendingOf = (c: { kind: string; sealed: boolean }, over: Record<string, un
 
 describe('[4993 5a] the contract copies', () => {
   it('direct-bridge.json is the mobile repository\'s file byte for byte', () => { expect(createHash('sha256').update(read('direct-bridge.json')).digest('hex')).toBe(BRIDGE_SHA); });
-  it('the bridge names the seven calls the web uses and the closed words it relies on', () => {
-    expect(Object.keys(BRIDGE.calls).sort()).toEqual(['direct.ask', 'direct.close', 'direct.download_save', 'direct.offer', 'direct.result', 'direct.send', 'direct.status']);
+  it('the bridge names the eight calls the web uses and the closed words it relies on', () => {
+    expect(Object.keys(BRIDGE.calls).sort()).toEqual(['direct.ask', 'direct.close', 'direct.download_save', 'direct.keep', 'direct.offer', 'direct.result', 'direct.send', 'direct.status']);
     expect(BRIDGE.allowed.kinds).toEqual(expect.arrayContaining(['send_prompt', 'stop_session', 'end_session', 'file_download'])); // (version 3: a download rides the road)
-    expect(BRIDGE.version).toBe(3);
+    expect(BRIDGE.version).toBe(4); // (4: the keep-alive call `direct.keep`)
     expect(BRIDGE.command_row.keys).toEqual(ROWS.row_keys);
   });
 });

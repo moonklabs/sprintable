@@ -14,6 +14,7 @@ import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { useDirectRoad } from './use-direct-road';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { readStartableKeyed } from '@/lib/phone-start';
 import { readClock } from '@/lib/phone-clock';
@@ -220,6 +221,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
   const { inPhoneApp: phone, phoneCall } = usePhoneBridge();
+  useDirectRoad(typeof view.setup_id === 'string' && view.setup_id !== '' ? view.setup_id : undefined); // story 4993 (PO ⓐ): this computer's room is in front — its direct road is made and kept while it is
   const [result, setResult] = useState<Result | null>(null);
   // Kadir 4955 · Yuna · PO 13:27Z: a command whose end is not known — [결과 확인] follows it (never a second one). While it is
   // unknown: an instruction → [지금 지시] becomes [결과 확인] ([멈춤] stays — the safety handle) · a stop → both become [결과 확인]

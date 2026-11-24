@@ -155,12 +155,12 @@ function openBehind(deps: DirectDeps, setupId: string): void {
  * the shell's three direct answers that have NO `ok` (contracts/direct-bridge.json: `direct.status` → {state} · `direct.send` → {sent, why?} · `direct.result` → {state, code?, got?, of?}). They are real answers when the call was not refused:
  * the bridge's own refusals (a bad shape · `page_hidden` · a failed call) are `ok:false`. So «answered» is «no `ok` word, or `ok:true`» (anything else — `false` or a word that is no boolean — is not an answer), never `ok === true` alone, which these three replies do not carry (the road was never opened on the real shell for that: found by the PR 6 wheel).
  */
-const notRefused = (a: PhoneAnswer | null | undefined): a is PhoneAnswer => !!a && typeof a === 'object' && (a.ok === undefined || a.ok === true);
+export const notRefused = (a: PhoneAnswer | null | undefined): a is PhoneAnswer => !!a && typeof a === 'object' && (a.ok === undefined || a.ok === true);
 const capsSayDirect = (caps: PhoneAnswer): boolean => caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { direct?: unknown }).direct === 1;
 /** how long a road-opening that came late (a slow shell) waits for the shell's answers in all — its own end, so a shell that never answers leaves nothing waiting */
 export const DIRECT_LATE_OPEN_MAX_MS = 10_000;
 /** open the road behind a press unless one was started lately for this computer (the note is shared by all presses; checked and set in one step) */
-function openIfNotLately(deps: DirectDeps, setupId: string): void {
+export function openIfNotLately(deps: DirectDeps, setupId: string): void {
   const fired = deps.openFired; const last = fired?.get(setupId);
   if (last === undefined || Date.now() - last >= DIRECT_OPEN_AGAIN_MS) { fired?.set(setupId, Date.now()); openBehind(deps, setupId); }
 }
