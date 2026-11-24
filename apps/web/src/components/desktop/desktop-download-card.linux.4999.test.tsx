@@ -26,7 +26,7 @@ vi.mock('@/lib/phone-bridge', () => ({
   phoneCall: async () => ({ id: '', ok: false, code: 'not_phone_app' }),
   subscribePhoneApp: (listen: () => void) => { phoneListeners.add(listen); return () => { phoneListeners.delete(listen); }; },
 }));
-const { DesktopDownloadCard, isLinuxBrowser, otherPlatformOf } = await import('./desktop-download-card');
+const { DesktopDownloadCard, isLinuxBrowser, otherPlatformOf, LINUX_PREREQUISITES_COMMAND } = await import('./desktop-download-card');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -98,6 +98,21 @@ describe('DesktopDownloadCard — [SID:4999] the Linux download', () => {
     await flush();
     expect(text('desktop-download-linux-target')).toBe(koMessages.desktop.linuxTarget);
     expect(container.querySelector('[data-testid="desktop-download-linux-button"]')?.textContent).toBe(koMessages.desktop.linuxDownloadCta);
+  });
+
+  it('the Linux card says what a fresh Ubuntu 24.04 needs before the AppImage (libfuse2t64 · libasound2t64) — a line in both languages and the command under the button, for Linux only', async () => {
+    vi.stubGlobal('fetch', answering({ '/desktop/downloads/macos.json': MAC_MANIFEST, '/desktop/downloads/linux.json': LINUX_MANIFEST }));
+    for (const [loc, msgs] of [['en', enMessages], ['ko', koMessages]] as const) {
+      await act(async () => { root.render(wrap(<DesktopDownloadCard />, loc)); });
+      await flush();
+      expect(container.querySelector('[data-testid="desktop-download-linux-install-notice"] p')?.textContent).toBe(msgs.desktop.linuxInstallNotice);
+      expect(text('desktop-download-linux-install-command')).toBe('sudo apt install libfuse2t64 libasound2t64'); // (the very words INSTALL.md and the draft release say)
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+    ua = WINDOWS; vi.stubGlobal('fetch', answering({ '/desktop/downloads/macos.json': MAC_MANIFEST, '/desktop/downloads/windows.json': { ...LINUX_MANIFEST, signed: false, url: LINUX_MANIFEST.url.replace('linux-electron', 'windows-electron') } }));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-linux-install-notice"]')).toBeNull();
   });
 
   it('no Linux manifest yet (404) or a url outside our bucket: no invented link — the card says what it said before (open on a Mac)', async () => {
