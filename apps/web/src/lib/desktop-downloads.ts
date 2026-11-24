@@ -18,7 +18,10 @@ export function desktopDownloadBucket(value: string | undefined = process.env[DE
   return BUCKET_NAME.test(v) ? v : null;
 }
 
-const manifestUrlFor = (bucket: string): string => `https://storage.googleapis.com/${bucket}/macos-electron/latest/manifest.json`;
+/** [SID:4998] the app a person downloads: the Mac's DMG or the Windows installer — each has its own folder in the bucket (`macos-electron/` · `windows-electron/`) and its own `latest/manifest.json` of the same shape */
+export type DesktopPlatform = 'macos' | 'windows';
+const PLATFORM_FOLDER: Record<DesktopPlatform, string> = { macos: 'macos-electron', windows: 'windows-electron' };
+const manifestUrlFor = (bucket: string, platform: DesktopPlatform = 'macos'): string => `https://storage.googleapis.com/${bucket}/${PLATFORM_FOLDER[platform]}/latest/manifest.json`;
 
 export class DesktopDownloadUnavailableError extends Error {}
 
@@ -51,11 +54,11 @@ export function ourDownloadUrl(url: unknown, bucket: string | null | undefined):
 }
 
 /** The GCS manifest body as it is (no parse · no rebuild), past any front cache (the same cache-busting as desktop-updates.ts). */
-export async function fetchDesktopDownloadManifest(fetchImpl: typeof fetch = fetch, bucket: string | null = desktopDownloadBucket()): Promise<string> {
+export async function fetchDesktopDownloadManifest(fetchImpl: typeof fetch = fetch, bucket: string | null = desktopDownloadBucket(), platform: DesktopPlatform = 'macos'): Promise<string> {
   // no bucket configured (prod today): nothing to read — never the dev one
   if (!bucket) throw new DesktopDownloadUnavailableError('no download bucket is configured (DESKTOP_DOWNLOAD_BUCKET)');
   const nonce = Math.random().toString(36).slice(2);
-  const res = await fetchImpl(`${manifestUrlFor(bucket)}?_t=${Date.now()}-${nonce}`, { cache: 'no-store' });
+  const res = await fetchImpl(`${manifestUrlFor(bucket, platform)}?_t=${Date.now()}-${nonce}`, { cache: 'no-store' });
   if (!res.ok) {
     throw new DesktopDownloadUnavailableError(`GCS download manifest fetch failed: ${res.status} ${res.statusText}`);
   }
