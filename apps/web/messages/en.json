@@ -7409,6 +7409,9 @@
     "installOldMac": "On macOS 12, right-click the app → \"Open\"",
     "downloadCta": "Download",
     "openOnMac": "Open this page on your Mac to download",
+    "windowsTarget": "For Windows (64-bit)",
+    "windowsDownloadCta": "Download for Windows",
+    "windowsUnsignedNotice": "This installer isn't signed yet, so Windows may show \"Windows protected your PC\" the first time you open it. Choose More info, then Run anyway.",
     "unavailable": "Not available right now.",
     "setup": {
       "loading": "Loading setup",
