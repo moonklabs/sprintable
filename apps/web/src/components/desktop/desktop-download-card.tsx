@@ -134,9 +134,8 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
   // [SID:4998] a Windows browser also asks for the Windows installer's manifest (the same checks: a link only into our bucket · a version) — a failure is «none», the card then says what it said before.
   // Its own effect, kept by `isWindows`: when the phone bridge claims after the mount (a late claim), the page is no Windows browser any more — nothing is asked, and what was asked is dropped.
   useEffect(() => {
-    if (desktopApp() || !isWindows) { setWin(null); setWinLoading(false); return; }
+    if (desktopApp() || !isWindows) return; // (nothing is asked; what is shown is derived from `isWindows` below — no state is set here)
     let alive = true;
-    setWinLoading(true);
     fetch('/desktop/downloads/windows.json')
       .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopWindowsManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
       .catch(() => null)
@@ -150,7 +149,7 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
     return () => { alive = false; };
   }, [isWindows]);
 
-  if (loading || winLoading) {
+  if (loading || (isWindows && winLoading)) {
     return (
       <Card className="flex items-center gap-2 p-4" data-testid="desktop-download-card">
         <Loader2 className="size-3.5 animate-spin text-ds-ink-3" />
