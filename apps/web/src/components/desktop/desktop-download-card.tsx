@@ -65,8 +65,8 @@ export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
   return inPhoneApp || !/Macintosh/.test(userAgent);
 }
 
-/** [SID:4998] the Windows installer's manifest (publish-win-setup.mjs): the card reads the url (our bucket only) and `signed` — the first-open guide is shown only when the manifest says `signed: false` (a signed build makes the line disappear by itself) */
-interface DesktopWindowsManifest {
+/** [SID:4998 · 4999] the manifest of the Windows installer (publish-win-setup.mjs) or the Linux AppImage: the card reads the url (our bucket only), the version and — for Windows — `signed` (the first-open guide is shown only when the manifest says `signed: false`) */
+interface DesktopOtherManifest {
   product?: string;
   version: string;
   build?: string;
@@ -77,6 +77,17 @@ interface DesktopWindowsManifest {
 /** [SID:4998] a Windows computer's browser (never inside the phone app): the person who can use the Windows download — the Windows manifest is asked for only here (a Mac · a phone · Linux never ask for it) */
 export function isWindowsBrowser(userAgent: string, inPhoneApp: boolean): boolean {
   return !inPhoneApp && /Windows NT/.test(userAgent);
+}
+
+/** [SID:4999] a Linux desktop's browser (never inside the phone app · never Android — its user agent carries «Linux» too · never an Arm Linux: the AppImage is the 64-bit x86 one; a ChromeOS agent says «CrOS», not «Linux», so it is no Linux here): the person who can use the Linux download */
+export function isLinuxBrowser(userAgent: string, inPhoneApp: boolean): boolean {
+  return !inPhoneApp && /Linux/.test(userAgent) && !/Android|aarch64|arm/i.test(userAgent);
+}
+
+type OtherPlatform = 'windows' | 'linux';
+/** the platform whose download this browser gets instead of the Mac's, or null (a Mac · a phone · anything else) */
+export function otherPlatformOf(userAgent: string, inPhoneApp: boolean): OtherPlatform | null {
+  return isWindowsBrowser(userAgent, inPhoneApp) ? 'windows' : isLinuxBrowser(userAgent, inPhoneApp) ? 'linux' : null;
 }
 
 /** story 4668: `hideTitle` — the onboarding's «데스크톱 앱 받기» screen has the title as its h1, so the card's own «데스크톱 앱» line
@@ -107,9 +118,9 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
   // story #4547/#4661: the device is read after mount, and a claim that comes later reaches this card (subscribed)
   const { inPhoneApp } = usePhoneBridge();
   const elsewhere = typeof navigator !== 'undefined' && notAMac(navigator.userAgent, inPhoneApp);
-  const isWindows = typeof navigator !== 'undefined' && isWindowsBrowser(navigator.userAgent, inPhoneApp);
-  const [win, setWin] = useState<DesktopWindowsManifest | null>(null);
-  const [winLoading, setWinLoading] = useState(isWindows);
+  const otherPlatform = typeof navigator === 'undefined' ? null : otherPlatformOf(navigator.userAgent, inPhoneApp);
+  const [other, setOther] = useState<DesktopOtherManifest | null>(null);
+  const [otherLoading, setOtherLoading] = useState(otherPlatform !== null);
 
   useEffect(() => {
     // story 4970 (codex): while the page hydrates, the server snapshot (no bridge) mounts this card for one render even inside the app — the app's bridge is already on the page then (the preload runs
@@ -131,25 +142,25 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
     return () => { alive = false; };
   }, []);
 
-  // [SID:4998] a Windows browser also asks for the Windows installer's manifest (the same checks: a link only into our bucket · a version) — a failure is «none», the card then says what it said before.
-  // Its own effect, kept by `isWindows`: when the phone bridge claims after the mount (a late claim), the page is no Windows browser any more — nothing is asked, and what was asked is dropped.
+  // [SID:4998 · 4999] a Windows or a Linux browser also asks for its own platform's manifest (the same checks: a link only into our bucket · a version) — a failure is «none», the card then says what it said before.
+  // Its own effect, kept by `otherPlatform`: when the phone bridge claims after the mount (a late claim), the page is no desktop browser any more — nothing is asked, and what was asked is dropped.
   useEffect(() => {
-    if (desktopApp() || !isWindows) return; // (nothing is asked; what is shown is derived from `isWindows` below — no state is set here)
+    if (desktopApp() || otherPlatform === null) return; // (nothing is asked; what is shown is derived from `otherPlatform` below — no state is set here)
     let alive = true;
-    fetch('/desktop/downloads/windows.json')
-      .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopWindowsManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
+    fetch(`/desktop/downloads/${otherPlatform}.json`)
+      .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopOtherManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
       .catch(() => null)
-      .then((got: { json: DesktopWindowsManifest; bucket: string | null } | null) => {
+      .then((got: { json: DesktopOtherManifest; bucket: string | null } | null) => {
         if (!alive) return;
         const json = got?.json ?? null;
         const url = ourDownloadUrl(json?.url, got?.bucket);
-        setWin(json?.version && url ? { ...json, url } : null);
-        setWinLoading(false);
+        setOther(json?.version && url ? { ...json, url } : null);
+        setOtherLoading(false);
       });
     return () => { alive = false; };
-  }, [isWindows]);
+  }, [otherPlatform]);
 
-  if (loading || (isWindows && winLoading)) {
+  if (loading || (otherPlatform !== null && otherLoading)) {
     return (
       <Card className="flex items-center gap-2 p-4" data-testid="desktop-download-card">
         <Loader2 className="size-3.5 animate-spin text-ds-ink-3" />
@@ -161,21 +172,22 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
   // 매니페스트를 아직 못 읽으면(민 라우트 미착지·일시 오류 등) 있지도 않은
   // 버전·다운로드 링크는 지어내지 않되, 카드 틀은 남겨 「지금은 받을 수
   // 없습니다」로 정직하게 말한다(페드루 PO 정정 — 완전 침묵은 막다른 길).
-  // [SID:4998] a Windows computer with a Windows installer to give: the Windows download (this is the app for the computer the person is on) — and, under it, the first-open guide while the installer is not signed
-  if (isWindows && win) {
+  // [SID:4998 · 4999] a Windows or Linux computer with its platform's download to give: that download (the app for the computer the person is on) — and, for Windows, under it the first-open guide while the installer is not signed
+  if (otherPlatform !== null && other) {
+    const p = otherPlatform;
     return (
       <Card className="space-y-2 p-4" data-testid="desktop-download-card">
         {hideTitle ? null : <p className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</p>}
-        <p className="text-ds-small text-ds-ink-3" data-testid="desktop-download-windows-target">{t('windowsTarget')}</p>
+        <p className="text-ds-small text-ds-ink-3" data-testid={`desktop-download-${p}-target`}>{t(p === 'windows' ? 'windowsTarget' : 'linuxTarget')}</p>
         <p className="text-ds-small text-ds-ink-3">
-          {win.product ? <span data-testid="desktop-download-product">{win.product}{' · '}</span> : null}
-          <span data-testid="desktop-download-version">{t('versionLabel', { version: win.version })}</span>
-          {win.build ? <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: win.build })}</span> : null}
+          {other.product ? <span data-testid="desktop-download-product">{other.product}{' · '}</span> : null}
+          <span data-testid="desktop-download-version">{t('versionLabel', { version: other.version })}</span>
+          {other.build ? <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: other.build })}</span> : null}
         </p>
-        <Button asChild variant={ctaVariant === 'outline' ? 'secondary' : 'primary'} data-testid="desktop-download-windows-button">
-          <a href={win.url} download onClick={onCta} onAuxClick={(e) => { if (e.button === 1) onCta?.(); }}>{t('windowsDownloadCta')}</a>
+        <Button asChild variant={ctaVariant === 'outline' ? 'secondary' : 'primary'} data-testid={`desktop-download-${p}-button`}>
+          <a href={other.url} download onClick={onCta} onAuxClick={(e) => { if (e.button === 1) onCta?.(); }}>{t(p === 'windows' ? 'windowsDownloadCta' : 'linuxDownloadCta')}</a>
         </Button>
-        {win.signed === false ? (
+        {p === 'windows' && other.signed === false ? (
           <p className="break-keep text-ds-small text-ds-ink-3" data-testid="desktop-download-windows-unsigned-notice">{t('windowsUnsignedNotice')}</p>
         ) : null}
       </Card>
