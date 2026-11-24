@@ -34,8 +34,9 @@ def test_free_limits_org_project_hardcoded():
     from ee.plan_limits import FREE_LIMITS
 
     assert "max_members" not in FREE_LIMITS
-    assert FREE_LIMITS["max_orgs_owned"] == 1
-    assert FREE_LIMITS["max_projects"] == 1
+    # story 5000: the free tier's organization · project · agent caps are lifted (None = no cap) — test_5000_free_limits_lifted pins that
+    assert FREE_LIMITS["max_orgs_owned"] is None
+    assert FREE_LIMITS["max_projects"] is None
 
 
 def _by_tier(rows):

@@ -1480,3 +1480,15 @@ def team_member_has_members_anchor():
         yield
     finally:
         event.remove(TeamMember, "after_insert", _mirror_into_members)
+
+
+@pytest.fixture
+def free_caps_on(monkeypatch):
+    """story 5000 — the free tier's organization · project · agent caps are lifted in production (`FREE_LIMITS` None). A test of the cap
+    mechanism itself (the 402 · its numbers · the room before start) puts the old numbers back for its own duration. Opt in with
+    `pytestmark = pytest.mark.usefixtures("free_caps_on")` or the fixture argument."""
+    import ee.plan_limits as plan_limits
+
+    monkeypatch.setitem(plan_limits.FREE_LIMITS, "max_orgs_owned", 1)
+    monkeypatch.setitem(plan_limits.FREE_LIMITS, "max_projects", 1)
+    monkeypatch.setitem(plan_limits.FREE_LIMITS, "max_agents", 3)

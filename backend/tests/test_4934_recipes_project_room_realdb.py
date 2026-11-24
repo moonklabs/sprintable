@@ -29,6 +29,8 @@ from tests.test_4565_attach_existing_agent_realdb import _live_keys, _plain_key,
 OUTSIDER = None  # filled from the 4424 world below (an admin of the OTHER organization)
 
 
+pytestmark = pytest.mark.usefixtures("free_caps_on")  # story 5000: this file tests the cap mechanism — the old free numbers are put back
+
 async def _read(c, who=OWNER, org=ORG):
     return await c.get("/api/v2/desktop/recipes", headers=_person(who, org))
 

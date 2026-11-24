@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
 _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 
-pytestmark = pytest.mark.skipif(not _RAW, reason="real-DB URL not set — skip")
+pytestmark = [pytest.mark.skipif(not _RAW, reason="real-DB URL not set — skip"), pytest.mark.usefixtures("free_caps_on")]  # story 5000: this file tests the cap mechanism — the old free numbers are put back
 
 
 @pytest.fixture

@@ -77,8 +77,9 @@ def test_free_limits_defined():
     하드코딩 유지). max_members는 #2776로 offering_versions.included_seats 카탈로그
     집행으로 이관돼 이 dict에서 빠짐(전 tier 공통 조회이지 tier별 상수가 아니므로)."""
     from ee.plan_limits import FREE_LIMITS
-    assert FREE_LIMITS["max_orgs_owned"] == 1
-    assert FREE_LIMITS["max_projects"] == 1
+    # story 5000: lifted (None = no cap) — the keys stay, so a number turns the cap back on
+    assert FREE_LIMITS["max_orgs_owned"] is None
+    assert FREE_LIMITS["max_projects"] is None
     assert "max_members" not in FREE_LIMITS
 
 
@@ -172,7 +173,7 @@ def test_api_overage_rates_defined():
 # ─── AC7: dev 환경 Free 제한 초과 검증 ──────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_check_org_create_limit_raises_when_over():
+async def test_check_org_create_limit_raises_when_over(free_caps_on):
     """owner org 1개 이상 시 check_org_create_limit → 402 HTTPException."""
     import uuid
     from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,5 +1,8 @@
 """EE Plan Limit 정책 (E-ORG-MULTI S5.5, story #2776 후속 — seats/max_agents 축 통일).
 
+story 5000(선생님 11-24, 오픈소스 · 혼자 무료): free tier의 조직 · 프로젝트 · 에이전트 상한은 `FREE_LIMITS`가 None(= 상한 없음)이라 풀려 있다 —
+아래 «Org/Project 제한» · «max_agents free 유한 3» 서술은 그 前 값(검사 코드는 그대로이고 숫자를 되돌리면 다시 걸린다).
+
 Org/Project 제한(#2776 스코프 밖 — `offering_versions`에 대응 필드가 없다, PO 確定
 2026-08-18: "gating 통일 완료"가 전 축으로 오독되지 않게 이름 박아둠):
   - Org: 사용자당 owner org 1개(하드코딩 유지).
@@ -33,9 +36,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-FREE_LIMITS: dict[str, int] = {
-    "max_orgs_owned": 1,
-    "max_projects": 1,
+# story 5000 (선생님 11-24 — 오픈소스 · 혼자 무료 방향): the free tier's organization · project · agent caps are lifted. None = no cap on that axis.
+# The check code stays (a number here turns the cap back on); seats · storage · AU and every paid tier's own caps are untouched.
+# Only the value moved — «free: 1 organization · 1 project per organization · 3 agents» had no way up on a deployment whose payment entry is closed.
+FREE_LIMITS: dict[str, int | None] = {
+    "max_orgs_owned": None,
+    "max_projects": None,
+    "max_agents": None,
 }
 
 # org_subscriptions.tier로 실제 나타날 수 있는, offering_versions가 정의하는 tier 집합.
@@ -100,7 +107,11 @@ async def _get_offering_limits(session: AsyncSession, tier: str) -> tuple[int, i
 
 async def check_org_create_limit(session: AsyncSession, user_id) -> None:
     """Free: 사용자당 owner org 1개 제한. story 4726 — 있는 조직만 센다: org_members.org_id에는 FK가 없어 조직 행이 지워져도(삭제 길은 이제 멤버
-    행도 끝내지만, 삭제와 겹친 멤버 쓰기 · 예전에 남은 행) 산 owner 행이 남을 수 있고, 그 행은 한도를 먹으면 안 된다."""
+    행도 끝내지만, 삭제와 겹친 멤버 쓰기 · 예전에 남은 행) 산 owner 행이 남을 수 있고, 그 행은 한도를 먹으면 안 된다.
+    story 5000: `FREE_LIMITS["max_orgs_owned"]` None = no cap (nothing is counted)."""
+    limit = FREE_LIMITS["max_orgs_owned"]
+    if limit is None:
+        return
     result = await session.execute(
         text(
             "SELECT COUNT(*) FROM org_members om"
@@ -110,12 +121,15 @@ async def check_org_create_limit(session: AsyncSession, user_id) -> None:
         {"uid": str(user_id)},
     )
     count = result.scalar() or 0
-    if count >= FREE_LIMITS["max_orgs_owned"]:
-        raise _plan_limit_error("org", FREE_LIMITS["max_orgs_owned"])
+    if count >= limit:
+        raise _plan_limit_error("org", limit)
 
 
 async def check_project_create_limit(session: AsyncSession, org_id) -> None:
-    """Free: org당 project 1개 제한. Team/Pro는 스킵. (#2776 스코프 밖 — 하드코딩 유지)"""
+    """Free: org당 project 제한(`FREE_LIMITS["max_projects"]`, story 5000: None = no cap). Team/Pro는 스킵. (#2776 스코프 밖 — 하드코딩 유지)"""
+    limit = FREE_LIMITS["max_projects"]
+    if limit is None:
+        return
     tier = await _get_org_tier(session, org_id)
     if tier != "free":
         return
@@ -124,8 +138,8 @@ async def check_project_create_limit(session: AsyncSession, org_id) -> None:
         {"oid": str(org_id)},
     )
     count = result.scalar() or 0
-    if count >= FREE_LIMITS["max_projects"]:
-        raise _plan_limit_error("project", FREE_LIMITS["max_projects"])
+    if count >= limit:
+        raise _plan_limit_error("project", limit)
 
 
 def _format_mb(mb: int) -> str:
@@ -340,11 +354,14 @@ async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
     if tier not in KNOWN_TIERS:
         logger.error("check_agent_add_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
-    offering = await _get_offering_limits(session, tier)
-    if offering is None:
-        logger.error("check_agent_add_limit: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
-        return
-    _seats, max_agents = offering
+    if tier == "free":
+        max_agents = FREE_LIMITS["max_agents"]  # story 5000: the free tier's agent cap is this table's, not the catalog's (None = no cap)
+    else:
+        offering = await _get_offering_limits(session, tier)
+        if offering is None:
+            logger.error("check_agent_add_limit: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
+            return
+        _seats, max_agents = offering
     if max_agents is None:
         return  # 무제한 tier
     # story 4717 AC4: the one count (app/services/agent_count.py) — «시스템 발행» is not one of the customer's agents
@@ -360,6 +377,8 @@ async def _agent_limit_of_tier(session: AsyncSession, tier: str) -> int | None:
     unknown tier or no offering row: the same fail-open as the check, so a read never shows a limit the check would not hold)."""
     if tier not in KNOWN_TIERS:
         return None
+    if tier == "free":
+        return FREE_LIMITS["max_agents"]  # story 5000: same source as the check (None = no cap)
     offering = await _get_offering_limits(session, tier)
     if offering is None:
         return None
