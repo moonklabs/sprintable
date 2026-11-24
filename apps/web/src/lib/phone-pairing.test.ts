@@ -37,6 +37,10 @@ describe('[4532] phoneLabel', () => {
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 15; SM-S938N Build/AP3A.240905.015.A2; wv) AppleWebKit/537.36')).toBe('SM-S938N');
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 15; SM-S938N) AppleWebKit/537.36')).toBe('SM-S938N');
     expect(phoneLabel('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36')).toBe('Android'); // reduced UA
+    // story 4994: the guest desktop app (an Electron window) is named for its computer — it was shown as «Android» (the fall-through)
+    expect(phoneLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) sprintable-desktop/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Mac');
+    expect(phoneLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Windows PC');
+    expect(phoneLabel('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36')).toBe('Linux PC');
   });
 });
 
@@ -45,7 +49,7 @@ describe('[4532] scanPairQr', () => {
     const phoneCall = shell({ 'pair.scan': { id: 'x', ok: true, ...HEAD } });
     await expect(scanPairQr(serverFor(phoneCall, server({})))).resolves.toEqual({ kind: 'confirm', head: HEAD });
   });
-  it.each([['cancelled', 'cancelled'], ['expired', 'expired'], ['not_ours', 'notOurs'], ['bad', 'notOurs'], ['failed', 'failed']])(
+  it.each([['cancelled', 'cancelled'], ['expired', 'expired'], ['not_ours', 'notOurs'], ['bad', 'qrUnreadable'], ['failed', 'failed']])(
     'the shell says %s → %s', async (code, kind) => {
       await expect(scanPairQr(serverFor(shell({ 'pair.scan': { id: 'x', ok: false, code } }), server({})))).resolves.toEqual({ kind });
     });
@@ -83,6 +87,13 @@ describe('[4532] sendPairOffer', () => {
     const phoneCall = okShell();
     const fetch = server(okRoutes({ 'GET /api/remote-devices': () => res(200, { devices: [{ id: KEY_ID, pairs: [{ setup_id: HEAD.setup_id }] }] }) }));
     await expect(sendPairOffer(HEAD, 'x', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'alreadyPaired' });
+    expect(phoneCall).not.toHaveBeenCalledWith('pair.mac', expect.anything());
+  });
+
+  it('lens 5842 delta 6: the list refused with a 403 (no access to that computer\'s organization) → its own outcome, nothing offered — not read as «no pair»', async () => {
+    const phoneCall = okShell();
+    const fetch = server(okRoutes({ 'GET /api/remote-devices': () => res(403, {}) }));
+    await expect(sendPairOffer(HEAD, 'x', serverFor(phoneCall, fetch))).resolves.toEqual({ kind: 'forbidden' });
     expect(phoneCall).not.toHaveBeenCalledWith('pair.mac', expect.anything());
   });
 
@@ -132,6 +143,11 @@ describe('[4532] checkPairOffer', () => {
   const offerPath = `GET /api/remote-devices/pairing-offers/${HEAD.offer_id}`;
   const notYet = () => res(200, { devices: [{ id: KEY_ID, pairs: [] }] });
   const stood = () => res(200, { devices: [{ id: KEY_ID, pairs: [{ setup_id: HEAD.setup_id }] }] });
+
+  it('lens 5842 delta 6: after the computer took the offer, a list that is refused (403) is a failed look — not «no pair» (the person is not told «not paired»)', async () => {
+    const fetch = server({ [offerPath]: () => res(200, { state: 'expired', reveal: null }), 'GET /api/remote-devices': () => res(403, {}) });
+    await expect(checkPairOffer(HEAD, KEY_ID, null, serverFor(shell({}), fetch))).resolves.toEqual({ kind: 'failed' });
+  });
 
   it('sent → still waiting (the setup goes along in the query)', async () => {
     const fetch = server({ [offerPath]: () => res(200, { state: 'sent', reveal: null }) });

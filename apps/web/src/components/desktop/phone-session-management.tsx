@@ -18,6 +18,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { beginFlow, endFlow, groupForPress, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
+import { AgentUsageSheet } from '@/components/desktop/agent-usage-sheet'; // story 4981 (PR 4): the card's «사용량» sheet
 import { checkPress, editClock, pressClock, readClock, type ClockAction, type ClockEditFields, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
@@ -49,7 +50,8 @@ export function PhoneSessionManagement() {
 function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; orgSyncPending: boolean }) {
   const [held] = useState(() => new Map<string, Held>()); // one Map for this component's life (read in handlers · written in handlers), by press (idempotency key); this organization's only (another organization remounts this whole component)
   const t = useTranslations('desktop.phoneSessions');
-  const { inPhoneApp, phoneCall } = usePhoneBridge();
+  const { inPhoneApp, phoneCall, deviceKind } = usePhoneBridge();
+  const computer = deviceKind === 'computer'; // story 4994: the guest desktop app — its lines say «이 컴퓨터», not «폰»
   const [section, setSection] = useState<Section>({ kind: 'reading' });
   const flowRef = useRef<Flow | null>(null);
   const alive = useRef(true);
@@ -96,7 +98,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
     return (
       <section className="space-y-2" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
         <h2 id="phone-sessions-heading" className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
-        <p role="status" className="break-keep text-xs text-muted-foreground" data-testid="phone-sessions-remote-off">{t('remoteOff')}</p>
+        <p role="status" className="break-keep text-xs text-muted-foreground" data-testid="phone-sessions-remote-off">{t(computer ? 'remoteOffComputer' : 'remoteOff')}</p>
       </section>
     );
   }
@@ -124,9 +126,9 @@ const DONE_LINES: Record<string, LineKey> = {
 };
 
 /** the words of a line — every key written out, so a key nobody reads is seen as one */
-function resultText(t: T, key: LineKey): string {
+function resultText(t: T, key: LineKey, computer = false): string {
   switch (key) {
-    case 'remoteOff': return t('remoteOff');
+    case 'remoteOff': return t(computer ? 'remoteOffComputer' : 'remoteOff');
     case 'already': return t('result.already');
     case 'nothingRunning': return t('result.nothingRunning');
     case 'notOpen': return t('result.notOpen');
@@ -147,12 +149,12 @@ function resultText(t: T, key: LineKey): string {
     case 'computerTooBig': return t('result.computerTooBig');
     case 'unknown': return t('result.unknown');
     case 'unknownStart': return t('result.unknownStart');
-    case 'notAllowed': return t('result.notAllowed');
-    case 'notPaired': return t('result.notPaired');
+    case 'notAllowed': return t(computer ? 'result.notAllowedComputer' : 'result.notAllowed');
+    case 'notPaired': return t(computer ? 'result.notPairedComputer' : 'result.notPaired');
     case 'signInAgain': return t('result.signInAgain');
-    case 'pairAgain': return t('result.pairAgain');
+    case 'pairAgain': return t(computer ? 'result.pairAgainComputer' : 'result.pairAgain');
     case 'biometricRequired': return t('result.biometricRequired');
-    case 'noScreenLock': return t('result.noScreenLock');
+    case 'noScreenLock': return t(computer ? 'result.noScreenLockComputer' : 'result.noScreenLock');
     case 'failed': return t('result.failed');
   }
 }
@@ -182,11 +184,14 @@ function lineOf(o: PressOutcome, start: boolean, edit = false): Line {
 function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { computer: StartableComputer; phoneKeyId: string; onChanged: () => void; frozen: boolean; held: Map<string, Held> }) {
   const t = useTranslations('desktop.phoneSessions');
   const locale = useLocale();
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
+  const computerGuest = deviceKind === 'computer'; // story 4994
   // what was read belongs to the setup it was read FROM: when the setup named for the card changes (the first reachable one drops off), the old answer — its counts included — is not the card's any more
   const [readState, setReadState] = useState<{ setup: string; read: ClockRead } | null>(null);
   const read: ClockRead | null = readState !== null && readState.setup === computer.setup_id ? readState.read : null;
   const [hidden, setHidden] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false); // story 4981 (PR 4): the «사용량» sheet of this computer
+  const usageAgent = computer.agents[0]?.agent_member_id ?? null; // the usage read is by agent (the server's check is the agent session's own): any agent of this computer names it
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<Line>(null);
   // story 4734 (B): the card is the COMPUTER's (its setups together); the setup named for the card itself is the first reachable one and may change between two reads — what is held, is held by the computer
@@ -354,7 +359,7 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
           <p className="text-sm font-semibold text-foreground">{computer.device_name}</p>
           <p className="text-xs text-muted-foreground">{t('title')}</p>
         </header>
-        <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-old-app">{t('oldApp')}</p>
+        <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-old-app">{t(computerGuest ? 'oldAppComputer' : 'oldApp')}</p>
       </Card>
     );
   }
@@ -375,10 +380,14 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
 
   return (
     <Card className="break-keep space-y-3 p-4" data-testid="phone-session-card" data-setup={computer.setup_id}>
-      <header>
-        <p className="text-sm font-semibold text-foreground">{device}</p>
-        <p className="text-xs text-muted-foreground">{t('title')}</p>
+      <header className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">{device}</p>
+          <p className="text-xs text-muted-foreground">{t('title')}</p>
+        </div>
+        {usageAgent ? <Button variant="outline" size="sm" className="min-h-11" onClick={() => setUsageOpen(true)} data-testid="phone-sessions-usage">{t('usage.button')}</Button> : null}
       </header>
+      {usageAgent ? <AgentUsageSheet agentId={usageAgent} open={usageOpen} onOpenChange={setUsageOpen} /> : null}
       {elsewhere ? <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-elsewhere">{elsewhere === 'mac' ? t('elsewhere.mac') : t('elsewhere.phone')}</p> : null}
 
       {view?.mode === 'panel' ? (
@@ -398,9 +407,9 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
           {t('readFailed')} <Button variant="outline" size="sm" className="min-h-11" onClick={() => void look()}>{t('retry')}</Button>
         </p>
       ) : null}
-      {!read.remoteControl ? <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-card-remote-off">{t('remoteOff')}</p> : null}
+      {!read.remoteControl ? <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-card-remote-off">{t(computerGuest ? 'remoteOffComputer' : 'remoteOff')}</p> : null}
       <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="phone-sessions-line">
-        {line ? resultText(t, line.key) : ''}
+        {line ? resultText(t, line.key, computerGuest) : ''}
       </p>
       {pending ? <Button variant="outline" size="sm" className="min-h-11" disabled={checkLocked} onClick={() => void check()} data-testid="phone-sessions-check">{t('result.checkResult')}</Button> : null}
     </Card>
@@ -461,6 +470,7 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
   onSubmit: (agentId?: string) => void; onCancel: (agentId?: string) => void;
   onEdit: (agentId: string, baseRev: number, fields: ClockEditFields) => Promise<PressOutcome>;
 }) {
+  const computerGuest = usePhoneBridge().deviceKind === 'computer'; // story 4994
   const one = view.scope === 'one';
   const oneRow = one ? view.rows[0] ?? null : null;
   const agentId = oneRow?.agentId;
@@ -474,7 +484,7 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
   const countsAgree = count.ready === view.rows.length && count.needsYou === 0 && count.drafting === 0;
   const allReady = countsAgree && everyRowReady;
   const unseenLine = view.rows.some((r) => r.state === 'ready' && !r.idle && r.firstLine === null);
-  const reason = count.drafting > 0 ? t('action.draftsComing') : count.needsYou > 0 ? t(one ? 'action.needsHandOne' : 'action.needsHand', { m: count.needsYou }) : unseenLine ? t('action.lineHidden') : null;
+  const reason = count.drafting > 0 ? t('action.draftsComing') : count.needsYou > 0 ? t(one ? (computerGuest ? 'action.needsHandOneComputer' : 'action.needsHandOne') : (computerGuest ? 'action.needsHandComputer' : 'action.needsHand'), { m: count.needsYou }) : unseenLine ? t('action.lineHidden') : null;
   // the lead line counts the agents the flow is about — its own rows: the list of who is running can already say none while the ends are being saved (seen live: «stops 0 agents»)
   const idleOnly = one && oneRow?.idle === true;
   return (

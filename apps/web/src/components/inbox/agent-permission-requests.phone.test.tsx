@@ -12,6 +12,7 @@ import enMessages from '../../../messages/en.json';
 import type { PermissionRequest } from '@/lib/agent-permissions';
 import { __resetPhoneBridgeForTest, claimPhoneBridge } from '@/lib/phone-bridge';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+import { __resetDirectKeepForTest } from '@/lib/phone-direct-keep';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -68,6 +69,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  __resetDirectKeepForTest(); // (story 4993 ⓐ-3: one keeper per computer for the page's life — reset between tests)
   container.remove();
   __resetPhoneBridgeForTest();
   delete window.__sprintablePhone;
@@ -99,6 +101,20 @@ const press = async (label: string) => {
   await settle();
 };
 
+describe('[4993 ⓐ-3] the road of each computer that has an approval waiting', () => {
+  const keepsFor = () => sent.filter((x) => x.type === 'direct.keep').map((x) => x.args.setup_id as string).sort();
+  const S1 = '0f0e0d0c-0b0a-4908-8706-050403020100'; const S2 = '11111111-2222-4333-8444-555555555555';
+  const withCaps = () => { shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : type === 'shell.caps' ? { ok: true, caps: { direct: 1, direct_keep: 1 } } : type === 'direct.keep' ? { state: 'idle' } : { ok: true }); };
+  it('two requests of two computers and one more of the first: each computer\'s road is kept ONCE; a request that names no session (not answerable by the road) holds nothing', async () => {
+    withCaps(); installShell();
+    await render([req({ id: 'r1', request_id: 'q1', setup_id: S1, session_key: 's-1' }), req({ id: 'r2', request_id: 'q2', setup_id: S2, session_key: 's-2' }), req({ id: 'r3', request_id: 'q3', setup_id: S1, session_key: 's-3' }), req({ id: 'r4', request_id: 'q4', setup_id: '22222222-3333-4444-8555-666666666666', session_key: null })]);
+    await vi.waitFor(() => expect(keepsFor()).toEqual([S1, S2]));
+  });
+  it('no request waiting: nothing about a road is asked', async () => {
+    withCaps(); installShell(); await render([]); await settle(); expect(sent.filter((x) => x.type === 'direct.keep' || x.type === 'shell.caps' && false)).toEqual([]);
+  });
+});
+
 describe('[4532] approvals card inside the phone app', () => {
   it('[허용] → the shell gets {id, decision} only → the shell\'s signed goes to the answer route → «허용됨 · Bash», buttons gone', async () => {
     installShell();
@@ -113,6 +129,17 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(phoneLines()).toEqual(['허용됨 · Bash']);
     expect(buttons()).toEqual([]);
     expect(document.activeElement?.textContent).toBe('허용됨 · Bash'); // the result takes the pressed button's focus
+  });
+
+  it('[4993 5b-2] with the same-network road ready, [허용] goes to the computer over it — the request\'s own session and id in the row — and the server\'s answer route is not called; the same «허용됨» line', async () => {
+    shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : type === 'approval.sign' ? signAnswer : type === 'shell.caps' ? { ok: true, caps: { direct: 1 } } : type === 'direct.status' ? { ok: true, state: 'ready' } : type === 'direct.send' ? { ok: true, sent: true } : type === 'direct.result' ? { ok: true, state: 'done' } : { ok: true });
+    installShell();
+    await render([req({ setup_id: '0f0e0d0c-0b0a-4908-8706-050403020100', session_key: 's-77', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd' })]);
+    await press('허용'); await vi.waitFor(() => expect(phoneLines()).toEqual(['허용됨 · Bash'])); // (the computer\'s word is asked for 200 ms after the send)
+    const row = sent.find((x) => x.type === 'direct.send')!.args.row as { kind: string; session_key: string; payload: Record<string, unknown> };
+    expect(row.kind).toBe('answer_approval'); expect(row.session_key).toBe('s-77'); expect(row.payload).toEqual({ session_key: 's-77', request_id: '99999999-aaaa-4bbb-8ccc-dddddddddddd', decision: 'allow', signed: 'SIGNED' });
+    expect(fetchWithAuth.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
+    expect(phoneLines()).toEqual(['허용됨 · Bash']); expect(buttons()).toEqual([]);
   });
 
   it('[4612] a change frame for a request answered HERE is not read on (its result line stays) — one for another request reads at once', async () => {
@@ -311,6 +338,45 @@ describe('[4532] approvals card inside the phone app', () => {
     expect(buttons()).toEqual([]);
   });
 
+  it('story 4994: in the guest desktop app (a COMPUTER) no screen lock / not registered / not ready / cannot open say «이 컴퓨터» — never «폰» — and there is no [설정 열기] that would open nothing', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      // before any press: the shell says no screen lock (the key store is not usable)
+      auth = 'no_screen_lock'; __resetPhoneBridgeForTest(); installShell(); await render([req()]);
+      expect(phoneLines()).toEqual([koMessages.agentPermissions.phone.noScreenLockComputer]);
+      expect(buttons(), 'no settings button on a computer').toEqual([]);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      auth = 'biometric';
+      for (const [answer, text] of [
+        [{ ok: false, code: 'no_screen_lock' }, koMessages.agentPermissions.phone.noScreenLockComputer],
+        [{ ok: false, code: 'not_registered' }, koMessages.agentPermissions.phone.notRegisteredComputer],
+        [{ ok: false, code: 'vault_unavailable' }, koMessages.agentPermissions.phone.notReadyComputer],
+        [{ ok: false, code: 'card_refused' }, koMessages.agentPermissions.phone.cannotOpenComputer],
+      ] as const) {
+        signAnswer = answer; __resetPhoneBridgeForTest(); installShell(); await render([req()]); await press('허용');
+        expect(phoneLines(), JSON.stringify(answer)).toEqual([text]);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+    } finally { ua.mockRestore(); }
+    for (const m of [koMessages, enMessages]) for (const k of ['noScreenLockComputer', 'notRegisteredComputer', 'notReadyComputer', 'cannotOpenComputer'] as const) expect(m.agentPermissions.phone[k], k).not.toMatch(/폰|phone/i);
+  });
+
+  it('story 4994 (D-3): in the guest desktop app (a COMPUTER) the removed-device line does not call it a phone — ko and en', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
+    try {
+      for (const [locale, text] of [['ko', koMessages.agentPermissions.phone.notPairedComputer], ['en', enMessages.agentPermissions.phone.notPairedComputer]] as const) {
+        answerResponse = () => new Response(JSON.stringify({ error: { code: 'phone_not_paired' } }), { status: 409 });
+        installShell();
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render([req()], locale);
+        await press(locale === 'ko' ? '허용' : 'Allow');
+        expect(phoneLines(), locale).toEqual([text]);
+        expect(text, locale).not.toMatch(/폰|phone/i);
+      }
+    } finally { ua.mockRestore(); }
+  });
+
   it('reads in English', async () => {
     auth = 'screen_lock';
     installShell();
@@ -436,6 +502,22 @@ describe('[4604] the question\'s words only while it asks', () => {
     await remount();
     await render([net()]); // a browser: the request still asks (answered on the phone) — its words stay
     expect(askLine()?.textContent).toBe(ko.net.askLine);
+  });
+
+  it('story 4994: the card\'s read-only line in the guest desktop app (a COMPUTER) does not send the person to «a phone»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      await remount(); installShell();
+      await render([net({ recipient_reason: 'no_paired_phone' } as Partial<PermissionRequest>)]);
+      expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(koMessages.agentPermissions.line.noPairedComputer);
+      __resetPhoneBridgeForTest();
+      // pending, answerable by nobody here: the «answer on a paired device» line (no «폰»)
+      await remount(); installShell();
+      await render([net({ answerable: false } as Partial<PermissionRequest>)]);
+      expect(container.querySelector('[data-testid="agent-permission-line"]')?.textContent).toBe(koMessages.agentPermissions.line.answerOnComputer);
+      __resetPhoneBridgeForTest();
+      for (const m of [koMessages, enMessages]) for (const k of ['noPairedComputer', 'answerOnComputer'] as const) expect(m.agentPermissions.line[k], k).not.toMatch(/폰|phone/i);
+    } finally { ua.mockRestore(); }
   });
 
   it('(Yuna 4987) pending, but no button can come — no word from the computer · no paired phone → no «press [허용…]» line, the card\'s own line says why', async () => {
@@ -585,6 +667,22 @@ describe('[4590] a question only that computer\'s terminal answers (Yuna 4590-te
     expect(container.textContent).not.toContain('페어링된 폰');
     expect(container.querySelector('[data-testid="agent-permission-tool"]')?.textContent).toBe('Bash'); // read: named as ever
     expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
+  });
+
+  it('[4972] an ENDED card whose words the server let go: the agent and its state — no «see it in the terminal» line, no summary box, no folder', async () => {
+    await render([req({ state: 'expired', tool: null, tool_name: null, summary: null, workdir: null, answerable: false, session_key: null, input_hash: null, expires_at: new Date(Date.now() - 5 * 60_000).toISOString() })]);
+    expect(container.querySelector('[data-testid="agent-permission-card"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-tool"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-tool-unread"]')).toBeNull();
+    expect(container.querySelector('.font-mono')).toBeNull();
+    expect(container.textContent).not.toContain('터미널에서 볼 수 있어요');
+  });
+
+  it('[4972] answering a card whose tool name is gone says what was done and nothing after the dot', async () => {
+    installShell();
+    await render([req({ tool: null, tool_name: null, summary: null })]);
+    await press('허용');
+    expect(phoneLines()).toEqual(['허용했어요']);
   });
 
   it('a tool not read: where to see it in its place, no summary box, no made-up name', async () => {

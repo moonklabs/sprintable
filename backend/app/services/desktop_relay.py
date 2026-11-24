@@ -22,9 +22,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.desktop_relay import (
     COMMAND_KINDS,
@@ -43,6 +44,20 @@ logger = logging.getLogger(__name__)
 
 TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
+# story 4979 (PO 11-18): a device that sends `presence` every 60 s is «disconnected» once it has been silent this long (two missed beats and a margin) — measured: the 90 s rule on the SERVER's tick showed «connected» for up to
+# 5 min 20 s after a computer fell silent. A device counts as presence-aware only while its last presence is this young; an older host version (no presence) keeps the 90 s rule on `last_used_at`.
+PRESENCE_UNKNOWN_AFTER = timedelta(seconds=150)
+# story 4979 gate alignment (Kadir 5853 ①): a presence host is connected only while the SERVER has also heard its connection within this long — `last_used_at` is stamped by the stream's 30 s tick AND by the host's own state reports and acks,
+# so the condition is «no tick and no report for 400 s → refused», not «the stream is dead → refused». Without it a host whose stream is dead for good (a proxy that lets the POSTs through and blocks the event stream · the two-stream limit ·
+# a long reconnect back-off) and which then also sends nothing but presence is shown «connected · working» on presence alone, and a command is accepted and sits `queued` with no expiry for as long as it stays that way. 400 s = the stream's
+# lifetime 5 min 20 s (320 s) + 80 s for the reopen — a reconnect gap under it is still «queued, delivered when the stream is back»; past it a command is refused (409 device_unreachable) like before presence existed.
+PRESENCE_STREAM_TICK_MAX = timedelta(seconds=400)
+# How long a last presence still makes a device «presence-aware» (Kadir 5851 ②: a day let a host that went back to an older version flip between «connected» and «disconnected» for a day). The number is the longest a half-open
+# connection can keep the SERVER's tick-stamped `last_used_at` fresh after a computer fell silent — the stream's lifetime 5 min 20 s + the 90 s rule = ≈ 6 min 50 s (measured 11-18) — doubled and rounded: 15 minutes. Past it the old
+# rule judges, and by then it says «not heard» on its own; a host that really sends presence is never that quiet (it sends one at every connect, then every 60 s).
+PRESENCE_AWARE_WINDOW = timedelta(minutes=15)
+PRESENCE_LIMIT = "20/minute"  # per verified device: a host asks once a minute (reconnects add a few) — a token that asks more is answered 429 BEFORE any write (the request costs the token check, nothing else)
+PRESENCE_MIN_GAP = timedelta(seconds=10)  # a presence closer than this to the last one is accepted and ignored (nothing is written: no one can turn the endpoint into a write load)
 SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 # story #4554 (PO 11:45Z) — the relay's edges, each a named number:
 INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
@@ -145,13 +160,42 @@ async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup 
     return setup
 
 
-async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
-    """The device was heard from now (connect · heartbeat · any report) — what `unknown` is measured from."""
+async def touch_device(db: AsyncSession, setup_id: uuid.UUID, *, heard: bool = True) -> None:
+    """The device was heard from now (connect · heartbeat · any report) — what `unknown` is measured from. `heard=False` is the SERVER's own tick on an open stream: it keeps `last_used_at` as it always did
+    but is NOT the computer speaking, so `last_heard_at` is left alone (story 4979)."""
+    now = _now()
+    values: dict = {"last_used_at": now}
+    if heard:
+        values["last_heard_at"] = now
     await db.execute(
         update(DesktopDeviceToken)
         .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
-        .values(last_used_at=_now())
+        .values(**values)
     )
+
+
+async def touch_presence(db: AsyncSession, setup_id: uuid.UUID, token: str | None = None) -> bool:
+    """story 4979: the device's own «I am here» (`POST /relay/presence`). Stamps `last_heard_at` and `last_presence_at` of the token the request CAME WITH (`token`; None = every live token of the device) — and NOT `last_used_at`
+    (Kadir 5851 ①: `last_used_at` is what the SERVER judges «may a command go to this computer» by; a presence alone must not turn a computer with no stream and no report into one that accepts commands — this change moves only what a
+    person is SHOWN). Only when the last presence is older than PRESENCE_MIN_GAP (one UPDATE with the guard in its WHERE: a flood writes nothing, and costs no read). Returns whether anything was written."""
+    now = _now()
+    where = [DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None),
+             or_(DesktopDeviceToken.last_presence_at.is_(None), DesktopDeviceToken.last_presence_at < now - PRESENCE_MIN_GAP)]
+    if token:
+        where.append(DesktopDeviceToken.token_hash == _hash(token))
+    res = await db.execute(update(DesktopDeviceToken).where(*where).values(last_heard_at=now, last_presence_at=now))
+    return bool(res.rowcount)
+
+
+async def touch_heard(db: AsyncSession, setup_id: uuid.UUID, token: str | None = None) -> bool:
+    """story 4981 (Kadir 5854 ①): the device's own word that is NOT a stream tick or a report — it stamps `last_heard_at` of the token the request came with (`token`; None = every live token of the device) and NOTHING else:
+    not `last_used_at`. `last_used_at` is what the 5853 rule «no tick and no report for 400 s → refused» judges a presence host by, so a usage report must not renew it (a computer whose stream died would otherwise stay
+    «reachable» for as long as it kept sending numbers). Returns whether anything was written."""
+    where = [DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None)]
+    if token:
+        where.append(DesktopDeviceToken.token_hash == _hash(token))
+    res = await db.execute(update(DesktopDeviceToken).where(*where).values(last_heard_at=_now()))
+    return bool(res.rowcount)
 
 
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
@@ -393,12 +437,18 @@ class StartableSnapshot(BaseModel):
     # story #4734 (B): this computer's app knows the press of the WHOLE computer (the `computer` mark of a clock press) — a closed word, sent with every list; absent = an app from before.
     # The server keeps it in the setup's `capabilities` and tells the phone's list (`computer_press`), so a screen offers the one button only for a Mac that can take it.
     computer_press: StrictBool | None = None  # (the boolean true and nothing else: 1 · "true" · false are refused below)
+    # story 4976 (A3 · Kadir 871 ⓓ): this computer's app OPENS a sealed instruction (`send_prompt` as an envelope — host `sealed-prompt.ts`). The card-sealing mark a phone pins says «this computer seals cards», which an app from before
+    # the sealed instruction also says; only THIS word says the Mac can open one — kept in `capabilities` like `computer_press`, shown in the session view (`sealed_prompt`) so a sealed instruction is never sent to a Mac that cannot open it.
+    sealed_prompt: StrictBool | None = None  # (true and nothing else, as above)
+    # story 4987 (P7 · the 10-minute files window): this computer's app accepts a files request signed by a window key (it said so with its startable list) — kept in `capabilities` like the two words above and told to the
+    # phone with the session view (`file_window`), so a phone asks for a window only of a Mac that can give one; absent = an app from before (the phone then asks for the OS confirmation on every request)
+    file_window: StrictBool | None = None  # (true and nothing else, as above)
 
-    @field_validator("computer_press")
+    @field_validator("computer_press", "sealed_prompt", "file_window")
     @classmethod
     def _only_true(cls, v: bool | None) -> bool | None:
         if v is False:
-            raise ValueError("computer_press is the word true, or absent")
+            raise ValueError("a capability word is true, or absent")
         return v
 
 
@@ -766,14 +816,27 @@ async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: 
 
 
 COMPUTER_PRESS = "computer_press"
+SEALED_PROMPT = "sealed_prompt"  # story 4976 (A3): the computer's app opens a sealed instruction
+FILE_WINDOW = "file_window"  # story 4987 (P7): the computer's app accepts a files request signed by a window key (the 10-minute window)
 
 
 async def note_computer_press(db: AsyncSession, setup: DesktopSetup, knows: bool) -> None:
     """story #4734 (B): the computer says (with each startable list) whether its app takes the whole-computer press; kept in `capabilities` next to what the setup's app
     could take at its creation, and taken out again when a list comes without it (an app that went back). The other words of the list are left as they are."""
+    await note_capabilities(db, setup, {COMPUTER_PRESS: knows})
+
+
+async def note_capabilities(db: AsyncSession, setup: DesktopSetup, says: dict[str, bool]) -> None:
+    """the capability words the computer says with its list (`computer_press` · `sealed_prompt` · `file_window`), all in ONE write (a second write would start from the old value the first had already changed): each kept in
+    `capabilities` when said, taken out again when a list comes without it; the other words are left as they are"""
     have = [c for c in (setup.capabilities or []) if isinstance(c, str)]
-    want = sorted({*have, COMPUTER_PRESS}) if knows else [c for c in have if c != COMPUTER_PRESS]
+    want = sorted(({*have} | {w for w, k in says.items() if k}) - {w for w, k in says.items() if not k})
+    if says.get(SEALED_PROMPT) is True and setup.sealed_prompts_at is None:
+        # story 4976 (A5): the computer says it opens a sealed instruction → its mark stands (one way: the first time kept; a later list without the word takes the capability out but not the mark). The same statement
+        # every time (COALESCE keeps the first) — so a repeated list changes nothing and costs one cheap write only until the mark stands. Under the machine lock a plaintext instruction of the same Mac takes (create_command).
+        await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id, DesktopSetup.sealed_prompts_at.is_(None)).values(sealed_prompts_at=func.now()))
     if want == have and setup.capabilities is not None:
+        await db.flush()
         return
     if not want and setup.capabilities is None:
         return
@@ -813,12 +876,10 @@ async def device_sessions_view(
 
     story #4554 ④: «heard from» counts the device's live token only — a disconnected device (its token revoked) is silent at once,
     not for the 90 seconds its last heartbeat would have covered. ①: live rows first, newest first, `limit` of them."""
+    from app.services.agent_permissions import _reachable
+
     now = now or _now()
-    last_heard = (await db.execute(
-        select(func.max(DesktopDeviceToken.last_used_at))
-        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
-    )).scalar_one_or_none()
-    silent = last_heard is None or now - last_heard > UNKNOWN_AFTER
+    silent = setup_id not in await _reachable(db, {setup_id}, now)  # story 4979: the same rule as everywhere (a presence host: 150 s of its own silence; any other: `last_used_at` within UNKNOWN_AFTER)
     rows = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup_id)
         .order_by((DesktopSession.state == "stopped").asc(), DesktopSession.state_at.desc(), DesktopSession.created_at.desc())
@@ -872,11 +933,28 @@ class StartSessionPayload(_Payload):
 
 class SendPromptPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
-    text: str = Field(min_length=1, max_length=PROMPT_MAX)
+    text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     # story #4534 (contract v1.9) — the conversation the agent answers in, and the phone's signed blob (its conversation_id
     # and text hash inside — the daemon wraps «this conversation» from the signed value only); carried as is
     conversation_id: uuid.UUID
-    signed: str = Field(min_length=1, max_length=16384)
+    signed: str | None = Field(default=None, min_length=1, max_length=16384)
+    # story 4976: or the SEALED road — `envelope` (kind `send_prompt`: the words and the phone's signature over the whole envelope inside, the server cannot open it) in place
+    # of `text` + `signed`, never beside them: a sealed press stores no word and no hash of the words
+    envelope: dict | None = None
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        from app.services.envelope_shape import check_envelope
+
+        return None if env is None else check_envelope(env, kind="send_prompt")
+
+    @model_validator(mode="after")
+    def _one_road(self) -> SendPromptPayload:
+        sealed = self.envelope is not None
+        if sealed == (self.text is not None or self.signed is not None) or (not sealed and (self.text is None or self.signed is None)):
+            raise ValueError("an instruction is the plain road (text and signed) or the sealed road (envelope), one of the two")
+        return self
 
 
 class AnswerApprovalPayload(_Payload):
@@ -981,6 +1059,21 @@ class ReadChangesPayload(_Payload):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
 
 
+class DirectOpenPayload(_Payload):
+    """story 4993 (P2): a paired phone's sealed ASK for a same-network direct door on this computer — exactly {envelope}. No session, no address, no key in the clear: the one-time key and the time are inside the signed envelope (the shape is
+    `envelope_shape.check_envelope`'s, judged where the person asks)."""
+
+    envelope: dict
+
+
+class FileListPayload(_Payload):
+    """story 4983 (P5): a person's sealed request to list a folder of a project of this computer — exactly {project_id, envelope}. No session, no folder, no path, nothing readable: the computer maps the project to a folder of
+    its own and opens the envelope itself (the shape of an envelope is `envelope_shape.check_envelope`'s, judged where the person asks)."""
+
+    project_id: uuid.UUID
+    envelope: dict
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
@@ -989,6 +1082,10 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "end_session": EndSessionPayload,
     "clock": ClockPayload,
     "read_changes": ReadChangesPayload,
+    "file_list": FileListPayload,
+    "file_read": FileListPayload,  # story 4983 (P6): the same two fields — the project and the sealed request (the file's name is inside it)
+    "file_download": FileListPayload,  # story 4988 (P8): the same two fields again
+    "direct_open": DirectOpenPayload,  # story 4993 (P2): {envelope} only
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -1001,6 +1098,79 @@ def validate_payload(kind: str, payload: dict) -> _Payload:
         return schema.model_validate(payload)
     except ValidationError as exc:
         raise DesktopRelayError(422, "invalid_payload", exc.errors(include_url=False, include_input=False)[0]["msg"]) from exc
+
+
+COMMAND_END_STATES = ("done", "failed", "rejected")
+
+
+def ended_prompt_payload(payload: dict | None) -> dict:
+    """story 4976: what a finished instruction press keeps — which session and which conversation, nothing of the words (the text · the plain road's signature with a hash of
+    the words · the sealed envelope). A new dict: the JSONB column is set to it, never changed in place."""
+    p = payload or {}
+    return {k: p[k] for k in ("session_key", "conversation_id") if k in p}
+
+
+async def forget_prompts(db: AsyncSession, setup_ids: list[uuid.UUID]) -> int:
+    """story 4976: the instruction copies of computers that cannot be reached any more go (a disconnect · a replaced line · an account's computers cut off · the organization's remote
+    control turned off): EVERY `send_prompt` of those computers — queued · delivered · acked · over — keeps `{session_key, conversation_id}` and nothing of the words (text · plain
+    signature · envelope). `reject_open_commands` ends the open ones; this also covers the one it does not (an `acked` instruction: the computer took it, then the line was cut) and the
+    paths that end no command (a replacement, an account cut-off). Row locks of the commands only — the same place `desktop_clock.forget` and `desktop_changes.forget` stand."""
+    if not setup_ids:
+        return 0
+    # `SKIP LOCKED` (codex 4976 · third delta): a command row that a result is landing on right now is held by that transaction (it takes the row, then the device's token — the cut-off paths take the
+    # token first), so waiting for it here would be one side of a deadlock. Such a row is not lost: a result that ENDS it (done · failed · rejected) scrubs it; one that only acknowledges it (`acked`) does not,
+    # and the minute sweep (`purge_stale_prompts`) takes it when it is still open ten minutes on.
+    due = (
+        select(DesktopCommand.id)
+        .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.kind == "send_prompt",
+               or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
+        .with_for_update(skip_locked=True)
+    )
+    res = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(due))
+        .values(payload=func.jsonb_build_object(
+            "session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    return res.rowcount or 0
+
+
+STALE_PROMPT_COPY_MINUTES = 10  # a command is refused by the computer after 120 s (RELAY_COMMAND_MAX_AGE_MS): ten minutes is far past any answer — what is still open then is a copy nobody will use
+
+
+async def purge_stale_prompts(db: AsyncSession, *, now: datetime | None = None, minutes: int = STALE_PROMPT_COPY_MINUTES) -> int:
+    """story 4976 (the minute job, with the card sweep): a `send_prompt` that is still OPEN (queued · delivered · acked) after `minutes` ends as `rejected` / `expired` and keeps
+    {session_key, conversation_id} only. It closes what no cut-off path can: a press made while a switch-off was committing (the switch-off ended the commands it saw; this one landed after) and
+    a computer that took a press and never reported. A row held by another transaction (its result landing · an organization's delete) is skipped (`SKIP LOCKED`) and taken the next minute. → how many ended."""
+    now = now or _now()
+    due = (
+        select(DesktopCommand.id)
+        # the kind · state tests are written as LITERALS (not bind parameters): the partial index of 0486 can only be proven usable by the planner when the predicate is a constant in the statement —
+        # with parameters, a prepared statement that has switched to a generic plan (asyncpg's statement cache does after a few runs) falls back to walking the table (codex 5850)
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('queued', 'delivered', 'acked')"),
+               DesktopCommand.created_at < now - timedelta(minutes=minutes))
+        .with_for_update(skip_locked=True)
+    )
+    res = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(due))
+        .values(state="rejected", result_code="expired", finished_at=now,
+                payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    ended = res.rowcount or 0
+    # (Kadir lens 5850 · low 6) a press an OLDER build of the server ended while this one was rolling out keeps its words — 0486 ran before that build stopped: the same sweep takes every finished
+    # instruction of the last day that still holds any (a press ends within minutes of its making, and the rollout is shorter than a day; the older ones are 0486's). Both reads start from a partial
+    # index of 0486 (open · ended instruction rows by `created_at`), so neither walks the whole table each minute (Kadir lens 5850: 77 / 85 ms on a million rows before).
+    leftovers = (
+        select(DesktopCommand.id)
+        .where(text("desktop_commands.kind = 'send_prompt' AND desktop_commands.state IN ('done', 'failed', 'rejected')"),  # literals, for the partial index (see above)
+               DesktopCommand.created_at > now - timedelta(days=1),
+               or_(DesktopCommand.payload.has_key("text"), DesktopCommand.payload.has_key("signed"), DesktopCommand.payload.has_key("envelope")))
+        .with_for_update(skip_locked=True)
+    )
+    res2 = await db.execute(
+        update(DesktopCommand).where(DesktopCommand.id.in_(leftovers))
+        .values(payload=func.jsonb_build_object("session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+    )
+    return ended + (res2.rowcount or 0)
 
 
 async def enqueue_command(
@@ -1025,14 +1195,24 @@ async def enqueue_command(
     )).scalar_one_or_none()
     if existing is not None:
         return existing
+    # story 4976: only a computer that is NOT cut off takes a number. The caller read the computer a moment ago; a disconnect · a replacement · an account cut-off that committed since
+    # (this UPDATE waited on its row lock) is seen here again by the UPDATE's own WHERE — no command is made for a computer whose copies were just scrubbed
     seq = (await db.execute(
-        update(DesktopSetup).where(DesktopSetup.id == setup.id)
+        update(DesktopSetup).where(DesktopSetup.id == setup.id, DesktopSetup.revoked_at.is_(None))
         .values(relay_command_seq=DesktopSetup.relay_command_seq + 1)
         .returning(DesktopSetup.relay_command_seq)
-    )).scalar_one()
+    )).scalar_one_or_none()
+    if seq is None:
+        raise DesktopRelayError(409, DISCONNECTED_CODE, "that computer has been disconnected")
+    # story 4976 (Kadir lens 5850 · middle 1): the remote-control switch-off holds the computer's row while it forgets what it holds (`desktop_clock.forget`) — a press that read «on» above waits on the
+    # UPDATE just now and would then make its command AFTER that scrub. Ask again: this is a NEW statement after the wait (READ COMMITTED), it sees the switch-off's commit. No new lock · no new order.
+    if not await remote_control.is_enabled(db, setup.org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     body = parsed.model_dump(mode="json")
     if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
+    if kind == "send_prompt":  # story 4976: a plain press is exactly {session_key, text, conversation_id, signed} as before, a sealed one {session_key, conversation_id, envelope}
+        body = {k: v for k, v in body.items() if v is not None}
     if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
         body.pop("agent_member_id", None)
     if kind == "clock" and body.get("computer") is None:  # story #4734 (B): a press without the mark carries none of its three keys (the same bytes as before)
@@ -1069,13 +1249,26 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         .limit(100)
     )).scalars().all()
     now = _now()
-    if any(r.kind == "read_changes" for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered
+    if any(r.kind in ("read_changes", "file_list", "file_read", "file_download", "direct_open") for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered (story 4983: a files request too — a list and an open)
         from app.services.desktop_changes import reject_stale_commands
 
         rows = await reject_stale_commands(db, rows, now=now)
-    for r in rows:
-        if r.state == "queued":
-            r.state, r.delivered_at = "delivered", now
+    # story 4976 (codex third delta): «queued → delivered» is a GUARDED statement (`state = 'queued'`), not the ORM's blind write of the row read above: a command that a sweep or a cut-off ended
+    # and scrubbed between that read and now is NOT rewritten back to `delivered` and is NOT sent with the words read a moment ago (a row already `delivered` is re-sent as always — at least
+    # once; the computer drops an id it has seen). The rows it moves are HELD to the commit — as the ORM write it replaces held them (command row, then the device's token in `touch_device`; the
+    # cut-off paths take the token first: that pair, stream vs disconnect, exists before this change and is not in its scope — Kadir lens 5850). Nothing is locked beyond what that write locked.
+    queued = [r.id for r in rows if r.state == "queued"]
+    if queued:
+        moved = set((await db.execute(
+            update(DesktopCommand).where(DesktopCommand.id.in_(queued), DesktopCommand.state == "queued")
+            .values(state="delivered", delivered_at=now).returning(DesktopCommand.id)
+            .execution_options(synchronize_session=False)  # (the ORM must not «evaluate» the guard on its own stale copies: a row the database refused would still look moved)
+        )).scalars().all())
+        rows = [r for r in rows if r.state != "queued" or r.id in moved]
+        for r in rows:
+            if r.id in moved:
+                set_committed_value(r, "state", "delivered")
+                set_committed_value(r, "delivered_at", now)
     await db.flush()
     return rows
 
@@ -1118,6 +1311,8 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)
+    if cmd.kind == "send_prompt" and cmd.state in COMMAND_END_STATES:  # story 4976: the words (or the sealed envelope) were a copy for delivery — gone once the press is over (the line above has been written)
+        cmd.payload = ended_prompt_payload(cmd.payload)
     if cmd.kind == "clock":  # story #4733: a submitted / cancelled clock-out takes the draft lines off the server at once
         from app.services.desktop_clock import on_clock_result, scrub_clock_edits
 
@@ -1157,6 +1352,13 @@ async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], 
         .values(state="rejected", result_code=result_code, finished_at=now)
         .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
     )).all()
+    if any(kind == "send_prompt" for _, kind, _p in rejected):  # story 4976: an instruction that never reached the computer leaves no words (or envelope) behind either
+        await db.execute(
+            update(DesktopCommand)
+            .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.kind == "send_prompt", DesktopCommand.state == "rejected", DesktopCommand.finished_at == now)
+            .values(payload=func.jsonb_build_object(
+                "session_key", DesktopCommand.payload["session_key"], "conversation_id", DesktopCommand.payload["conversation_id"]))
+        )
     if any(kind == "clock" for _, kind, _p in rejected):  # S5 · P2: an edit that never reached the computer leaves no typed text behind
         from app.services.desktop_clock import scrub_clock_edits
 

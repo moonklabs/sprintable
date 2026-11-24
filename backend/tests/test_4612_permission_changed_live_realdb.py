@@ -95,7 +95,7 @@ async def test_02_withdraw_tells_once_and_a_second_withdraw_tells_nothing(world,
 
 async def _net_answered_allow(c, d, agent, phone_id):
     """a Claude network question answered «allow…» at its first stage (the shape F2 and the second answer start from)"""
-    rid, row_id, recipient = await _new(c, d, agent, tool="SandboxNetwork")
+    rid, row_id, recipient = await _new(c, d, agent, tool="SandboxNetwork", summary="network")  # (the daemon's real first-stage shape: the fixed summary — story 4972 0484 keeps only that after the answer)
     r = await c.post(f"{REQS}/{row_id}/answer", json=_answer(phone_id), headers=_person(OWNER))
     assert r.status_code == 200, r.text
     return rid, row_id, recipient

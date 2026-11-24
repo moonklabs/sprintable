@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Loader2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
+import { desktopApp, subscribeDesktopApp, type SprintableDesktop } from '@/lib/desktop-app';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import {
   canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, agentNameList, deviceDateOptions, linkedSetupId, readRevoked, type DesktopDevice,
@@ -38,6 +39,8 @@ type Done = { kind: 'one'; device: string; already: boolean } | { kind: 'all'; d
 export function DesktopDevices() {
   const t = useTranslations('desktop.devices');
   const tDesktop = useTranslations('desktop');
+  // story 4970: inside the app the person has the app — the empty state does not tell them to get it (the one mark is desktopApp(), never a user-agent guess)
+  const inApp = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
   const { orgId, orgMemberships } = useDashboardContext();
   const manage = canManageDevices(orgMemberships.find((o) => o.orgId === orgId)?.role);
   const [computers, setComputers] = useState<DesktopComputer[] | null>(null);
@@ -188,7 +191,7 @@ export function DesktopDevices() {
               {tDesktop('loading')}
             </p>
           ) : computers.length === 0 ? (
-            <DesktopEmptyState title={t('emptyTitle')} testId="desktop-devices-empty">{t('emptyBody')}</DesktopEmptyState>
+            <DesktopEmptyState title={t('emptyTitle')} testId="desktop-devices-empty">{t(inApp ? 'emptyBodyInApp' : 'emptyBody')}</DesktopEmptyState>
           ) : (
             <Card className="overflow-hidden p-0">
               <ul className="divide-y divide-border">
@@ -298,6 +301,10 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
               {dateText ? <>{' · '}{tz ? dateText : <InvisibleSample>{dateText}</InvisibleSample>}</> : null}
               {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}
             </p>
+            {/* story 4986 AC5: a computer an agent was moved away from stays connected with no agent — said in words (a person ends it; nothing is ended for them) */}
+            {computer.state === 'handed_over' && computerAgents(computer).length === 0 ? (
+              <p className="mt-0.5 break-keep text-xs text-foreground" data-testid="desktop-computer-empty">{t('emptyComputer')}</p>
+            ) : null}
             <p className="mt-0.5 text-xs text-muted-foreground" aria-hidden>
               <span className="group-open:hidden">{t('setupsShow')}</span>
               <span className="hidden group-open:inline">{t('setupsHide')}</span>

@@ -141,6 +141,7 @@ type MailState = { kind: 'idle' } | { kind: 'sending' } | { kind: 'sent'; email:
 
 function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boolean }) {
   const t = useTranslations('onboarding.phone');
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994: the guest desktop app — the first thing it sees says «computer», not «phone»
   const alive = useAlive();
   const [mail, setMail] = useState<MailState>({ kind: 'idle' });
   const sending = mail.kind === 'sending';
@@ -160,8 +161,8 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
   return (
     <div className="space-y-4" data-testid="onboarding-phone-no-mac">
       <div className="text-center">
-        <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t('noMac.title')}</h1>
-        <p className="mt-2 break-keep text-sm text-muted-foreground">{t('noMac.body')}</p>
+        <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t(computer ? 'noMac.titleComputer' : 'noMac.title')}</h1>
+        <p className="mt-2 break-keep text-sm text-muted-foreground">{t(computer ? 'noMac.bodyComputer' : 'noMac.body')}</p>
       </div>
       {showMail ? (
         <div className="space-y-2 text-center" data-testid="onboarding-phone-mail">
@@ -186,7 +187,7 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
       ) : null}
       {/* the pairing page is the existing one (the shell has the camera and the key); a text link, drawn in every state */}
       <p className="text-center">
-        <Button variant="link" size="sm" asChild className="h-auto whitespace-normal px-0 py-0 text-sm"><a href={pairHref} data-testid="onboarding-phone-pair">{t('noMac.pair')}</a></Button>
+        <Button variant="link" size="sm" asChild className="h-auto whitespace-normal px-0 py-0 text-sm"><a href={pairHref} data-testid="onboarding-phone-pair">{t(computer ? 'noMac.pairComputer' : 'noMac.pair')}</a></Button>
       </p>
     </div>
   );
@@ -194,6 +195,7 @@ function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boole
 
 function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: () => void }) {
   const t = useTranslations('onboarding.phone');
+  const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994
   const alive = useAlive();
   const [rc, setRc, readFailed] = useOrgRemoteControl(orgId);
   const [busy, setBusy] = useState(false);
@@ -221,7 +223,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
           </div>
         ) : null
       ) : (
-        <p className="text-sm text-muted-foreground">{canChange ? t('off.bodyOwner') : t('off.bodyOther')}</p>
+        <p className="text-sm text-muted-foreground">{canChange ? t(computer ? 'off.bodyOwnerComputer' : 'off.bodyOwner') : t(computer ? 'off.bodyOtherComputer' : 'off.bodyOther')}</p>
       )}
       {canChange ? (
         <div className="space-y-1">
@@ -235,7 +237,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
 
 function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, note, onNoteSeen, computers, onPickComputer }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void; onListChanged: () => void; note: boolean; onNoteSeen: () => void; computers: StartableComputer[] | null; onPickComputer: (setupId: string) => void }) {
   const t = useTranslations('onboarding.phone');
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
   const [agentId, setAgentId] = useState<string | null>(agents.length === 1 ? agents[0].agent_member_id : null); // one agent → picked already
   const agent: StartableAgent | undefined = agents.find((a) => a.agent_member_id === agentId);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -312,12 +314,12 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, not
       case 'no_folder': return t('result.noFolder');
       case 'already_running': return t('result.alreadyRunning');
       case 'unreachable': return t('result.unreachable');
-      case 'not_paired': return t('result.notPaired');
+      case 'not_paired': return t(deviceKind === 'computer' ? 'result.notPairedComputer' : 'result.notPaired'); // (story 4994 D-3: the guest desktop app is a computer)
       case 'remote_off': return t('result.remoteOff');
-      case 'no_screen_lock': return t('result.noScreenLock');
+      case 'no_screen_lock': return t(deviceKind === 'computer' ? 'result.noScreenLockComputer' : 'result.noScreenLock');
       case 'biometric_required': return t('result.biometricRequired');
       case 'key_invalidated': return t('result.keyInvalidated');
-      case 'not_registered': return t('result.notRegistered');
+      case 'not_registered': return t(deviceKind === 'computer' ? 'result.notRegisteredComputer' : 'result.notRegistered');
       case 'signed_out': return t('result.signedOut');
       case 'unknown': return t('result.unknown');
       case 'failed': return t('result.failed');

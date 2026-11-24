@@ -24,7 +24,7 @@ export interface ChangedFile {
 /** the closed words a read can end with — the computer's (`code` of a failed read) and the server's refusals; the screen writes the sentence */
 export type ChangesProblem =
   | 'not_allowed' | 'unreachable' | 'remote_off' | 'busy' | 'too_fast' | 'session_gone' | 'expired'
-  | 'no_folder' | 'not_a_repo' | 'not_repo_root' | 'unsafe_repo_config' | 'unsupported_repo' | 'state_inside' | 'git_missing' | 'timeout' | 'upload_failed' | 'failed';
+  | 'no_folder' | 'not_enabled' | 'not_a_repo' | 'not_repo_root' | 'unsafe_repo_config' | 'unsupported_repo' | 'state_inside' | 'git_missing' | 'timeout' | 'upload_failed' | 'failed';
 
 export type ChangesState =
   | { kind: 'idle' }
@@ -76,6 +76,7 @@ export function problemOf(httpStatus: number, code: string | undefined): { probl
   if (httpStatus === 429 || c === 'changes_too_fast') return { problem: 'too_fast', retry: true };
   if (httpStatus === 404 && (c === 'session_not_found' || c === 'agent_not_found')) return { problem: 'session_gone', retry: false };
   if (c === 'no_folder') return { problem: 'no_folder', retry: false };
+  if (c === 'not_enabled') return { problem: 'not_enabled', retry: false }; // story 4983 AC5/AC6: the person turned «폰에서 파일 보기» off for this folder on the computer — a retry cannot change that
   if (c === 'not_a_repo') return { problem: 'not_a_repo', retry: false };
   if (c === 'not_repo_root') return { problem: 'not_repo_root', retry: false };
   if (c === 'unsafe_repo_config') return { problem: 'unsafe_repo_config', retry: false };

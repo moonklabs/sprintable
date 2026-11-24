@@ -13,6 +13,7 @@
 import { fetchWithAuth } from '@/lib/db/client';
 import { hiddenCharsChange } from './instruction-text';
 import type { PhoneAnswer } from './phone-bridge';
+import { followDirectResult, openFired, tryDirect } from './phone-direct';
 
 export type CommandOutcome =
   | { kind: 'stopped' } // the daemon interrupted the turn — the session lives on
@@ -23,6 +24,11 @@ export type CommandOutcome =
   | { kind: 'sent_after_step' } // pasted — it goes in as soon as the step the agent is on ends (PO 10:20Z · Yuna)
   | { kind: 'sent_as_message' } // the turn had ended — sent as a message instead (it goes in when its turn comes)
   | { kind: 'sent_as_message_not_now' } // this session could not take it into the turn (the daemon said so) — sent as a message instead
+  // story 4976 A3 (Kadir 871 lens): a SEALED instruction the session could not take (the turn had ended · it cannot take one into the turn now) — NOT sent, and never quietly turned into a chat message
+  // (that would put the words on the server in the clear, the thing sealing is for): the person is told, and what they wrote stays
+  | { kind: 'sealed_not_taken' }
+  // story 4990 (879 audit «좁힘»): this phone holds a pin that opens SEALED instructions but none for THIS computer — the shell refuses the plain road (`sealed_pair_missing`): NOT sent, never re-sent plain, never a chat message; the person is told to pair again
+  | { kind: 'sealed_pair_missing' }
   | { kind: 'too_long' } // over 400 code points — the sheet stops it first; the server refuses it again
   // story 4633 (contract v0.4 §3 · web): the daemon refused it because the text holds invisible characters — refused, never sent as a message
   | { kind: 'hidden_text' }
@@ -47,13 +53,19 @@ export type CommandOutcome =
   | { kind: 'failed' };
 
 export type CommandInput =
-  | { agentId: string; kind: 'stop_session' }
-  | { agentId: string; kind: 'end_session' } // story #4599: [세션 끝내기] — the shell signs this kind, so what was signed is what happens
-  | { agentId: string; kind: 'send_prompt'; text: string; conversationId: string };
+  | { agentId: string; kind: 'stop_session'; setupId?: string }
+  | { agentId: string; kind: 'end_session'; setupId?: string } // story #4599: [세션 끝내기] — the shell signs this kind, so what was signed is what happens
+  // `computerOpensSealed` (story 4976 A3 · Kadir 871 ⓓ): the computer itself said its app opens a sealed instruction (the session view's `sealed_prompt`) — without it the instruction never goes sealed, whatever the shell can do
+  | { agentId: string; kind: 'send_prompt'; text: string; conversationId: string; computerOpensSealed?: boolean; setupId?: string };
 
 export type Verb = 'stop' | 'send' | 'end';
-/** a command the web posted (or tried to): what [결과 확인] follows again — the same key and body, its id once known */
-export interface Pending { verb: Verb; key: string; body: Record<string, unknown>; commandId?: string }
+/** a command the web posted (or tried to): what [결과 확인] follows again — the same key and body, its id once known.
+ *  `sealed` (story 4976 A3): the body is an envelope — it has no words (the server never gets them) and the web keeps none: such an instruction is never sent as a chat message when its turn has ended (see `sealed_not_taken`) */
+export interface Pending { verb: Verb; key: string; body: Record<string, unknown>; commandId?: string; sealed?: true;
+  /** story 4993 (5a): the command went (or may have gone) over the SAME-NETWORK direct road to this computer — the server has no row for it: it is followed by the shell's `direct.result` and NEVER posted to the server (a second delivery would be refused on the Mac as a replay, and read as a failure of what ran) */
+  direct?: { setupId: string };
+  /** story 4993 (5a): the direct road said «not sent» AFTER the frame may have reached the computer (no verified receipt) and the press went to the server: if the server's line then comes back refused as a REPLAY (the computer had already taken it), that is not a failure — `unknown` */
+  afterDirectMiss?: true }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 export interface CommandDeps {
@@ -85,7 +97,10 @@ const KEY_REFUSALS: Record<string, PlainOutcome['kind']> = {
   remote_control_off: 'remote_off',
   conversation_not_found: 'conversation_not_found',
   not_held: 'not_held', // story #4599: an end refused by the shell — no longer held by a macOS window (phoneCalls.js)
+  too_long: 'too_long', // story 4976 A3: a SEALED instruction the server cannot count — the shell stops what the Mac would refuse (400 code points)
 };
+/** story 4976 A3: the shell cannot seal for THIS computer (an older pairing · a computer that has not shown it opens sealed ones) — a pairing fact, not a fault: the instruction goes the plain road it always went (the server closes that road in a later step) */
+const SEAL_NOT_POSSIBLE = new Set(['host_not_pinned', 'host_not_sealing']);
 
 async function codeOf(res: Response): Promise<string> {
   try {
@@ -105,12 +120,45 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
 
+  // story 4976 A3: an instruction goes SEALED when this shell says it can (`shell.caps` — read, never guessed from a version) AND the computer says its app opens one (`sealed_prompt` of the session view — the card-sealing mark says nothing about it): the words are sealed on the phone to the computer and the web posts the envelope, never the words.
+  // The press's own key is made FIRST — the shell seals it into the envelope's header (the server compares it with the key posted). An older shell does not know the question: the plain road, as before.
+  // the sealed road as one step (story 4976 A5 asks it a second time): an outcome, or `null` = «not possible for this computer (a pairing fact) — go the plain road»
+  const trySealed = async (): Promise<CommandOutcome | null> => {
+    if (input.kind !== 'send_prompt') return null; // (only an instruction is sealed; narrows `input` inside this closure)
+    const caps = await deps.phoneCall('shell.caps', {}).catch(() => null);
+    const can = !!caps && caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { sealed_prompt?: unknown }).sealed_prompt === 1;
+    if (!can) return null;
+    const key = deps.newKey();
+    const sealed = await deps.phoneCall('command.sign', { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId, sealed: true, idempotency_key: key });
+    if (sealed.ok) {
+      if (sealed.sealed !== true || !sealed.envelope || typeof sealed.envelope !== 'object' || Array.isArray(sealed.envelope) || typeof sealed.phone_key_id !== 'string'
+        || typeof sealed.session_key !== 'string' || sealed.conversation_id !== input.conversationId) return { kind: 'failed' };
+      // no `text`, no `signed` in what is posted — and the web keeps no copy of the words for another road
+      return route(input.agentId, {
+        verb: 'send', key, sealed: true,
+        body: { kind: 'send_prompt', session_key: sealed.session_key, conversation_id: input.conversationId, envelope: sealed.envelope, phone_key_id: sealed.phone_key_id },
+      }, deps, input.setupId);
+    }
+    const code = sealed.code ?? '';
+    if (code === 'not_working' || code === 'no_session') return { kind: 'sealed_not_taken' }; // never «sent as a message» for a sealed instruction
+    if (!SEAL_NOT_POSSIBLE.has(code)) return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome; // a vault that does not answer is «failed» (try again), never a quiet drop to the plain road
+    return null;
+  };
+  if (prompt && input.computerOpensSealed === true) {
+    const done = await trySealed();
+    if (done) return done;
+  }
+
   const signed = await deps.phoneCall('command.sign', prompt
     ? { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId }
     : { agent_member_id: input.agentId, kind: input.kind });
   if (!signed.ok) {
     const code = signed.code ?? '';
     if (code === 'not_working' || code === 'no_session') return notWorking(prompt ? input.text : '');
+    // story 4976 (A5 · AC4b): the shell holds a pin that says this computer OPENS sealed instructions although the server's word (or this page's) said otherwise — it signs no plain instruction for it. The words go the sealed road once (a shell
+    // that can seal is asked again; one that cannot, or that is refused again, ends the press with its own line — never the plain road, never a chat message)
+    if (prompt && code === 'sealed_required') return (await trySealed()) ?? { kind: 'sealed_not_taken' };
+    if (prompt && code === 'sealed_pair_missing') return { kind: 'sealed_pair_missing' }; // story 4990: the shell's own word — the words are not sent another way (nothing was signed)
     return { kind: KEY_REFUSALS[code] ?? 'failed' } as PlainOutcome;
   }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string' || typeof signed.session_key !== 'string') return { kind: 'failed' };
@@ -131,12 +179,23 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
       ...(prompt ? { text, conversation_id: input.conversationId } : {}),
     },
   };
-  return post(input.agentId, pending, deps);
+  return route(input.agentId, pending, deps, input.setupId);
+}
+
+/** story 4993 (5a): the same-network direct road FIRST, for the three kinds the shell and the Mac take on it (a sealed instruction · a stop · an end); anything that does not go that way — no shell support, no road within the time box, a refusal — is the server's POST, exactly as before. The direct road never turns a failure into a quiet drop: `not_sent` is certain, `maybe` is followed, never re-posted. */
+async function route(agentId: string, pending: Pending, deps: CommandDeps, setupId: string | undefined): Promise<CommandOutcome> {
+  if (setupId) {
+    const went = await tryDirect(setupId, pending, { ...deps, openFired });
+    if (went === 'sent' || went === 'maybe') return followDirect(agentId, { ...pending, direct: { setupId } }, deps, went === 'maybe');
+    if (went === 'missed') return post(agentId, { ...pending, afterDirectMiss: true }, deps);
+  }
+  return post(agentId, pending, deps);
 }
 
 /** [결과 확인]: the same command again — its id when known (follow it), else the same post (same key: the server gives back the
  *  command it made, if it made one) · never a new signature */
 export async function checkCommand(agentId: string, pending: Pending, deps: CommandDeps): Promise<CommandOutcome> {
+  if (pending.direct) return followDirect(agentId, pending, deps, false); // (a direct command is asked of the shell again — never posted: the server has no row for it)
   return pending.commandId ? follow(agentId, pending, deps) : post(agentId, pending, deps);
 }
 
@@ -145,6 +204,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
   const text = typeof pending.body.text === 'string' ? pending.body.text : '';
   const notWorking = async (): Promise<CommandOutcome> => {
     if (!prompt) return { kind: 'already_stopped' };
+    if (pending.sealed) return { kind: 'sealed_not_taken' }; // no words here to send, and none are asked for again
     if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
@@ -173,6 +233,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
+    if (code === 'sealed_required') return { kind: 'sealed_not_taken' }; // story 4976 (A5): the computer takes sealed instructions only — nothing was made; what was written is still here (the words are never posted another way for it)
     return { kind: 'failed' }; // another 4xx: refused before anything was made
   }
   let made: { command_id?: string; state?: string };
@@ -184,7 +245,6 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
 
 // follow it: done · after_step · the daemon's «the turn had ended» · any other end · two minutes on the wall clock without an end
 async function follow(agentId: string, pending: Pending, deps: CommandDeps): Promise<CommandOutcome> {
-  const prompt = pending.verb === 'send';
   const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = deps.now ?? Date.now;
   const every = deps.pollMs ?? COMMAND_POLL_MS;
@@ -199,27 +259,57 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
     } catch {
       continue;
     }
-    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : r.result_code === 'commands_running' ? { kind: 'stopped_commands_running' } : { kind: 'stopped' };
-    // story #4599 (Mirko 385): the daemon found a macOS window holding the turn when the stop reached it — the same closed reason
-    if (r.state === 'rejected' && r.result_code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
-    // the daemon found the turn ended: it never put it in — the instruction becomes a message (nothing went in twice)
-    if (r.state === 'rejected' && r.result_code === 'session_not_working') {
-      if (!prompt) return { kind: 'already_stopped' };
-      const text = typeof pending.body.text === 'string' ? pending.body.text : '';
-      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
-      return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
-    }
-    // story #4534 (PO 06:20Z · Kadir 06:31Z (a)): the daemon could not put it into this session's turn (refused before anything was
-    // pasted) — it goes in as a message, never dropped; its own line says why
-    // story 4633 (contract v0.4 §3): the daemon refused the signed text for its hidden characters — its own line; no «send as a message»
-    // route (the same words would reach the chat unchecked)
-    if (prompt && r.state === 'rejected' && r.result_code === 'instruct_hidden_text') return { kind: 'hidden_text' };
-    if (prompt && r.state === 'rejected' && r.result_code === 'instruct_not_now') {
-      const text = typeof pending.body.text === 'string' ? pending.body.text : '';
-      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
-      return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message_not_now' } : { kind: 'failed' };
-    }
-    if (r.state === 'rejected' || r.state === 'failed') return { kind: 'failed' };
+    const end = await outcomeOfResult(r, pending, deps);
+    if (end) return end;
   }
   return { kind: 'unknown', pending };
+}
+
+/** the end of a command as the daemon said it (a result line of the server's, or the shell's `direct.result` — the same words): an outcome, or `null` = not an end yet */
+async function outcomeOfResult(r: { state?: string; result_code?: string | null }, pending: Pending, deps: CommandDeps): Promise<CommandOutcome | null> {
+  const prompt = pending.verb === 'send';
+  // a press the direct road MISSED after the frame may have reached the computer, then taken by the server's line: the computer says «replay» — it already had it. Not a failure of what ran.
+  // (the same for a press that went over the road: a result of «replay» there means the computer already had it)
+  if ((pending.afterDirectMiss || pending.direct) && r.state === 'rejected' && (r.result_code === 'reused' || r.result_code === 'envelope_replay')) return { kind: 'unknown', pending };
+  if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : r.result_code === 'commands_running' ? { kind: 'stopped_commands_running' } : { kind: 'stopped' };
+  // story #4599 (Mirko 385): the daemon found a macOS window holding the turn when the stop reached it — the same closed reason
+  if (r.state === 'rejected' && r.result_code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
+  // the daemon found the turn ended: it never put it in — the instruction becomes a message (nothing went in twice)
+  if (r.state === 'rejected' && r.result_code === 'session_not_working') {
+    if (!prompt) return { kind: 'already_stopped' };
+    if (pending.sealed) return { kind: 'sealed_not_taken' };
+    const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
+    return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
+  }
+  // story #4534 (PO 06:20Z · Kadir 06:31Z (a)): the daemon could not put it into this session's turn (refused before anything was
+  // pasted) — it goes in as a message, never dropped; its own line says why
+  // story 4633 (contract v0.4 §3): the daemon refused the signed text for its hidden characters — its own line; no «send as a message»
+  // route (the same words would reach the chat unchecked)
+  if (prompt && r.state === 'rejected' && r.result_code === 'instruct_hidden_text') return { kind: 'hidden_text' };
+  // story 4976 A3: the Mac counts a sealed text (the server cannot) — over its limit it says so; never a message, never a retry of the same words
+  if (prompt && r.state === 'rejected' && r.result_code === 'instruct_too_long') return { kind: 'too_long' };
+  if (prompt && r.state === 'rejected' && r.result_code === 'instruct_not_now') {
+    if (pending.sealed) return { kind: 'sealed_not_taken' };
+    const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
+    return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message_not_now' } : { kind: 'failed' };
+  }
+  if (r.state === 'rejected' || r.state === 'failed') return { kind: 'failed' };
+  return null;
+}
+
+
+/**
+ * story 4993 (5a): follow a command that went over the direct road — ask the shell for its word (`direct.result`) the way the relay's line is asked, the same times (every 1.5 s · two minutes). The words are the daemon's own (`outcomeOfResult` reads them as it reads the server's);
+ * `unknown` from the shell (it has none: the road ended · forgotten) or the end of the two minutes is `unknown` with the same pending — followed again on [결과 확인], never posted. A word the page does not know is `failed`'s opposite: it is not an end, so it is asked again.
+ * `maybe` = the shell did not say whether it went: the first answers are waited for the same way.
+ */
+async function followDirect(agentId: string, pending: Pending, deps: CommandDeps, maybe: boolean): Promise<CommandOutcome> {
+  void agentId; void maybe;
+  const setupId = pending.direct?.setupId; if (!setupId) return { kind: 'unknown', pending };
+  return followDirectResult<CommandOutcome>(setupId, pending.key, {
+    phoneCall: deps.phoneCall, wait: deps.wait, now: deps.now, pollMs: deps.pollMs ?? COMMAND_POLL_MS, pollMaxMs: deps.pollMaxMs ?? COMMAND_POLL_MAX_MS,
+    decide: (r) => outcomeOfResult({ state: r.state, result_code: r.code }, pending, deps), unknown: () => ({ kind: 'unknown', pending }),
+  });
 }

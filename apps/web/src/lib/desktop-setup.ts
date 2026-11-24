@@ -430,6 +430,15 @@ export type MoveRowState = 'ok' | 'needs-team' | 'runtime-missing';
 export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MoveRowState {
   return !runtimes.includes(a.runtime) ? 'runtime-missing' : a.in_project ? 'ok' : 'needs-team';
 }
+/**
+ * story 4986 AC5: the tools the «옮긴 뒤에 알아 둘 것» login line names — the CHOSEN agents' tools (in the list's order: Claude Code, then Codex), or, before anything is chosen,
+ * every tool of an agent that can be moved. A tool no agent here uses is never named (a Codex agent is not told to «log in to Claude Code»).
+ */
+export function moveAfterTools(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], chosen: readonly string[]): DesktopRuntime[] {
+  const pool = attachable.filter((a) => moveRowState(a, runtimes) !== 'runtime-missing');
+  const picked = chosen.length > 0 ? pool.filter((a) => chosen.includes(a.id)) : pool;
+  return (['claude', 'codex'] as const).filter((r) => picked.some((a) => a.runtime === r));
+}
 /** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
 export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {
   return (['ok', 'needs-team', 'runtime-missing'] as const).flatMap((state) => attachable.filter((a) => moveRowState(a, runtimes) === state));

@@ -31,7 +31,7 @@ import {
   agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
-  moveConfirmBody, moveRowState, moveListOrder } from '@/lib/desktop-setup';
+  moveConfirmBody, moveRowState, moveListOrder, moveAfterTools } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -581,6 +581,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // story 4832: the ticked agents that are not on the team yet — the confirmation asks the server to put them there (`add_to_team`)
   const moveAddToTeam = moveChosen.filter((id) => attachable.some((a) => a.id === id && !a.in_project));
   const anyMovable = movable.some((a) => moveRowState(a, runtimes) !== 'runtime-missing');
+  const afterTools = moveAfterTools(attachable, runtimes, moveChosen).map((r) => RUNTIME_LABEL[r]).join(' · ');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -875,6 +876,17 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           )}
           {/* Yuna 05:39Z: with nothing to move the folder line says nothing true */}
           {anyMovable ? <p className="mt-2 text-xs text-muted-foreground">{t('move.folderNote')}</p> : null}
+          {/* story 4986 AC5: what a person does after the move — the login stays on the old computer (never carried), the old computer lets go once the new one is connected, the last 퇴근 memo is a reading for the first 출근 */}
+          {anyMovable ? (
+            <div className="mt-3 rounded-md border p-3 text-xs text-muted-foreground" data-testid="setup-move-after">
+              <p className="font-medium text-foreground">{t('move.afterTitle')}</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                <li>{t('move.afterLogin', { tools: afterTools, josa: pickEunNeunJosa(afterTools) })}</li>
+                <li>{t('move.afterOldComputer')}</li>
+                <li>{t('move.afterMemo')}</li>
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : (
         <>

@@ -27,6 +27,7 @@ const KEYID = 'p-1';
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 interface World {
+  usage?: unknown;
   startable?: unknown; clock?: Response | unknown; post?: Response; poll?: Response; remote?: boolean; reachable?: boolean; supported?: boolean;
   view?: Record<string, unknown> | null; running?: boolean; outs?: unknown[];
 }
@@ -45,6 +46,7 @@ function server() {
     if (url.startsWith('/api/desktop/startable')) {
       return json(world.startable ?? { remote_control: world.remote !== false, computers: [{ setup_id: SETUP, device_name: '윤재의 맥북', reachable: world.reachable !== false, agents: agents(world.running !== false) }] });
     }
+    if (url.endsWith('/desktop-usage')) return json(world.usage ?? { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '작업용 맥북', connected: true, usage: [] }); // story 4981 (PR 4): the «사용량» sheet's read
     if (url.includes('/clock/commands/')) return world.poll ? world.poll.clone() : json({ command_id: CMD, state: 'done', result_code: 'ok' }); // a Response body can be read once: every look gets its own
     if (url.includes('/clock?phone_key_id=')) {
       if (typeof world.clock === 'function') return (world.clock as () => Promise<Response> | Response)();
@@ -81,10 +83,10 @@ afterEach(async () => {
 });
 
 const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
-async function screen({ phone = true, locale = 'ko' as 'ko' | 'en' } = {}) {
+async function screen({ phone = true, locale = 'ko' as 'ko' | 'en', deviceKind = undefined as 'phone' | 'computer' | undefined } = {}) {
   await act(async () => {
     root.render(
-      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, phoneCall: phoneCall as never }}>
+      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, ...(deviceKind ? { deviceKind } : {}), phoneCall: phoneCall as never }}>
         <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages}><PhoneSessionManagement /></NextIntlClientProvider>
       </PhoneBridgeContext.Provider>,
     );
@@ -1243,3 +1245,88 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(byId('phone-sessions-check')).not.toBeNull();
   });
 });
+
+describe('[4981 PR 4] the card\'s «사용량»', () => {
+  it('a button on the computer\'s card opens the sheet — read for the computer\'s FIRST agent, only when pressed — with the bars of what its host reported', async () => {
+    world.usage = { agent_id: AGENT, remote_control: true, setup_id: SETUP, device_name: '윤재의 맥북', connected: true, usage: [{ runtime: 'claude', account: 'a1b2c3d4e5f6', state: 'windows', why: null, seen_at: new Date(Date.now() - 120_000).toISOString(), windows: [{ kind: 'five_hour', minutes: 300, used_percent: 63, resets_at: new Date(Date.now() + 2 * 3_600_000).toISOString() }] }] };
+    await screen();
+    expect(calls.some((c) => c.url.endsWith('/desktop-usage'))).toBe(false);                        // nothing is asked until the button is pressed
+    const button = byId('phone-sessions-usage');
+    expect(button?.textContent).toBe(koMessages.desktop.phoneSessions.usage.button);
+    await press(button);
+    expect(calls.filter((c) => c.url.endsWith('/desktop-usage')).map((c) => c.url)).toEqual([`/api/agents/${AGENT}/desktop-usage`]);
+    expect(document.body.querySelector('[data-testid="agent-usage-percent"]')?.textContent).toBe('63%');
+    expect(document.body.querySelector('[data-testid="agent-usage-seen"]')?.textContent).toBe('마지막으로 본 지 2분 전');
+  });
+
+  it('the card of a computer whose app is too old to speak `clock` has no buttons at all (the old-app card is unchanged)', async () => {
+    world.supported = false;
+    await screen();
+    expect(byId('phone-sessions-usage')).toBeNull();
+  });
+
+  it('English: the button and the sheet are in en', async () => {
+    await screen({ locale: 'en' });
+    expect(byId('phone-sessions-usage')?.textContent).toBe(enMessages.desktop.phoneSessions.usage.button);
+  });
+});
+
+// ── story 4994 (D-3d): the guest desktop app is a computer ──
+describe('[SID:4994 D-3d] session management in the guest desktop app (a computer)', () => {
+  const kc = koMessages.desktop.phoneSessions as unknown as Record<string, unknown> & { result: Record<string, string>; action: Record<string, string> };
+  const ec = enMessages.desktop.phoneSessions as unknown as typeof kc;
+  const lineAfterEndAll = async () => { await screen({ deviceKind: 'computer' }); await press(byId('phone-sessions-end-all')); return byId('phone-sessions-line')?.textContent; };
+
+  it('an old computer app · remote control off (the section and the card) say «이 컴퓨터»', async () => {
+    world.supported = false;
+    await screen({ deviceKind: 'computer' });
+    expect(byId('phone-sessions-old-app')?.textContent).toBe(kc.oldAppComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    world.supported = true; world.remote = false;
+    await screen({ deviceKind: 'computer' });
+    expect(byId('phone-sessions-remote-off')?.textContent).toBe(kc.remoteOffComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    world.remote = true; world.clock = { remote_control: false, reachable: true, supported: true, view: null };
+    await screen({ deviceKind: 'computer' });
+    expect(byId('phone-sessions-card-remote-off')?.textContent).toBe(kc.remoteOffComputer);
+  });
+
+  it('the panel\'s «fill in below» lines (one agent · several) say «여기서»', async () => {
+    world.view = panel([needsPlan(4)], { ready: 0, needs_you: 1, drafting: 0 }, { scope: 'one' });
+    await screen({ deviceKind: 'computer' });
+    expect(byId('phone-sessions-reason')?.textContent).toBe(kc.action.needsHandOneComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    world.view = panel([needsPlan(4, { agent_member_id: AGENT }), needsPlan(4, { agent_member_id: AGENT2, name: '문서 담당' })], { ready: 0, needs_you: 2, drafting: 0 });
+    await screen({ deviceKind: 'computer' });
+    expect(byId('phone-sessions-reason')?.textContent).toBe(kc.action.needsHandComputer!.replace('{m}', '2'));
+  });
+
+  it('the press results: not paired · not registered · no secure storage · not allowed', async () => {
+    world.post = json({ error: { code: 'phone_not_paired' } }, 409);
+    expect(await lineAfterEndAll()).toBe(kc.result.notPairedComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container); world.post = undefined;
+    signAnswer = { id: 's', ok: false, code: 'not_registered' };
+    expect(await lineAfterEndAll()).toBe(kc.result.pairAgainComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    signAnswer = { id: 's', ok: false, code: 'no_screen_lock' };
+    expect(await lineAfterEndAll()).toBe(kc.result.noScreenLockComputer);
+    await act(async () => { root.unmount(); }); root = createRoot(container); signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID };
+    world.post = json({ error: { code: 'not_allowed_to_command' } }, 403);
+    expect(await lineAfterEndAll()).toBe(kc.result.notAllowedComputer);
+  });
+
+  it('a press the server refuses because remote control is off says «이 컴퓨터»', async () => {
+    world.post = json({ error: { code: 'remote_control_off' } }, 409);
+    expect(await lineAfterEndAll()).toBe(kc.remoteOffComputer);
+  });
+
+  it('every new computer message (ko · en) has no «폰» / «phone»; a phone keeps its words', async () => {
+    const flat = (o: unknown, p = ''): Array<[string, string]> => (typeof o === 'string' ? [[p, o]] : o && typeof o === 'object' ? Object.entries(o).flatMap(([k, v]) => flat(v, p ? `${p}.${k}` : k)) : []);
+    for (const [k, v] of flat(kc).filter(([k]) => k.endsWith('Computer'))) expect(v, k).not.toMatch(/폰/);
+    for (const [k, v] of flat(ec).filter(([k]) => k.endsWith('Computer'))) expect(v, k).not.toMatch(/phone/i);
+    world.supported = false;
+    await screen({ deviceKind: 'phone' });
+    expect(byId('phone-sessions-old-app')?.textContent).toBe(koMessages.desktop.phoneSessions.oldApp);
+  });
+});
+

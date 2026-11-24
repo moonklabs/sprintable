@@ -99,6 +99,9 @@ _CATALOG: dict[str, dict[str, str]] = {
     "desktop_setup.agent_created_line": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool} · 폴더 {folder}", "en": "Agent created · name {name} · tool {tool} · folder {folder}"},
     "desktop_setup.agent_created_line_no_folder": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool}", "en": "Agent created · name {name} · tool {tool}"},
     "desktop_command.prompt_line_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음", "en": "Instruction · queued after the step in progress"},
+    # story 4976 (PO 11-18): a SEALED instruction — the server holds no word of it, so its line in the conversation is these fixed words (the phone opens the sealed record; story 4977 replaces this line with it)
+    "desktop_command.prompt_line_sealed": {"ko": "지시 · 지금 턴에 보냄 · 잠긴 글(앱에서 열기)", "en": "Instruction · sent into the current turn · sealed (open in the app)"},
+    "desktop_command.prompt_line_sealed_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음 · 잠긴 글(앱에서 열기)", "en": "Instruction · queued after the step in progress · sealed (open in the app)"},
     "desktop_command.turn_end_title": {"ko": "{agent} · 다음 일 기다림", "en": "{agent} · Waiting for work"},
     "desktop_command.turn_end_title_bare": {"ko": "다음 일 기다림", "en": "Waiting for work"},
     "desktop_command.turn_end_body": {
@@ -188,9 +191,10 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요",
         "en": "The agent stopped with an error — the reason is in the desktop app on that computer",
     },
+    # story 4972 (선생님 결정): the words of a notice sit on a lock screen and in a notice history — the agent and «an approval is waiting» only; the tool is inside the card
     "agent_permission.notice_body": {
-        "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
-        "en": "Waiting for you to allow {tool} — tap to check",
+        "ko": "승인 요청이 왔어요",
+        "en": "An approval is waiting",
     },
     # story #3786 슬라이스 1 — dependencies.py(8건, 고유 키 5개: "의존성을 찾을 수 없음"이
     # 4개 호출부에서 재사용됨).

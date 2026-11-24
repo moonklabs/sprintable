@@ -14,6 +14,7 @@ import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { useDirectRoad } from './use-direct-road';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { readStartableKeyed } from '@/lib/phone-start';
 import { readClock } from '@/lib/phone-clock';
@@ -23,6 +24,8 @@ import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
 import { inboxStop, type SessionInbox } from '@/lib/agent-session-inbox';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { AgentChangesSheet } from '@/components/chat/agent-changes-sheet';
+import { AgentRecordsSheet } from '@/components/chat/agent-records-sheet';
+import { shellTakesRecords } from '@/lib/phone-records';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -50,6 +53,8 @@ interface View {
   can_read_changes?: boolean;
   // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
   setup_id?: string | null;
+  // story 4979: the last time that computer ITSELF spoke (its own presence · reports — never the server's tick); the server sends it with the session, an older one sends none
+  last_heard_at?: string | null;
   device_name: string | null;
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
@@ -57,6 +62,8 @@ interface View {
   // story #4534 (0438 · PO 06:30Z): the daemon says whether an instruction can go into this session's turn — [지금 지시] only when
   // true (a daemon from before says nothing → hidden: its «지금 턴» was not so). It hides a button; the daemon decides again.
   instruct_now?: boolean | null;
+  // story 4976 (A3 · Kadir 871 ⓓ): this computer's app OPENS a sealed instruction (it said so itself) — a sealed instruction is made only when true; absent / false / null → the plain road (an app from before opens none)
+  sealed_prompt?: boolean | null;
   limit?: SessionLimit | null;
   // story 4686 (AC2): what it really runs on — model · whether the profile named it · thinking depth · account (the server sends it only while
   // the computer is heard and the session lives; an older server sends none → no line)
@@ -214,6 +221,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const t = useTranslations('chats.agentSession');
   const flatHref = useFlatHref();
   const { inPhoneApp: phone, phoneCall } = usePhoneBridge();
+  useDirectRoad(typeof view.setup_id === 'string' && view.setup_id !== '' ? view.setup_id : undefined); // story 4993 (PO ⓐ): this computer's room is in front — its direct road is made and kept while it is
   const [result, setResult] = useState<Result | null>(null);
   // Kadir 4955 · Yuna · PO 13:27Z: a command whose end is not known — [결과 확인] follows it (never a second one). While it is
   // unknown: an instruction → [지금 지시] becomes [결과 확인] ([멈춤] stays — the safety handle) · a stop → both become [결과 확인]
@@ -223,6 +231,20 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // first focus is [취소]
   const [endOpen, setEndOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false); // story #4951 ①c: the «바뀐 파일» sheet
+  // story 4977 (B3-2b): the «기록» sheet — the history of this chat, opened by the phone's shell. Only inside the app, and only when THIS shell says it opens records (`shell.caps` · read, never guessed from a version).
+  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsShell, setRecordsShell] = useState(false);
+  const hasComputer = typeof view.setup_id === 'string' && view.setup_id !== '';
+  const setupName = hasComputer ? (view.setup_id as string) : '';
+  const phoneCallRef = useRef(phoneCall); // the bridge wrapper is new at every render: the read below must not run again for each of them
+  useEffect(() => { phoneCallRef.current = phoneCall; }); // (kept current after each render — a ref is not written while rendering)
+  useEffect(() => {
+    if (!phone || !hasComputer) return undefined; // asked only where the button could stand: in the app, for a session that names its computer
+    let live = true;
+    void shellTakesRecords((type, args) => phoneCallRef.current(type, args)).then((ok) => { if (live) setRecordsShell(ok); });
+    // the button and the sheet belong to THIS computer: when the session loses it (or names another) both go, and what comes back is asked again — a sheet never reopens by itself
+    return () => { live = false; setRecordsShell(false); setRecordsOpen(false); };
+  }, [phone, hasComputer, setupName]);
   // story #4733 (Yuna 4733 §6): the hard end's dialog points at the phone's own [세션 종료] — drawn only where that button exists for this agent (its computer speaks
   // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
   const [clockAvailable, setClockAvailable] = useState(false);
@@ -297,10 +319,12 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   };
   const run = async (verb: Verb, text?: string) => {
     setResult({ verb, busy: true });
+    // story 4993 (5a): the computer this session runs on — the shell may take the press over the same-network direct road to it (the server's POST is the road when it does not)
+    const setupId = typeof view.setup_id === 'string' && view.setup_id !== '' ? view.setup_id : undefined;
     settle(verb, await commandOnPhone(
-      verb === 'stop' ? { agentId, kind: 'stop_session' }
-        : verb === 'end' ? { agentId, kind: 'end_session' }
-          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId }, deps,
+      verb === 'stop' ? { agentId, kind: 'stop_session', ...(setupId ? { setupId } : {}) }
+        : verb === 'end' ? { agentId, kind: 'end_session', ...(setupId ? { setupId } : {}) }
+          : { agentId, kind: 'send_prompt', text: text ?? '', conversationId, computerOpensSealed: view.sealed_prompt === true, ...(setupId ? { setupId } : {}) }, deps,
     ));
   };
   // [결과 확인]: the same command followed again — no signature, no sheet
@@ -312,6 +336,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 
   const showChanges = view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '';
   const changesButton = showChanges ? <Button size="sm" variant="outline" onClick={() => setChangesOpen(true)} data-testid="agent-changes-open">{t('changes.button')}</Button> : null;
+  const showRecords = phone && recordsShell && hasComputer;
+  const recordsButton = showRecords ? <Button size="sm" variant="outline" onClick={() => setRecordsOpen(true)} data-testid="agent-records-open">{t('records.button')}</Button> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2 text-xs" data-testid="agent-session-strip">
       <span
@@ -326,6 +352,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       {canStop ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
           {changesButton}
+          {recordsButton}
           {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
@@ -334,21 +361,23 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       ) : canEnd ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
           {changesButton}
+          {recordsButton}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
             : <Button size="sm" variant="outline" disabled={busy} onClick={() => setEndOpen(true)}>{t('button.endSession')}</Button>}
         </span>
-      ) : changesButton ? (
-        // no other buttons: this one stands alone at the right end. With others it joins THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
-        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}</span>
+      ) : changesButton || recordsButton ? (
+        // no other buttons: these stand alone at the right end. With others they join THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
+        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}{recordsButton}</span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
       <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
+      {showRecords ? <AgentRecordsSheet key={`${view.setup_id as string}/${conversationId}`} conversationId={conversationId} setupId={view.setup_id as string} deviceName={view.device_name} open={recordsOpen} onOpenChange={setRecordsOpen} /> : null}
       {showChanges ? (
-        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} open={changesOpen} onOpenChange={setChangesOpen} />
+        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} filesHref={phone && typeof view.setup_id === 'string' && view.setup_id ? `/phone-files?setup_id=${encodeURIComponent(view.setup_id)}&agent_id=${encodeURIComponent(agentId)}` : null} open={changesOpen} onOpenChange={setChangesOpen} />
       ) : null}
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
@@ -398,7 +427,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 }
 
 function ResultLine({ result }: { result: Result }) {
-  const { phoneCall } = usePhoneBridge();
+  const { phoneCall, deviceKind } = usePhoneBridge();
   const t = useTranslations('chats.agentSession');
   const pairHref = usePairHref(); // story 4780: the pairing screen's [Close] comes back to this conversation
   const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on
@@ -424,6 +453,10 @@ function ResultLine({ result }: { result: Result }) {
     case 'sent_as_message': return line(t('command.sentAsMessage'));
     case 'sent_as_message_not_now': return line(t('command.sentAsMessageNotNow'));
     case 'too_long': return line(t('sheet.tooLong'));
+    // story 4976 A3: a sealed instruction the session could not take — not sent, not turned into a message, the words stay in the box
+    case 'sealed_not_taken': return line(t('command.sealedNotTaken'));
+    // story 4990: this phone has no sealed pairing with that computer — not sent (the words stay in the box), and the way to pair again is right here
+    case 'sealed_pair_missing': return line(deviceKind === 'computer' ? t('command.sealedPairMissingComputer') : t('command.sealedPairMissing'), pairAgain);
     // story 4633 (Yuna 4633-hidden-text-copy.md · web line): refused for invisible characters — nothing went in, nothing was sent as a message
     case 'hidden_text': return line(t('command.hiddenText'));
     case 'unreachable': return line(stop ? t('command.stopUnreachable') : t('command.sendUnreachable'));
@@ -435,16 +468,18 @@ function ResultLine({ result }: { result: Result }) {
     case 'unknown': return line(stop ? t('command.stopUnknown') : t('command.sendUnknown'));
     // story #4583 (Yuna copy.md row 3): the same words as the strip's line — the owner gets the way to the switch
     case 'remote_off': return remoteOff?.owner
-      ? line(t('line.remoteOffOwner'), <RemoteControlLink />)
-      : line(t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
+      ? line(t(deviceKind === 'computer' ? 'line.remoteOffOwnerComputer' : 'line.remoteOffOwner'), <RemoteControlLink />)
+      : line(t(deviceKind === 'computer' ? 'line.remoteOffOthersComputer' : 'line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' }));
     case 'conversation_not_found': return line(t('command.conversationNotFound'));
     case 'cancelled': return line(stop ? t('command.stop.cancelled') : t('command.send.cancelled'));
-    case 'not_paired': return line(stop ? t('command.stop.notPaired') : t('command.send.notPaired'));
+    // story 4994 (D-3): the guest desktop app is a COMPUTER — its words do not call it a phone
+    case 'not_paired': return line(deviceKind === 'computer' ? (stop ? t('command.stop.notPairedComputer') : t('command.send.notPairedComputer')) : (stop ? t('command.stop.notPaired') : t('command.send.notPaired')));
     case 'signed_out': return line(stop ? t('command.stop.signedOut') : t('command.send.signedOut'), signIn);
     case 'key_invalidated': return line(stop ? t('command.stop.keyInvalidated') : t('command.send.keyInvalidated'), pairAgain);
-    case 'not_registered': return line(stop ? t('command.stop.notRegistered') : t('command.send.notRegistered'), pairAgain);
+    case 'not_registered': return line(deviceKind === 'computer' ? (stop ? t('command.stop.notRegisteredComputer') : t('command.send.notRegisteredComputer')) : (stop ? t('command.stop.notRegistered') : t('command.send.notRegistered')), pairAgain);
     case 'biometric_required': return line(stop ? t('command.stop.biometricRequired') : t('command.send.biometricRequired'), settings);
-    case 'no_screen_lock': return line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
+    // (the guest desktop app has no phone settings to open: its words say what is missing and there is no button that would do nothing)
+    case 'no_screen_lock': return deviceKind === 'computer' ? line(stop ? t('command.stop.noScreenLockComputer') : t('command.send.noScreenLockComputer')) : line(stop ? t('command.stop.noScreenLock') : t('command.send.noScreenLock'), settings);
     default: return line(stop ? t('command.stop.failed') : t('command.send.failed'));
   }
 }
@@ -515,12 +550,29 @@ function WidenedLine({ view }: { view: View }) {
   return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-widened">{t('widened', { time, mode })}</p>;
 }
 
+/** story 4979: «마지막으로 본 지 N분 전» from the computer's own last word — a time that cannot be read (none · not a date · in the future by more than a minute) says nothing (the caller keeps the older line). Minutes up to an hour, then hours, then days. */
+export function lastSeenLine(t: (key: string, values?: Record<string, number>) => string, heardAt: string | null | undefined, now: number): string | null {
+  if (!heardAt) return null;
+  const at = Date.parse(heardAt);
+  if (!Number.isFinite(at)) return null;
+  const ms = now - at;
+  if (ms < -60_000) return null;
+  const min = Math.max(0, Math.floor(ms / 60_000));
+  if (min < 1) return t('line.disconnectedSeenNow');
+  if (min < 60) return t('line.disconnectedSeenMin', { n: min });
+  if (min < 24 * 60) return t('line.disconnectedSeenHour', { n: Math.floor(min / 60) });
+  return t('line.disconnectedSeenDay', { n: Math.floor(min / (24 * 60)) });
+}
+
 function Line({ view, now, phone, href }: { view: View & { state: SessionState }; now: number; phone: boolean; href: string }) {
   const t = useTranslations('chats.agentSession');
   const tPermissions = useTranslations('agentPermissions'); // story #4590: the terminal-only line is the card's own key (Yuna §2)
   const locale = useLocale();
   const remoteOff = useRemoteOff(); // story #4583: who can turn it on (the org's value · the session's own flag decides whether to say it)
-  if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{t('line.unknown')}</p>;
+  const bridgeKind = usePhoneBridge().deviceKind;
+  const computerGuest = phone && bridgeKind === 'computer'; // story 4994: the guest desktop app — its lines say «이 컴퓨터», not «폰»
+  // story 4979 (PO 11-18): a computer that is no longer heard says WHEN it was last seen («연결이 끊겼어요 · 마지막으로 본 지 N분 전»; under a minute = «방금 전») — «상태 모름» alone when the server has no such time
+  if (view.state === 'unknown') return <p className="w-full text-muted-foreground" data-testid="agent-session-line">{lastSeenLine(t, view.last_heard_at, now) ?? t('line.unknown')}</p>;
   if (view.state === 'unrecognized') return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.unrecognized')}</p>;
   // story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — what to do is on that computer's screen, whatever remote control says;
   // the folder named only when the daemon read it (a wrong folder name is worse than none). Inside the phone app, where [세션 끝내기]
@@ -553,12 +605,12 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
     if (remoteOff?.owner) {
       return (
         <div className="flex w-full flex-col gap-1">
-          <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOwner')}</p>
+          <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t(computerGuest ? 'line.remoteOffOwnerComputer' : 'line.remoteOffOwner')}</p>
           <RemoteControlLink />
         </div>
       );
     }
-    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t('line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{t(computerGuest ? 'line.remoteOffOthersComputer' : 'line.remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</p>;
   }
   if (view.state === 'waiting_permission') {
     // story #4590 (Yuna §2): a question only that computer's terminal answers — the card's own line (one key for both), no inbox link:

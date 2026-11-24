@@ -865,10 +865,55 @@ async def changes_purge(
     """story #4951 (Kadir lens A): a changed-file list a person never came back to read is deleted when its 120 seconds are over — the sweep that does not wait for anyone's next read."""
     verify_cron(request)
     try:
+        # story 4976 (Kadir lens 5850 · middle 2): the instruction-copy sweep goes FIRST, in its own savepoint and try, and is COMMITTED before the other steps run — «an open instruction's words do not
+        # stay on the server past about eleven minutes» must not depend on the three older steps below succeeding (one that keeps failing used to take the whole job — and this sweep — with it)
+        prompts: int | None = None
+        try:
+            async with session.begin_nested():
+                from app.services.desktop_relay import purge_stale_prompts
+
+                prompts = await purge_stale_prompts(session)
+            await session.commit()
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · stale prompts): %s", type(exc).__name__)
+            await session.rollback()
         from app.services.desktop_changes import purge_audit, purge_expired
         purged = await purge_expired(session)  # (the session commits at the end of the request, as the other sweeps rely on)
+        from app.services.desktop_files import purge_expired as purge_expired_files
+
+        files_purged = await purge_expired_files(session)  # story 4983 — a sealed files answer nobody came back to read goes at its end too
+        from app.services.desktop_direct import purge_expired as purge_expired_direct
+
+        direct_purged = await purge_expired_direct(session)  # story 4993 — and a sealed answer to an ask for a direct door nobody read
+        from app.services.desktop_direct import purge_counts as purge_direct_counts
+
+        direct_counts_purged = await purge_direct_counts(session)  # story 4993 (P3b) — and the counts of a run of the host not reported for 30 days
+        from app.services.desktop_record_handoff import purge_expired as purge_expired_handoffs
+
+        handoffs_purged = await purge_expired_handoffs(session)  # story 4978 — and a record-key handoff nobody took
         audit = await purge_audit(session)  # the audit lines past their 90 days
-        return _ok({"purged": purged, "audit_purged": audit})
+        # story 4972 (카디르 lens M1): the same minute job also lets go of the words of a permission request whose window passed (no new scheduler job: one more cron is one more
+        # thing to set up by hand on dev and prod)
+        from app.services.agent_permissions import end_orphan_cards, purge_open_cards
+        cards = await purge_open_cards(session)
+        # a card nobody can open any more (whichever way it went). On its OWN savepoint and try: a failure here (a lock order that meets a report's, a bad statement) rolls back to the savepoint only — the purges above are
+        # one transaction with it, and one failed statement would otherwise take them all (lens 5833 L5)
+        orphans: int | None = None
+        try:
+            async with session.begin_nested():
+                orphans = await end_orphan_cards(session)
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · orphan cards): %s", type(exc).__name__)
+        # story 4977 B2: a tombstone (a deleted record's ids and counters — no sealed content) past its 7 days; a LIVE record is never aged out. Its own savepoint and try, like the sweep above
+        tombstones: int | None = None
+        try:
+            async with session.begin_nested():
+                from app.services.session_records import purge_tombstones
+
+                tombstones = await purge_tombstones(session)
+        except Exception as exc:
+            logger.exception("cron error (changes-purge · record tombstones): %s", type(exc).__name__)
+        return _ok({"purged": purged, "files_purged": files_purged, "direct_purged": direct_purged, "direct_counts_purged": direct_counts_purged, "handoffs_purged": handoffs_purged, "audit_purged": audit, "cards_ended": cards, "orphan_cards_ended": orphans, "stale_prompts_ended": prompts, "record_tombstones_purged": tombstones})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

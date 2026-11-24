@@ -1318,7 +1318,19 @@ async def _retire_same_machine(
         from app.services import desktop_changes
 
         await desktop_changes.forget(db, [o.id for o in old], lock=False)  # story #4951 — a replaced line keeps no changed-file list either
+        from app.services import desktop_files
+
+        await desktop_files.forget(db, [o.id for o in old], lock=False)  # story 4983 — nor a sealed files answer
+        from app.services import desktop_direct
+
+        await desktop_direct.forget(db, [o.id for o in old], lock=False)  # story 4993 — nor a sealed answer to an ask for a direct door
+        from app.services import desktop_record_handoff
+
+        await desktop_record_handoff.forget(db, [o.id for o in old], lock=False)  # story 4978 — nor a sealed record-key handoff
         await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
+        from app.services.desktop_relay import forget_prompts
+
+        await forget_prompts(db, [o.id for o in old])  # story 4976 — nor the words of an instruction it still holds (queued · delivered · acked)
         await db.execute(
             update(DesktopDeviceToken)
             .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
@@ -1538,15 +1550,33 @@ async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUI
     deletion closes each open one of them exactly as a disconnect does (`_disconnect_setup`: keys, device token, open commands, open
     stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
     leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
-    Returns how many were closed."""
-    return await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+    story 4977 B2: the person's sealed records (their history, kept for them alone) go with the account — the rows and their tombstones — in every organization that outlives it.
+    Returns how many setups were closed."""
+    closed = await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+    await _delete_records_of_person(db, user_id=user_id, org_id=None)
+    return closed
 
 
 async def close_setups_of_removed_member(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, removed_by: uuid.UUID) -> int:
     """story #4769 — the same for a person REMOVED from one organization while their account lives on: the computers they confirmed IN THAT
     ORGANIZATION close like a disconnect (`revoked_by` = whoever removed them, `revoked_reason` = member_removed). Their computers in other
-    organizations are not touched, nor are agents a setup only attached. Returns how many were closed."""
-    return await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+    organizations are not touched, nor are agents a setup only attached. story 4977 B2: their sealed records IN THAT ORGANIZATION go too (nobody could read or delete them any more).
+    Returns how many setups were closed."""
+    closed = await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+    await _delete_records_of_person(db, user_id=user_id, org_id=org_id)
+    return closed
+
+
+async def _delete_records_of_person(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID | None) -> None:
+    """story 4977 B2: the sealed records a person kept (`session_records.owner_id`) — a person who leaves leaves no sealed rows behind that nobody can read or delete."""
+    from sqlalchemy import delete
+
+    from app.models.session_record import SessionRecord
+
+    cond = [SessionRecord.owner_id == user_id]
+    if org_id is not None:
+        cond.append(SessionRecord.org_id == org_id)
+    await db.execute(delete(SessionRecord).where(*cond))
 
 
 def _made_agent_ids(members) -> list[uuid.UUID]:
@@ -1623,7 +1653,17 @@ async def _disconnect_setup(
     from app.services import desktop_changes
 
     await desktop_changes.forget(db, [setup.id], lock=False)  # story #4951 — no changed-file list outlives the computer's connection (the row is held: `_lock_in_order` above)
+    from app.services import desktop_files
+
+    await desktop_files.forget(db, [setup.id], lock=False)  # story 4983 — nor a sealed files answer (the same row lock)
+    from app.services import desktop_direct
+
+    await desktop_direct.forget(db, [setup.id], lock=False)  # story 4993 — nor a sealed answer to an ask for a direct door (the same row lock)
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget(db, [setup.id], lock=False)  # story 4978 — nor a sealed record-key handoff (the same row lock)
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
+    await desktop_relay.forget_prompts(db, [setup.id])  # story 4976 — nor the words of an instruction: the open ones ended just above, this also covers an acked one
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = set(_made_agent_ids(setup.members))

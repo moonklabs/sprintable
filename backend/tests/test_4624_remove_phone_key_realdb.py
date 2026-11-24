@@ -91,6 +91,10 @@ async def test_02_its_pairs_go_with_it_at_once_and_an_answer_signed_by_it_is_ref
         assert sorted(woken) == sorted([a["setup_id"], b["setup_id"]]), woken
         live_pairs = (await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{phone_id}' AND removed_at IS NULL"))[0][0]
         assert live_pairs == 0, "both pairs removed with the key"
+        # story 4972 (0484): the person's last phone is gone — their plain card ends with it (nobody can answer it): the answer finds it withdrawn; a card made AFTER the removal is the one that says «not paired»
+        ended = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert (ended.status_code, ended.json()["error"]["code"]) == (410, "withdrawn"), ended.text
+        view = (await _post_ask(c, a, _ask(agent))).json()
         refused = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
         assert (refused.status_code, refused.json()["error"]["code"]) == (409, "phone_not_paired"), refused.text  # a live key with a live pair only
         frame = 'event: pairing_removed\ndata: {"phone_key_fingerprint": "%s"}' % _fp(der)

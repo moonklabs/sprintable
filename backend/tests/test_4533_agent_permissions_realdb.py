@@ -19,6 +19,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG,
     OWNER,
     OWNER_TM,
+    ORG2,
     PLAIN,
     _addresses,
     _client,
@@ -232,6 +233,10 @@ async def test_a_removal_works_at_once_and_goes_down_until_the_device_drops_it(w
         gone = await c.delete(f"{PHONES}/{phone_id}/pairs/{sid}", headers=_person(OWNER))
         assert gone.status_code == 200 and gone.json() == {"removed": True}
         assert (await c.delete(f"{PHONES}/{phone_id}/pairs/{sid}", headers=_person(OWNER))).json() == {"removed": False}
+        # story 4972 (0484): taking off the person's last phone now ends their plain card too (it can be answered by nobody) — the answer finds it withdrawn; a card made AFTER the removal is the one that shows «this phone is not paired»
+        ended = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
+        assert ended.json()["error"]["code"] == "withdrawn"
+        view = (await _post_ask(c, device, _ask(agent))).json()
         refused = await c.post(f"{REQS}/{view['id']}/answer", json=_answer(phone_id), headers=_person(OWNER))
         assert refused.json()["error"]["code"] == "phone_not_paired"  # at once, before the device hears of it
 
@@ -352,7 +357,8 @@ async def test_the_recipient_gets_one_bell_line_with_the_agent_and_tool_only(wor
         # story 4542: «{agent} · {computer}» with the computer once · the tool by the one naming rule (Claude's own: as it is)
         assert payload["agent_name"] and payload["title"] == f"권한 대기 · {agent_on_device(payload['agent_name'], 'd4424 mac 4533i')}"
         assert payload["title"].count("d4424 mac 4533i") == 1
-        assert payload["body"] == "Bash 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
+        # story 4972 (선생님 결정): «승인 요청이 왔어요» only — not even the tool (it is inside the card)
+        assert payload["body"] == "승인 요청이 왔어요" and "Bash" not in payload["body"]
         assert "git push" not in str(payload) and "secret-project" not in str(payload)
         listed = await c.get("/api/v2/event-notifications", headers=_person(OWNER))
         assert listed.status_code == 200 and "agent.permission_request" in listed.text, listed.text[:300]
@@ -393,3 +399,49 @@ async def test_only_the_recipient_with_their_own_paired_phone_answers_and_only_a
 
         mine = await c.post(f"{REQS}/{rid}/answer", json=_answer(owner_phone), headers=_person(OWNER))  # the real answer still goes
         assert mine.status_code == 200
+
+
+async def test_a_waiting_request_is_not_pushed_out_of_the_list_by_100_newer_ended_ones_4972(world):
+    """story 4972 (push landing · PO): the list is cut at 100 newest — a state filter was applied AFTER the cut, and the screen that reads the
+    whole list (no state) had no room reserved for what still waits. 101 newer requests past their window + ONE older waiting request:
+    the waiting one is in the whole list and is the whole `?state=pending` list (reverting either path goes RED)."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4972pl")
+        agent = await _with_session(c, device)
+        _phone, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        old_body = _ask(agent)
+        old = await _post_ask(c, device, old_body)
+        assert old.status_code == 201, old.text
+        for i in range(101):
+            assert (await _post_ask(c, device, _ask(agent))).status_code == 201
+            if i % 40 == 39:  # (a computer keeps at most OPEN_LIMIT open questions — AC3 ①: the earlier ones end by their clocks before the next batch)
+                await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '2 hours' WHERE request_id <> '{old_body['request_id']}' AND setup_id = (SELECT setup_id FROM agent_permission_requests WHERE id = '{old.json()['id']}')")
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '2 hours' WHERE id <> '{old.json()['id']}' AND setup_id = "
+                   f"(SELECT setup_id FROM agent_permission_requests WHERE id = '{old.json()['id']}')")
+        whole = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+        assert old.json()["id"] in [r["id"] for r in whole]  # (101 newer rows are ended by their clocks: the oldest one that waits is still there)
+        assert [r["id"] for r in (await c.get(REQS + "?state=pending", headers=_person(OWNER))).json()["requests"]] == [old.json()["id"]]
+        expired = (await c.get(REQS + "?state=expired", headers=_person(OWNER))).json()["requests"]
+        assert len(expired) == 100 and old.json()["id"] not in [r["id"] for r in expired]
+
+
+async def test_the_merged_waiting_list_stays_inside_the_recipient_and_the_org_4972(world):
+    """story 4972 (push landing · security point): the «still waiting» rows added to the whole list are cut by the SAME recipient and org
+    as the newest-100 query (both come from one base query). A waiting request of the owner is NOT in another member's list (whole · pending ·
+    expired) and, once its computer belongs to another org, not in the owner's list for this org either."""
+    async with _client() as c:
+        await _plain_member()
+        device = await _device(c, name="d4424 mac 4972sec")
+        agent = await _with_session(c, device)
+        _phone, der = await _register(c)
+        await _pair(c, device["device_token"], der)
+        made = await _post_ask(c, device, _ask(agent))
+        assert made.status_code == 201, made.text
+        rid = made.json()["id"]
+        assert [r["id"] for r in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]] == [rid]  # (the owner sees it)
+        for q in ("", "?state=pending", "?state=expired"):
+            assert (await c.get(REQS + q, headers=_person(PLAIN))).json()["requests"] == [], q  # another member of the org: nothing
+        await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = (SELECT setup_id FROM agent_permission_requests WHERE id = '{rid}')")
+        for q in ("", "?state=pending"):
+            assert (await c.get(REQS + q, headers=_person(OWNER))).json()["requests"] == [], q  # the computer is in another org now: not in this org's list

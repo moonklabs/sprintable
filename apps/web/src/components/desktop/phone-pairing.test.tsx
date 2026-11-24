@@ -14,6 +14,13 @@ import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
+// story 4978 (C1b-phone): the record key handoff and its watch are the pairing screen's NEXT step, tested in their own files — here they are stand-ins (a real watch would look at the server on a timer)
+const handoff = vi.hoisted(() => ({ sendHandoff: vi.fn(async () => ({ kind: 'no_plan' })), startHandoffWatch: vi.fn(), stopHandoffWatch: vi.fn() }));
+vi.mock('@/lib/phone-handoff', () => ({ sendHandoff: handoff.sendHandoff }));
+vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: handoff.startHandoffWatch, stopHandoffWatch: handoff.stopHandoffWatch, AFTER_PAIRING_MS: 600_000, ON_OPEN_MS: 60_000 }));
+
+let remoteOffNow: { owner: boolean; names: { owners: string; hasOwners: 'yes' | 'no' }; connectedSetups: number } | null = null; // story 4994: the org's «remote control off» (null = not read here)
+vi.mock('@/components/desktop/remote-off', async (orig) => ({ ...(await orig<typeof import('@/components/desktop/remote-off')>()), useRemoteOff: () => remoteOffNow }));
 const { PhonePairing, PhonePairEntry } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -150,6 +157,8 @@ describe('[4532] phone pairing screen', () => {
     await tick();
     expect(line()).toBe('페어링했어요 · SYJ-MacBook-Pro — 이제 이 폰에서 그 컴퓨터의 에이전트에 답하고, 멈추거나 지시할 수 있어요');
     expect(buttons()).toEqual(['닫기']);
+    expect(handoff.sendHandoff).not.toHaveBeenCalled(); // story 4978: the OLD procedure hands no record key (it is the new pairing's step)
+    expect((handoff.startHandoffWatch.mock.calls as unknown as Array<[{ forMs: number }]>).filter((c) => c[0].forMs === 600_000)).toEqual([]);
     const looks = fetchWithAuth.mock.calls.length;
     await tick();
     await tick();
@@ -215,6 +224,31 @@ describe('[4532] phone pairing screen', () => {
     await press('페어링');
     expect(line()).toBe(expected);
     expect(buttons()).toEqual(left);
+  });
+
+  it('story 4994 (D-3d): in the guest desktop app (a computer) «register again» and «remote control off» (owner · others) say «이 컴퓨터»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    const T = koMessages.phonePairing as unknown as Record<string, string>;
+    try {
+      offerPost = () => res(404, { error: { code: 'phone_key_not_found' } });
+      installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
+      expect(line()).toBe(T.registerAgainComputer);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      for (const owner of [true, false]) {
+        remoteOffNow = { owner, names: { owners: '민', hasOwners: 'yes' }, connectedSetups: 1 };
+        offerPost = () => res(409, { error: { code: 'remote_control_off' } });
+        installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
+        expect(line(), `owner=${owner}`).toBe(owner ? T.remoteOffOwnerComputer : '원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자(민)가 켜면 다시 할 수 있어요');
+        expect(line()).not.toMatch(/폰/);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+      // English: «this computer», not «this phone» (the Korean «others» line has no device word to tell the two apart)
+      remoteOffNow = { owner: false, names: { owners: 'Min', hasOwners: 'yes' }, connectedSetups: 1 };
+      offerPost = () => res(409, { error: { code: 'remote_control_off' } });
+      installShell(); await render('en'); await press('Paste code'); await press('Pair');
+      expect(line()).toBe("Remote control is off, so this computer can't be paired — you can try again once an organization owner (Min) turns it on");
+      expect(line()).not.toMatch(/phone/i);
+    } finally { ua.mockRestore(); remoteOffNow = null; }
   });
 
   it('already paired with that computer → «이미 페어링된 컴퓨터예요 · {컴퓨터}» + [닫기], nothing offered', async () => {
@@ -297,6 +331,36 @@ describe('[4532] phone pairing screen', () => {
     expect(row?.textContent).not.toContain('아직 안 씀');
   });
 
+  it('story 4994 (D-3d): the limit screen in the guest desktop app — a computer\'s own row (label «Mac») says «이 기기 빼기» and its confirmation says «기기»; a phone\'s row beside it stays «이 폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+      const base = fetchWithAuth.getMockImplementation()!;
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: [{ id: 'g-1', label: 'Mac', last_used_at: null, pairs: [] }, { id: 'p-1', label: 'iPhone', last_used_at: null, pairs: [] }] });
+        return base(url, init);
+      });
+      installShell();
+      await render();
+      await press('코드 붙여넣기');
+      await press('페어링');
+      const rows = [...container.querySelectorAll('[data-testid="pairing-limit-phone"]')] as HTMLElement[];
+      expect(rows.map((r) => r.querySelector('button')?.textContent)).toEqual(['이 기기 빼기', '이 폰 빼기']);
+      await act(async () => { rows[0]!.querySelector('button')!.click(); });
+      expect(rows[0]!.textContent).toContain('이 기기를 뺄까요? · Mac');
+      expect(rows[0]!.textContent).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: [{ id: 'g-2', label: 'Windows PC', last_used_at: null, pairs: [{ device_name: 'Studio' }] }] });
+        return base(url, init);
+      });
+      installShell(); await render(); await press('코드 붙여넣기'); await press('페어링');
+      await act(async () => { (container.querySelector('[data-testid="pairing-limit-phone"] button') as HTMLButtonElement).click(); });
+      expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).toContain('이 기기를 뺄까요? · Windows PC — 빼면 그 기기로는');
+      expect(container.querySelector('[data-testid="pairing-limit-phone"]')!.textContent).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
+  });
+
   it('a removal that fails shows no «자리가 하나 비었어요» line (story #4624 · 까디르)', async () => {
     registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
     const phones = [{ id: 'p-1', label: '내 폰 A', last_used_at: null, pairs: [] }];
@@ -315,6 +379,32 @@ describe('[4532] phone pairing screen', () => {
     expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
     expect(document.body.textContent).not.toContain('자리가 하나 비었어요');
     expect(document.body.textContent).not.toContain('뺐어요');
+  });
+
+  it('story 4994 (D-3e): in the guest desktop app (a computer) a freed place says [다시 붙여넣기] / [Paste again] — the button it really has — never [다시 찍기]', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        registerPost = () => res(409, { error: { code: 'remote_device_limit' } });
+        let removed = false;
+        const base = fetchWithAuth.getMockImplementation()!;
+        fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+          if (url === '/api/remote-devices' && (init?.method ?? 'GET') === 'GET') return res(200, { devices: removed ? [] : [{ id: 'g-1', label: 'Mac', last_used_at: null, pairs: [] }] });
+          if (url === '/api/remote-devices/g-1' && init?.method === 'DELETE') { removed = true; return res(200, { removed: true }); }
+          return base(url, init);
+        });
+        installShell();
+        await render(locale);
+        await press(locale === 'ko' ? '코드 붙여넣기' : 'Paste code'); await press(locale === 'ko' ? '페어링' : 'Pair');
+        for (let i = 0; i < 2; i++) await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="pairing-limit-phone"] button')!.click(); });
+        await settle();
+        const m = (locale === 'ko' ? koMessages : enMessages).phonePairing as unknown as Record<string, string> & { limit: Record<string, string> };
+        expect(document.body.textContent).toContain(m.limit.afterComputer);
+        expect(document.body.textContent).not.toMatch(locale === 'ko' ? /다시 찍기/ : /Scan again/);
+        expect(buttons()).toContain(m.rescanComputer);
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+      }
+    } finally { ua.mockRestore(); }
   });
 
   it('three phones → one [이 폰 빼기] → confirm → the place is free → [다시 찍기] starts the scan again (story #4624 · 까디르)', async () => {
@@ -449,6 +539,22 @@ describe('[4532] phone pairing screen', () => {
     expect(nothingSent()).toBe(true); // the claim is true: no key registered, no offer, no MAC
     await press('설정 열기');
     expect(sent.at(-1)).toEqual({ type: 'app.settings', args: {} });
+  });
+
+  it('story 4994: the guest desktop app (a COMPUTER) with no secure storage → the same refusal in «이 컴퓨터» words and NO [설정 열기] (its shell opens no settings)', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
+      installShell();
+      await render();
+      await press('코드 붙여넣기');
+      await press('페어링');
+      expect(lines()[0]).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요');
+      expect(lines()[1]).toBe(koMessages.agentPermissions.phone.noScreenLockComputer);
+      expect(lines()[1]).not.toMatch(/폰/);
+      expect(buttons()).toEqual(['다시 붙여넣기']);
+      expect(nothingSent()).toBe(true);
+    } finally { ua.mockRestore(); }
   });
 
   it('⭐a phone that can answer only with a fingerprint is refused the same way: «아직 페어링하지 않았어요 …» first, its own line second, the 5 minutes third', async () => {

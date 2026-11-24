@@ -139,7 +139,7 @@ async def test_02_the_phone_sees_only_its_paired_computers_and_only_projects_the
         # PROJ2: the owner (an org owner) opens every project → both; ids and names, and not one key beyond these
         assert sorted(p["project_id"] for p in comp["projects"]) == sorted([str(PROJ), str(PROJ2)])
         assert all(set(p) == {"project_id", "name"} for p in comp["projects"])
-        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "can_command", "projects"}  # story 4734: the old keys + the added computer_id
+        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "last_heard_at", "can_command", "projects"}  # story 4734: the old keys + the added computer_id · story 4979: + last_heard_at (the computer's own last word)
         # a project the agent is not in is never offered, even if the computer says it
         await _sql(f"UPDATE desktop_setups SET startable = '[{{\"agent_member_id\": \"{agent}\", \"project_id\": \"{PROJ3}\"}}]'::jsonb WHERE id = '{device['setup_id']}'")
         assert (await _list(c, agent, phone)).json()["computers"][0]["projects"] == []
@@ -347,8 +347,9 @@ async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_ag
         view = (await _all(c, phone)).json()
         assert set(view) == {"remote_control", "computers"} and view["remote_control"] is True
         comp = view["computers"][0]
-        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "agents", "computer_press"} and comp["setup_id"] == sid and comp["reachable"] is True  # story 4734: + computer_id, + computer_press (B)
+        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "last_heard_at", "agents", "computer_press", "file_window"} and comp["setup_id"] == sid and comp["reachable"] is True  # story 4734 · story 4987 (file_window): + computer_id, + computer_press (B) · story 4979: + last_heard_at
         assert comp["computer_press"] is False  # (this device never said it takes the press of the whole computer)
+        assert comp["file_window"] is False  # (…nor that it accepts a window key)
         assert comp["computer_id"]
         by_id = {a["agent_member_id"]: a for a in comp["agents"]}
         assert set(by_id) == {agent, other_agent}  # every agent this computer was set up with (the owner opens them all)

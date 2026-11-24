@@ -311,3 +311,29 @@ describe('[4734 · Yuna §A-2b] a setup row names its agents', () => {
     expect(q('desktop-devices-confirm-agents')).toHaveLength(0);
   });
 });
+
+// story 4986 AC5 — after an agent is moved to another computer the old one stays connected with no agent: it says so in words (a person ends it · nothing is ended for them)
+describe('[SID:4986] a connected computer with no agent', () => {
+  it('connected + no agent → «에이전트가 없는 컴퓨터예요 — 끊어도 돼요» · a computer with agents (or a disconnected one) has no such line · en too', async () => {
+    listBody = list(
+      computer(C1, '옛 맥', [setup(1, { members: [], active_keys: 0 })], { active_keys: 0 }),
+      computer(C2, '새 맥', [setup(2)]),
+    );
+    await render();
+    const rowOf = (name: string) => q('desktop-computer-row').find((r) => r.textContent?.includes(name))!;
+    expect(rowOf('옛 맥').querySelector('[data-testid=desktop-computer-empty]')?.textContent).toBe('에이전트가 없는 컴퓨터예요 — 끊어도 돼요');
+    expect(rowOf('새 맥').querySelector('[data-testid=desktop-computer-empty]')).toBeNull();
+    // nothing is ended on its own: the disconnect stays a button a person presses
+    expect(deletes()).toEqual([]);
+  });
+  it('a disconnected computer with no agent says nothing more (it is already ended)', async () => {
+    listBody = list(computer(C1, '끊긴 맥', [setup(1, { members: [], state: 'disconnected', revoked_at: '2026-09-30T05:00:00Z', revoked_by_name: '김지우', active_keys: 0 })]));
+    await render();
+    expect(q('desktop-computer-empty')).toHaveLength(0);
+  });
+  it('en', async () => {
+    listBody = list(computer(C1, 'Old Mac', [setup(1, { members: [], active_keys: 0 })], { active_keys: 0 }));
+    await render('en');
+    expect(q('desktop-computer-empty')[0].textContent).toBe('A computer with no agents — it is fine to disconnect it');
+  });
+});

@@ -16,7 +16,7 @@ import { readStartableKeyed } from '@/lib/phone-start';
 export function TodayPairCard() {
   const t = useTranslations('phonePairing');
   const pairHref = usePairHref(); // story 4780: carries this page (Today) so the pairing screen's [Close] comes back here
-  const { inPhoneApp, phoneCall } = usePhoneBridge();
+  const { inPhoneApp, phoneCall, deviceKind } = usePhoneBridge();
   // the answer is stored with the bridge it came from: another bridge makes an old answer «not read yet» without a state write in the effect
   const [seen, setSeen] = useState<{ call: typeof phoneCall; unpaired: boolean } | null>(null);
   // restored from the back-forward cache (the person paired on /desktop/pair and came back with Back): the page is as it was left, the old answer on it — read again (the start screen does the same).
@@ -47,7 +47,7 @@ export function TodayPairCard() {
   if (!inPhoneApp || !seen || seen.call !== phoneCall || !seen.unpaired) return null;
   return (
     <Card className="break-keep flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between" data-testid="today-pair-card">
-      <p className="text-sm text-foreground" data-testid="today-pair-note">{t('todayNote')}</p>
+      <p className="text-sm text-foreground" data-testid="today-pair-note">{t(deviceKind === 'computer' ? 'todayNoteComputer' : 'todayNote')}</p>
       <Button asChild size="sm" className="self-start sm:self-auto">
         <a href={pairHref} data-testid="today-pair-link">{t('entry')}</a>
       </Button>

@@ -11,6 +11,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useIsBelowLg } from '@/hooks/use-mobile';
 import { StatusLabel } from '@/components/ds/status-label';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
+import { AgentRecordsSheet } from '@/components/chat/agent-records-sheet';
+import { useRecordsShell } from '@/components/chat/use-records-shell';
 import { AgentsPausedBand, type AgentsPausedState } from '@/components/chat/agents-paused-band';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
@@ -134,6 +136,8 @@ export default function ConversationPage() {
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
   const headMenuTriggerRef = useRef<HTMLButtonElement>(null); // the «⋯» button: where focus returns after the notification-settings window closes (the menu item that opened it is gone)
+  // story 4977 (B3-3): the «기록» sheet of an agent's DM — also for a room whose session is over. It is open for ONE room (the room's id, not a bare flag): a page reused for another room opens nothing by itself
+  const [recordsOpenFor, setRecordsOpenFor] = useState<string | null>(null);
   const [headMenuOpen, setHeadMenuOpen] = useState(false); // story 4887 (UI-4 P3-a) — the room head's «⋯» menu (controlled: the library closes it through onOpenChange after an item is chosen)
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -281,6 +285,12 @@ export default function ConversationPage() {
   // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
   const goBackToList = () => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'));
 
+  // story 4977 (B3-3): the history of a chat with an agent is the person's own, session or not — an entry in the room's «⋯» menu, in the phone app only, only where THIS shell opens records.
+  // (a hook: above the early return below, so every render calls it)
+  const recordsPeer = meta?.type === 'dm' ? meta.participants.find((p) => p.member_id !== currentTeamMemberId) : null;
+  const recordsAgentId = recordsPeer?.type === 'agent' ? recordsPeer.member_id : null;
+  const recordsEntry = useRecordsShell(recordsAgentId !== null);
+
   if (!currentTeamMemberId) {
     return (
       <>
@@ -396,6 +406,12 @@ export default function ConversationPage() {
             <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size={16} className="text-muted-foreground" />
             {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
           </DropdownMenuItem>
+          {recordsEntry ? (
+            <DropdownMenuItem onClick={() => setRecordsOpenFor(conversation_id)} data-testid="room-head-records">
+              <Icon name="history" size={16} className="text-muted-foreground" />
+              {t('agentSession.records.button')}
+            </DropdownMenuItem>
+          ) : null}
           {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
           <DropdownMenuItem onClick={() => setShowDeliveryContract(true)} data-testid="room-head-settings">
             <Icon name="settings" size={16} className="text-muted-foreground" />
@@ -460,6 +476,7 @@ export default function ConversationPage() {
           <>
           {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
           {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
+          {recordsEntry && recordsAgentId ? <AgentRecordsSheet key={conversation_id} conversationId={conversation_id} setupId={null} agentId={recordsAgentId} open={recordsOpenFor === conversation_id} onOpenChange={(o) => setRecordsOpenFor(o ? conversation_id : null)} /> : null}
           {/* story #4631 C · D — agent messages paused: the band (and an owner/admin's [멈춤 풀기]) — one per conversation */}
           {metaFailed && !meta ? (
             <div className="flex items-center gap-2 border-b border-border px-4 py-2" role="status" data-testid="room-info-failed">

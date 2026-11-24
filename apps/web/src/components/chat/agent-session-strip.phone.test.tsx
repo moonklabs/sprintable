@@ -10,12 +10,15 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+import { __resetDirectKeepForTest } from '@/lib/phone-direct-keep';
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const CONV = '33333333-4444-4555-8666-777777777777';
 const CMD = '44444444-5555-4666-8777-888888888888';
 
 const fetchWithAuth = vi.fn();
+// story 4978 (C1b-phone): the provider's record key handoff watch is a stand-in here (it would ask the shell and the server on its own — its file tests it)
+vi.mock('@/lib/phone-handoff-watch', () => ({ startHandoffWatch: () => undefined, stopHandoffWatch: () => undefined, ON_OPEN_MS: 60_000, AFTER_PAIRING_MS: 600_000 }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
@@ -28,6 +31,8 @@ vi.mock('@/lib/phone-bridge', () => ({
   claimPhoneBridge: () => {},
   subscribePhoneApp: () => () => {},
 }));
+let remoteOffNow: { owner: boolean; names: { owners: string; hasOwners: 'yes' | 'no' }; connectedSetups: number } | null = null; // story 4994: the org's «remote control off» (null = on · not known)
+vi.mock('@/components/desktop/remote-off', async (orig) => ({ ...(await orig<typeof import('@/components/desktop/remote-off')>()), useRemoteOff: () => remoteOffNow }));
 const { AgentSessionStrip } = await import('./agent-session-strip');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -54,12 +59,13 @@ let root: Root;
 beforeEach(() => {
   window.localStorage?.clear(); // drafts (useFieldDraft) do not leak between cases
   phone = true;
+  remoteOffNow = null;
   phoneCall.mockReset();
   fetchWithAuth.mockReset();
   sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
-afterEach(async () => { vi.useRealTimers(); await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; });
+afterEach(async () => { await act(async () => { root.unmount(); }); __resetDirectKeepForTest(); /* (the direct road's keeper is one per computer for the page's life: a test's screen must not leave it — or its timers — for the next; reset while the fake timers are still the ones it used) */ vi.useRealTimers(); container.remove(); document.body.innerHTML = ''; });
 
 async function settle(n = 6) { for (let i = 0; i < n; i++) await act(async () => { await Promise.resolve(); }); }
 async function render(locale: 'ko' | 'en' = 'ko') {
@@ -274,6 +280,91 @@ describe('[4534] the strip inside the phone app', () => {
     expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'stop_session', session_key: 's-9', signed: 'S', phone_key_id: 'k-1' });
   });
 
+  // story 4976 A3: a shell that can seal — the instruction goes as an envelope; the words are in no byte of the post; a turn that has ended is NOT turned into a message, and what was written stays
+  it('[4976] a sealing shell: the post is the envelope (no words) · «… 단계를 마치면 바로 들어가요» · and a session that cannot take it → «보내지 않았어요» line, no message post, the words stay', async () => {
+    vi.useFakeTimers();
+    const ENV = { v: 1, kind: 'send_prompt', command_id: 'k', ct: 'AAAA' };
+    let signs = 0;
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown>) => {
+      if (type === 'shell.caps') return { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+      signs += 1;
+      expect(args).toMatchObject({ kind: 'send_prompt', text: 'secret words 4976', conversation_id: CONV, sealed: true });
+      expect(typeof args.idempotency_key).toBe('string');
+      return signs === 1 ? { id: 'w', ok: true, sealed: true, envelope: ENV, phone_key_id: 'k-1', session_key: 's-9', conversation_id: CONV } : { id: 'w', ok: false, code: 'not_working' };
+    });
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: 'after_step' })]);
+    sessionView = { ...sessionView, sealed_prompt: true }; // this computer's app says it opens a sealed instruction
+    await render();
+    const type = async (text: string) => {
+      await press(ko.button.instruct);
+      const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
+      await press(ko.sheet.send);
+    };
+    await type('secret words 4976');
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
+    const posted = calls.filter((c) => c.init?.method === 'POST');
+    expect(posted).toHaveLength(1);
+    const body = JSON.parse(posted[0]!.init!.body as string);
+    expect(body).toMatchObject({ kind: 'send_prompt', conversation_id: CONV, session_key: 's-9', phone_key_id: 'k-1', envelope: ENV });
+    expect(body).not.toHaveProperty('text');
+    expect(body).not.toHaveProperty('signed');
+    expect(String(posted[0]!.init!.body)).not.toContain('secret words');
+    // the session cannot take the next one: said, not sent, no message; the words stay in the box
+    await type('secret words 4976');
+    expect(commandLine()?.textContent).toBe(ko.command.sealedNotTaken);
+    expect(calls.filter((c) => String(c.url).includes('/messages'))).toEqual([]);
+    await press(ko.button.instruct);
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toBe('secret words 4976');
+  });
+
+  it('[4990] a phone with a sealing pin and NO pin for this computer (the server names it anyway): the sealed call says host_not_pinned, the page\'s plain re-send is refused by the shell → the reason line + the pair-again way; NOTHING is posted, no chat message, the words stay', async () => {
+    vi.useFakeTimers();
+    const signs: Array<Record<string, unknown>> = [];
+    phoneCall.mockImplementation(async (type: string, args: Record<string, unknown>) => {
+      if (type === 'shell.caps') return { id: 'c', ok: true, caps: { sealed_prompt: 1 } };
+      signs.push(args);
+      return args.sealed === true ? { id: 'w', ok: false, code: 'host_not_pinned' } : { id: 'w', ok: false, code: 'sealed_pair_missing' };
+    });
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: null })]);
+    sessionView = { ...sessionView, sealed_prompt: true }; // the server says this computer opens a sealed instruction — the phone's own table has no pin for it
+    await render();
+    await press(ko.button.instruct);
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'secret words 4990'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+    await press(ko.sheet.send);
+    expect(signs.map((a) => a.sealed)).toEqual([true, undefined]); // the sealed road first, then the plain re-send the shell refuses
+    expect(commandLine()?.textContent).toBe(ko.command.sealedPairMissing);
+    expect(Array.from(document.querySelectorAll('a')).some((a) => a.textContent === ko.command.pairAgain), 'the way to pair again is there').toBe(true);
+    expect(calls.filter((c) => c.init?.method === 'POST'), 'nothing posted').toEqual([]);
+    expect(calls.filter((c) => String(c.url).includes('/messages')), 'no chat message').toEqual([]);
+    expect(JSON.stringify(calls.map((c) => c.init?.body ?? ''))).not.toContain('secret words');
+    await press(ko.button.instruct);
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value, 'what the person wrote stays').toBe('secret words 4990');
+  });
+
+  it('[4976] a shell that can seal but a computer that has NOT said its app opens one → the plain road (the session view\'s `sealed_prompt` is what lets a sealed instruction be made)', async () => {
+    vi.useFakeTimers();
+    phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: { sealed_prompt: 1 } } : { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'go on' }));
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    for (const flag of [undefined, false, null]) {
+      sessionView = { ...sessionView, sealed_prompt: flag as never };
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      await press(ko.button.instruct);
+      const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'go on'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+      await press(ko.sheet.send);
+    }
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toEqual([]);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').every((c) => !('sealed' in (c[1] as object)))).toBe(true);
+    const posted = calls.filter((c) => c.init?.method === 'POST');
+    expect(posted.length).toBeGreaterThan(0);
+    expect(posted.every((c) => JSON.parse(c.init!.body as string).signed === 'S')).toBe(true);
+  });
+
   it('[지금 지시]: the sheet (title · note) → [보내기] → the shell gets the text and this conversation → «… 단계를 마치면 바로 들어가요» · the draft goes', async () => {
     vi.useFakeTimers();
     const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done', result_code: 'after_step' })]);
@@ -336,7 +427,7 @@ describe('[4534] the strip inside the phone app', () => {
     await press(ko.button.checkResult);
     await poll(1);
     expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
-    expect(phoneCall).toHaveBeenCalledTimes(1);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(1); // (an instruction first asks the shell what it can do — `shell.caps` — that is a read, not a signature)
     expect(posts().length).toBe(1);
     expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
   });
@@ -404,6 +495,120 @@ describe('[4534] the strip inside the phone app', () => {
       expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value, `${code}: what was written stays`).toBe('x');
     }
     expect(fetchWithAuth.mock.calls.some(([u, i]) => String(u).endsWith('/desktop-commands') && (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
+  });
+
+  it('story 4994: in the guest desktop app (a COMPUTER) not registered · no screen lock · no sealed pairing say «이 컴퓨터» (stop and send, ko and en) and the no-screen-lock line has no settings button', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+        for (const [code, stopLine, sendLine, action] of [
+          ['not_registered', m.command.stop.notRegisteredComputer, m.command.send.notRegisteredComputer, m.command.pairAgain],
+          ['no_screen_lock', m.command.stop.noScreenLockComputer, m.command.send.noScreenLockComputer, null],
+        ] as const) {
+          server(res(201, {}));
+          phoneCall.mockResolvedValue({ id: 'w', ok: false, code });
+          await act(async () => { root.unmount(); }); root = createRoot(container);
+          await render(locale);
+          await press(m.button.stop);
+          expect(commandLine()?.textContent, `${locale} ${code} stop`).toBe(stopLine);
+          expect(commandLine()?.parentElement?.querySelector('a,button')?.textContent ?? null, `${locale} ${code} action`).toBe(action);
+          await press(m.button.instruct);
+          const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+          await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'x'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+          await press(m.sheet.send);
+          expect(commandLine()?.textContent, `${locale} ${code} send`).toBe(sendLine);
+        }
+        // a sealed instruction with no secure pairing: the shell's own refusal word
+        server(res(201, {}));
+        phoneCall.mockResolvedValue({ id: 'w', ok: false, code: 'sealed_pair_missing' });
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render(locale);
+        await press(m.button.instruct);
+        const box2 = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
+        await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box2, 'x'); box2.dispatchEvent(new Event('input', { bubbles: true })); });
+        await press(m.sheet.send);
+        expect(commandLine()?.textContent, `${locale} sealed_pair_missing`).toBe(m.command.sealedPairMissingComputer);
+      }
+    } finally { ua.mockRestore(); }
+    for (const lang of [ko, enMessages.chats.agentSession as typeof ko]) {
+      for (const text of [lang.command.stop.notRegisteredComputer, lang.command.send.notRegisteredComputer, lang.command.stop.noScreenLockComputer, lang.command.send.noScreenLockComputer, lang.command.sealedPairMissingComputer]) expect(text).not.toMatch(/폰|phone/i);
+    }
+  });
+
+  it('story 4994: remote control off in the guest desktop app (a COMPUTER): the status line says «이 컴퓨터», not «폰»; a non-phone window keeps the old words', async () => {
+    server(res(201, {}));
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const locale of ['ko', 'en'] as const) {
+        const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+        phone = true; sessionView = { ...sessionView, remote_control: false };
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render(locale);
+        const text = container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '';
+        expect(text, locale).toContain(locale === 'ko' ? '이 컴퓨터에서 멈추거나 지시할 수 없어요' : 'from this computer');
+        expect(text, locale).not.toMatch(/폰|phone/i);
+        expect(m.line.remoteOffOwnerComputer, locale).not.toMatch(/폰|phone/i); expect(m.line.remoteOffOthersComputer, locale).not.toMatch(/폰|phone/i);
+        sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
+      }
+      // not the phone app (a plain window with an Electron UA but no bridge): the old words stay
+      phone = false; sessionView = { ...sessionView, remote_control: false };
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await render('ko');
+      expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '').toContain('폰에서 멈추거나 지시할 수 없어요');
+    } finally { ua.mockRestore(); }
+  });
+
+  it('story 4994: remote control off for an owner / someone else in the guest desktop app (a COMPUTER): the status line AND a refused command say «이 컴퓨터»; a phone keeps «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      for (const owner of [true, false]) {
+        remoteOffNow = { owner, names: { owners: '민', hasOwners: 'yes' }, connectedSetups: 1 };
+        // the status line (the session says remote control is off)
+        sessionView = { ...sessionView, remote_control: false };
+        server(res(201, {}));
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render();
+        const line = container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? '';
+        expect(line, `status owner=${owner}`).toContain('이 컴퓨터에서 멈추거나 지시할 수 없어요');
+        expect(line).not.toMatch(/폰/);
+        // the command line (the server refuses a stop with remote_control_off)
+        sessionView = { device_name: 'SYJ-MacBook-Pro', state: 'working', remote_control: true, can_command: true, pending_permission_request_id: null, instruct_now: true };
+        server(res(409, { error: { code: 'remote_control_off' } }));
+        phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'x' });
+        await act(async () => { root.unmount(); }); root = createRoot(container);
+        await render();
+        await press(ko.button.stop); await settle();
+        const cmd = commandLine()?.textContent ?? '';
+        expect(cmd, `command owner=${owner}`).toContain('이 컴퓨터에서 멈추거나 지시할 수 없어요');
+        expect(cmd).not.toMatch(/폰/);
+      }
+    } finally { ua.mockRestore(); remoteOffNow = null; }
+  });
+
+  it('story 4994 (D-3): the server says 409 phone_not_paired — in a phone the line says «이 폰», in the guest desktop app (a COMPUTER) it says «이 컴퓨터» (stop and send, ko and en)', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    for (const guest of [false, true]) {
+      const ua = guest ? vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP) : null;
+      try {
+        for (const locale of ['ko', 'en'] as const) {
+          const m = (locale === 'ko' ? ko : enMessages.chats.agentSession) as typeof ko;
+          server(res(409, { error: { code: 'phone_not_paired' } }));
+          phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'x' });
+          await act(async () => { root.unmount(); }); root = createRoot(container);
+          await render(locale);
+          await press(m.button.stop); await settle();
+          expect(commandLine()?.textContent, `${locale} guest=${guest} stop`).toBe(guest ? m.command.stop.notPairedComputer : m.command.stop.notPaired);
+          await press(m.button.instruct);
+          await act(async () => { const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'x'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+          await press(m.sheet.send); await settle();
+          expect(commandLine()?.textContent, `${locale} guest=${guest} send`).toBe(guest ? m.command.send.notPairedComputer : m.command.send.notPaired);
+        }
+      } finally { ua?.mockRestore(); }
+    }
+    for (const lang of [ko, enMessages.chats.agentSession as typeof ko]) {
+      expect(lang.command.stop.notPairedComputer).not.toMatch(/폰|phone/i); expect(lang.command.send.notPairedComputer).not.toMatch(/폰|phone/i);
+    }
   });
 
   it('reads in English', async () => {
@@ -681,5 +886,198 @@ describe('the «바뀐 파일» button next to the stop / instruct buttons (stor
     await render();
     expect(container.querySelector('[data-testid="agent-changes-open"]')).not.toBeNull();
     expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
+  });
+});
+
+describe('[4983] the files line of the «바뀐 파일» sheet', () => {
+  const SETUP = '11111111-2222-4333-8444-555555555555';
+  const filesLine = () => document.body.querySelector<HTMLAnchorElement>('[data-testid="agent-changes-files"]');
+  async function openSheet() {
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return res(201, { command_id: '33333333-4444-4555-8666-777777777777' });
+      if (String(url).includes('desktop-changes')) return res(200, { state: 'done', files: [], more: false, total: 0 });
+      return res(200, sessionView);
+    });
+    await render();
+    await act(async () => { (container.querySelector('[data-testid="agent-changes-open"]') as HTMLButtonElement).click(); });
+    await settle(12);
+  }
+  it('inside the phone app the sheet\'s last line goes to THIS computer and THIS agent — nothing else rides on the address', async () => {
+    sessionView = { ...sessionView, setup_id: SETUP, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()?.getAttribute('href')).toBe(`/phone-files?setup_id=${SETUP}&agent_id=${AGENT}`);
+  });
+  it('in a browser the line is not drawn (only the phone app\'s shell can sign)', async () => {
+    phone = false;
+    sessionView = { ...sessionView, setup_id: SETUP, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()).toBeNull();
+  });
+  it('a session that names no computer (an older server) has no line', async () => {
+    sessionView = { ...sessionView, session_key: 's-1', can_read_changes: true };
+    await openSheet();
+    expect(filesLine()).toBeNull();
+    sessionView = { ...sessionView, setup_id: '' };
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await openSheet();
+    expect(filesLine()).toBeNull();
+  });
+});
+
+// (last in the file: its open sheet is a dialog, and a dialog left to the unmount must not be the one the earlier dialog tests start from)
+describe('[4977] the «기록» button of the strip', () => {
+  const SETUP = '55555555-6666-4777-8888-999999999999';
+  const caps = (records: unknown) => phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: records === undefined ? {} : { records } } : { id: 'c', ok: false, code: 'bad_request' }));
+  const recordsButton = () => container.querySelector('[data-testid="agent-records-open"]') as HTMLButtonElement | null;
+
+  // story 4993 (PO ⓐ): the strip is a screen of that computer — in the phone app, with a shell that says `direct: 1` + `direct_keep: 1`, its room keeps the computer's direct road (`direct.keep` with THAT computer's id); outside the phone app, or with a session that names no computer, nothing is asked
+  it('the direct road: the strip of a session that names its computer asks `direct.keep` for that computer — only inside the phone app', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    phoneCall.mockImplementation(async (type: string) => (type === 'shell.caps' ? { id: 'c', ok: true, caps: { direct: 1, direct_keep: 1 } } : type === 'direct.keep' ? { id: 'k', state: 'ready' } : { id: 'c', ok: false, code: 'bad_request' }));
+    await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep')).toEqual([['direct.keep', { setup_id: SETUP }]]);
+  });
+
+  it('the direct road: a session that names no computer, or a page outside the phone app, asks the shell nothing about a road', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: '' };
+    phoneCall.mockImplementation(async () => ({ id: 'c', ok: false, code: 'bad_request' }));
+    await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep' || c[0] === 'direct.status')).toEqual([]);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    phone = false; sessionView = { ...sessionView, setup_id: SETUP }; phoneCall.mockClear(); await render(); await act(async () => { await Promise.resolve(); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep' || c[0] === 'direct.status' || c[0] === 'direct.close' || c[0] === 'shell.caps')).toEqual([]); // (outside the phone app: not even the capability probe)
+  });
+
+  it('the phone app · a shell that says `records: 1` · a session that names its computer → [기록] sits with the other buttons', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    expect(recordsButton()?.textContent).toBe(ko.records.button);
+    expect(buttons()).toEqual([ko.records.button, ko.button.stop, ko.button.instruct]);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toHaveLength(2); // read ONCE by the strip's records button, and ONCE by the direct road's keeper (story 4993 · PO ⓐ: a different question, once per computer) — neither at every render
+  });
+
+  it('[기록] opens the sheet of THIS chat (its title and its lead) and reads through the shell\'s own words only', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    await act(async () => { recordsButton()!.click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).not.toBeNull();
+    expect(document.body.textContent).toContain(ko.records.title);
+    expect(document.body.textContent).toContain(ko.records.lead);
+    expect(document.querySelector('[data-testid="agent-records-computer"]')!.textContent).toBe(ko.records.computer.replace('{name}', 'SYJ-MacBook-Pro')); // whose history it is: the session's own computer
+  });
+
+  it('no button: an older shell (no `records`, or a word that is not 1) · a session that names no computer · the browser — and the browser never asks the shell', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    for (const records of [undefined, 0, 2, true, '1']) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      caps(records);
+      await render();
+      expect(recordsButton(), String(records)).toBeNull();
+    }
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    caps(1);
+    await render();
+    expect(recordsButton()).toBeNull();
+    sessionView = { ...sessionView, setup_id: SETUP };
+    phone = false;
+    phoneCall.mockClear();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    caps(1);
+    await render();
+    expect(recordsButton()).toBeNull();
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'shell.caps')).toEqual([]);
+  });
+
+  it('the button goes when a later read of the session no longer names its computer (the shell\'s earlier answer is not enough)', async () => {
+    vi.useFakeTimers();
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    expect(recordsButton()).not.toBeNull();
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull();
+  });
+
+  it('a session that loses its computer and gets one back does not reopen the sheet by itself, and the button waits for the shell to say again', async () => {
+    vi.useFakeTimers();
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    caps(1);
+    await render();
+    await act(async () => { recordsButton()!.click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).not.toBeNull();
+    sessionView = { ...sessionView, setup_id: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull();
+    let release: (v: unknown) => void = () => {};
+    phoneCall.mockImplementation(() => new Promise((r) => { release = r; })); // the shell has not answered yet
+    sessionView = { ...sessionView, setup_id: SETUP };
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    await settle();
+    expect(recordsButton()).toBeNull(); // not before the shell says it again
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull();
+    await act(async () => { release({ id: 'c', ok: true, caps: { records: 1 } }); });
+    await settle();
+    expect(recordsButton()).not.toBeNull();
+    expect(document.querySelector('[data-testid="agent-records-sheet"]')).toBeNull(); // and the sheet stays shut
+  });
+
+  it('with no other button (the agent is idle) [기록] stands alone at the right end', async () => {
+    server(res(201, {}));
+    sessionView = { ...sessionView, setup_id: SETUP, state: 'idle' };
+    caps(1);
+    await render();
+    expect(container.querySelector('[data-testid="agent-changes-buttons"] [data-testid="agent-records-open"]')).not.toBeNull();
+  });
+});
+
+// story 4993 (5a): the strip names the computer the session runs on — the shell may take the press over the same-network direct road (and the server's POST is the road when it does not)
+describe('[4993 5a] the strip and the direct road', () => {
+  const SETUP = '0f0e0d0c-0b0a-4908-8706-050403020100';
+  const shellAnswering = (extra: Record<string, unknown> = {}) => phoneCall.mockImplementation(async (type: string) => {
+    if (type === 'command.sign') return { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' };
+    if (type === 'shell.caps') return { id: 'c', ok: true, caps: { direct: 1 } };
+    if (type === 'direct.status') return { id: 's', ok: true, state: 'ready' };
+    if (type === 'direct.send') return { id: 'x', ok: true, sent: true };
+    if (type === 'direct.result') return { id: 'r', ok: true, state: 'done', ...extra };
+    throw new Error(`unexpected ${type}`);
+  });
+  it('a session that names its computer: [멈춤] goes over the direct road — the shell is told which computer, and the server\'s command line is not posted to', async () => {
+    vi.useFakeTimers(); sessionView = { ...sessionView, setup_id: SETUP };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]); shellAnswering();
+    await render(); await press(ko.button.stop); await poll(1);
+    const send = phoneCall.mock.calls.find((c) => c[0] === 'direct.send')!; expect(send[1]).toMatchObject({ setup_id: SETUP, row: { kind: 'stop_session', session_key: 's-9', payload: { session_key: 's-9', signed: 'S' } } });
+    expect(commandLine()?.textContent).toBe(ko.command.stopped);
+    expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands'))).toBe(false);
+  });
+  it('a session that does not name its computer: the shell is never asked about the road and the server gets the post as ever', async () => {
+    vi.useFakeTimers(); const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]); shellAnswering();
+    await render(); await press(ko.button.stop); await poll(1);
+    expect(phoneCall.mock.calls.map((c) => c[0])).toEqual(['command.sign']); expect(calls.some((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands'))).toBe(true); expect(commandLine()?.textContent).toBe(ko.command.stopped);
+  });
+  it('the direct road refuses (a closed word): the same press is posted to the server with the same signature — the person sees the same line', async () => {
+    vi.useFakeTimers(); sessionView = { ...sessionView, setup_id: SETUP };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    phoneCall.mockImplementation(async (type: string) => (type === 'command.sign' ? { id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' } : type === 'shell.caps' ? { id: 'c', ok: true, caps: { direct: 1 } } : type === 'direct.status' ? { id: 's', ok: true, state: 'ready' } : { id: 'x', ok: true, sent: false, why: 'ack' }));
+    await render(); await press(ko.button.stop); await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.stopped); expect(calls.filter((c) => c.init?.method === 'POST' && c.url.endsWith('/desktop-commands')).length).toBe(1);
   });
 });

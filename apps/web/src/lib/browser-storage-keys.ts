@@ -70,6 +70,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/reference-candidates.ts'] },
 
   // ── kept: view settings inside one project · device layout · per-person keys · in-flight payment (its own card, 4488) ──
+  // story 4973: which tool (Claude Code · Codex …) was last chosen on THIS computer in the app's one-screen recruit — a fact about the computer's installed tools (a slug, no person's words or ids), so it stays with the device
+  { key: 'sprintable.recruiter.lastRuntime', area: 'local', scope: 'kept', where: ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx'] },
   { key: 'board_axis_mode_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'done_collapsed_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'wip_limit_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },

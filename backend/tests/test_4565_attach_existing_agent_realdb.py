@@ -346,7 +346,10 @@ async def test_the_one_lock_order_agents_then_setups_by_id(attachable):
 
     def watch(conn, cursor, statement, parameters, context, executemany):
         if "FOR UPDATE" in statement:
-            table = "members" if "FROM members" in statement else "desktop_setups" if "FROM desktop_setups" in statement else "other"
+            # story 4976: the scrub of a cut-off computer's instruction words locks command rows with `SKIP LOCKED` — a lock that NEVER WAITS (a held row is passed over), so it cannot be a side of a lock cycle
+            # whatever its place; it is counted on its own (and is expected AFTER the two ordered locks), not folded into «other», so an unknown or waiting lock still turns this red
+            table = ("members" if "FROM members" in statement else "desktop_setups" if "FROM desktop_setups" in statement
+                     else "commands skip-locked" if "SKIP LOCKED" in statement and "FROM desktop_commands" in statement else "other")
             seen.append(table + (" ordered" if "ORDER BY" in statement else ""))
 
     async with _client() as c:
@@ -365,7 +368,7 @@ async def test_the_one_lock_order_agents_then_setups_by_id(attachable):
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", watch)
     assert exchange_locks == ["members ordered", "desktop_setups ordered"], exchange_locks
-    assert disconnect_locks == ["members ordered", "desktop_setups ordered"], disconnect_locks
+    assert disconnect_locks == ["members ordered", "desktop_setups ordered", "commands skip-locked"], disconnect_locks
 
 
 @pytest.mark.anyio
