@@ -143,4 +143,34 @@ describe('AttachmentMedia — story #2051', () => {
     expect(downloadLink).not.toBeNull();
     expect(downloadLink?.getAttribute('href')).toBe(SIGNED_URL);
   });
+
+  it('비디오 + onOpen: 칸을 누르면 큰 보기를 열고, 칸 안에서 재생하지도 서명하지도 않는다(story #5002)', async () => {
+    stubFetch(async () => ({ ok: true, status: 200, json: async () => ({ data: { url: SIGNED_URL } }) }));
+    const onOpen = vi.fn();
+    await act(async () => {
+      root.render(wrap(<AttachmentMedia storedUrl="att-1.mp4" conversationId="conv-1" label="영상.mp4" kind="video" onOpen={onOpen} />));
+    });
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(container.querySelector('video')).toBeNull();
+  });
+
+  it('오디오는 onOpen을 줘도 예전처럼 칸 안에서 재생한다(큰 보기는 영상만)', async () => {
+    stubFetch(async () => ({ ok: true, status: 200, json: async () => ({ data: { url: SIGNED_URL } }) }));
+    const onOpen = vi.fn();
+    await act(async () => {
+      root.render(wrap(<AttachmentMedia storedUrl="att-1.mp3" conversationId="conv-1" label="음성.mp3" kind="audio" onOpen={onOpen} />));
+    });
+    await act(async () => {
+      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(container.querySelector('audio')).not.toBeNull();
+  });
 });

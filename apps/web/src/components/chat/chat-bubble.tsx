@@ -550,16 +550,21 @@ export function ChatBubble({
   const attachmentConversationId = message.conversation_id || message.memo_id;
   const imageAttachmentEntries = useMemo(() => {
     const atts = message.attachments ?? [];
-    const isImageAtt = (a: (typeof atts)[number]) => Boolean(a.url) && a.content_type?.startsWith('image/');
+    // story #5002 — 크게 볼 수 있는 첨부 = 이미지 + 영상(오디오 · 그 외 파일은 아님). 좌우 넘기기가 둘을 첨부 순서대로 함께 넘긴다.
+    const isViewableAtt = (a: (typeof atts)[number]) => Boolean(a.url) && Boolean(a.content_type?.startsWith('image/') || a.content_type?.startsWith('video/'));
     return atts.map((att, pos) => ({
       att,
-      imageIndex: isImageAtt(att) ? atts.slice(0, pos).filter(isImageAtt).length : undefined,
+      imageIndex: isViewableAtt(att) ? atts.slice(0, pos).filter(isViewableAtt).length : undefined,
     }));
   }, [message.attachments]);
   const lightboxItems: LightboxItem[] = useMemo(
     () => imageAttachmentEntries
       .filter((e) => e.imageIndex !== undefined)
-      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? t('attachmentFileAlt') })),
+      .map((e): LightboxItem => ({
+        storedUrl: e.att.url!,
+        alt: e.att.name ?? e.att.filename ?? t('attachmentFileAlt'),
+        kind: e.att.content_type?.startsWith('video/') ? 'video' : 'image',
+      })),
     [imageAttachmentEntries, t],
   );
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -974,6 +979,19 @@ export function ChatBubble({
                 const href = att.url;
                 if (!href) return null;
                 const label = att.name ?? att.filename ?? t('attachmentFileAlt');
+                if (imageIndex !== undefined && att.content_type?.startsWith('video/')) {
+                  // story #5002 — 영상: 칸을 누르면 사진처럼 크게 보기(라이트박스)가 열리고 재생은 거기서.
+                  return (
+                    <AttachmentMedia
+                      key={href ?? i}
+                      storedUrl={href}
+                      conversationId={attachmentConversationId}
+                      label={label}
+                      kind="video"
+                      onOpen={() => setLightboxIndex(imageIndex)}
+                    />
+                  );
+                }
                 if (imageIndex !== undefined) {
                   return (
                     <AttachmentImage
