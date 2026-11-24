@@ -11,7 +11,10 @@
     "runtime": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "cursor",
+        "gemini",
+        "opencode"
       ],
       "required": false
     }
@@ -24,7 +27,10 @@
     "runtime": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "cursor",
+        "gemini",
+        "opencode"
       ],
       "required": false
     }
@@ -83,7 +89,10 @@
     "runtime": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "cursor",
+        "gemini",
+        "opencode"
       ],
       "required": false
     }
@@ -113,7 +122,10 @@
     "runtime": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "cursor",
+        "gemini",
+        "opencode"
       ],
       "required": false
     },

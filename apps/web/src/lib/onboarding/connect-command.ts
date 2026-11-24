@@ -13,12 +13,14 @@
  */
 
 /** the name the server is registered under — the same as the `.mcp.json` the connection artifact carries (not the channel plugin's `sprintable`) */
+import type { EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+
 export const MCP_SERVER_NAME = 'sprintable-mcp';
 
 /** the environment variable the Codex line puts the key in (Codex reads the bearer token from the environment, never from its file) */
 export const CODEX_KEY_ENV = 'SPRINTABLE_AGENT_KEY';
 
-export type ConnectRuntime = 'claude' | 'codex';
+export type ConnectRuntime = EnabledDesktopRuntimeId; // story 5008 (A1)
 
 /** the key as the screen shows it: the prefix that says what it is and the last four, nothing between */
 export function maskKey(key: string): string {

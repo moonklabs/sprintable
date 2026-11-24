@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.services.agent_runtime import DESKTOP_RUNTIME_IDS
 
 # story #4599 (0443 · contract v1.13.2 · PO 14:08Z): `end_session` — a person's signed end of the whole session (the one handle on
 # a turn held by a macOS window, where a stop cannot reach); always ends, what was signed is what happens
@@ -48,7 +49,7 @@ SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
 SESSION_INBOX_STREAMS = ("stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full")
 # story #4763 (0465): the first-screen question that stands at a computer (one closed word — the daemon's own list, 4528: folder trust · Claude's new-MCP-server(s) question · Codex's update)
 SESSION_FIRST_SCREEN_ASKS = ("trust", "mcp", "mcp_many", "update")
-SESSION_RUNTIMES = ("claude", "codex")
+SESSION_RUNTIMES = DESKTOP_RUNTIME_IDS  # story 5008: the registry is the list; migration 0497 holds the same names
 # story #4733 (0459): the clock view a computer reports. A row exists while a flow is open (panel · out · in) — or, in mode `none`, only while some agents stand
 # clocked out one by one (`outs`: ids and times, so the phone can draw each one's [출근]); a `none` report with nothing in it deletes the row
 CLOCK_VIEW_MODES = ("none", "panel", "out", "in")
@@ -224,7 +225,7 @@ class DesktopUsage(Base):
 
     __tablename__ = "desktop_usage"
     __table_args__ = (
-        CheckConstraint("runtime IN ('claude', 'codex')", name="ck_desktop_usage_runtime"),
+        CheckConstraint(_in("runtime", SESSION_RUNTIMES), name="ck_desktop_usage_runtime"),
         CheckConstraint("account ~ '^[a-z0-9]{8,32}$'", name="ck_desktop_usage_account"),
         CheckConstraint("state IN ('windows', 'unavailable')", name="ck_desktop_usage_state"),
         CheckConstraint("why IS NULL OR why IN ('api_key', 'not_read')", name="ck_desktop_usage_why"),

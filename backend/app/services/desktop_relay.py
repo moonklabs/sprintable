@@ -24,6 +24,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.agent_runtime import DesktopRuntimeId
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -350,7 +352,7 @@ class SessionReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_member_id: uuid.UUID
-    runtime: Literal["claude", "codex"]
+    runtime: DesktopRuntimeId
     # story #4534 (0437 · contract v1.12): the board's own words — never folded into «idle» (asked in the terminal · an error ·
     # paused at a usage limit)
     # story #4599 (0442 · contract v1.13): `waiting_system` — held by a macOS window on that computer (no limit rides on it)

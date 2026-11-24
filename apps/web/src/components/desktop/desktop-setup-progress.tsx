@@ -21,6 +21,7 @@ import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-des
 import { endsWithAgentWord, forgetActiveSetup, moveProgress, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type MoveProgress, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
 import { Failure, ToolsNotConnected } from './desktop-setup';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
+import type { EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
 
 /**
  * «시작» 뒤 진행 표시(유나 시안 v13 · PO 12:25Z): 설정 상태 조회(4826)를 2초마다 읽어 세 단계로. 조회는 setupProgress()의
@@ -28,7 +29,7 @@ import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-contr
  * 안 붙음 = ⑦ 블록). 설정 id가 없으면(옛 앱) 임시 한 장만.
  */
 // story 4658: the login command each runtime names for itself (the app's AUTH_COMMAND — the same two strings)
-const SIGN_IN_COMMAND: Record<'claude' | 'codex', string> = { claude: 'claude auth login', codex: 'codex login' };
+const SIGN_IN_COMMAND: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude auth login', codex: 'codex login' };
 
 /** story 4658 (Yuna 4658-design.md · 480 CHANGES ①): the sentence, then the command of each runtime on its own line — the CLI's own (the app's AUTH_COMMAND) */
 export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {

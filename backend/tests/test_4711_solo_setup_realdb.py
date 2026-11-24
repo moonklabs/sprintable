@@ -253,3 +253,28 @@ async def test_the_plan_project_limit_on_a_new_folder_is_the_plans_402_and_leave
         again, _, _ = await _solo_code(c, "d4424 solo project limit 2")
         r2 = await _confirm_solo(c, again, {"runtime": "claude", "project_name": "third-folder"})
         assert r2.status_code == 402 and "existing_project" not in r2.json()["error"], r2.text
+
+
+@pytest.mark.anyio
+async def test_a_runtime_switched_on_later_is_given_only_to_an_app_that_said_it_can_drive_it_5008(solo, monkeypatch):
+    """story 5008 (A1): the registry's `opencode` is switched on in this test (a «newer server»). An app from before (no runtime word) is refused it and nothing is made;
+    an app that sends `rt-opencode` gets the agent, named by the registry, with the runtime_type the registry gives. A newer app's word an OLDER server does not know is no error:
+    it is just not kept (KNOWN_CAPABILITIES)."""
+    from app.services import agent_runtime as ar
+
+    monkeypatch.setitem(ar.DESKTOP_RUNTIME_TYPES, "opencode", "opencode")
+    async with _client() as c:
+        before = await _state()
+        old, _, _ = await _solo_code(c, "d5008 old app", capabilities=["solo"])
+        r = await _confirm_solo(c, old, {"runtime": "opencode", "project_name": "x"})
+        assert (r.status_code, r.json()["error"]["code"]) == (422, "roles_invalid"), r.text
+        assert await _state() == before  # the refusal left nothing behind
+
+        new, _, new_id = await _solo_code(c, "d5008 new app", capabilities=["solo", "rt-opencode", "a-word-nobody-knows"])
+        assert (await _sql(fetch=f"SELECT capabilities FROM desktop_setups WHERE id='{new_id}'"))[0][0] == ["solo", "rt-opencode"]  # the unknown word was dropped, not an error
+        r = await _confirm_solo(c, new, {"runtime": "opencode", "project_name": "x"})
+        assert r.status_code == 200, r.text
+        (member,) = r.json()["members"]
+        assert (member["kind"], member["name"]) == ("agent", "OpenCode")
+        assert (await _sql(fetch=f"SELECT runtime_type FROM members WHERE id='{member['member_id']}'"))[0][0] == "opencode"
+

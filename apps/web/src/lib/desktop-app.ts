@@ -3,8 +3,10 @@
 // three values and three hands, nothing else. In a browser there is none (`desktopApp()` → undefined) and every screen stays as it
 // is. D2 (hiring in the app) and D3 (a project's folder) read it through this one function — never `window` directly.
 
-export const DESKTOP_RUNTIMES_IN_APP = ['claude', 'codex'] as const;
-export type DesktopRuntimeInApp = (typeof DESKTOP_RUNTIMES_IN_APP)[number];
+import { ENABLED_DESKTOP_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+
+export const DESKTOP_RUNTIMES_IN_APP = ENABLED_DESKTOP_RUNTIME_IDS; // story 5008 (A1): the one list is lib/desktop-runtimes.ts
+export type DesktopRuntimeInApp = EnabledDesktopRuntimeId;
 
 /** a runtime the app found on this computer — name · version · where (the app's «이 컴퓨터에서 찾은 에이전트» panel's picked ones) */
 export interface DesktopRuntimeFound { runtime: DesktopRuntimeInApp; version: string; executable: string }

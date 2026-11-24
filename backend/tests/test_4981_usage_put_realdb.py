@@ -207,7 +207,7 @@ async def test_11_the_database_itself_refuses_a_shape_the_door_would_not_let_in(
         for sql in (
             f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'claude', '/Users/me/.claude', 'unavailable', 'api_key', '[]', now())",   # an account that is a path (not an opaque id)
             f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'claude', 'SHORT', 'unavailable', 'api_key', '[]', now())",
-            f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'gemini', 'a1b2c3d4e5f6', 'windows', NULL, '[{{}}]', now())",       # a CLI of the closed list
+            f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'not-a-cli', 'a1b2c3d4e5f6', 'windows', NULL, '[{{}}]', now())",       # a CLI outside the closed list (story 5008: `gemini` is in the registry now — the list is migration 0497's names — so a name nobody has)
             f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'claude', 'a1b2c3d4e5f6', 'windows', 'api_key', '[{{}}]', now())",  # numbers with a reason
             f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'claude', 'a1b2c3d4e5f6', 'windows', NULL, '[]', now())",         # numbers with none
             f"INSERT INTO desktop_usage (setup_id, runtime, account, state, why, windows, seen_at) VALUES ('{sid}', 'claude', 'a1b2c3d4e5f6', 'unavailable', NULL, '[]', now())",     # the word with no reason

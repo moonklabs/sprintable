@@ -8,11 +8,13 @@
 // - 작업 폴더는 제안일 뿐 — 최종 판단은 데스크톱 로컬 층(홈 안 · `..` 없음 …)이 한다(PO 08:15Z).
 /** A role's kind from the server (4831): human → the person confirming · agent → one of this computer's agents · either → an agent,
  * or «나». The same union the recipe preset uses. */
+import { ENABLED_DESKTOP_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+
 export type RoleActorKind = 'human' | 'agent' | 'either';
 
 /** 데스크톱 앱이 찾는 런타임 — 고정 순서(기본값은 이 순서의 첫째). 셸 runtimes.ts와 같은 id. */
-export const DESKTOP_RUNTIMES = ['claude', 'codex'] as const;
-export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
+export const DESKTOP_RUNTIMES = ENABLED_DESKTOP_RUNTIME_IDS; // story 5008 (A1): the one list is lib/desktop-runtimes.ts
+export type DesktopRuntime = EnabledDesktopRuntimeId;
 
 /** 설정 코드(BE 4424: 43자 base64url). 모양이 틀리면 «코드 없음»과 같게 본다. */
 const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -437,7 +439,7 @@ export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRunti
 export function moveAfterTools(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], chosen: readonly string[]): DesktopRuntime[] {
   const pool = attachable.filter((a) => moveRowState(a, runtimes) !== 'runtime-missing');
   const picked = chosen.length > 0 ? pool.filter((a) => chosen.includes(a.id)) : pool;
-  return (['claude', 'codex'] as const).filter((r) => picked.some((a) => a.runtime === r));
+  return DESKTOP_RUNTIMES.filter((r) => picked.some((a) => a.runtime === r));
 }
 /** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
 export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {

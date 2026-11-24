@@ -4,7 +4,9 @@
  * person isn't shown a value the server would refuse. A change is used from the next start — the web never restarts anything
  * (restarting one by one is the desktop app's · PO ⓓ).
  */
-export const DESKTOP_RUNTIMES = ['claude-code', 'codex'] as const;
+import { ENABLED_MEMBER_RUNTIME_TYPES } from '@/lib/desktop-runtimes';
+
+export const DESKTOP_RUNTIMES = ENABLED_MEMBER_RUNTIME_TYPES as readonly ('claude-code' | 'codex')[]; // story 5008 (A1): the one list is lib/desktop-runtimes.ts (the server's registry, enabled rows)
 export type DesktopRuntime = (typeof DESKTOP_RUNTIMES)[number];
 
 /** Low → high, the order every effort list is shown in (유나 2026-10-03). */

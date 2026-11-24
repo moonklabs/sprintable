@@ -70,6 +70,7 @@ from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  
 # the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses) — story 4680: the table lives in
 # agent_runtime.py (runtime_capabilities carries its inverse); this name stays for the readers here
 from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as RUNTIME_TYPES  # noqa: E402
+from app.services.agent_runtime import DESKTOP_RUNTIME_REGISTRY, RUNTIME_CAPABILITIES, runtime_offered_to  # noqa: E402
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
 _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
@@ -99,7 +100,8 @@ def _now() -> datetime:
 # story #4576 — what an app may say it can take when it asks for a code; anything else it names is left out (a newer app's word
 # this server does not know yet is no error)
 # story 4711: «solo» = the first setup in three steps (one new agent for the folder the person chose · no recipe)
-KNOWN_CAPABILITIES = ("move", "solo")
+# story 5008 (A1): + one word per runtime that needs the app to say it can drive it («rt-opencode» …) — an older server drops the word, an older app never sends it
+KNOWN_CAPABILITIES = ("move", "solo", *RUNTIME_CAPABILITIES)
 
 
 async def create_setup_code(
@@ -253,7 +255,7 @@ SETUP_MAX_ROLES = 50
 SETUP_ROLE_NAME_MAX = 200
 
 
-def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
+def bind_setup_roles(rows: list[dict], roles: list[RoleChoice], capabilities: list[str] | None = None) -> RoleBinding:
     """The one place a confirmation body is checked against a recipe's setup rows (`setup_role_rows`) — every confirmation
     route uses it. A human row is never sent (it is the person); an agent row needs a runtime; an either row takes a runtime or
     owner «me». Anything else (an unknown or repeated role, a human row sent, «me» on an agent row, both or neither of runtime
@@ -291,7 +293,7 @@ def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
             existing[r.role] = agent
         elif r.owner == "me" and k == "either":
             person.add(r.role)
-        elif r.owner is None and r.runtime in RUNTIME_TYPES:
+        elif r.owner is None and runtime_offered_to(r.runtime, capabilities):  # story 5008: enabled, and — for a runtime that needs it — the app said it can drive it
             runtimes[r.role] = r.runtime
         else:
             raise DesktopSetupError("roles_invalid", f"role {r.role!r} / runtime {r.runtime!r} / owner {r.owner!r}")
@@ -534,7 +536,7 @@ async def _put_agent_on_team(db: AsyncSession, *, user_id: uuid.UUID, project_id
     return True
 
 
-async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> str:
+async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID, capabilities: list[str] | None = None) -> str:
     """story #4565 — the runtime (claude · codex) of an agent the confirming person may attach, or a closed code. An id that
     is not an active agent of THIS org is `agent_not_found` (another org's agent and no agent at all read the same — whether it
     exists elsewhere never shows), and so does one on a runtime the desktop cannot run (Qadir lens · the card); not yet in the
@@ -548,7 +550,7 @@ async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id
     if row is None or row.type != "agent" or not row.is_active:
         raise DesktopSetupError("agent_not_found")
     runtime = {v: k for k, v in RUNTIME_TYPES.items()}.get(row.runtime_type or "")
-    if runtime is None:
+    if runtime is None or not runtime_offered_to(runtime, capabilities):  # story 5008: a runtime that needs the app's word is not attachable by an app that did not say it
         raise DesktopSetupError("agent_not_found")  # Qadir lens (card): another runtime reads the same as no agent
     if agent_id not in await project_accessible_member_ids(db, org_id, project_id):
         raise DesktopSetupError("agent_not_in_project")
@@ -673,7 +675,7 @@ async def confirm_move_setup(
     added: list[uuid.UUID] = []  # story 4832: the agents this confirmation put on the project's team (who, not just how many — the event names them)
     for agent_id in agent_ids:
         try:
-            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
         except DesktopSetupError as e:
             # story 4832 (PO 11-03 «팀에 넣고 옮기기»): only a row that ASKED for it, and only for «not on the team yet» — every other refusal (another org's agent,
             # an agent with no desktop runtime, …) stays as it was, and the checks before the team's are `_attachable_runtime`'s own (it is asked again after the grant)
@@ -681,7 +683,7 @@ async def confirm_move_setup(
                 raise
             if await _put_agent_on_team(db, user_id=user_id, project_id=project_id, agent_id=agent_id):
                 added.append(agent_id)
-            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
         name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
         # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
         members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120],
@@ -749,7 +751,7 @@ async def setup_project_room(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.
     return None
 
 
-SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
+SOLO_AGENT_NAMES = {r.id: r.agent_name for r in DESKTOP_RUNTIME_REGISTRY}  # story 4711 (Yuna): the agent is called what the person picked (story 5008: the registry carries the names)
 
 
 _KEY_IGNORED = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\u2800")  # draw as nothing but are not format characters: grapheme joiner, Hangul/Khmer fillers, braille blank
@@ -851,7 +853,7 @@ async def confirm_solo_setup(
         raise DesktopSetupError("already_confirmed")
     if "solo" not in (setup.capabilities or []):
         raise DesktopSetupError("app_cannot_solo")
-    if runtime not in RUNTIME_TYPES:
+    if not runtime_offered_to(runtime, setup.capabilities):  # story 5008: enabled, and — for a runtime that needs it — the app said it can drive it
         raise DesktopSetupError("roles_invalid", "unknown runtime")
     # `not org_locked`: a member promoted between the first look and this one is refused this time (they press again) — never let a caller past without the lock
     if not org_locked or not await is_org_owner_or_admin(db, user_id, org_id):
@@ -1026,7 +1028,7 @@ async def confirm_setup(
 
     # the same rows GET /desktop/recipes hands the web (one function — PO 16:03Z)
     rows = setup_role_rows(definition)
-    binding = bind_setup_roles(rows, roles)
+    binding = bind_setup_roles(rows, roles, setup.capabilities)
     role_order = binding.order
     human_roles = binding.person_roles  # human rows and either rows chosen as «me»
     choices = dict(binding.agent_runtimes)
@@ -1034,7 +1036,7 @@ async def confirm_setup(
     # their runtime is their own. Nothing is made for them and the plan's agent count does not move.
     existing = binding.existing_agents
     for role, agent_id in existing.items():
-        choices[role] = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+        choices[role] = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id, capabilities=setup.capabilities)
 
     person_member_id: uuid.UUID | None = None
     if human_roles:

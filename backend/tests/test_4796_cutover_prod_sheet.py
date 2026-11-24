@@ -1067,7 +1067,18 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
     up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_"))]
+    # story 5008 (A1): 0497 is the 0477 shape on THREE CHECKs — the runtime-name CHECK of `desktop_sessions`, `agent_permission_requests` and `desktop_usage` dropped and made again with the registry's five names instead of `claude · codex` (the new CHECK is the old
+    # set PLUS three words, so every value a running old revision writes — `claude` · `codex` — still passes; an old revision never writes the new words). The reading lists the drop and the create of the loop in upgrade() (and the downgrade's pair, the
+    # same two calls); nothing is added, altered, renamed, backfilled or deleted, and no index is built. The three tables hold a computer's sessions, the open permission cards and a few usage rows per computer, so the scan under each CHECK's brief lock is small.
+    # The downgrade() STOPS (raises, changes nothing) when a row already names a new runtime — it never deletes a person's rows.
+    runtime_names = [h for h in hits if h.startswith("0497_")]
+    assert runtime_names and all(("drop_constraint" in h or "create_check_constraint" in h) for h in runtime_names), runtime_names
+    assert any("drop_constraint" in h for h in runtime_names) and any("create_check_constraint" in h for h in runtime_names), runtime_names
+    up0497 = (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|create_index|drop_index", up0497), "0497's upgrade() only swaps three CHECKs"
+    assert up0497.count("op.drop_constraint(") == 1 and up0497.count("op.create_check_constraint(") == 1 and "for table, name in _CHECKS" in up0497, "the one loop over the three runtime CHECKs"
+    assert "_NEW" in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text() and 'raise RuntimeError(' in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text(), "the downgrade stops instead of deleting rows"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
