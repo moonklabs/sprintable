@@ -767,6 +767,9 @@ class AttachableAgent(BaseModel):
     live_keys: int
     last_used_at: datetime | None = None
     in_project: bool
+    # story 5009 (A2 · AC5): the word an app must say (`caps=rt-…`) to drive this runtime — None = every app can. The page compares it with the words the app that opened it said, and shows
+    # «update the app» (never «no such agent», never «not on this computer») for an app from before the runtime
+    needs_capability: str | None = None
 
 
 class AttachableAgentsResponse(BaseModel):

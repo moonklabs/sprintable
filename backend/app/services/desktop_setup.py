@@ -1260,6 +1260,7 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
             "id": str(a.id), "name": a.name or "", "runtime": runtime_of[a.runtime_type],
             "live_keys": keys.get(a.id, (0, None))[0], "last_used_at": keys.get(a.id, (0, None))[1],
             "in_project": a.id in in_project,
+            "needs_capability": next((r.capability for r in DESKTOP_RUNTIME_REGISTRY if r.member_type == a.runtime_type), None),
         }
         for a in agents
     ]

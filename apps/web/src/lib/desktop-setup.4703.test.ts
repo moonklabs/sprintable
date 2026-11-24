@@ -64,7 +64,7 @@ describe('[4703] preselectHoldOf — the reason comes from the list and the foun
         for (const blocked of [[], ['claude']] as const) {
           const usableNow = usable.filter((r) => !(blocked as readonly string[]).includes(r));
           const list = listed ? [agent({ in_project: inProject, runtime })] : [];
-          const lands = list.some((a) => a.id === A && a.in_project && usableNow.includes(a.runtime));
+          const lands = list.some((a) => a.id === A && a.in_project && (usableNow as readonly string[]).includes(a.runtime));
           expect(preselectHoldOf(list, A, usableNow, blocked) === null, JSON.stringify({ listed, inProject, runtime, usableNow, blocked })).toBe(lands);
         }
       }

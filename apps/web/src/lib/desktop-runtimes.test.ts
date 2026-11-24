@@ -12,10 +12,10 @@ import { DESKTOP_RUNTIMES_IN_APP } from './desktop-app';
 import { DESKTOP_RUNTIMES as MEMBER_TYPES } from './agent-run-profile';
 
 describe('desktop runtimes — one module', () => {
-  it('today the app is offered claude and codex, in that order (first is the default)', () => {
-    expect([...ENABLED_DESKTOP_RUNTIME_IDS]).toEqual(['claude', 'codex']);
-    expect([...ENABLED_MEMBER_RUNTIME_TYPES]).toEqual(['claude-code', 'codex']);
-    expect(MEMBER_RUNTIME_TYPE).toEqual({ claude: 'claude-code', codex: 'codex' });
+  it('the app is offered claude, codex and opencode, in that order (first is the default) — OpenCode switched on in story 5009 (A2)', () => {
+    expect([...ENABLED_DESKTOP_RUNTIME_IDS]).toEqual(['claude', 'codex', 'opencode']);
+    expect([...ENABLED_MEMBER_RUNTIME_TYPES]).toEqual(['claude-code', 'codex', 'opencode']);
+    expect(MEMBER_RUNTIME_TYPE).toEqual({ claude: 'claude-code', codex: 'codex', opencode: 'opencode' });
   });
 
   it('every enabled id is one of the names the server allows in its tables', () => {
@@ -31,6 +31,7 @@ describe('desktop runtimes — one module', () => {
   it('a name that came over the wire is acted on only when it is enabled; anything else (a newer runtime, a number, nothing) is just not acted on', () => {
     expect(isEnabledRuntimeId('claude')).toBe(true);
     expect(isEnabledRuntimeId('codex')).toBe(true);
-    for (const v of ['opencode', 'gemini', 'a-future-agent', '', 7, null, undefined, ['claude']]) expect(isEnabledRuntimeId(v)).toBe(false);
+    expect(isEnabledRuntimeId('opencode')).toBe(true);
+    for (const v of ['gemini', 'cursor', 'a-future-agent', '', 7, null, undefined, ['claude']]) expect(isEnabledRuntimeId(v)).toBe(false);
   });
 });

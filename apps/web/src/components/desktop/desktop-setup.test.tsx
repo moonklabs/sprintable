@@ -108,11 +108,11 @@ describe('[SID:4427] desktop setup page', () => {
     // itself carries «시작» and its one line
     const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
     // story 4708 (Yuna `4708-copy-1016.md` row 4): after the app stopped deciding what is asked, the note no longer promises «그때마다 물어봐요»
-    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 해요. 이 컴퓨터의 파일 · 명령 · 다른 도구는 이 컴퓨터의 Claude Code · Codex 설정대로 묻거나 바로 해요.');
+    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 해요. 이 컴퓨터의 파일 · 명령 · 다른 도구는 이 컴퓨터의 Claude Code · Codex · OpenCode 설정대로 묻거나 바로 해요.');
     expect(row.previousElementSibling?.textContent).not.toContain('그때마다');
     // the English note is pinned too (a literal — not read back from the JSON it comes from): no «ask each time» promise
     const enNote = (enMessages as unknown as { desktop: { setup: { toolNote: string } } }).desktop.setup.toolNote;
-    expect(enNote).toBe("Agents work in Sprintable without asking. Files, commands and other tools on this computer follow this computer's Claude Code or Codex settings — they ask or go ahead as those settings say.");
+    expect(enNote).toBe("Agents work in Sprintable without asking. Files, commands and other tools on this computer follow this computer's Claude Code, Codex or OpenCode settings — they ask or go ahead as those settings say.");
     expect(enNote).not.toContain('ask each time');
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     expect(text()).not.toContain('발행'); // channel stage → later
@@ -486,6 +486,7 @@ describe('[SID:4765] the install commands the page offers (other screens import 
     expect(INSTALL).toEqual({
       claude: 'curl -fsSL https://claude.ai/install.sh | bash',
       codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh',
+      opencode: 'curl -fsSL https://opencode.ai/install | bash', // story 5009 — the same string as the app's table (desktop-electron/src/runtime-install.ts)
     });
     expect(JSON.stringify(INSTALL)).not.toContain('chatgpt.com');
   });

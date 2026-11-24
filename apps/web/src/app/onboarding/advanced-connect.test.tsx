@@ -133,6 +133,15 @@ describe('AdvancedConnect — story 4766', () => {
     expect(line.textContent).not.toMatch(/앞에 공백|공백을 넣/); // Kadir (3): no «put a space before it»
   });
 
+  it('[SID:5009] the by-hand lines exist for Claude Code and Codex only — OpenCode (offered through the app) gets no chip here (it would read as Codex\'s text), and no install row', async () => {
+    await mount();
+    await press('advanced-make');
+    expect(q('advanced-runtime-claude')).not.toBeNull();
+    expect(q('advanced-runtime-codex')).not.toBeNull();
+    expect(q('advanced-runtime-opencode')).toBeNull();
+    expect(q('advanced-install-opencode')).toBeNull();
+  });
+
   it('Codex: a different runtime gives its own line — the key goes in an environment variable, and the screen says where that stays', async () => {
     await mount();
     await press('advanced-make');

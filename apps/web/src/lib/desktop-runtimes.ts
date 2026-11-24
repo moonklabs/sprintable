@@ -12,11 +12,18 @@ export const DESKTOP_RUNTIME_IDS = ['claude', 'codex', 'opencode', 'gemini', 'cu
 export type DesktopRuntimeId = (typeof DESKTOP_RUNTIME_IDS)[number];
 
 /** The runtimes an app is offered today — switched on by the registry's `enabled` mark; the web does not decide this. */
-export const ENABLED_DESKTOP_RUNTIME_IDS = ['claude', 'codex'] as const satisfies readonly DesktopRuntimeId[];
+export const ENABLED_DESKTOP_RUNTIME_IDS = ['claude', 'codex', 'opencode'] as const satisfies readonly DesktopRuntimeId[];
 export type EnabledDesktopRuntimeId = (typeof ENABLED_DESKTOP_RUNTIME_IDS)[number];
 
+/**
+ * story 5009 (A2): the runtimes the by-hand «고급 연결» (a key + one pasted line per CLI) has words for — Claude Code and Codex. It is NOT the enabled list: OpenCode is offered through
+ * the app's setup, and a manual line for it (its own config file and key place) is a separate piece of work — a chip for it here would read as Codex's text.
+ */
+export const MANUAL_CONNECT_RUNTIME_IDS = ['claude', 'codex'] as const satisfies readonly EnabledDesktopRuntimeId[];
+export type ManualConnectRuntimeId = (typeof MANUAL_CONNECT_RUNTIME_IDS)[number];
+
 /** id → the members.runtime_type value the product uses (the server's DESKTOP_RUNTIME_TYPES, enabled rows). */
-export const MEMBER_RUNTIME_TYPE: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude-code', codex: 'codex' };
+export const MEMBER_RUNTIME_TYPE: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude-code', codex: 'codex', opencode: 'opencode' };
 export const ENABLED_MEMBER_RUNTIME_TYPES = ENABLED_DESKTOP_RUNTIME_IDS.map((id) => MEMBER_RUNTIME_TYPE[id]) as readonly string[];
 
 /** A value that came over the wire: is it a runtime this web build can act on? (anything else is kept as text and shown as unsupported). */

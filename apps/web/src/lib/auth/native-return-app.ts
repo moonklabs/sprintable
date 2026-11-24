@@ -70,10 +70,10 @@ export function appWorkdirLink(app: NativeReturnApp | null, memberId: string): s
  *  puts it in its setup page's fragment, so that agent is chosen there. Only a uuid-shaped id goes into the link. `intent` wins
  *  when both are given (a reopen/pair is the setup the person has — no agent to choose); no caller passes both today (PO 5065).
  *  story 4832: `move` — the sidebar's «이 컴퓨터로 에이전트 옮기기»: the app opens its setup page with «이미 있는 에이전트 옮기기» already chosen (`kind=move` in the `#`). */
-export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair' | 'folder' | 'move', opts?: { agent?: string | null; pick?: 'claude' | 'codex' | null }): string {
+export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair' | 'folder' | 'move', opts?: { agent?: string | null; pick?: 'claude' | 'codex' | 'opencode' | null }): string {
   const agent = opts?.agent && /^[0-9a-f-]{36}$/i.test(opts.agent) ? opts.agent : null;
   // story 4711: `intent=folder` asks the app for its Mac folder window; `pick` is the program the person had chosen (the app puts it back)
-  const pick = intent === 'folder' && (opts?.pick === 'claude' || opts?.pick === 'codex') ? `&pick=${opts.pick}` : '';
+  const pick = intent === 'folder' && (opts?.pick === 'claude' || opts?.pick === 'codex' || opts?.pick === 'opencode') ? `&pick=${opts.pick}` : '';
   const q = intent ? `intent=${intent}${pick}` : agent ? `agent=${agent}` : '';
   return `${appScheme(app)}:/desktop/setup${q ? `?${q}` : ''}`;
 }

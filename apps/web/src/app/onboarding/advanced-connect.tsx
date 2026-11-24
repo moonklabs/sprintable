@@ -28,7 +28,7 @@ import { buildConnectLine, CODEX_KEY_ENV, isPlainKey, maskKey, mcpUrlFromArtifac
 import { INSTALL, RUNTIME_LABEL } from '@/components/desktop/desktop-setup';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { VerifyRail, useVerificationRail } from './verify-rail';
-import { ENABLED_DESKTOP_RUNTIME_IDS } from '@/lib/desktop-runtimes';
+import { MANUAL_CONNECT_RUNTIME_IDS } from '@/lib/desktop-runtimes';
 
 type Phase = 'idle' | 'working' | 'ready' | 'failed';
 type Failure = 'network' | 'project' | 'agent' | 'hosted' | 'key';
@@ -287,7 +287,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
       <p className="break-keep text-xs font-medium text-foreground">{t('prereqTitle')}</p>
       <p className="break-keep text-xs text-muted-foreground">{t('prereqBody')}</p>
       <ul className="space-y-1">
-        {ENABLED_DESKTOP_RUNTIME_IDS.map((rt, i) => (
+        {MANUAL_CONNECT_RUNTIME_IDS.map((rt, i) => (
           <li key={rt} className="space-y-1.5" data-testid={`advanced-install-${rt}`}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
@@ -336,7 +336,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
       {made && !revoked ? (
         <div className="space-y-2" data-testid="advanced-ready">
           <div className="flex gap-0 rounded-md border border-border bg-muted p-1" role="group" aria-label={t('runtimeLabel')}>
-            {ENABLED_DESKTOP_RUNTIME_IDS.map((rt, i) => (
+            {MANUAL_CONNECT_RUNTIME_IDS.map((rt, i) => (
               <Button
                 key={rt}
                 type="button"
