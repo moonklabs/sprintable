@@ -170,7 +170,9 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogPortal>
-        <DialogOverlay className="bg-scrim-3" />
+        {/* story 5010 — on a phone the back was 80% black, so the room (its title · the composer · the bottom tabs) showed through and the counter row sat on the room's title row.
+            Below md the back is solid; from md up it is the same 80% as before (desktop unchanged). */}
+        <DialogOverlay className="bg-scrim-3 max-md:bg-scrim-solid" />
         <DialogPrimitive.Popup data-modal-popup=""
           aria-label={current.alt}
           className="fixed inset-0 z-50 flex flex-col outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"

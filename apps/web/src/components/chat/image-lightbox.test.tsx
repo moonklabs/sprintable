@@ -430,4 +430,24 @@ describe('ImageLightbox — story #5002 영상 모드', () => {
     expect(document.querySelector('video')).toBeNull();                                                  // it must not draw a video over the picture
     expect(document.querySelector('img[data-next-image="true"]')?.getAttribute('src')).toBe(SIGNED2);
   });
+
+  it('폰 폭에서는 크게 보기 바탕이 속이 안 비치게 꽉 차고, 데스크톱 폭은 예전 80% 그대로다(story 5010)', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]');
+    expect(overlay).not.toBeNull();
+    expect(overlay!.className).toContain('max-md:bg-scrim-solid');   // below md: solid, nothing of the room behind it shows
+    expect(overlay!.className).toContain('bg-scrim-3');              // md and up: the same 80% as before
+  });
+
+  it('속이 안 비치는 색 토큰이 두 테마에 정의돼 있다(없으면 폰에서 바탕이 투명으로 돌아간다)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const css = readFileSync(resolve(__dirname, '../../app/globals.css'), 'utf8');
+    expect(css.match(/--scrim-solid:\s*oklch\(0 0 0\)/g)?.length).toBe(2);                 // light and dark blocks
+    expect(css).toContain('--color-scrim-solid: var(--scrim-solid)');                          // the utility `bg-scrim-solid` exists
+  });
 });
