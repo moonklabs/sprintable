@@ -26,6 +26,9 @@ export type ManualConnectRuntimeId = (typeof MANUAL_CONNECT_RUNTIME_IDS)[number]
 export const MEMBER_RUNTIME_TYPE: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude-code', codex: 'codex', opencode: 'opencode' };
 export const ENABLED_MEMBER_RUNTIME_TYPES = ENABLED_DESKTOP_RUNTIME_IDS.map((id) => MEMBER_RUNTIME_TYPE[id]) as readonly string[];
 
+/** story 5009: runtimes that need no sign-in to start (OpenCode runs on its free models) — copy that says «sign in to X» never names them. */
+export const NO_SIGN_IN_RUNTIME_IDS = ['opencode'] as const satisfies readonly EnabledDesktopRuntimeId[];
+
 /** A value that came over the wire: is it a runtime this web build can act on? (anything else is kept as text and shown as unsupported). */
 export function isEnabledRuntimeId(value: unknown): value is EnabledDesktopRuntimeId {
   return typeof value === 'string' && (ENABLED_DESKTOP_RUNTIME_IDS as readonly string[]).includes(value);

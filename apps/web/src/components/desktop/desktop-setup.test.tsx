@@ -200,6 +200,17 @@ describe('[SID:4427] desktop setup page', () => {
     expect([q.get('code'), q.get('setup'), q.get('runtimes')]).toEqual([CODE, 's-1', 'claude']); // not only the code: everything the page held
     replaceState.mockRestore();
   });
+  it('[SID:5009] a reload keeps the runtime words the app said (rt-opencode) — else a modern app would read as «outdated» after [다시 확인]', async () => {
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn() } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'opencode']} setupId="s-1" appRuntimeWords={['rt-opencode']} />, 'member');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    expect(new URLSearchParams(replaced.split('#')[1]).get('caps') ?? '').toContain('rt-opencode');
+    replaceState.mockRestore();
+  });
+
   it('confirm codes → screens (closed list); an unknown code is not guessed', () => {
     expect(failureForCode('not_org_admin')).toBe('not-admin');
     expect(failureForCode('person_session_required')).toBe('not-admin');

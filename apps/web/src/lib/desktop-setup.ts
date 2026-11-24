@@ -8,7 +8,7 @@
 // - 작업 폴더는 제안일 뿐 — 최종 판단은 데스크톱 로컬 층(홈 안 · `..` 없음 …)이 한다(PO 08:15Z).
 /** A role's kind from the server (4831): human → the person confirming · agent → one of this computer's agents · either → an agent,
  * or «나». The same union the recipe preset uses. */
-import { ENABLED_DESKTOP_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+import { ENABLED_DESKTOP_RUNTIME_IDS, NO_SIGN_IN_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
 
 export type RoleActorKind = 'human' | 'agent' | 'either';
 
@@ -452,7 +452,8 @@ export const moveRowBlocked = (state: MoveRowState): boolean => state === 'runti
 export function moveAfterTools(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], chosen: readonly string[], appRuntimeWords: readonly string[] = []): DesktopRuntime[] {
   const pool = attachable.filter((a) => !moveRowBlocked(moveRowState(a, runtimes, appRuntimeWords)));
   const picked = chosen.length > 0 ? pool.filter((a) => chosen.includes(a.id)) : pool;
-  return DESKTOP_RUNTIMES.filter((r) => picked.some((a) => a.runtime === r));
+  // the line says «sign in to …»: a runtime that needs no sign-in is never named in it (an OpenCode-only move has no such line to draw — the page hides the item when this is empty)
+  return DESKTOP_RUNTIMES.filter((r) => !(NO_SIGN_IN_RUNTIME_IDS as readonly string[]).includes(r) && picked.some((a) => a.runtime === r));
 }
 /** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
 export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], appRuntimeWords: readonly string[] = []): AttachableAgent[] {

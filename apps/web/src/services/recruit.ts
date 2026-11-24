@@ -211,6 +211,6 @@ export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
   // hermes ②커넥터 안내가 조용히 사라진다(§7 "한 축이 두 물음" 함정, PO+유나 2026-08-05 정정).
   { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: 'http', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'openclaw', display_name: 'OpenClaw', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
-  { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null, desktop_runtime: 'opencode' },
   { slug: 'pi', display_name: 'Pi', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
 ];

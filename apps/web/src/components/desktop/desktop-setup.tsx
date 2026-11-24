@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
+import { NO_SIGN_IN_RUNTIME_IDS } from '@/lib/desktop-runtimes';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
@@ -711,7 +712,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
   const reloadKeepingSetup = () => {
     // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(appRuntimeWords.length ? { appRuntimeWords } : {}), ...(preselect ? { agent: preselect } : {}) }));
     window.location.reload();
   };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
@@ -883,7 +884,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             <div className="mt-3 rounded-md border p-3 text-xs text-muted-foreground" data-testid="setup-move-after">
               <p className="font-medium text-foreground">{t('move.afterTitle')}</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t('move.afterLogin', { tools: afterTools, josa: pickEunNeunJosa(afterTools) })}</li>
+                {afterTools ? <li>{t('move.afterLogin', { tools: afterTools, josa: pickEunNeunJosa(afterTools) })}</li> : null}
                 <li>{t('move.afterOldComputer')}</li>
                 <li>{t('move.afterMemo')}</li>
               </ul>
@@ -1076,7 +1077,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           <p role="status" aria-live="polite" className="mt-2 break-keep text-xs text-foreground empty:hidden" data-testid="setup-put-on-team-done">
             {putDone ? t('putOnTeamDone', { name: putDone }) : null}
           </p>
-          {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
+          {claudeBlocked && runtimes.includes('codex') ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
         </section>
   
@@ -1135,7 +1136,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 : preselectHold.reason === 'app_outdated' ? t('preselect.appOutdated', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
                 : preselectHold.reason === 'outside_project' ? t('preselect.notInProject', { name: preselectHold.agent.name })
                   : preselectHold.reason === 'runtime_missing'
-                    ? t('preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
+                    ? t(NO_SIGN_IN_RUNTIME_IDS.includes(preselectHold.agent.runtime as never) ? 'preselect.runtimeMissingNoSignIn' : 'preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
                     : t('preselect.runtimeBlocked', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })}
             </p>
             {preselectHold.reason === 'runtime_missing' ? (

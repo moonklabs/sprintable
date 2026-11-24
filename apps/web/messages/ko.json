@@ -7689,6 +7689,7 @@
         "notListed": "고른 에이전트는 이 컴퓨터에서 시작할 수 없어요",
         "notInProject": "{name} · 이 프로젝트 팀에 아직 없어요 — 팀에 넣으면 이 컴퓨터에서 시작할 수 있어요",
         "runtimeMissing": "{name} · 이 컴퓨터에서 {runtime}{eulReul} 찾지 못했어요 — 설치하고 로그인한 뒤 다시 찾아 주세요",
+        "runtimeMissingNoSignIn": "{name} · 이 컴퓨터에서 {runtime}{eulReul} 찾지 못했어요 — 설치한 뒤 다시 찾아 주세요",
         "appOutdated": "{name} · {runtime}{eunNeun} 지금 쓰는 앱 판에서는 아직 지원하지 않아요 — 앱을 업데이트한 뒤 다시 열어 주세요",
         "runtimeBlocked": "{name} · {runtime}{eunNeun} 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어요",
         "useNew": "새로 만들기로 바꾸기"
