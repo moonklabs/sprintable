@@ -268,6 +268,7 @@
   --color-scrim-1: var(--scrim-1);
   --color-scrim-2: var(--scrim-2);
   --color-scrim-3: var(--scrim-3);
+  --color-scrim-solid: var(--scrim-solid);
   --color-on-scrim: var(--on-scrim);
   /* story 4831 — «항상 어두운 면 위»의 희미한 면 · 선(지금은 이미지 확대 보기의 단추). 내 말풍선은 밝은 틴트라 «항상 어두운 면»이 아니다 — 그 위의 카드는 일반 카드 표면을 쓴다. 겹침색(overlay-*)은 테마를 따라 라이트에서 검정 알파가 되지만, 이 자리들은 두 테마 모두 어두우므로 흰 알파로 고정한다. */
   --color-on-scrim-fill-1: var(--on-scrim-fill-1);
@@ -453,6 +454,7 @@
   --scrim-1: oklch(0 0 0 / 0.3);
   --scrim-2: oklch(0 0 0 / 0.55);
   --scrim-3: oklch(0 0 0 / 0.8);
+  --scrim-solid: oklch(0 0 0); /* story 5010: a viewer that must hide the app behind it on a phone (the image · video viewer) */
   --on-scrim: oklch(1 0 0);
   --on-scrim-fill-1: oklch(1 0 0 / 0.12);
   --on-scrim-fill-2: oklch(1 0 0 / 0.2);
@@ -732,6 +734,7 @@
   --scrim-1: oklch(0 0 0 / 0.3);
   --scrim-2: oklch(0 0 0 / 0.55);
   --scrim-3: oklch(0 0 0 / 0.8);
+  --scrim-solid: oklch(0 0 0); /* story 5010: a viewer that must hide the app behind it on a phone (the image · video viewer) */
   --on-scrim: oklch(1 0 0);
   --on-scrim-fill-1: oklch(1 0 0 / 0.12);
   --on-scrim-fill-2: oklch(1 0 0 / 0.2);
