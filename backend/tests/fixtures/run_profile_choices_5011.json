@@ -1,0 +1,243 @@
+{
+  "catalog": {
+    "claude-code": {
+      "custom": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "models": {
+        "fable": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "opus": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "sonnet": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    "codex": {
+      "custom": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "models": {
+        "gpt-5.6-luna": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "gpt-5.6-sol": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "gpt-5.6-terra": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "gpt-6-astra": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "gpt-6-luna": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "gpt-6-sol": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "gpt-6.1-sol": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      }
+    }
+  },
+  "desktop_runtimes": {
+    "claude-code": "claude",
+    "codex": "codex"
+  },
+  "options": {
+    "model_pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+    "runtimes": [
+      {
+        "custom_model_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "model_pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\\[1m\\])?$",
+        "models": [
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "name": "fable"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "name": "opus"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "name": "sonnet"
+          }
+        ],
+        "runtime": "claude-code"
+      },
+      {
+        "custom_model_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "model_pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$",
+        "models": [
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "name": "gpt-6.1-sol"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "name": "gpt-6-astra"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "name": "gpt-6-sol"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "name": "gpt-6-luna"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "name": "gpt-5.6-sol"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "name": "gpt-5.6-terra"
+          },
+          {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "name": "gpt-5.6-luna"
+          }
+        ],
+        "runtime": "codex"
+      }
+    ]
+  },
+  "patterns": {
+    "claude-code": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\\[1m\\])?$",
+    "codex": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$"
+  }
+}

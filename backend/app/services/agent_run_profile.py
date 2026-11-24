@@ -23,7 +23,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.ownership import assert_agent_owner_mutable
-from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as _DESKTOP_RUNTIME_TYPES  # story 5008: one registry
+from app.services.agent_runtime import (  # story 5008: one registry
+    CLAUDE_MODEL_NAME,  # noqa: F401 — kept importable from here
+    DESKTOP_RUNTIME_REGISTRY,
+    DESKTOP_RUNTIME_TYPES as _DESKTOP_RUNTIME_TYPES,
+    MODEL_NAME,  # noqa: F401
+    run_profile_choices,
+)
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
 from app.models.agent_deployment import AgentPersona
@@ -32,43 +38,16 @@ from app.models.member import Member
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
 DESKTOP_RUNTIMES = {member_type: runtime_id for runtime_id, member_type in _DESKTOP_RUNTIME_TYPES.items()}
 
-_CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-_CODEX_SOL_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
-_CODEX_LUNA_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-_CODEX_COMMON_EFFORTS = ("low", "medium", "high", "xhigh")  # what every Codex model takes
-
-# runtime → {"models": {name: efforts}, "custom": efforts for a typed-in name or no model (the runtime's default)}.
-# Codex efforts are per model (`codex debug models`); hidden slugs (gpt-reserve · codex-auto-review) are not listed.
-# Listed = a start with it opens the conversation with no question (민 19:32Z · `4540-ac0/model-probe`, turn 0): gpt-5.5 is left out —
-# its TUI stops at «GPT-5.5 retires on October 14, 2026 … Try new model / Use existing model» before any thread starts, so an agent
-# given it would sit there. A typed-in name is still allowed (checked at its first start · 명세 C-5).
-# Bracketed aliases (`opus[1m]`) are not listed — a Claude name may be typed with the «[1m]» tail (CLAUDE_MODEL_NAME below).
+# story 5011: the model and effort lists are the registry's (agent_runtime.DESKTOP_RUNTIME_REGISTRY — each row carries its own, an empty one allowed). `CATALOG` and
+# `MODEL_NAMES` stay as VIEWS of it (same shapes as before, keyed by members.runtime_type, the runtimes that name something) for what read them.
+# Listed models = a start with one opens the conversation with no question; a typed-in name is still allowed (checked at its first start · 명세 C-5).
 CATALOG: dict[str, dict[str, Any]] = {
-    "claude-code": {
-        "models": {"fable": _CLAUDE_EFFORTS, "opus": _CLAUDE_EFFORTS, "sonnet": _CLAUDE_EFFORTS},
-        "custom": _CLAUDE_EFFORTS,
-    },
-    "codex": {
-        "models": {
-            "gpt-6.1-sol": _CODEX_SOL_EFFORTS,
-            "gpt-6-astra": _CODEX_SOL_EFFORTS,
-            "gpt-6-sol": _CODEX_SOL_EFFORTS,
-            "gpt-6-luna": _CODEX_LUNA_EFFORTS,
-            "gpt-5.6-sol": _CODEX_SOL_EFFORTS,
-            "gpt-5.6-terra": _CODEX_SOL_EFFORTS,
-            "gpt-5.6-luna": _CODEX_LUNA_EFFORTS,
-        },
-        "custom": _CODEX_COMMON_EFFORTS,
-    },
+    r.member_type: {"models": dict(r.choices.models), "custom": r.choices.custom_efforts}
+    for r in DESKTOP_RUNTIME_REGISTRY if r.enabled and r.choices and not r.choices.is_empty
 }
-
-# a typed-in model name goes on a command line: no space, quote, `=`, `;`, bracket, nor a leading `-` (§2)
-MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
-# story 4540 (PO 13:10Z · 13:11Z): Claude takes its 1M-context id as the name with a «[1m]» tail (`claude-opus-5-5[1m]` — our launchers'
-# value) · that one tail only, Claude only — Codex never. The same rule is the daemon's (desktop-host run-profile.ts), held to it by
-# the shared vector file tests/fixtures/model-name-vectors.json (same bytes in both repos · its sha256 pinned on both sides)
-CLAUDE_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
-MODEL_NAMES: dict[str, re.Pattern[str]] = {"claude-code": CLAUDE_MODEL_NAME, "codex": MODEL_NAME}
+MODEL_NAMES: dict[str, re.Pattern[str]] = {
+    r.member_type: r.choices.model_pattern for r in DESKTOP_RUNTIME_REGISTRY if r.enabled and r.choices and r.choices.model_pattern is not None
+}
 
 BULK_MAX = 50
 
@@ -88,16 +67,19 @@ def _reject(status: int, code: str) -> HTTPException:
 
 
 def allowed_efforts(runtime: str, model: str | None) -> tuple[str, ...]:
-    entry = CATALOG[runtime]
-    return entry["models"].get(model, entry["custom"]) if model is not None else entry["custom"]
+    choices = run_profile_choices(runtime)
+    if model is None:
+        return choices.custom_efforts
+    return dict(choices.models).get(model, choices.custom_efforts)
 
 
 def check(runtime: str | None, model: str | None, effort: str | None) -> None:
     """The saved result must be one the CLI takes (§2 — judged on the result, so a model change alone can leave an effort
-    the new model doesn't take: 422)."""
+    the new model doesn't take: 422). A runtime whose registry row names no models or efforts is saved with neither (story 5011: 422, never a 500)."""
     if runtime not in DESKTOP_RUNTIMES:
         raise _reject(422, "runtime_not_desktop")
-    if model is not None and not MODEL_NAMES[runtime].fullmatch(model):
+    pattern = run_profile_choices(runtime).model_pattern
+    if model is not None and (pattern is None or not pattern.fullmatch(model)):
         raise _reject(422, "invalid_model")
     if effort is not None and effort not in allowed_efforts(runtime, model):
         raise _reject(422, "invalid_effort")
@@ -107,12 +89,13 @@ def options() -> dict:
     return {
         "runtimes": [
             {
-                "runtime": runtime,
-                "models": [{"name": name, "efforts": list(efforts)} for name, efforts in entry["models"].items()],
-                "custom_model_efforts": list(entry["custom"]),
-                "model_pattern": MODEL_NAMES[runtime].pattern,
+                "runtime": r.member_type,
+                "models": [{"name": name, "efforts": list(efforts)} for name, efforts in r.choices.models],
+                "custom_model_efforts": list(r.choices.custom_efforts),
+                "model_pattern": r.choices.model_pattern.pattern,
             }
-            for runtime, entry in CATALOG.items()
+            # the runtimes an app is offered that have something to pick (a runtime that names no model or effort has no row here)
+            for r in DESKTOP_RUNTIME_REGISTRY if r.enabled and r.choices and not r.choices.is_empty and r.choices.model_pattern is not None
         ],
         # the strictest (no tail) for a client that reads one pattern only — each runtime's own is in its entry
         "model_pattern": MODEL_NAME.pattern,
