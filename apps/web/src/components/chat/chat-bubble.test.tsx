@@ -2688,6 +2688,31 @@ describe('ChatBubble — story 4856 첨부 서명 요청은 대화 id를 싣는�
     expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
   });
 
+  it('영상 첨부를 누르면 사진처럼 크게 보기가 열리고 재생은 거기서 된다(story #5002)', async () => {
+    const vid = { url: 'org/o/project/p/chat/c/mcp/u-clip.mp4', name: 'clip.mp4', content_type: 'video/mp4', size: 10 };
+    await show(raw({ attachments: [vid] }));
+    signed.length = 0;
+    const tile = Array.from(container.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') ?? '').includes('clip.mp4'));
+    expect(tile).toBeDefined();
+    expect(document.querySelector('[data-modal-popup]')).toBeNull();
+    await act(async () => { tile!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-modal-popup]')).not.toBeNull();             // the larger view opened
+    expect(document.querySelector('video')?.getAttribute('src')).toBe('https://signed/org/o/project/p/chat/c/mcp/u-clip.mp4');
+    expect(container.querySelector('video')).toBeNull();                              // not played in the small box
+    expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
+  });
+
+  it('사진 · 영상이 섞인 메시지는 크게 보기에서 첨부 순서대로 함께 넘어간다(영상이 목록에서 빠지지 않는다)', async () => {
+    const png = { url: 'org/o/project/p/chat/c/mcp/u-a.png', name: 'a.png', content_type: 'image/png', size: 10 };
+    const vid = { url: 'org/o/project/p/chat/c/mcp/u-clip.mp4', name: 'clip.mp4', content_type: 'video/mp4', size: 10 };
+    const png2 = { url: 'org/o/project/p/chat/c/mcp/u-b.png', name: 'b.png', content_type: 'image/png', size: 10 };
+    await show(raw({ attachments: [png, vid, png2] }));
+    const tile = Array.from(container.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') ?? '').includes('clip.mp4'));
+    await act(async () => { tile!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('2 / 3');    // the video is the 2nd of three viewable attachments
+    expect(document.querySelector('video')).not.toBeNull();
+  });
+
   it('최상위 메시지는 이전과 같다(대화 id)', async () => {
     await show(raw({}));
     expect(signed.length).toBeGreaterThan(0);

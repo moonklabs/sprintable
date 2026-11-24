@@ -298,3 +298,98 @@ describe('ImageLightbox — 창 접근 이름([SID:4375])', () => {
     expect(dialog().getAttribute('aria-label')).toBe(IMG2.alt);
   });
 });
+
+// ── story #5002 — 영상 첨부도 사진처럼 크게 본다 ──────────────────────────────────────────────
+const VID1 = { storedUrl: 'att-v1.mp4', alt: '영상1', kind: 'video' as const };
+const SIGNED_V1 = 'https://storage.googleapis.com/bucket/att-v1.mp4?sig=v';
+
+describe('ImageLightbox — story #5002 영상 모드', () => {
+  it('영상 항목은 <video controls autoPlay playsInline>을 서명 URL로 렌더하고 이미지 · 확대 힌트는 안 그린다', async () => {
+    mockFetchFor({ 'att-v1.mp4': SIGNED_V1 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[VID1]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const video = document.querySelector('video');
+    expect(video).not.toBeNull();
+    expect(video?.getAttribute('src')).toBe(SIGNED_V1);
+    expect(video?.hasAttribute('controls')).toBe(true);
+    expect(video?.hasAttribute('autoplay')).toBe(true);
+    expect(video?.hasAttribute('playsinline')).toBe(true);
+    expect(document.querySelector('img[data-next-image="true"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('더블탭');   // the zoom hint belongs to pictures
+    // the shared chrome is the same as for a picture: close + open-original
+    expect(document.querySelector('[aria-label="닫기"]')).not.toBeNull();
+    const openOriginal = Array.from(document.querySelectorAll('a')).find((a) => a.getAttribute('href') === SIGNED_V1);
+    expect(openOriginal?.getAttribute('target')).toBe('_blank');
+  });
+
+  it('이미지 · 영상이 섞인 목록은 첨부 순서대로 함께 넘어간다(영상이 빠지지 않는다)', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1, 'att-v1.mp4': SIGNED_V1, 'att-2.png': SIGNED2 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1, VID1, IMG2]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('1 / 3');
+    expect(document.querySelector('img[data-next-image="true"]')?.getAttribute('src')).toBe(SIGNED1);
+
+    const next = () => document.querySelector('[aria-label="다음 이미지"]') as HTMLButtonElement;
+    await act(async () => { next().dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('2 / 3');
+    expect(document.querySelector('video')?.getAttribute('src')).toBe(SIGNED_V1);
+    expect(document.querySelector('img[data-next-image="true"]')).toBeNull();
+
+    await act(async () => { next().dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('3 / 3');
+    expect(document.querySelector('video')).toBeNull();
+    expect(document.querySelector('img[data-next-image="true"]')?.getAttribute('src')).toBe(SIGNED2);
+  });
+
+  it('영상 위에서 시작한 터치 끌기는 다음 항목으로 넘기지 않는다(재생 막대를 끄는 손)', async () => {
+    mockFetchFor({ 'att-v1.mp4': SIGNED_V1, 'att-2.png': SIGNED2 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[VID1, IMG2]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const video = document.querySelector('video') as HTMLVideoElement;
+    const touch = (type: string, x: number) => {
+      const ev = new Event(type, { bubbles: true }) as Event & { touches?: unknown; changedTouches?: unknown };
+      ev.touches = [{ clientX: x }]; ev.changedTouches = [{ clientX: x }];
+      return ev;
+    };
+    await act(async () => {
+      video.dispatchEvent(touch('touchstart', 300));
+      video.dispatchEvent(touch('touchend', 100));   // a left swipe of 200px that began on the video
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain('1 / 2');   // still the video
+    expect(document.querySelector('video')).not.toBeNull();
+  });
+
+  it('재생이 실패(코덱 미지원)하면 형식 안내 + 다운로드 링크', async () => {
+    mockFetchFor({ 'att-v1.mp4': SIGNED_V1 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[VID1]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { document.querySelector('video')?.dispatchEvent(new Event('error')); });
+    expect(document.body.textContent).toContain('지원하지 않는 형식');
+    expect(document.querySelector('video')).toBeNull();
+    const dl = document.querySelector('a[download]');
+    expect(dl?.getAttribute('href')).toBe(SIGNED_V1);
+  });
+
+  it('닫기 · 이전 · 다음 단추는 손가락 기기에서 44 바닥을 가진다(touch:size-11 — 영상 크게 보기를 폰에서 누를 수 있게)', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1, 'att-v1.mp4': SIGNED_V1, 'att-2.png': SIGNED2 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1, VID1, IMG2]} startIndex={1} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    for (const label of ['닫기', '이전 이미지', '다음 이미지']) {
+      const el = document.querySelector(`[aria-label="${label}"]`);
+      expect(el, label).not.toBeNull();
+      expect(el!.className, label).toContain('touch:size-11');
+    }
+  });
+});

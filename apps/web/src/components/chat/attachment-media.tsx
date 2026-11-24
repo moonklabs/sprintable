@@ -14,6 +14,9 @@ import { useTranslations } from 'next-intl';
  * AC3: idle→fetching→ready 전 상태가 같은 고정 프레임을 쓴다(오디오/비디오 각각 자기 프레임
  * 고정, 종류 간에는 다름 — 오디오는 가로 바, 비디오는 16:9 박스).
  *
+ * story #5002 — 비디오는 `onOpen`을 받으면 [재생] 칸을 눌렀을 때 인라인으로 틀지 않고 사진처럼 크게 보기(라이트박스)를
+ * 연다(서명 fetch · 재생은 라이트박스 안에서). `onOpen`이 없으면 예전처럼 칸 안에서 재생한다.
+ *
  * AC4: 재생 시도 자체가 실패(코덱 미지원 등, <audio>/<video> onError)하면 "지원하지 않는
  * 형식" + 다운로드 링크로 폴백한다 — 조용히 깨진 플레이어를 보여주지 않는다. 서명 URL 발급
  * 자체가 실패(403/만료)하는 것과는 별개 상태로 구분한다(AttachmentImage의 denied/expired와
@@ -28,12 +31,14 @@ interface AttachmentMediaProps {
   storyId?: string;
   label: string;
   kind: 'audio' | 'video';
+  /** story #5002 — 비디오 칸을 누르면 큰 보기를 연다(없으면 칸 안 인라인 재생). */
+  onOpen?: () => void;
 }
 
 const AUDIO_FRAME_CLASS = 'flex h-12 w-72 max-w-full items-center gap-2 rounded-lg bg-muted px-3';
 const VIDEO_FRAME_CLASS = 'relative flex aspect-video w-72 max-w-full items-center justify-center overflow-hidden rounded-lg bg-muted';
 
-export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kind }: AttachmentMediaProps) {
+export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kind, onOpen }: AttachmentMediaProps) {
   const t = useTranslations('chats');
   const [state, setState] = useState<State>('idle');
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
@@ -143,7 +148,7 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
   return (
     <button
       type="button"
-      onClick={() => void play()}
+      onClick={() => (kind === 'video' && onOpen ? onOpen() : void play())}
       disabled={state === 'fetching'}
       aria-label={`${t('mediaPlay')}: ${label}`}
       className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-foreground transition hover:bg-muted/70 disabled:opacity-70`}
