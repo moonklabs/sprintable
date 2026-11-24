@@ -9,8 +9,8 @@ import manifest from './manifest';
 
 const SUBTITLE_KO = '책상을 떠나도, 일은 이어진다';
 const SUBTITLE_EN = 'Leave your desk. Your work keeps going.';
-const DESCRIPTION_KO = '에이전트가 맥에서 일하는 동안, 대화와 승인은 폰에서. 혼자 또는 작은 팀으로 일하는 사람을 위한 작업 공간.';
-const DESCRIPTION_EN = 'While your agents work on your Mac, chat and approve from your phone. A workspace for people who work solo or in small teams.';
+const DESCRIPTION_KO = '에이전트가 내 컴퓨터에서 일하는 동안, 대화와 승인은 폰에서. 혼자 또는 작은 팀으로 일하는 사람을 위한 작업 공간.';
+const DESCRIPTION_EN = 'While your agents work on your computer, chat and approve from your phone. A workspace for people who work solo or in small teams.';
 
 const OLD_PHRASES = ['열린 루프를 닫는 조직 OS', 'organization OS that closes open loops'];
 
