@@ -7414,6 +7414,7 @@
     "windowsUnsignedNotice": "이 설치 파일은 아직 서명 전이라, 처음 열 때 Windows가 「Windows의 PC 보호」 화면을 띄울 수 있어요. 「추가 정보」 → 「실행」을 누르면 열려요.",
     "linuxTarget": "대상 Linux (64비트)",
     "linuxDownloadCta": "Linux용 받기",
+    "linuxInstallNotice": "Ubuntu 24.04에서는 열기 전에 아래 명령을 먼저 실행해 주세요. 화면이 있는 데스크톱 Ubuntu용이에요.",
     "unavailable": "지금은 받을 수 없어요.",
     "setup": {
       "loading": "설정을 불러오고 있어요",

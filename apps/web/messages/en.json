@@ -7414,6 +7414,7 @@
     "windowsUnsignedNotice": "This installer isn't signed yet, so Windows may show \"Windows protected your PC\" the first time you open it. Choose More info, then Run anyway.",
     "linuxTarget": "For Linux (64-bit)",
     "linuxDownloadCta": "Download for Linux",
+    "linuxInstallNotice": "On Ubuntu 24.04, run this command before opening it. This is for a desktop Ubuntu with a screen.",
     "unavailable": "Not available right now.",
     "setup": {
       "loading": "Loading setup",

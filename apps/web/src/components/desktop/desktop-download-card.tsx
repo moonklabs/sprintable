@@ -79,6 +79,9 @@ export function isWindowsBrowser(userAgent: string, inPhoneApp: boolean): boolea
   return !inPhoneApp && /Windows NT/.test(userAgent);
 }
 
+/** [SID:4999] what a fresh Ubuntu 24.04 needs before the AppImage starts: FUSE 2 («AppImages require FUSE») and the sound library («libasound.so.2: cannot open shared object file») — a shell command, not UI text, so it is not in the message files */
+export const LINUX_PREREQUISITES_COMMAND = 'sudo apt install libfuse2t64 libasound2t64';
+
 /** [SID:4999] a Linux desktop's browser (never inside the phone app · never Android — its user agent carries «Linux» too · never an Arm Linux: the AppImage is the 64-bit x86 one; a ChromeOS agent says «CrOS», not «Linux», so it is no Linux here): the person who can use the Linux download */
 export function isLinuxBrowser(userAgent: string, inPhoneApp: boolean): boolean {
   return !inPhoneApp && /Linux/.test(userAgent) && !/Android|aarch64|arm/i.test(userAgent);
@@ -187,6 +190,12 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
         <Button asChild variant={ctaVariant === 'outline' ? 'secondary' : 'primary'} data-testid={`desktop-download-${p}-button`}>
           <a href={other.url} download onClick={onCta} onAuxClick={(e) => { if (e.button === 1) onCta?.(); }}>{t(p === 'windows' ? 'windowsDownloadCta' : 'linuxDownloadCta')}</a>
         </Button>
+        {p === 'linux' ? (
+          <div className="space-y-1" data-testid="desktop-download-linux-install-notice">
+            <p className="break-keep text-ds-small text-ds-ink-3">{t('linuxInstallNotice')}</p>
+            <code className="block select-all rounded bg-ds-surface-sunk px-2 py-1 text-ds-small text-ds-ink" data-testid="desktop-download-linux-install-command">{LINUX_PREREQUISITES_COMMAND}</code>
+          </div>
+        ) : null}
         {p === 'windows' && other.signed === false ? (
           <p className="break-keep text-ds-small text-ds-ink-3" data-testid="desktop-download-windows-unsigned-notice">{t('windowsUnsignedNotice')}</p>
         ) : null}
