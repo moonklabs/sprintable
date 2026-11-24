@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { usePairHref } from '@/hooks/use-pair-href';
+import { useDirectRoads } from '@/components/chat/use-direct-road';
 import { agentOnDevice, permissionLine, requestAge, shownSummary, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
@@ -101,6 +102,8 @@ export function useAgentPermissionRequests() {
   const listed = (requests ?? []).filter((r) => stillShown(r, now));
   const shown = [...listed, ...[...answers.values()].filter((a) => !listed.some((r) => r.id === a.row.id)).map((a) => a.row)];
   const waiting = shown.length > 0;
+  // story 4993 (ⓐ-3): an approval that waits is answered on the phone's own sheet and can ride the same-network road — so the road to ITS computer is made and kept while the card is on screen (an answerable request names its session and its computer)
+  useDirectRoads(listed.map((r) => (r.session_key && r.setup_id ? r.setup_id : undefined)));
   const [notices, setNotices] = useState(0);
   // story 4949 (codex): a card's clock must not wait for a read — a row with lines on screen is re-judged against its window every 5 s on its own (a read that hangs cannot keep an expired preview up)
   const hasLines = shown.some((r) => r.preview);

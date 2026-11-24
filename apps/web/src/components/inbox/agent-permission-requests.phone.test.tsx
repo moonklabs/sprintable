@@ -12,6 +12,7 @@ import enMessages from '../../../messages/en.json';
 import type { PermissionRequest } from '@/lib/agent-permissions';
 import { __resetPhoneBridgeForTest, claimPhoneBridge } from '@/lib/phone-bridge';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+import { __resetDirectKeepForTest } from '@/lib/phone-direct-keep';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -68,6 +69,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  __resetDirectKeepForTest(); // (story 4993 ⓐ-3: one keeper per computer for the page's life — reset between tests)
   container.remove();
   __resetPhoneBridgeForTest();
   delete window.__sprintablePhone;
@@ -98,6 +100,20 @@ const press = async (label: string) => {
   await act(async () => { b.click(); });
   await settle();
 };
+
+describe('[4993 ⓐ-3] the road of each computer that has an approval waiting', () => {
+  const keepsFor = () => sent.filter((x) => x.type === 'direct.keep').map((x) => x.args.setup_id as string).sort();
+  const S1 = '0f0e0d0c-0b0a-4908-8706-050403020100'; const S2 = '11111111-2222-4333-8444-555555555555';
+  const withCaps = () => { shellAnswers = (type) => (type === 'device.auth' ? { ok: true, auth } : type === 'shell.caps' ? { ok: true, caps: { direct: 1, direct_keep: 1 } } : type === 'direct.keep' ? { state: 'idle' } : { ok: true }); };
+  it('two requests of two computers and one more of the first: each computer\'s road is kept ONCE; a request that names no session (not answerable by the road) holds nothing', async () => {
+    withCaps(); installShell();
+    await render([req({ id: 'r1', request_id: 'q1', setup_id: S1, session_key: 's-1' }), req({ id: 'r2', request_id: 'q2', setup_id: S2, session_key: 's-2' }), req({ id: 'r3', request_id: 'q3', setup_id: S1, session_key: 's-3' }), req({ id: 'r4', request_id: 'q4', setup_id: '22222222-3333-4444-8555-666666666666', session_key: null })]);
+    await vi.waitFor(() => expect(keepsFor()).toEqual([S1, S2]));
+  });
+  it('no request waiting: nothing about a road is asked', async () => {
+    withCaps(); installShell(); await render([]); await settle(); expect(sent.filter((x) => x.type === 'direct.keep' || x.type === 'shell.caps' && false)).toEqual([]);
+  });
+});
 
 describe('[4532] approvals card inside the phone app', () => {
   it('[허용] → the shell gets {id, decision} only → the shell\'s signed goes to the answer route → «허용됨 · Bash», buttons gone', async () => {

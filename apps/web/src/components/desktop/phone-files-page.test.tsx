@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
+import { DIRECT_KEEP_GRACE_MS, __resetDirectKeepForTest } from '@/lib/phone-direct-keep';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 
 const fetchWithAuth = vi.fn();
@@ -91,6 +92,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  __resetDirectKeepForTest(); // (story 4993 ⓐ-3: the direct road's keeper is one per computer for the page's life — a test's screen must not leave it, or the mode it cached, for the next)
   container.remove();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -194,6 +196,22 @@ describe('[4983] outside and before', () => {
     server();
     await press(container.querySelector('[data-testid="phone-files-read-failed"] button'));
     expect(byId('phone-files-choose')).not.toBeNull();
+  });
+});
+
+describe('[4993 ⓐ-3] the road of the computer whose files are on screen', () => {
+  const KEEP_CAPS = { sealed_prompt: 1, files: 1, direct: 1, direct_keep: 1 };
+  const keeps = () => phoneCall.mock.calls.filter((c) => c[0] === 'direct.keep' || c[0] === 'direct.close').map((c) => `${c[0]}:${(c[1] as { setup_id: string }).setup_id}`);
+  it('the list of computers asks nothing about a road; a computer\'s folder on screen keeps its road (`direct.keep` for THAT computer); back to the list lets it go after the grace', async () => {
+    world.caps = KEEP_CAPS; await screen(); await act(async () => { await vi.advanceTimersByTimeAsync(31_000); }); expect(keeps(), 'the list: nothing').toEqual([]);
+    await press(byId('phone-files-project-proj-1')); await act(async () => { await vi.advanceTimersByTimeAsync(1); }); await flush(); expect(keeps()).toEqual([`direct.keep:${SETUP}`]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(31_000); }); expect(keeps().filter((k) => k.startsWith('direct.keep')).length, 'and every 30 s').toBeGreaterThanOrEqual(2);
+    const before = keeps().length; await press(byId('phone-files-back')); expect(byId('phone-files-folder'), 'back on the list of computers').toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(DIRECT_KEEP_GRACE_MS); }); await flush(); expect(keeps().slice(before), 'the computer is let go: its road closed after the grace, nothing asked after it').toEqual([`direct.close:${SETUP}`]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(31_000); }); expect(keeps().slice(before)).toEqual([`direct.close:${SETUP}`]);
+  });
+  it('outside the phone app, nothing is asked about a road (the page goes home)', async () => {
+    world.caps = KEEP_CAPS; await screen({ phone: false }); await act(async () => { await vi.advanceTimersByTimeAsync(31_000); }); expect(keeps()).toEqual([]);
   });
 });
 
