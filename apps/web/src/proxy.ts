@@ -39,6 +39,7 @@ const PUBLIC_EXACT = [
   // DESKTOP_DOWNLOAD_ENABLED is on (route.ts §desktop/get/macos). EXACT, not a prefix — the card's /desktop/downloads/macos.json stays behind a session.
   '/desktop/get/macos',
   '/desktop/get/windows', // [SID:4998] the Windows app: the same public redirect (route.ts §desktop/get/windows) — EXACT
+  '/desktop/get/linux', // [SID:4999] the Linux app: the same public redirect (route.ts §desktop/get/linux) — EXACT
   // story 4915 (PR 2) — the «다시 시도» page the proxy rewrites an unconfirmed page load to (static, no data; a direct visit is harmless)
   '/session-unconfirmed',
   '/llms-baos.txt',

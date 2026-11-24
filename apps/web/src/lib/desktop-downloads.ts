@@ -18,9 +18,9 @@ export function desktopDownloadBucket(value: string | undefined = process.env[DE
   return BUCKET_NAME.test(v) ? v : null;
 }
 
-/** [SID:4998] the app a person downloads: the Mac's DMG or the Windows installer — each has its own folder in the bucket (`macos-electron/` · `windows-electron/`) and its own `latest/manifest.json` of the same shape */
-export type DesktopPlatform = 'macos' | 'windows';
-const PLATFORM_FOLDER: Record<DesktopPlatform, string> = { macos: 'macos-electron', windows: 'windows-electron' };
+/** [SID:4998] the app a person downloads: the Mac's DMG · the Windows installer · the Linux AppImage — each has its own folder in the bucket (`macos-electron/` · `windows-electron/` · `linux-electron/`) and its own `latest/manifest.json` of the same shape */
+export type DesktopPlatform = 'macos' | 'windows' | 'linux';
+const PLATFORM_FOLDER: Record<DesktopPlatform, string> = { macos: 'macos-electron', windows: 'windows-electron', linux: 'linux-electron' };
 const manifestUrlFor = (bucket: string, platform: DesktopPlatform = 'macos'): string => `https://storage.googleapis.com/${bucket}/${PLATFORM_FOLDER[platform]}/latest/manifest.json`;
 
 export class DesktopDownloadUnavailableError extends Error {}

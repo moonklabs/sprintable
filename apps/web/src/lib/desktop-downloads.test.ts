@@ -60,6 +60,12 @@ describe('desktopDownloadBucket (story 4696)', () => {
 });
 
 describe('fetchDesktopDownloadManifest', () => {
+  it('[SID:4999] the Linux platform reads linux-electron/latest/manifest.json of the same bucket', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => { urls.push(url); return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' }; }) as unknown as typeof fetch;
+    await fetchDesktopDownloadManifest(fetchImpl, 'sprintable-desktop-releases', 'linux');
+    expect(urls[0]).toMatch(/^https:\/\/storage\.googleapis\.com\/sprintable-desktop-releases\/linux-electron\/latest\/manifest\.json\?_t=/);
+  });
   it('[SID:4998] the Windows platform reads windows-electron/latest/manifest.json of the same bucket (the default stays the Mac\'s)', async () => {
     const urls: string[] = [];
     const fetchImpl = (async (url: string) => { urls.push(url); return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' }; }) as unknown as typeof fetch;

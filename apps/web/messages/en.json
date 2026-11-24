@@ -7412,6 +7412,8 @@
     "windowsTarget": "For Windows (64-bit)",
     "windowsDownloadCta": "Download for Windows",
     "windowsUnsignedNotice": "This installer isn't signed yet, so Windows may show \"Windows protected your PC\" the first time you open it. Choose More info, then Run anyway.",
+    "linuxTarget": "For Linux (64-bit)",
+    "linuxDownloadCta": "Download for Linux",
     "unavailable": "Not available right now.",
     "setup": {
       "loading": "Loading setup",
