@@ -83,7 +83,11 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // story #5002 (codex QA) — 빠르게 넘기면 앞 항목의 서명 응답이 늦게 도착해 지금 항목 자리에 그려지거나(옛 영상 주소) 지금 항목의
+  // 상태를 «만료»로 덮을 수 있다 → 요청마다 번호를 매기고, 최신 번호가 아닌 응답은 버린다.
+  const signSeq = useRef(0);
   const fetchSignedUrl = useCallback(async (storedUrl: string) => {
+    const mine = ++signSeq.current;
     setSignState('fetching');
     setSignedUrl(null);
     try {
@@ -91,6 +95,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
       if (conversationId) params.set('conversation_id', conversationId);
       else if (storyId) params.set('story_id', storyId);
       const res = await fetchWithAuth(`/api/attachments/sign?${params.toString()}`);
+      if (mine !== signSeq.current) return;
       if (res.status === 403) {
         setSignState('denied');
         return;
@@ -100,6 +105,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
         return;
       }
       const json = (await res.json()) as { data?: { url?: string } };
+      if (mine !== signSeq.current) return;
       const url = json.data?.url;
       if (!url) {
         setSignState('expired');
@@ -108,7 +114,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
       setSignedUrl(url);
       setSignState('ok');
     } catch {
-      setSignState('expired');
+      if (mine === signSeq.current) setSignState('expired');
     }
   }, [conversationId, storyId]);
 
@@ -124,6 +130,8 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // story #5002 (codex QA) — 영상에 초점이 있으면 ←/→는 그 영상의 앞뒤 건너뛰기(기본 동작)다. 넘기기로 가로채지 않는다(단추 · 스와이프로 넘김).
+      if ((e.target as HTMLElement | null)?.tagName === 'VIDEO') return;
       if (e.key === 'ArrowLeft') goPrev();
       else if (e.key === 'ArrowRight') goNext();
     };

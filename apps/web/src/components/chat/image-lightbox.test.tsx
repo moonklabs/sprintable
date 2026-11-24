@@ -392,4 +392,42 @@ describe('ImageLightbox — story #5002 영상 모드', () => {
       expect(el!.className, label).toContain('touch:size-11');
     }
   });
+
+  it('영상에 초점이 있을 때 ←/→는 넘기기로 가로채지 않는다(영상의 앞뒤 건너뛰기 기본 동작) — 다른 곳에서는 여전히 넘어간다', async () => {
+    mockFetchFor({ 'att-v1.mp4': SIGNED_V1, 'att-2.png': SIGNED2 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[VID1, IMG2]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // a <video> that holds the focus (here outside the dialog's own React tree so the event certainly reaches the window listener)
+    const focused = document.createElement('video');
+    document.body.appendChild(focused);
+    await act(async () => { focused.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+    focused.remove();
+    expect(document.body.textContent).toContain('1 / 2');            // not paged: the video keeps its own seek key
+    expect(document.querySelector('video')).not.toBeNull();
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain('2 / 2');            // elsewhere the arrow still pages
+  });
+
+  it('빨리 넘겨도 늦게 도착한 앞 항목의 서명 응답은 지금 항목을 덮지 못한다(옛 영상 주소 · 옛 «만료»)', async () => {
+    let releaseFirst: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const path = new URL(String(input), 'http://localhost').searchParams.get('path') ?? '';
+      if (path === 'att-v1.mp4') {
+        await new Promise<void>((r) => { releaseFirst = r; });          // the video's answer is held back
+        return { ok: true, status: 200, json: async () => ({ data: { url: SIGNED_V1 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { url: SIGNED2 } }) };
+    }));
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[VID1, IMG2]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    const next = document.querySelector('[aria-label="다음 이미지"]') as HTMLButtonElement;
+    await act(async () => { next.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('img[data-next-image="true"]')?.getAttribute('src')).toBe(SIGNED2);   // now on the picture
+    await act(async () => { releaseFirst?.(); await new Promise((r) => setTimeout(r, 30)); });              // the video's late answer arrives (and is let settle)
+    expect(document.querySelector('video')).toBeNull();                                                  // it must not draw a video over the picture
+    expect(document.querySelector('img[data-next-image="true"]')?.getAttribute('src')).toBe(SIGNED2);
+  });
 });

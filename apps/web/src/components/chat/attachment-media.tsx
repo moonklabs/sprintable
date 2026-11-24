@@ -145,10 +145,16 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
   }
 
   // idle | fetching — AC2: [재생]을 누르기 전엔 fetch가 일어나지 않는다.
+  // story #5002 — 영상 + onOpen이면 큰 보기를 연다. 이름 붙은 핸들러로 둔다: 인라인 삼항이 className의 `kind === 'video'`와 짝이 되어
+  // verify:no-stateless-toggle(③-같음 «고르는 단추»)이 «고름 상태 단추»로 잘못 읽었다(PO 5909 CI).
+  const handleOpenOrPlay = () => {
+    if (kind === 'video' && onOpen) onOpen();
+    else void play();
+  };
   return (
     <button
       type="button"
-      onClick={() => (kind === 'video' && onOpen ? onOpen() : void play())}
+      onClick={handleOpenOrPlay}
       disabled={state === 'fetching'}
       aria-label={`${t('mediaPlay')}: ${label}`}
       className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-foreground transition hover:bg-muted/70 disabled:opacity-70`}
