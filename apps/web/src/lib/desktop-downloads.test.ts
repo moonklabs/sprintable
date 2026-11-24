@@ -60,6 +60,15 @@ describe('desktopDownloadBucket (story 4696)', () => {
 });
 
 describe('fetchDesktopDownloadManifest', () => {
+  it('[SID:4998] the Windows platform reads windows-electron/latest/manifest.json of the same bucket (the default stays the Mac\'s)', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => { urls.push(url); return { ok: true, status: 200, statusText: 'OK', text: async () => '{}' }; }) as unknown as typeof fetch;
+    await fetchDesktopDownloadManifest(fetchImpl, 'sprintable-desktop-releases-dev', 'windows');
+    await fetchDesktopDownloadManifest(fetchImpl, 'sprintable-desktop-releases-dev');
+    expect(urls[0]).toMatch(/^https:\/\/storage\.googleapis\.com\/sprintable-desktop-releases-dev\/windows-electron\/latest\/manifest\.json\?_t=/);
+    expect(urls[1]).toMatch(/\/macos-electron\/latest\/manifest\.json\?_t=/);
+  });
+
   it('reads macos-electron/latest/manifest.json past the cache (no-store · a new query each call) and returns the body as it is', async () => {
     const body = '{\n  "version": "0.2.0"\n}\n';
     const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => body });

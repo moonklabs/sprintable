@@ -217,3 +217,29 @@ describe('publicDownloadTarget (4763 follow-up)', () => {
     });
   });
 });
+
+describe('[SID:4998] one answer per platform and bucket: the Mac\'s file is never served for the Windows door', () => {
+  it('the same bucket, two platforms: each reads its own manifest and keeps its own answer', async () => {
+    clearDownloadTargetCache();
+    const bucket = 'sprintable-desktop-releases-dev';
+    const exe = `https://storage.googleapis.com/${bucket}/windows-electron/0.2.0/Sprintable-Setup-0.2.0-win-x64.exe`;
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      seen.push(String(url));
+      const body = String(url).includes('/windows-electron/') ? { url: exe } : { url: dmg(bucket) };
+      return { ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify(body) };
+    }) as unknown as typeof fetch;
+    expect(await publicDownloadTarget(bucket, fetchImpl)).toBe(dmg(bucket)); // (the default is the Mac)
+    expect(await publicDownloadTarget(bucket, fetchImpl, 'windows')).toBe(exe);
+    expect(await publicDownloadTarget(bucket, fetchImpl)).toBe(dmg(bucket)); // from its own cache
+    expect(await publicDownloadTarget(bucket, fetchImpl, 'windows')).toBe(exe);
+    expect(seen.length).toBe(2); // one read each — the second asks came from the platform's own kept answer
+    expect(seen[0]).toContain('/macos-electron/latest/manifest.json'); expect(seen[1]).toContain('/windows-electron/latest/manifest.json');
+  });
+
+  it('a Windows manifest whose url is the Mac\'s folder is still «ours» only by the bucket check (the platform folder is not part of the check) — and a url in another bucket is refused', async () => {
+    clearDownloadTargetCache();
+    const fetchImpl = (async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => JSON.stringify({ url: dmg('another-bucket') }) })) as unknown as typeof fetch;
+    expect(await publicDownloadTarget('sprintable-desktop-releases-dev', fetchImpl, 'windows')).toBeNull();
+  });
+});
