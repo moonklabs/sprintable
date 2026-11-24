@@ -46,6 +46,8 @@ _EXTRA_CLEAN = [
 ]
 
 
+pytestmark = pytest.mark.usefixtures("free_caps_on")  # story 5000: this file tests the cap mechanism — the old free numbers are put back
+
 @pytest.fixture
 async def solo(attachable):  # 4565's world plus an agent of the organization that already runs somewhere
     yield

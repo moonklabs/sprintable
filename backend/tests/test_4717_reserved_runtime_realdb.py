@@ -24,7 +24,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 
 from tests.test_4424_desktop_setup_realdb import _RAW
 
-pytestmark = [pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip"), pytest.mark.anyio]
+pytestmark = [pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip"), pytest.mark.anyio, pytest.mark.usefixtures("free_caps_on")]  # story 5000: this file tests the cap mechanism — the old free numbers are put back
 
 
 async def _runtime(member) -> str | None:
