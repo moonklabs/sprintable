@@ -1,8 +1,10 @@
 'use client';
 
-import { useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { deviceKindOf } from '@/lib/device-kind';
 import { claimPhoneBridge, isPhoneApp, phoneCall, subscribePhoneApp } from '@/lib/phone-bridge';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
+import { ON_OPEN_MS, startHandoffWatch, stopHandoffWatch } from '@/lib/phone-handoff-watch';
 
 /**
  * story #4532 — claim the phone app's signing bridge at the app root, first in <body>: the shell's one-time handle must be taken
@@ -13,6 +15,16 @@ import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context'
 export function PhoneBridgeClaim({ children }: { children: ReactNode }) {
   claimPhoneBridge();
   const inPhoneApp = useSyncExternalStore(subscribePhoneApp, isPhoneApp, () => false);
-  const value = useMemo(() => ({ inPhoneApp, phoneCall }), [inPhoneApp]);
+  const deviceKind = typeof navigator === 'undefined' ? 'phone' : deviceKindOf(navigator.userAgent); // (read where the page runs: the guest desktop app's window says `Electron/`)
+  const value = useMemo(() => ({ inPhoneApp, deviceKind, phoneCall }), [inPhoneApp, deviceKind]);
+  // story 4978 (C1b-phone): in the phone app, a look for the record key handoffs computers put for this phone — when the app opens and each time it comes back to the front (a computer may have sealed a new envelope while it was away), for a short while.
+  // Outside the phone app nothing is looked for; a page that goes away ends the watch.
+  useEffect(() => {
+    if (!inPhoneApp) return undefined;
+    const look = () => { if (document.visibilityState === 'visible') startHandoffWatch({ phoneCall, forMs: ON_OPEN_MS }); };
+    look();
+    document.addEventListener('visibilitychange', look);
+    return () => { document.removeEventListener('visibilitychange', look); stopHandoffWatch(); };
+  }, [inPhoneApp]);
   return <PhoneBridgeContext.Provider value={value}>{children}</PhoneBridgeContext.Provider>;
 }

@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
+import { isComputerLabel } from '@/lib/device-kind';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 /** story #4624 — one phone of the person's account on the limit screen (its pairs are the computers it is paired to now). */
@@ -24,18 +25,19 @@ export function LimitPhoneRow({ phone, asking, onAsk, onConfirm, onCancel }: {
   const viewerTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const t = useTranslations('phonePairing');
   const pairs = phone.pairs?.length ?? 0;
+  const device = isComputerLabel(phone.label); // story 4994: a computer's row (the guest desktop app) is not «a phone»
   return (
     <li className="flex flex-col gap-1" data-testid="pairing-limit-phone">
       <div className="flex items-center justify-between gap-2">
         <span className="text-ds-body font-medium text-ds-ink">{phone.label}</span>
-        {asking ? null : <Button variant="secondary" onClick={onAsk}>{tr('removePhone')}</Button>}
+        {asking ? null : <Button variant="secondary" onClick={onAsk}>{tr(device ? 'removePhoneComputer' : 'removePhone')}</Button>}
       </div>
       <span className="text-ds-small text-ds-ink-3">{typeof phone.last_used_at === 'string' ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
       {asking ? (
         <div className="flex flex-col gap-2">
-          <p className="text-ds-body text-ds-ink">{pairs > 0 ? tr('confirmRemovePhone', { phone: phone.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: phone.label })}</p>
+          <p className="text-ds-body text-ds-ink">{pairs > 0 ? tr(device ? 'confirmRemovePhoneComputer' : 'confirmRemovePhone', { phone: phone.label, n: pairs }) : tr(device ? 'confirmRemovePhoneUnpairedComputer' : 'confirmRemovePhoneUnpaired', { phone: phone.label })}</p>
           <div className="flex gap-2">
-            <Button variant="danger" onClick={onConfirm}>{tr('removePhone')}</Button>
+            <Button variant="danger" onClick={onConfirm}>{tr(device ? 'removePhoneComputer' : 'removePhone')}</Button>
             <Button variant="secondary" onClick={onCancel}>{tr('cancel')}</Button>
           </div>
         </div>

@@ -25,7 +25,7 @@ from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
-from app.services import desktop_changes, desktop_clock
+from app.services import desktop_changes, desktop_clock, desktop_usage, pairing_sessions
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -114,6 +114,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         last_beat = last_check = time.monotonic()
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
+        session_frames_sent: set[str] = set()  # story 4972 — each commitment · reveal of the new pairing once per connection
         reactivated_marks: set[str] = set()  # story 4739 — agents a wake named as turned on again (read below; each is looked at again before its frame)
         try:
             # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
@@ -146,10 +147,11 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                         commands = await relay.commands_to_send(s, setup_id, last_seq)
                         removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                         offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
+                        session_frames = [(k, f) for k, f in await pairing_sessions.frames_to_send(s, setup_id) if k not in session_frames_sent]
                         reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
                         reactivated_marks.clear()
                         if now - last_beat >= _HEARTBEAT_SEC:
-                            await relay.touch_device(s, setup_id)
+                            await relay.touch_device(s, setup_id, heard=False)  # story 4979: the SERVER's own tick — keeps `last_used_at` as it always did, is NOT the computer speaking
                         await s.commit()
                 if terminal is not None:  # the session is closed (rolled back, as before: nothing was written); the stream ends with its frame
                     yield terminal
@@ -160,6 +162,9 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 for o in offers:  # story #4531 — adds nothing by itself: the daemon pins only an offer it opened, its MAC and a person's [같아요]
                     offers_sent.add(o["offer_id"])
                     yield f"event: pairing_offer\ndata: {json.dumps(o)}\n\n"
+                for k, f in session_frames:  # story 4972 — a frame carries a public message of a pairing in progress and adds nothing by itself (the computer checks it against the session it opened; it pins nothing before its person's [같아요])
+                    session_frames_sent.add(k)
+                    yield f"event: pairing_{k.split(':', 1)[0]}\ndata: {json.dumps(f)}\n\n"
                 for aid in reactivated:  # story 4739 — a hint only: this agent's receiving may skip its wait now (the key still proves itself at the connect)
                     yield f"event: {sse_event_name(relay.AGENT_REACTIVATED_CODE)}\ndata: {json.dumps({'agent_member_id': str(aid)})}\n\n"
                 for c in commands:
@@ -407,6 +412,46 @@ async def get_device_sessions(
 # ── story #4533 (B-2) — permission requests up · the device's phone pairs (contract §9 ① · §10 ②) ───────────────────────────
 
 
+@router.post("/relay/presence")
+async def post_presence(
+    setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+) -> dict:
+    """story 4979 (PO 11-18): the computer's own «I am here», sent every ~60 s by a host that has this line. No body. The device is the token's own device (`_device`) — a presence can never stamp another device — and the
+    UPDATE names the very token the request came with. Counted per VERIFIED device (never per an unverified header — the 4828 trap): over PRESENCE_LIMIT a request is answered 429 before anything is written. What it writes:
+    `last_heard_at` · `last_presence_at` of that token — NOT `last_used_at` (the old rule that decides whether a command is accepted stays exactly as it was) — only when the last presence is older than a few seconds (one UPDATE; a flood writes nothing). It wakes nothing and touches no session.
+    Answers `{ok: true}` whether or not it wrote."""
+    from app.core.rate_limit import hit_person_limits
+
+    retry = hit_person_limits("desktop-presence", str(setup.id), relay.PRESENCE_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    await relay.touch_presence(db, setup.id, x_desktop_device_token)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.put("/relay/usage")
+async def put_usage(
+    body: desktop_usage.UsageReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+) -> dict:
+    """story 4981 (연결 ③): the computer's agent usage — closed numbers its host read (whole percent per limit window · the reset time) or the word `unavailable` with its reason. The device is the token's own (`_device`); the body
+    names no computer. Counted per VERIFIED device, before anything is written (429 `RATE_LIMITED`). An older report than the stored one (by the host's `seen_at`) is ignored; a closed computer is refused (409). Nothing of the body is logged."""
+    from app.core.rate_limit import hit_person_limits
+
+    retry = hit_person_limits("desktop-usage", str(setup.id), desktop_usage.USAGE_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    try:
+        written = await desktop_usage.apply_usage(db, setup, body, x_desktop_device_token)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"ok": True, "written": written}
+
+
 @router.post("/relay/permission-requests")
 async def post_permission_request(
     body: PermissionRequestReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
@@ -496,6 +541,58 @@ async def post_permission_host_added(
     return {"added": added}
 
 
+# ── story 4972 — pairing on the new procedure (design ② §5-2): the computer's half (services/pairing_sessions.py) ──────────────────────────────
+
+
+async def _session_call(db: AsyncSession, run):
+    try:
+        result = await run()
+    except relay.DesktopRelayError as exc:
+        if exc.code == pairing_sessions.BURNED:
+            await db.commit()  # the burn is the point of the refusal: it stays
+        else:
+            await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return result
+
+
+@router.post("/relay/pairing-sessions")
+async def post_pairing_session(body: pairing_sessions.SessionRegister, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer opened a QR on the new procedure: its offer is registered (a commitment can come only for an offer that exists). A new one ends the one before it."""
+    async def run():
+        await pairing_sessions.register(db, setup, body)
+        return JSONResponse(status_code=201, content={"state": "registered"})
+    return await _session_call(db, run)
+
+
+@router.post("/relay/pairing-sessions/{offer_id}/nonce")
+async def post_pairing_session_nonce(offer_id: uuid.UUID, body: pairing_sessions.SessionNonce, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer's n_m and its signature over «offer ‖ C_p ‖ n_m», after the commitment came (once)."""
+    async def run():
+        await pairing_sessions.post_nonce(db, setup, offer_id, body)
+        return {"state": "nonce"}
+    return await _session_call(db, run)
+
+
+@router.post("/relay/pairing-sessions/{offer_id}/confirmed")
+async def post_pairing_session_confirmed(offer_id: uuid.UUID, body: pairing_sessions.SessionConfirmed, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 (wiring 4a) — the computer's signed receipt «I confirmed THIS offer», written once after the computer kept the phone. Only this setup's device token; the server carries it, the phone checks it."""
+    async def run():
+        await pairing_sessions.post_confirmed(db, setup, offer_id, body)
+        return {"state": "confirmed"}
+    return await _session_call(db, run)
+
+
+@router.post("/relay/pairing-sessions/{offer_id}/close")
+async def post_pairing_session_close(offer_id: uuid.UUID, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4972 — the computer's person pressed [달라요] (or the QR was closed): the offer ends."""
+    async def run():
+        await pairing_sessions.close_by_host(db, setup, offer_id)
+        return {"state": "burned"}
+    return await _session_call(db, run)
+
+
 @router.post("/relay/pairing-offers/{offer_id}/reveal")
 async def post_pairing_reveal(offer_id: uuid.UUID, body: PairingReveal, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """story #4531 (contract v1.11 §10 ⑤ 3) — the daemon's random value for this pairing's number (drawn after the MAC bound the key)."""
@@ -518,7 +615,7 @@ async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Dep
         narrowed, dropped = await relay.accessible_startable(db, setup, body)
         n, applied, held = await relay.replace_startable(db, setup, narrowed)
         if applied:  # story #4734 (B): a report a newer one has already covered says nothing about what the computer takes NOW
-            await relay.note_computer_press(db, setup, body.computer_press is True)
+            await relay.note_capabilities(db, setup, {relay.COMPUTER_PRESS: body.computer_press is True, relay.SEALED_PROMPT: body.sealed_prompt is True, relay.FILE_WINDOW: body.file_window is True})  # story 4976 (A3): …and whether this Mac opens a sealed instruction · story 4987: …and accepts a window key
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
@@ -561,6 +658,277 @@ async def put_changes(command_id: uuid.UUID, request: Request, setup: DesktopSet
     await relay.touch_device(db, setup.id)
     await db.commit()
     return {"files": count}
+
+
+@router.put("/relay/files/{command_id}")
+async def put_files(command_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4983 (P5): the computer's SEALED answer to one files request it was told to do — written once into a row of this computer. The body is read and judged here so that no refusal (and no log, no error report)
+    ever carries what it held; it is an envelope the server cannot open: a size class, nothing else."""
+    from app.services import desktop_files
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_files.ANSWER_BODY_MAX:
+            raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_files.ANSWER_BODY_MAX:
+                raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        size = await desktop_files.write_answer(db, setup, command_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer)
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"bytes": size}
+
+
+@router.put("/relay/direct-count")
+async def put_direct_count(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4993 (P3b): the computer's running totals of its same-network direct road — `{epoch, commands, doors}`, numbers only (no command, no phone, no address). Idempotent: the greater total is kept. A body past a few
+    hundred bytes is refused before it is parsed; nothing of it is logged."""
+    from app.services import desktop_direct
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_direct.COUNT_BODY_MAX:
+            raise relay.DesktopRelayError(413, "direct_count_too_large", "the report is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_direct.COUNT_BODY_MAX:
+                raise relay.DesktopRelayError(413, "direct_count_too_large", "the report is larger than the server takes")
+        body = desktop_direct.parse_count(raw)
+        await desktop_direct.apply_count(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.put("/relay/direct/{command_id}")
+async def put_direct(command_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4993 (P2): the computer's SEALED answer to one ask for a direct door it was told to do — written once into a row of this computer. The body is read and judged here so that no refusal (and no log, no error report) ever carries
+    what it held; it is an envelope the server cannot open: a size class, nothing else."""
+    from app.services import desktop_direct
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_direct.ANSWER_BODY_MAX:
+            raise relay.DesktopRelayError(413, "direct_too_large", "the answer is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_direct.ANSWER_BODY_MAX:
+                raise relay.DesktopRelayError(413, "direct_too_large", "the answer is larger than the server takes")
+        size = await desktop_direct.write_answer(db, setup, command_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer)
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"bytes": size}
+
+
+@router.put("/relay/records")
+async def put_record(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4977 B2 (alembic 0493): the computer keeps one SEALED record of the person's history (a `chat_line` · an `approval_record` under the record key R_g, which the server never holds) — by (conversation,
+    record id), replaced only by the same writer with a later counter. The body is read and judged here so that no refusal (and no log, no error report) ever carries what it held: a size class, nothing else."""
+    from app.services import session_records
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > session_records.BODY_MAX:
+            raise relay.DesktopRelayError(413, "record_too_large", "the record is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > session_records.BODY_MAX:
+                raise relay.DesktopRelayError(413, "record_too_large", "the record is larger than the server takes")
+        body = session_records.parse_host_write(raw)
+        out = await session_records.write(db, setup, body.envelope, person_must_be_in_room=True)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return JSONResponse(status_code=200 if out["replaced"] else 201, content=out)
+
+
+@router.put("/relay/files/{command_id}/chunks/{i}")
+async def put_files_chunk(command_id: uuid.UUID, request: Request, i: int = Path(ge=0, lt=57), setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4988 (P8): chunk i of the computer's SEALED answer to a DOWNLOAD it was told to do — put once, in order, at most a few ahead of what the phone has read (409 `files_chunks_ahead`: put it again a moment later). The body is read and judged here
+    so that no refusal (and no log, no error report) ever carries what it held; it is an envelope the server cannot open: a size class, nothing else."""
+    from app.services import desktop_files
+
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > desktop_files.ANSWER_BODY_MAX:
+            raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        raw = b""
+        async for chunk in request.stream():  # never more than the limit is held, whatever the header said
+            raw += chunk
+            if len(raw) > desktop_files.ANSWER_BODY_MAX:
+                raise relay.DesktopRelayError(413, "files_too_large", "the answer is larger than the server takes")
+        size = await desktop_files.write_chunk(db, setup, command_id, i, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()  # a refusal changes nothing but what it deleted (a row past its end · a row whose asker no longer pairs this computer)
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"bytes": size}
+
+
+async def _read_capped(request: Request, limit: int, *, code: str) -> bytes:
+    """The request body, never more than `limit` bytes held whatever the header said (413 `code`)."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise relay.DesktopRelayError(413, code, "the envelope is larger than the server takes")
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > limit:
+            raise relay.DesktopRelayError(413, code, "the envelope is larger than the server takes")
+    return raw
+
+
+@router.put("/relay/record-handoffs/{phone_key_id}")
+async def put_record_handoff_to_phone(phone_key_id: uuid.UUID, request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the computer's SEALED record-key handoff for one phone of its organization (R is inside the envelope; the server cannot open it). 201 when new · 200 for the same envelope again · 409 `phone_not_paired` /
+    `handoff_queue_full` · 422 `invalid_record_handoff` (the shape and the one fixed size are all the server judges)."""
+    from app.services import desktop_record_handoff as handoff
+
+    try:
+        raw = await _read_capped(request, handoff.BODY_MAX, code="record_handoff_too_large")
+        row_id, new, ends = await handoff.host_put(db, setup, phone_key_id, raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return JSONResponse(status_code=201 if new else 200, content={"id": str(row_id), "expires_at": ends.isoformat()})
+
+
+@router.get("/relay/record-handoffs")
+async def get_record_handoffs_for_host(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the handoffs phones have put for THIS computer (oldest first; reading deletes nothing — `received` does)."""
+    from app.services import desktop_record_handoff as handoff
+
+    try:
+        items = await handoff.host_list(db, setup)
+    except relay.DesktopRelayError as exc:  # the switch went off between the device gate and the read: its own 409, not a 500
+        await db.commit()
+        return _error(exc)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return {"items": items}
+
+
+@router.get("/relay/record-handoffs/waiting")
+async def get_record_handoffs_waiting_for_host(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): what THIS computer put that no phone has received yet — ids and ends with the server's own clock, never an envelope (a row gone before its end = received; one that ran out = not)."""
+    from app.services import desktop_record_handoff as handoff
+
+    out = await handoff.host_waiting(db, setup)
+    await relay.touch_device(db, setup.id)
+    await db.commit()
+    return out
+
+
+@router.post("/relay/record-handoffs/{handoff_id}/received")
+async def post_record_handoff_received_by_host(handoff_id: uuid.UUID, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 4978 (C2): the computer has the envelope — the row is deleted (only one addressed to this computer; any other id deletes nothing)."""
+    from app.services import desktop_record_handoff as handoff
+
+    deleted = await handoff.host_received(db, setup, handoff_id)
+    await db.commit()
+    return {"deleted": deleted}
+
+
+@router.put("/setups/{setup_id}/record-handoffs/{phone_key_id}")
+async def put_record_handoff_to_host(
+    setup_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): a person's phone puts its SEALED record-key handoff for a computer of the same organization. The phone is named by its own key id and must be the caller's (any other is 404 `phone_not_found`)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        raw = await _read_capped(request, handoff.BODY_MAX, code="record_handoff_too_large")
+        row_id, new, ends = await handoff.phone_put(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, phone_id=phone_key_id, raw=raw)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return JSONResponse(status_code=201 if new else 200, content={"id": str(row_id), "expires_at": ends.isoformat()})
+
+
+@router.get("/record-handoffs")
+async def get_record_handoffs_for_phone(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): the handoffs computers have put for THIS phone (the caller's own key id; oldest first; reading deletes nothing — `received` does)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        items = await handoff.phone_list(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return {"items": items}
+
+
+@router.get("/record-handoffs/waiting")
+async def get_record_handoffs_waiting_for_phone(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): what THIS phone (the caller's own key id) put that no computer has received yet — ids and ends with the server's own clock, never an envelope."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        out = await handoff.phone_waiting(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return out
+
+
+@router.post("/record-handoffs/{handoff_id}/received")
+async def post_record_handoff_received_by_phone(
+    handoff_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4978 (C2): the phone has the envelope — the row is deleted (only one addressed to this phone of this person; any other id deletes nothing)."""
+    from app.services import desktop_record_handoff as handoff
+
+    member = await _phone_person(db, auth, org_id)
+    try:
+        deleted = await handoff.phone_received(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, phone_id=phone_key_id, handoff_id=handoff_id)
+    except relay.DesktopRelayError as exc:
+        await db.commit()
+        return _error(exc)
+    await db.commit()
+    return {"deleted": deleted}
 
 
 @router.put("/relay/pairings")

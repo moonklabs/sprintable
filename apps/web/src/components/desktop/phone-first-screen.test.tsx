@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
+import { deviceKindOf } from '@/lib/device-kind';
 import { __resetOrgRemoteControlForTest } from '@/lib/org-remote-control';
 
 const fetchWithAuth = vi.fn();
@@ -93,7 +94,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { 
 async function renderIn(ui: React.ReactElement, { phone = true, locale = 'ko' as 'ko' | 'en' } = {}) {
   await act(async () => {
     root.render(
-      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, phoneCall: phoneCall as never }}>
+      <PhoneBridgeContext.Provider value={{ inPhoneApp: phone, deviceKind: deviceKindOf(navigator.userAgent), phoneCall: phoneCall as never }}>
         <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages}>{ui}</NextIntlClientProvider>
       </PhoneBridgeContext.Provider>,
     );
@@ -620,6 +621,57 @@ describe('[4714] branch 5 — the result lines', () => {
     expect(line()?.textContent).toBe('이 프로젝트는 Mac에서 아직 폴더를 고르지 않았어요 — Mac 앞에서 폴더를 골라 주세요');
   });
 
+  it('story 4994: the first screen of the guest desktop app (a COMPUTER) — «no computer paired yet» and «remote control off» (owner · others) say «컴퓨터», not «폰»; the phone keeps its words', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    const T = (koMessages as unknown as { onboarding: { phone: { off: Record<string, string>; noMac: Record<string, string> } } }).onboarding.phone;
+    const E = (enMessages as unknown as { onboarding: { phone: { off: Record<string, string>; noMac: Record<string, string> } } }).onboarding.phone;
+    try {
+      world.devices = [{ id: 'x', confirm_number: '000 000' }];
+      await screen();
+      expect(byId('onboarding-phone-no-mac')).not.toBeNull();
+      expect(text()).toContain(T.noMac.titleComputer);
+      expect(text()).toContain(T.noMac.bodyComputer);
+      expect(byId('onboarding-phone-pair')?.textContent).toBe(T.noMac.pairComputer);
+      expect(byId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair');
+      expect(text()).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container); world.devices = undefined as never;
+      world.startable = { remote_control: false, computers: [computer()] };
+      await screen();
+      expect(text()).toContain(T.off.bodyOwnerComputer);
+      expect(text()).not.toMatch(/폰/);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      world.remote = { data: { enabled: false, enabled_at: null, can_change: false } };
+      await screen();
+      expect(text()).toContain(T.off.bodyOtherComputer);
+      expect(text()).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
+    for (const [k, v] of [['off.bodyOwnerComputer', E.off.bodyOwnerComputer], ['off.bodyOtherComputer', E.off.bodyOtherComputer], ['noMac.titleComputer', E.noMac.titleComputer], ['noMac.bodyComputer', E.noMac.bodyComputer], ['noMac.pairComputer', E.noMac.pairComputer]] as const) expect(v, k).not.toMatch(/phone/i);
+  });
+
+  it('story 4994: no screen lock / not registered in the guest desktop app (a COMPUTER) say «이 컴퓨터», not «폰»', async () => {
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36');
+    try {
+      signAnswer = { id: 's', ok: false, code: 'no_screen_lock' };
+      await start();
+      expect(line()?.textContent).toBe(koMessages.onboarding.phone.result.noScreenLockComputer);
+      signAnswer = { id: 's', ok: false, code: 'not_registered' };
+      await press(byId('onboarding-phone-start-go'));
+      expect(line()?.textContent).toBe(koMessages.onboarding.phone.result.notRegisteredComputer);
+      for (const k of ['noScreenLockComputer', 'notRegisteredComputer'] as const) { expect(koMessages.onboarding.phone.result[k], k).not.toMatch(/폰/); expect(enMessages.onboarding.phone.result[k], k).not.toMatch(/phone/i); }
+    } finally { ua.mockRestore(); }
+  });
+
+  it('story 4994 (D-3): phone_not_paired in the guest desktop app (a COMPUTER) says «이 컴퓨터», not «이 폰»', async () => {
+    const MAC_APP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Sprintable/0.2.264 Chrome/140.0.0.0 Electron/44.4.5 Safari/537.36';
+    const ua = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(MAC_APP);
+    try {
+      world.post = json({ error: { code: 'phone_not_paired' } }, 409);
+      await start();
+      expect(line()?.textContent).toBe('이 컴퓨터는 에이전트가 도는 컴퓨터와 페어링되어 있지 않아 시작하지 못했어요 — 그 컴퓨터와 페어링한 뒤 다시 눌러 주세요');
+      expect(line()?.textContent).not.toMatch(/폰/);
+    } finally { ua.mockRestore(); }
+  });
+
   it('device_unreachable · phone_not_paired · a shell refusal each get their own line', async () => {
     world.post = json({ error: { code: 'device_unreachable' } }, 409);
     await start();
@@ -861,7 +913,7 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
   });
   it('the refusals reuse the phone lines\' shape: each ends in an instruction (a started start has only the «waiting to connect» line · a cancelled one none)', () => {
     expect(Object.keys(ko).filter((k) => k.startsWith('result.')).sort()).toEqual([
-      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired',
+      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.noScreenLockComputer', 'result.notPaired', 'result.notPairedComputer', 'result.notRegisteredComputer',
       'result.notRegistered', 'result.openChat', 'result.readFailed', 'result.remoteOff', 'result.retry', 'result.signedOut', 'result.unknown', 'result.unreachable',
     ].sort());
   });

@@ -85,6 +85,22 @@ async def get_desktop_session(
         return _error(exc)
 
 
+@router.get("/{agent_member_id}/desktop-usage")
+async def get_desktop_usage(
+    agent_member_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4981 (PR 3): the agent usage numbers of the computer this agent runs on — read by a person's session (an agent key is 403), by whoever may see the agent's session (`session_view`'s own check). Words and numbers only."""
+    await _person(db, auth, org_id, interactive=False)
+    user_id = uuid.UUID(str(auth.user_id))
+    try:
+        return await desktop_commands.usage_view(db, user_id=user_id, org_id=org_id, agent_id=agent_member_id)
+    except DesktopRelayError as exc:
+        return _error(exc)
+
+
 @router.post("/{agent_member_id}/desktop-commands")
 async def post_desktop_command(
     agent_member_id: uuid.UUID,

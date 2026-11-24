@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,12 +29,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
+from app.services.envelope_shape import check_envelope
+from app.services.desktop_relay import PRESENCE_AWARE_WINDOW, PRESENCE_STREAM_TICK_MAX, PRESENCE_UNKNOWN_AFTER, SESSION_KEY_PATTERN, UNKNOWN_AFTER, DesktopRelayError, _check_agent
 from app.services.tool_names import shown_tool
 
 logger = logging.getLogger(__name__)
 
 MAX_WINDOW = timedelta(seconds=3600)  # a daemon's permission window is never longer (contract §9 ①)
+OPEN_LIMIT = 50  # story 4972 (AC3 ① · lens push landing · PO 8787): the open questions (pending · window not passed) the server keeps for ONE computer — measured on dev over 30 days: at most 11 at once; past this a card is refused (422 open_limit), never silently dropped
+RECENT_CAP = 100  # the newest rows of EVERY state one list answer starts from (before the waiting ones are added)
+LIST_CAP = 200  # story 4972 (lens push landing): the most rows ONE list answer carries (the waiting ones first) — a response's size is bounded whatever a computer reported
 PHONES_PER_PERSON = 3  # PO B-4 · story #4535 AC2 — registered phone keys a person may hold
 _TOOL_PATTERN = r"^[A-Za-z0-9_.:-]{1,64}$"
 _HASH_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -240,6 +244,10 @@ async def remove_pair(
         return False
     pair.removed_at, pair.removed_by, pair.removal_acked_at = _now(), actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {setup_id})  # story 4972: a sealed card nobody can open any more does not wait out its window
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(setup_id, phone_id)])  # story 4978: a removed phone takes no record key — what travels on this pair goes with it
     _wake_device_after_commit(db, setup_id)
     return True
 
@@ -277,6 +285,10 @@ async def remove_computer_pairs(
         _wake_device_after_commit(db, pair.setup_id)
         removed += 1
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(p.setup_id, phone_id) for p in pairs])  # story 4978: nor a record-key handoff on any of those pairs
     return removed
 
 
@@ -405,6 +417,10 @@ async def remove_phone(
     for pair in pairs:
         pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
     await db.flush()
+    await _end_cards_without_phone(db, {p.setup_id for p in pairs})  # story 4972
+    from app.services import desktop_record_handoff
+
+    await desktop_record_handoff.forget_pairs(db, [(p.setup_id, phone_id) for p in pairs])  # story 4978: a revoked key takes no record key
     session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
@@ -435,7 +451,7 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
         raise DesktopRelayError(422, "duplicate_pairing", "a phone key appears twice in the snapshot")
     phones = {d.fingerprint: d for d in (await db.execute(
         select(RemoteDevice).where(RemoteDevice.fingerprint.in_(fps), RemoteDevice.org_id == setup.org_id,
-                                   RemoteDevice.revoked_at.is_(None))
+                                   RemoteDevice.revoked_at.is_(None)).order_by(RemoteDevice.id).with_for_update(read=True)  # story 4978: the key row first (a revocation takes it FOR UPDATE, then the pairing rows) — a snapshot cannot list a key that was revoked while it read
     )).scalars().all()} if fps else {}
     rows = {r.remote_device_id: r for r in (await db.execute(
         select(RemoteDevicePairing).where(RemoteDevicePairing.setup_id == setup.id).with_for_update()
@@ -456,14 +472,23 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
             if row.removed_at is not None:  # dropped by the device once, now listed again: a new QR pairing
                 row.removed_at = row.removed_by = row.removal_acked_at = None
             row.paired_at, row.reported_at = p.paired_at, now
+    dropped = False
+    dropped_phones: list[uuid.UUID] = []
     for phone_id, row in rows.items():
         if phone_id in listed:
             continue
         if row.removed_at is None:
             row.removed_at = now  # the device dropped it on its own
+            dropped = True
+            dropped_phones.append(phone_id)
         if row.removal_acked_at is None:
             row.removal_acked_at = now
     await db.flush()
+    if dropped:
+        await _end_cards_without_phone(db, {setup.id})  # story 4972: a snapshot that no longer lists the last phone of a person takes their sealed cards with it (nobody can open them now)
+        from app.services import desktop_record_handoff
+
+        await desktop_record_handoff.forget_pairs(db, [(setup.id, phone_id) for phone_id in dropped_phones])  # story 4978: a pair the device dropped takes what travelled on it (a re-added pair must not serve an old envelope)
     return {"pairings": len(listed), "unregistered": len(snapshot.pairings) - len(listed)}
 
 
@@ -564,6 +589,12 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
     if setup is None:
         await _log_setup_not_found(db, member_id=member_id, org_id=org_id, setup_id=body.setup_id)
         raise DesktopRelayError(404, "setup_not_found", "no such computer")
+    # story 4972 (PO 11-16 · 내림 막기): a computer that registered an offer on the new procedure is on it for good — the old six-digit offer is refused for it (no downgrade)
+    from app.services import pairing_sessions
+
+    await pairing_sessions.lock_setup(db, setup.id)  # against a registration being made at the same moment
+    if await pairing_sessions.has_session(db, setup.id):
+        raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     if not await remote_control.is_enabled(db, org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     now = _now()
@@ -595,6 +626,10 @@ async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
     """Offers for this device not yet past their window — sent on every connection until then (the daemon keeps the offers it
     opened and drops any other). `label` and `expires_at` are outside the MAC: shown, never trusted (the daemon goes by the
     window of the offer it opened)."""
+    from app.services import pairing_sessions
+
+    if await pairing_sessions.has_session(db, setup_id):  # story 4972 (PO 11-16): a computer on the new procedure is sent no old-style offer — one made before its registration included
+        return []
     now = _now()
     rows = (await db.execute(
         select(RemoteDevicePairingOffer, RemoteDevice)
@@ -610,6 +645,11 @@ async def offers_to_send(db: AsyncSession, setup_id: uuid.UUID) -> list[dict]:
 async def reveal_pairing(db: AsyncSession, setup: DesktopSetup, offer_id: uuid.UUID, body: PairingReveal) -> None:
     """v1.11 — the desktop's random value for this pairing's number, drawn after the offer's MAC bound the key; kept for the phone
     that sent the offer. Once: the same value again is fine, another is refused (the number the person compares must not move)."""
+    from app.services import pairing_sessions
+
+    await pairing_sessions.lock_setup(db, setup.id)  # against a registration being made at the same moment
+    if await pairing_sessions.has_session(db, setup.id):  # story 4972: an old-style offer is not carried on for a computer on the new procedure
+        raise DesktopRelayError(409, "pairing_protocol_mismatch", "this computer pairs the new way")
     row = (await db.execute(
         select(RemoteDevicePairingOffer).where(RemoteDevicePairingOffer.setup_id == setup.id, RemoteDevicePairingOffer.offer_id == offer_id)
         .with_for_update()
@@ -803,9 +843,27 @@ class PermissionRequestReport(BaseModel):
     # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
     # its tool and summary only when the daemon read them. Every other report keeps all three, as before.
     terminal_only: bool = False
+    # story 4972: the words (tool · summary · folder · preview) as ONE sealed envelope (kind `approval_card`) the server cannot open — in place of those four fields, never beside them
+    envelope: dict | None = None
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        return None if env is None else check_envelope(env, kind="approval_card")
 
     @model_validator(mode="after")
     def _fields_for_its_kind(self) -> "PermissionRequestReport":
+        if self.envelope is not None:
+            # story 4972: sealed, the words are in the envelope and nowhere else — a request that also carries them as text would put them on the server
+            if any(v is not None for v in (self.tool, self.summary, self.workdir, self.preview)):
+                raise ValueError("a request with an envelope carries no tool · summary · workdir · preview as text")
+            if self.terminal_only:
+                # a sealed terminal-only question: words to read, nothing to sign (so no hash — as a plain one)
+                if self.input_hash is not None:
+                    raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+            elif self.input_hash is None:
+                raise ValueError("input_hash is required unless the request is terminal_only")
+            return self
         if self.terminal_only:
             if self.input_hash is not None:
                 raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
@@ -819,25 +877,84 @@ class PermissionRequestReport(BaseModel):
         return self
 
 
+def _plain_words(body: "PermissionRequestReport") -> bool:
+    """A request that carries any of its words as text (tool · summary · workdir · preview) — the words the server may not read once a computer has sealed."""
+    return any(v is not None for v in (body.tool, body.summary, body.workdir, body.preview))
+
+
+def _network_first_stage(body: "PermissionRequestReport") -> bool:
+    """The one plain request a sealing computer still sends (contract §3 · AC3 exception): Claude's sandbox network question at its FIRST stage — the fixed word `network` and nothing else
+    (the server needs its tool name to run the second step). Every field is pinned: a different word, a detail, a folder, a preview, a mask or a cut mark → not this question."""
+    return (
+        body.runtime == "claude" and body.tool == SANDBOX_NET_TOOL and body.summary == "network" and body.masked is False and body.truncated is False
+        and body.terminal_only is False and body.workdir is None and body.preview is None and body.input_hash is not None and body.envelope is None
+    )
+
+
+async def _sealed_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """Has this computer sealed a card before? — its own mark, or the mark of any setup of the same Mac in the same organization (`org_id + machine_key` — revoked ones included: a replaced
+    setup keeps its mark, so a new setup_id does not open a plaintext window). A setup with no `machine_key` (an app that sent no device id) reads its own mark only."""
+    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
+    return bool((await db.execute(
+        select(exists().where(DesktopSetup.org_id == setup.org_id, DesktopSetup.sealed_cards_at.is_not(None), or_(*same_mac)))
+    )).scalar())
+
+
+async def _lock_machine(db: AsyncSession, setup: DesktopSetup) -> None:
+    """Serialize everything that reads or stands the sealed mark for ONE Mac: the mark is shared by `org_id + machine_key` (a sibling lane · a replaced setup), so the lock is on EVERY setup row of that machine — always taken in the same order (by id),
+    so two siblings cannot wait for each other. (codex AC3 ① high: locking only this setup let setup A read «no mark» while sibling B committed its first sealed card — A's plaintext card then landed after the mark.) A setup with no machine key locks itself."""
+    # (lens 5848 · low) the lock covers the LIVE siblings and this setup only: a revoked setup cannot report a card (its token is gone), so there is nothing to wait for — and a Mac that is installed again and again would otherwise pile up
+    # revoked rows that every card then locks. The mark is still READ across revoked setups (`_sealed_mark`).
+    live_siblings = [and_(DesktopSetup.machine_key == setup.machine_key, DesktopSetup.revoked_at.is_(None))] if setup.machine_key is not None else []
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == setup.org_id, or_(DesktopSetup.id == setup.id, *live_siblings)).order_by(DesktopSetup.id).with_for_update())
+
+
+async def _stand_sealed_mark(db: AsyncSession, setup: DesktopSetup, envelope: dict) -> None:
+    """The mark stands with a freshly committed sealed card whose receivers ALL are active pins of this computer (the server cannot check a signature — it does not know the computer's identity key —
+    so a form-only envelope naming unknown receivers does not close the plaintext road). The server's own now(), first one kept (COALESCE), in the card's transaction (a roll-back takes both)."""
+    to = {str(t) for t in envelope["to"]}
+    active = {str(i) for i in (await db.execute(
+        select(RemoteDevicePairing.remote_device_id).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id).where(
+            RemoteDevicePairing.setup_id == setup.id, RemoteDevicePairing.removed_at.is_(None), RemoteDevice.revoked_at.is_(None),
+        )
+    )).scalars()}
+    if to and to <= active:
+        await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id).values(sealed_cards_at=func.coalesce(DesktopSetup.sealed_cards_at, func.now())))
+
+
 async def report_request(db: AsyncSession, setup: DesktopSetup, body: PermissionRequestReport) -> tuple[AgentPermissionRequest, bool]:
     _check_agent(setup, body.agent_member_id)
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    # LOCK ORDER (lens 5848 · codex deltas): the setup rows FIRST (the order an organization's delete takes: setup → its requests by cascade), and the purge below takes NO wait on a request row somebody else holds
+    # (`SKIP LOCKED`) — so this report never waits for a request row while it holds the setup rows. `answer_request` takes request → setup; with this report waiting for no request row, the two cannot wait for each other.
+    await _lock_machine(db, setup)
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
     # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
-    await db.execute(
-        update(AgentPermissionRequest)
-        .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
-               AgentPermissionRequest.expires_at <= now, AgentPermissionRequest.preview.is_not(None))
-        .values(preview=None)
-    )
+    await purge_open_cards(db, now=now, setup_id=setup.id)  # story 4972: the one purge (words · hash · state) — the minute job runs the same for every computer
+    # (codex delta on lens 5848 · medium) a request that authenticated BEFORE its setup was revoked reaches this point after the revocation: under the lock the setup is read again — a revoked one takes no card (it is outside every live sibling's lock set, so a
+    # card of it could stand a mark a new setup of the same Mac never read). The token check is a read without a lock; this is the fence.
+    if (await db.execute(select(DesktopSetup.revoked_at).where(DesktopSetup.id == setup.id))).scalar_one_or_none() is not None:
+        raise DesktopRelayError(401, "DEVICE_TOKEN_INVALID", "a valid device token is required")
+    # story 4972 (AC3 ①): a computer that has sealed a card before takes no PLAINTEXT card — and the decision is made under the setup's lock (taken above), the same lock a sealed card takes to stand the mark (a card and a plaintext one at the
+    # same moment: either order, no plaintext card is made AFTER the mark). The answer is ALWAYS 422, a re-send of a plaintext body included (no branch that tells the first from the second). No `detail`: not a word of the body comes back.
+    if _plain_words(body) and not _network_first_stage(body) and await _sealed_mark(db, setup):
+        raise DesktopRelayError(422, "sealed_required", "this computer sends sealed cards")
     q = select(AgentPermissionRequest).where(
         AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
     )
     existing = (await db.execute(q)).scalar_one_or_none()
     if existing is not None:
         return existing, False
+    # story 4972 (AC3 ① · lens push landing): the open questions the server keeps for ONE computer — one device token cannot push the real ones out of every list; past the limit the card is refused (a fixed word — no count, no id)
+    open_now = (await db.execute(
+        select(func.count()).select_from(AgentPermissionRequest).where(
+            AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at > now,
+        )
+    )).scalar_one()
+    if open_now >= OPEN_LIMIT:
+        raise DesktopRelayError(422, "open_limit", "this computer has the most open questions the server keeps")
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == body.session_key)
     )).scalar_one_or_none()
@@ -847,12 +964,18 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         # Qadir · PO 16:17Z — another agent of the same device must not stand in for the session's own: its approval chain
         # would choose the recipient and its name would go on the bell
         raise DesktopRelayError(422, "session_agent_mismatch", "the session belongs to another agent of this device")
+    if body.envelope is not None:
+        # story 4972: the header the host sealed must be about THIS request (a server cannot read it, but it can see that it is not a copy of another's)
+        e = body.envelope
+        if e["setup_id"] != str(setup.id) or e["session_key"] != body.session_key or e["command_id"] != str(body.request_id) \
+                or abs(e["expires_at"] - int(body.expires_at.timestamp() * 1000)) > 1000:
+            raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this request's")
     recipient, reason = await resolve_recipient(db, setup, body.agent_member_id)
     row = AgentPermissionRequest(
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
-        preview=body.preview.model_dump() if body.preview is not None else None,
+        preview=body.preview.model_dump() if body.preview is not None else None, envelope=body.envelope, sealed=body.envelope is not None,
         recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
@@ -860,6 +983,8 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
             db.add(row)
     except IntegrityError:
         return (await db.execute(q)).scalar_one(), False
+    if body.envelope is not None:
+        await _stand_sealed_mark(db, setup, body.envelope)  # (same transaction: the router commits once, at the end)
     # story #4590 (Yuna §3): a terminal-only question sends no notice — the notice is the phone's push, and a push calls a person to
     # something they cannot do there; the card is on the approvals list (its count), the one at that computer sees the board
     if recipient is not None and not row.terminal_only:
@@ -870,7 +995,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
 async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: AgentPermissionRequest, recipient: uuid.UUID) -> None:
     """The recipient's bell line (and the phone push channel every notice takes): an agent waits at a prompt with a window, so
     not knowing until the inbox is opened leaves it standing (PO 14:28Z). The words are the spec's (명세 B-2 · 폰 알림) — the
-    agent and the tool only: no summary, no working folder, no command (a lock screen · a notice history keeps them). Sent once,
+    agent and «an approval is waiting» only (story 4972, 선생님: not even the tool — it is inside the card): no summary, no working folder, no command (a lock screen · a notice history keeps them). Sent once,
     with the row (the same request_id again finds the row and sends nothing). To the chain's head too when no phone is paired —
     the look-only card is theirs."""
     from app.models.member import Member
@@ -889,7 +1014,7 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
     title = t("agent_permission.notice_title", locale, agent=who) if who else t("agent_permission.notice_title_bare", locale)
     await dispatch_notification(
         db, org_id=setup.org_id, event_type="agent.permission_request", target_member_ids=[recipient],
-        title=title, body=t("agent_permission.notice_body", locale, tool=shown_tool(row.runtime, row.tool, locale)),
+        title=title, body=t("agent_permission.notice_body", locale),
         reference_type="agent_permission_request", reference_id=row.id, source_project_id=setup.project_id,
         event={"payload": {"agent_name": agent_name}},
     )
@@ -940,15 +1065,141 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         # it may trust in Claude's own text; the request ends with nothing allowed (Yuna 2-7)
         if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
-        row.state, row.result_code, row.preview = "withdrawn", "host_unread", None
+        row.state, row.result_code, row.preview, row.envelope = "withdrawn", "host_unread", None, None
+        if row.sealed:
+            row.input_hash = None
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
-        row.state, row.result_code, row.preview = "withdrawn", body.reason, None  # story 4949: the lines go with the question
+        row.state, row.result_code, row.preview, row.envelope = "withdrawn", body.reason, None, None  # story 4949: the lines go with the question (4972: so does the sealed card)
+        _end_words_of(row)  # (and the plain words)
+        if row.sealed:
+            row.input_hash = None  # the hash of the raw input is the one value derived from the words that would stay: it goes when the question ends (카디르 lens M2)
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
+
+
+# story 4972 (카디르 lens M1): a card's words are kept for as long as its question waits and not longer — a sealed card is opened by the phone's STATIC key (HPKE AUTH, no
+# forward secrecy), so how long the envelope stays is how long a later leak of that key can read it. Three ways a question ends without an answer: its window passes (the
+# sweep below, run by the existing minute job `changes-purge`), the computer's last paired phone is taken off (`_end_cards_without_phone`), and a withdrawal / an answer (above).
+_OPEN_WORDS = or_(AgentPermissionRequest.envelope.is_not(None), func.jsonb_typeof(AgentPermissionRequest.preview) == "object")
+
+
+# story 4972 (카디르 5848 알림 · PO 8821): the plaintext words of a plain card — `tool · summary · workdir` — go when the question ends, like the envelope · the preview · the hash do (선생님 11-16:
+# the automatic deletion is for the delivery copy only, once the question is over). ONE exception, by shape: the network question's FIXED vocabulary (`tool = SandboxNetwork` of the claude runtime ·
+# `summary = network` · no workdir) — no word of the person's, and the same row is opened again for its second (confirm) stage, which the card draws from that tool. (`host` — the address of the confirm stage —
+# is not in this change: its result line still names it.)
+def _is_net_question():
+    # (codex: `tool` is nullable — a terminal-only row may lack it; `NOT (… tool = 'X')` would then be NULL and the row would never match a WHERE) so the comparison is made on COALESCE(tool, ''): always true or false
+    # (카디르 5849 lens · low) the exception is for the FIXED vocabulary — the tool name AND `summary = 'network'`: a computer that does not seal yet (an older build) can send a plain card with that tool name and any summary (an address)
+    return and_(AgentPermissionRequest.runtime == "claude", func.coalesce(AgentPermissionRequest.tool, "") == SANDBOX_NET_TOOL, func.coalesce(AgentPermissionRequest.summary, "") == "network")
+
+
+def _ended_words() -> dict:
+    """the `values(...)` part that takes a plain card's words with it when its question ends (an UPDATE statement)"""
+    return {
+        "tool": case((_is_net_question(), AgentPermissionRequest.tool), else_=None),
+        "summary": case((_is_net_question(), AgentPermissionRequest.summary), else_=None),
+        "workdir": None,
+    }
+
+
+def _end_words_of(row: AgentPermissionRequest) -> None:
+    """the same on a row in hand (the answer · the withdrawal)"""
+    if not (row.runtime == "claude" and row.tool == SANDBOX_NET_TOOL and row.summary == "network"):
+        row.tool, row.summary = None, None
+    row.workdir = None
+
+
+def _holds_plain_words():
+    """a row whose plain words are still there: a tool or a summary that is not the network question's fixed vocabulary, or any workdir"""
+    return or_(
+        AgentPermissionRequest.workdir.is_not(None),
+        and_(~_is_net_question(), or_(AgentPermissionRequest.tool.is_not(None), AgentPermissionRequest.summary.is_not(None))),
+    )
+
+
+async def purge_open_cards(db: AsyncSession, *, now: datetime | None = None, setup_id: uuid.UUID | None = None) -> int:
+    """(One computer's setup when `setup_id` is given — the report of that computer — else every one: the minute job.) Every pending request whose window has passed and that still holds words (a sealed envelope · the lines of a preview) lets go of them and ends as `expired` —
+    without waiting for the computer's next report. A request that holds no words is left as it is (it only SHOWS as expired). → how many ended."""
+    now = now or _now()
+    scope = [AgentPermissionRequest.setup_id == setup_id] if setup_id is not None else []
+    # `SKIP LOCKED`: a request row held by another transaction (an answer landing at the end of its window · an organization's delete) is left for the next report / the minute job — the purge never WAITS on a request row, so a report
+    # that holds its computer's setup rows cannot be one side of a deadlock with a path that takes a request row first
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at <= now, or_(_OPEN_WORDS, _holds_plain_words()), *scope)
+           .with_for_update(skip_locked=True))
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.id.in_(due))
+        .values(state="expired", result_code="expired", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "expired")
+    return len(ended)
+
+
+async def _end_cards_without_phone(db: AsyncSession, setup_ids: set[uuid.UUID], *, sealed_only: bool = False) -> int:
+    """A person's last live pair with this computer was just removed (a pair · the computer's pairs · the whole phone): a pending request of that person that holds words
+    can be opened by nobody now — it ends as `withdrawn` (`session_ended`) and the words go. A person with another live phone on the computer keeps their cards.
+    `sealed_only` (the minute sweep): only a request that holds an ENVELOPE — a plain text card (a preview) of a person who never paired a phone is not touched (it ends as it always did: a window · an answer · a withdrawal)."""
+    if not setup_ids:
+        return 0
+    has_phone = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_(None),
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id, RemoteDevice.revoked_at.is_(None))
+    )
+    # (0484 · codex) a plain card with no preview/envelope ends here only for a person who actually LOST a phone on this computer (a pair of theirs is now removed): a look-only card of a person who never paired one
+    # (`no_paired_phone`) is not «lost» because somebody else's pair came off the same computer
+    lost_a_pair = exists(
+        select(1).select_from(RemoteDevicePairing).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevicePairing.setup_id == AgentPermissionRequest.setup_id, RemoteDevicePairing.removed_at.is_not(None),
+               RemoteDevicePairing.removed_at >= AgentPermissionRequest.created_at,  # (codex 3rd: a loss that came BEFORE the card was made is no reason to end it later — the loss must be one the card lived through)
+               RemoteDevice.member_id == AgentPermissionRequest.recipient_member_id)
+    )
+    # (카디르 5849 lens · medium) `SKIP LOCKED` + update by id, as the purge does: a phone's revocation takes the PHONE row first and then waits here for the request rows; an answer takes the REQUEST row first and then the phone row —
+    # waiting for a request row somebody holds closes that circle. A row held right now is being answered (or ended) by someone else; the window ends it otherwise.
+    due = (select(AgentPermissionRequest.id)
+           .where(AgentPermissionRequest.setup_id.in_(setup_ids), AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None) if sealed_only else or_(_OPEN_WORDS, and_(_holds_plain_words(), lost_a_pair)), ~has_phone)
+           .with_for_update(skip_locked=True, of=AgentPermissionRequest))
+    ended = (await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.id.in_(due))
+        .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None,
+                input_hash=case((AgentPermissionRequest.sealed.is_(True), None), else_=AgentPermissionRequest.input_hash), **_ended_words())
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in ended:
+        _schedule_changed(db, req_id, recipient, "withdrawn")
+    return len(ended)
+
+
+async def end_orphan_cards(db: AsyncSession) -> int:
+    """The minute job's second sweep (story 4972): a pending SEALED request (it holds an envelope) that nobody can open any more ends here — (a) its person has no live phone on that computer (an account reclaim that revokes keys · two removals
+    that ran at the same time and each saw the other's pair still standing — the paths above do their own check when they run and cannot see each other's uncommitted change), or (b) the computer was disconnected (`DesktopSetup.revoked_at`):
+    the pairs stay as rows, so (a) does not see it, and the envelope would otherwise wait out its window. Only rows that hold an envelope: a plain text card (a preview) of a person who never paired a phone is NOT this sweep's —
+    nothing was lost there, and it ends as it always did (lens 5833 M1). Reads only the setups that have such a request. → how many ended."""
+    setup_ids = set((await db.execute(
+        select(AgentPermissionRequest.setup_id).where(AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None)).distinct()
+    )).scalars().all())
+    ended = await _end_cards_without_phone(db, setup_ids, sealed_only=True)
+    if setup_ids:
+        cut = (await db.execute(
+            update(AgentPermissionRequest)
+            .where(AgentPermissionRequest.setup_id.in_(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids), DesktopSetup.revoked_at.is_not(None))),
+                   AgentPermissionRequest.state == "pending", AgentPermissionRequest.envelope.is_not(None))
+            .values(state="withdrawn", result_code="session_ended", envelope=None, preview=None, input_hash=None, **_ended_words())  # (only sealed rows hold an envelope: their hash goes with it)
+            .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+        )).all()
+        for req_id, recipient in cut:
+            _schedule_changed(db, req_id, recipient, "withdrawn")
+        ended += len(cut)
+    return ended
 
 
 # ── story #4580 AC2 B (Kadir ⓐ) — a network question's second answer · the host it added ────────────────────────────────
@@ -1033,15 +1284,38 @@ async def host_added(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUI
 
 
 async def _reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> set[uuid.UUID]:
+    """story 4979 (gate alignment): the computers a command, a clock press, a changed-files read, a pairing and an answer may go to — and the SAME computers a person is shown as connected (`_shown_reachable`: ONE rule, so
+    the screen and the server never say different things). A computer whose host sends presence: connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) — a command is refused for one that has been silent longer
+    (never queued into a dead stream), and accepted for one that has said it is here even while its stream is reconnecting. Any other computer: the old rule (`last_used_at` within UNKNOWN_AFTER, 90 s)."""
+    return (await _shown_reachable(db, setup_ids, now))[0]
+
+
+async def _shown_reachable(db: AsyncSession, setup_ids: set[uuid.UUID], now: datetime) -> tuple[set[uuid.UUID], dict[uuid.UUID, datetime | None]]:
+    """story 4979 — the computers a person is SHOWN as connected, and the last time each one itself spoke (`last_heard_at`).
+
+    A computer whose host sends `presence` (its last presence is younger than PRESENCE_AWARE_WINDOW) is connected while it has spoken within PRESENCE_UNKNOWN_AFTER (150 s) AND the server has heard its connection (the stream's tick or the host's own report · ack) within PRESENCE_STREAM_TICK_MAX (400 s) — `last_heard_at` is stamped only by what the device
+    sends, so a stream whose peer is gone (the server's own tick keeps `last_used_at` fresh) is no longer «connected» for minutes. A computer whose host sends no presence (an older version) keeps the old rule exactly:
+    `last_used_at` within UNKNOWN_AFTER (90 s). Also what `_reachable` returns (the same rule everywhere); `_reachable` is now this same rule (story 4979 gate alignment — before it, the old rule alone judged whether a command is accepted).
+    Returns `(connected, last_heard_at by setup)` — a setup with no token row is in neither."""
     if not setup_ids:
-        return set()
+        return set(), {}
     rows = (await db.execute(
-        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at))
+        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at), func.max(DesktopDeviceToken.last_heard_at), func.max(DesktopDeviceToken.last_presence_at))
         .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
         .where(DesktopDeviceToken.setup_id.in_(setup_ids), DesktopDeviceToken.revoked_at.is_(None), DesktopSetup.revoked_at.is_(None))
         .group_by(DesktopDeviceToken.setup_id)
     )).all()
-    return {sid for sid, last in rows if last is not None and now - last <= UNKNOWN_AFTER}
+    connected: set[uuid.UUID] = set()
+    heard: dict[uuid.UUID, datetime | None] = {}
+    for sid, used, said, presence in rows:
+        heard[sid] = said
+        if presence is not None and now - presence <= PRESENCE_AWARE_WINDOW:
+            # it has spoken itself within 150 s AND the server has heard its connection (stream tick or the host's own report · ack) within 400 s — presence alone must not keep a host «connected» (Kadir 5853 ①)
+            if said is not None and now - said <= PRESENCE_UNKNOWN_AFTER and used is not None and now - used <= PRESENCE_STREAM_TICK_MAX:
+                connected.add(sid)
+        elif used is not None and now - used <= UNKNOWN_AFTER:
+            connected.add(sid)
+    return connected, heard
 
 
 def shown_state(row: AgentPermissionRequest, now: datetime) -> str:
@@ -1053,13 +1327,34 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     from app.models.member import Member
 
     now = _now()
-    rows = (await db.execute(
+    base = (
         select(AgentPermissionRequest, DesktopSetup)
         .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
         .where(AgentPermissionRequest.recipient_member_id == member_id, DesktopSetup.org_id == org_id)
         .order_by(AgentPermissionRequest.created_at.desc())
-        .limit(100)
-    )).all()
+    )
+    A = AgentPermissionRequest
+    if state is not None:
+        # story 4972 (push landing · PO): the state is chosen BEFORE the 100 are cut — the SQL form of `shown_state` below (a pending row past its window is
+        # «expired», read and never swept). Cut first, a person's waiting request is pushed out by 100 newer ended ones.
+        shown = {
+            "pending": and_(A.state == "pending", A.expires_at > now),
+            "expired": or_(A.state == "expired", and_(A.state == "pending", A.expires_at <= now)),
+        }.get(state, A.state == state)
+        rows = (await db.execute(base.where(shown).limit(RECENT_CAP))).all()
+    else:
+        # no state: the newest 100 of everything — and every request still waiting or only just expired (the lists' own «still shown» window is ≤ 1 h = MAX_WINDOW),
+        # so a screen that reads the whole list cannot lose a waiting request to 100 newer ended ones
+        recent = (await db.execute(base.limit(RECENT_CAP))).all()
+        # (codex AC3 ① medium) the ones still OPEN are taken first and apart from the ones that only just ran out: more than LIST_CAP newer «pending but past their window» rows cannot push an older still-open one out of the answer
+        opened = (await db.execute(base.where(A.state == "pending", A.expires_at > now).limit(LIST_CAP))).all()
+        # (codex · 0484: a plain card whose window passed is now ended as `expired` by the purge — still «just lapsed» for the list, like a `pending` one past its window)
+        lapsed = (await db.execute(base.where(A.state.in_(("pending", "expired")), A.expires_at <= now, A.expires_at > now - MAX_WINDOW).limit(LIST_CAP))).all()
+        merged = {r.id: (r, s) for r, s in [*recent, *lapsed, *opened]}
+        # one answer carries at most LIST_CAP rows — the open ones first, then the just-lapsed ones (a flood of ended ones cannot push a waiting one out), then the newest of the rest; newest-first in the answer
+        open_ids, lapsed_ids = {r.id for r, _s in opened}, {r.id for r, _s in lapsed}
+        ordered = sorted(merged.values(), key=lambda rs: (0 if rs[0].id in open_ids else 1 if rs[0].id in lapsed_ids else 2, -rs[0].created_at.timestamp()))
+        rows = sorted(ordered[:LIST_CAP], key=lambda rs: rs[0].created_at, reverse=True)
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:
         return []
@@ -1100,6 +1395,10 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
             # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
             "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
+            # story 4972: the sealed card — served as it came, to the phone's own app only (it cannot be read here), on a row the person can answer now
+            # a sealed TERMINAL-ONLY card (no buttons — its words to read, nothing to sign) is served to a phone paired with that computer even when the computer is not reachable or remote control is off: the same as its plain words were
+            "envelope": r.envelope if shown == "pending" and ((answerable and not r.terminal_only) or (r.terminal_only and s.id in paired_setups and s.revoked_at is None)) else None,
+            "sealed": r.sealed,  # a card whose words were sealed — the phone knows what it is (and that it has none to show once the envelope is gone)
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
@@ -1191,6 +1490,10 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.state, row.answered_by, row.answered_phone_key_id = "answered", member_id, phone.id
     row.decision, row.answered_at = body.decision, now
     row.preview = None  # story 4949: answered — the file's lines are no longer needed here
+    row.envelope = None  # story 4972: nor the sealed card
+    _end_words_of(row)  # the plain words too (the command above already carries what the daemon needs) — the network question keeps its fixed vocabulary: its confirm stage opens this row again
+    if row.sealed:
+        row.input_hash = None  # (the command above already carries what the daemon needs) — see the withdrawal
     phone.last_used_at = now
     await db.flush()
     _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens

@@ -75,7 +75,7 @@ export const GROUPS: Group[] = [
     name: '첫 실행 길 (로그인·가입·메일 인증·온보딩·desktop setup)', closed: true,
     prefixes: [
       'app/login', 'app/register', 'app/verify-email', 'app/forgot-password', 'app/reset-password', 'app/set-password',
-      'app/mfa', 'app/invite', 'app/onboarding', 'app/desktop', 'app/auth', 'app/phone-start', 'app/phone-landing',
+      'app/mfa', 'app/invite', 'app/onboarding', 'app/desktop', 'app/auth', 'app/phone-start', 'app/phone-files', 'app/phone-landing',
       'app/(authenticated)/desktop', 'components/auth', 'components/desktop', 'components/verify',
     ],
   },

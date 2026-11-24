@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -32,10 +33,12 @@ const defaultDeps = (): ChangesDeps => ({
 const sleepCancels = new Set<() => void>();
 export const defaultChangesPaths = PATHS;
 
-export function AgentChangesSheet({ agentId, sessionKey, deviceName, open, onOpenChange, deps }: {
+export function AgentChangesSheet({ agentId, sessionKey, deviceName, filesHref, open, onOpenChange, deps }: {
   agentId: string;
   sessionKey: string;
   deviceName?: string | null;
+  /** story 4983 (P5 · PO 11-20): the one line at the bottom — «이 프로젝트 파일 전부 보기» — to the phone app's folder list of THIS computer and agent (nothing to pick when the agent has one project there). Only the phone app passes it (it is the shell that signs). */
+  filesHref?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** tests: the network and the clock */
@@ -108,6 +111,11 @@ export function AgentChangesSheet({ agentId, sessionKey, deviceName, open, onOpe
             </ul>
           ) : null}
           {state.kind === 'ready' && state.more ? <p className="break-keep px-4 py-3 text-ds-small text-ds-ink-3" data-testid="agent-changes-more">{t('more', { total: state.total })}</p> : null}
+          {filesHref && !(state.kind === 'problem' && state.problem === 'not_enabled') ? (
+            <div className="px-4 py-3" data-testid="agent-changes-files-line">
+              <Button variant="outline" asChild><Link href={filesHref} data-testid="agent-changes-files">{t('allFiles')}</Link></Button>
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           {canReload ? <Button variant="outline" disabled={busy || soon} onClick={start} data-testid="agent-changes-reload">{t('reload')}</Button> : null}
@@ -130,6 +138,7 @@ function problemText(t: T, problem: ChangesProblem): string {
     case 'session_gone': return t('problem.session_gone');
     case 'expired': return t('problem.expired');
     case 'no_folder': return t('problem.no_folder');
+    case 'not_enabled': return t('problem.not_enabled');
     case 'not_a_repo': return t('problem.not_a_repo');
     case 'not_repo_root': return t('problem.not_repo_root');
     case 'unsafe_repo_config': return t('problem.unsafe_repo_config');

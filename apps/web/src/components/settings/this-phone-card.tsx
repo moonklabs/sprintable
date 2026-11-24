@@ -16,7 +16,8 @@ type Result = { kind: 'number'; value: string } | { kind: 'no_screen_lock' } | {
 
 export function ThisPhoneCard() {
   const t = useTranslations('settings');
-  const { inPhoneApp, phoneCall } = usePhoneBridge();
+  const { inPhoneApp, phoneCall, deviceKind } = usePhoneBridge();
+  const computer = deviceKind === 'computer'; // (story 4994: the guest desktop app is a computer — «폰 확인 숫자» would be a wrong name)
   const [nonce, setNonce] = useState(0);
   // the answer is stored with the request it answers: a new request (nonce) makes the old answer «not read yet» without a state write in the effect
   const [answer, setAnswer] = useState<{ nonce: number; call: typeof phoneCall; result: Result } | null>(null);
@@ -43,15 +44,15 @@ export function ThisPhoneCard() {
   if (!inPhoneApp) return null;
   const result = answer && answer.nonce === nonce && answer.call === phoneCall ? answer.result : null; // an answer of another request or another bridge is not this one's
   return (
-    <SettingsSection title={t('thisPhoneTitle')} testId="this-phone-card">
+    <SettingsSection title={t(computer ? 'thisComputerTitle' : 'thisPhoneTitle')} testId="this-phone-card">
       {result === null && <p className="text-ds-body text-ds-ink-3" data-testid="this-phone-reading">{t('thisPhoneReading')}</p>}
       {result?.kind === 'number' && (
         <>
           <p className="font-mono text-3xl font-semibold tracking-widest text-ds-ink" data-testid="this-phone-number">{result.value}</p>
-          <p className="text-ds-body text-ds-ink-3" data-testid="this-phone-hint">{t('thisPhoneHint')}</p>
+          <p className="text-ds-body text-ds-ink-3" data-testid="this-phone-hint">{t(computer ? 'thisComputerHint' : 'thisPhoneHint')}</p>
         </>
       )}
-      {result?.kind === 'no_screen_lock' && <p className="text-ds-body text-ds-ink" data-testid="this-phone-no-screen-lock">{t('thisPhoneNoScreenLock')}</p>}
+      {result?.kind === 'no_screen_lock' && <p className="text-ds-body text-ds-ink" data-testid="this-phone-no-screen-lock">{t(computer ? 'thisComputerNoScreenLock' : 'thisPhoneNoScreenLock')}</p>}
       {result?.kind === 'failed' && (
         <>
           <p className="text-ds-body text-ds-ink" data-testid="this-phone-failed">{t('thisPhoneFailed')}</p>

@@ -6,7 +6,7 @@ two together (one changed alone → RED)."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,7 +17,11 @@ from app.core.database import Base
 # story #4733 (0459 · S2 · design 4733-phone-clock-design-1020.md): `clock` — a person's signed clock-out / clock-in of one whole computer from the phone;
 # the word is one, the choice (out_open · out_submit · out_cancel · in) is the payload's `action` (so a new action needs no migration)
 # story #4951 (0477 · ①a): `read_changes` — the computer's pairing person asks for the LIST of changed files of one session's folder (names · status word · line counts, never content); payload exactly {session_key}
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes")
+# story 4983 (0488 · P5): `file_list` — a person's SEALED request to list a folder of a project on their own computer; payload exactly {project_id, envelope} (no session, no path — the computer maps the project to a folder of its own)
+# story 4983 (0491 · P6): `file_read` — the same road to OPEN one file of a project (text or a small picture); payload exactly the same {project_id, envelope}: the folder and the file's name are inside the sealed request
+# story 4988 (0492 · P8): `file_download` — the same road to DOWNLOAD one file (up to 8 MiB, as sealed chunks); payload exactly the same {project_id, envelope}
+# story 4993 (0495 · P2 same-network direct): `direct_open` — a paired phone's SEALED ask for a short-lived door on its own computer; payload exactly {envelope} (no session, no address: the computer answers with a sealed `direct_offer`)
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download", "direct_open")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -68,6 +72,11 @@ class DesktopDeviceToken(Base):
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4979: «the computer itself spoke» — stamped ONLY by what the device sends (the stream connect · its reports and acks · `POST /relay/presence`), never by the server's own 30-second tick (which keeps
+    # `last_used_at` fresh for a stream whose peer is gone — measured 11-18: up to 5 min 20 s after the computer fell silent). The phone's «last seen N min ago» and the new «disconnected» rule read this.
+    last_heard_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4979: the last time the device sent its own `presence` (a host version that sends none keeps this empty — its «disconnected» rule stays the old 90 s one)
+    last_presence_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopSession(Base):
@@ -165,6 +174,9 @@ class DesktopCommand(Base):
         Index("ix_desktop_commands_setup_state_seq", "setup_id", "state", "device_seq"),
         # story #4951 (0477): the person's pause between two «changed files» asks reads their last ask — only those rows are in this index
         Index("ix_desktop_commands_read_changes_by", "requested_by", "created_at", postgresql_where=text("kind = 'read_changes'")),
+        # story 4976 (0486): the minute sweep of instruction copies reads the open ones older than ten minutes and the finished ones of the last day — one partial index each
+        Index("ix_desktop_commands_prompt_open_created", "created_at", postgresql_where=text("kind = 'send_prompt' AND state IN ('queued', 'delivered', 'acked')")),
+        Index("ix_desktop_commands_prompt_ended_created", "created_at", postgresql_where=text("kind = 'send_prompt' AND state IN ('done', 'failed', 'rejected')")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -206,6 +218,36 @@ class DesktopClockView(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class DesktopUsage(Base):
+    """story 4981 (0487): the computer's last known agent usage, one row per (computer, CLI, account) — closed numbers the host read (see the migration). Written only through the device's own
+    `PUT /relay/usage`; `seen_at` is the host's time (the phone's «마지막으로 본 지»), `reported_at` the server's. Never logged."""
+
+    __tablename__ = "desktop_usage"
+    __table_args__ = (
+        CheckConstraint("runtime IN ('claude', 'codex')", name="ck_desktop_usage_runtime"),
+        CheckConstraint("account ~ '^[a-z0-9]{8,32}$'", name="ck_desktop_usage_account"),
+        CheckConstraint("state IN ('windows', 'unavailable')", name="ck_desktop_usage_state"),
+        CheckConstraint("why IS NULL OR why IN ('api_key', 'not_read')", name="ck_desktop_usage_why"),
+        CheckConstraint("label IS NULL OR char_length(label) BETWEEN 1 AND 40", name="ck_desktop_usage_label"),  # 0490 — the length; the rest of the rule is the door's (desktop_usage.label_problem) and the reader's
+        # the two shapes are the only ones: numbers (no reason · 1–4 windows) or the word (a reason · no numbers) — the same text as the migration (0487)
+        CheckConstraint(
+            "(state = 'windows' AND why IS NULL AND jsonb_typeof(windows) = 'array' AND jsonb_array_length(windows) BETWEEN 1 AND 4)"
+            " OR (state = 'unavailable' AND why IS NOT NULL AND windows = '[]'::jsonb)",
+            name="ck_desktop_usage_shape",
+        ),
+    )
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True)
+    runtime: Mapped[str] = mapped_column(Text, primary_key=True)
+    account: Mapped[str] = mapped_column(Text, primary_key=True)  # an opaque short id of the CLI's settings folder (never a path)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    why: Mapped[str | None] = mapped_column(Text, nullable=True)
+    windows: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)  # story 4986 (0490): the name the person gave the account on the computer — display text only
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class DesktopChangesRead(Base):
     """story #4951 (0477 · ①a · Kadir lens A · E · I): one short-lived read of a session folder's changed-file LIST. Who asked (`viewer_id`), which computer (`setup_id`) and
     the command it travels in are fixed when the row is made; the computer's list (`payload`: names · a status word · line counts — no content) is written once and is
@@ -232,6 +274,113 @@ class DesktopChangesRead(Base):
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # the last look at this pending read (one per second per read)
+
+
+class DesktopFileRead(Base):
+    """story 4983 (0488 · P5): one short-lived request to LIST a folder of a project on a person's own computer. Who asked (`viewer_id`), which computer (`setup_id`), which project and the press's own key are fixed when
+    the row is made; the computer's SEALED answer (`payload` = {"envelope": …} — the server cannot open it: no name, no path, no word of what the folder holds) is written once and is deleted the moment the viewer reads
+    it, at `expires_at` (asked + 10 minutes), with its command, and when its computer is disconnected / its pairing person's account is closed / the organization's remote control is turned off. Never logged."""
+
+    __tablename__ = "desktop_file_reads"
+    __table_args__ = (
+        CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_file_reads_written"),
+        CheckConstraint("chunks_read >= 0 AND chunks_read <= chunks_written AND chunks_written <= 57", name="ck_desktop_file_reads_chunks"),  # story 4988 (0492)
+        Index("ix_desktop_file_reads_expires_at", "expires_at"),
+        Index("ix_desktop_file_reads_setup_created", "setup_id", "created_at"),
+    )
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_commands.id", ondelete="CASCADE"), primary_key=True)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # the project the request was asked for: the answer's header must name it
+    press_key: Mapped[str] = mapped_column(String(100), nullable=False)  # the press's own key: the answer's header `command_id` must be it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4988 (0492 · P8): a DOWNLOAD's chunks are put (`chunks_written`) and taken (`chunks_read`) in order; the server holds at most CHUNKS_AHEAD_MAX unread ones (a `file_list`/`file_read` row keeps both at 0)
+    chunks_written: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    chunks_read: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+
+class DesktopDirectAsk(Base):
+    """story 4993 (0495 · P2): one short-lived ASK for a same-network direct door. Who asked (`viewer_id`), which computer (`setup_id`) and the press's own key are written when the row is made; the computer's SEALED answer (`payload` =
+    {"envelope": …} — the server cannot open it: no address, no port, no ticket) is written once and is deleted the moment its person reads it, at `expires_at` (asked + 60 seconds: the door itself lives 20), with its command, and when its
+    computer is disconnected / its pairing person's account is closed / the organization's remote control is turned off. Nothing of it is kept in a log."""
+
+    __tablename__ = "desktop_direct_asks"
+    __table_args__ = (
+        CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_direct_asks_written"),
+        Index("ix_desktop_direct_asks_expires_at", "expires_at"),
+        Index("ix_desktop_direct_asks_setup_created", "setup_id", "created_at"),
+    )
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_commands.id", ondelete="CASCADE"), primary_key=True)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    press_key: Mapped[str] = mapped_column(String(100), nullable=False)  # the press's own key: the answer's header `command_id` must be it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+class DesktopDirectCount(Base):
+    """story 4993 (0496 · P3b): HOW MANY, nothing else — what a computer says of its own same-network direct road: the direct commands it took (`commands`) and the doors it opened (`doors`), counted since one run of the
+    host (`epoch`, a random word the host makes at start). The numbers are the host's running totals, so a report that comes again (a timeout, a retry) changes nothing and a lower one never lowers a higher one (the
+    row keeps the greater). No command, no phone, no address, no time of any one of them: a count. A row is kept 30 days after its last report and at most 20 runs per computer; it goes with the computer's row."""
+
+    __tablename__ = "desktop_direct_counts"
+    __table_args__ = (
+        CheckConstraint("commands >= 0 AND doors >= 0", name="ck_desktop_direct_counts_nonneg"),
+        Index("ix_desktop_direct_counts_updated_at", "updated_at"),
+    )
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True)
+    epoch: Mapped[str] = mapped_column(String(64), primary_key=True)
+    commands: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    doors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DesktopFileChunk(Base):
+    """story 4988 (0492 · P8): one SEALED chunk of a download (`payload` = {"envelope": …}: the server cannot open it — no name, no word, no byte of the file). Put by the computer once, deleted the moment the person reads it; it hangs from its
+    request's row (`desktop_file_reads.command_id`, ON DELETE CASCADE) so every end of that row takes its chunks with it."""
+
+    __tablename__ = "desktop_file_chunks"
+    __table_args__ = (CheckConstraint("i >= 0 AND i < 57", name="ck_desktop_file_chunks_i"),)
+
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_file_reads.command_id", ondelete="CASCADE"), primary_key=True)
+    i: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    written_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DesktopRecordHandoff(Base):
+    """story 4978 (0494 · C2): one SEALED `record_handoff` envelope in flight between a computer and a phone that are paired (the record key R travels inside, wrapped to ONE receiver: the server cannot open it and sees a shape and
+    one fixed size). Addressed by the pair — (`setup_id`, `remote_device_id`) — and a direction; deleted the moment the receiver says it has it, and anyway at `expires_at`; a computer or a phone that goes takes what was addressed to it
+    (ON DELETE CASCADE)."""
+
+    __tablename__ = "desktop_record_handoffs"
+    __table_args__ = (
+        CheckConstraint("direction IN ('host_to_phone', 'phone_to_host')", name="ck_desktop_record_handoffs_direction"),
+        CheckConstraint("char_length(command_id) BETWEEN 1 AND 64", name="ck_desktop_record_handoffs_command_id"),
+        UniqueConstraint("setup_id", "remote_device_id", "direction", "command_id", name="uq_desktop_record_handoffs_one_envelope"),
+        Index("ix_desktop_record_handoffs_pair", "setup_id", "remote_device_id", "direction", "created_at"),
+        Index("ix_desktop_record_handoffs_phone", "remote_device_id", "direction", "created_at"),
+        Index("ix_desktop_record_handoffs_expires", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False)
+    remote_device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("remote_devices.id", ondelete="CASCADE"), nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[str] = mapped_column(Text, nullable=False)
+    envelope: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class DesktopChangesAudit(Base):

@@ -226,7 +226,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story 4915 — `session-unconfirmed/page.tsx`(세션 확인 실패 때의 공개 «다시 시도» 화면 · default export만) 하나로 140→141.
     // story 4912 (B1) — `organization/workforce/api-keys/loading.tsx`(상단바 폴백 경계 · default export만) 하나로 141→142.
     // 4913 D물결 — `content/channel-posts/loading.tsx`(채널 포스트가 옛 스켈레톤을 따로 쥔다) · `content/[draftId]/loading.tsx`(상세가 옛 스켈레톤을 따로 쥔다) 둘 — default export만 — 로 142→144, 채널 포스트 D물결이 `content/channel-posts/{[draftId],calendar,engagement}/loading.tsx` 셋(옛 스켈레톤을 따로 쥔다)을 더해 144→147.
-    expect(fileCount).toBe(147);
+    // story 4983 (P5) — `phone-files/page.tsx`(폰 앱의 «프로젝트 파일» 화면 · default export · dynamic만) 하나로 147→148.
+    expect(fileCount).toBe(148);
     expect(violations).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@ from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,11 @@ from app.services.desktop_relay import (
 )
 
 logger = logging.getLogger(__name__)
+
+# story 4976: a sealed instruction's header time (ms): `ts` within this of the server's clock (design ② §4-2: the 5-minute signature window + 30 s of clock
+# difference), and the envelope open no longer than this after `ts` — the computer judges the window itself; the server only refuses what cannot be a press of now
+ENVELOPE_TS_SKEW_MS = 5 * 60_000 + 30_000
+ENVELOPE_LIFETIME_MAX_MS = 10 * 60_000
 
 TURN_END_EVENT_TYPE = "agent.turn_ended"
 
@@ -165,6 +170,10 @@ def _pick_session(sessions) -> DesktopSession:
     return sorted(sessions, key=lambda r: (r.state != "stopped", r.state_at), reverse=True)[0]
 
 
+def _iso(at: datetime | None) -> str | None:
+    return at.isoformat() if at is not None else None
+
+
 def _shown_state(pick: DesktopSession, reachable: bool) -> str:
     """a stopped session keeps its word; a live one whose computer is no longer heard reads `unknown` (the computer was lost)"""
     return pick.state if pick.state == "stopped" or reachable else "unknown"
@@ -194,6 +203,10 @@ def _picked_view(pick: DesktopSession, setup: DesktopSetup, state: str) -> dict:
         **widened_fields(pick, silent=not heard),
         # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
         "instruct_now": pick.instruct_now if heard else None,
+        # story 4976 (A3 · Kadir 871 ⓓ): whether this computer's app OPENS a sealed instruction (it said so with its startable list) — told only while the device is heard (the same gate); a sealed instruction is made only for a Mac that says true
+        "sealed_prompt": ("sealed_prompt" in (setup.capabilities or [])) if heard else None,
+        # story 4987 (P7): whether this computer's app accepts a files request signed by a window key (the 10-minute window; it said so with its startable list) — told only while the device is heard (the same gate)
+        "file_window": ("file_window" in (setup.capabilities or [])) if heard else None,
     }
 
 
@@ -201,7 +214,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
                        agent_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> dict:
     from app.models.agent_permission import AgentPermissionRequest
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
 
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
@@ -210,7 +223,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "work_hold": None, "instruct_now": None, "sealed_prompt": None, "file_window": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -222,6 +235,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
     bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
     view.update({"bound_setup_id": str(bound["setup_id"]) if bound else None, "bound_device_name": bound["device_name"] if bound else None})
+    view["last_heard_at"] = None  # story 4979: the last time the picked computer ITSELF spoke (only its own words — not the server's tick); null until one session is picked
     if not setups:
         return view
     sessions = (await db.execute(
@@ -232,7 +246,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     pick = _pick_session(sessions)
     setup = next(s for s in setups if s.id == pick.setup_id)
     now = _now()
-    reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
+    connected, heard = await _shown_reachable(db, {pick.setup_id}, now)  # story 4979: what is SHOWN (a presence-sending host: 150 s of its own silence; any other: the old 90 s rule)
+    reachable = pick.setup_id in connected
+    view["last_heard_at"] = _iso(heard.get(pick.setup_id))
     state = _shown_state(pick, reachable)
     view.update({**_picked_view(pick, setup, state), "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup)})
     from app.services.desktop_changes import may_read
@@ -261,6 +277,33 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     return view
 
 
+async def usage_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
+    """story 4981 (연결 ③ · PR 3): the agent usage numbers of the computer this agent is bound to, as its host last said them — closed numbers (whole percent per limit window · when it resets) or the word
+    `unavailable` with its reason, each with the host's «seen_at» (the phone says «마지막으로 본 지 N분 전»), and whether the computer is SHOWN connected right now (the same rule as every other screen). Whoever
+    may see this agent's session may see this (`can_view` — the very check of `session_view`): no new role, no new rule. A computer of another agent, another organization or a setup that was disconnected (revoked) is never in it; a computer that is merely silent now keeps its last numbers, with `connected: false` and their `seen_at` (PO 11-18 ⓑ).
+    With the organization's «원격 제어» off the device line is off and what the computer last said is old: no rows. These numbers are for SHOWING only — no decision is made by them anywhere."""
+    from app.models.desktop_relay import DesktopUsage
+    from app.services import remote_control
+    from app.services.agent_permissions import _shown_reachable
+    from app.services.desktop_usage import MAX_ACCOUNTS, row_view
+
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    await _agent(db, org_id, agent_id)
+    enabled = await remote_control.is_enabled(db, org_id)
+    bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
+    view: dict = {"agent_id": str(agent_id), "remote_control": enabled, "setup_id": None, "device_name": None, "connected": False, "usage": []}
+    if bound is None or not enabled:
+        return view
+    setup_id = bound["setup_id"]
+    connected, _heard = await _shown_reachable(db, {setup_id}, _now())
+    rows = (await db.execute(
+        select(DesktopUsage).where(DesktopUsage.setup_id == setup_id).order_by(DesktopUsage.runtime, DesktopUsage.account).limit(MAX_ACCOUNTS * 8)  # bounded: the door keeps at most MAX_ACCOUNTS rows per computer, so a table written some other way cannot make this read grow — the cut to MAX_ACCOUNTS is made AFTER the rows are judged (below), so odd rows cannot hide good ones
+    )).scalars().all()
+    view.update({"setup_id": str(setup_id), "device_name": bound["device_name"], "connected": setup_id in connected, "usage": [v for v in (row_view(r) for r in rows) if v is not None][:MAX_ACCOUNTS]})
+    return view
+
+
 # ── ①-b the list of every agent (the Today screen) ─────────────────────────────────────────────────────────────────────────
 
 OVERVIEW_MAX = 100
@@ -275,7 +318,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
     web can link to it — never someone else's. Returns `(rows, total)` — `total` before the `limit` cut.
     """
     from app.models.member import AgentProjectProfile, Member
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
     from app.services.project_auth import accessible_project_ids_in_org
 
     project_ids = await accessible_project_ids_in_org(db, user_id, org_id)
@@ -317,7 +360,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
                 sessions_of[r.agent_member_id].append(r)
     picks = {i: _pick_session(rs) for i, rs in sessions_of.items() if rs}
     now = _now()
-    reachable = await _reachable(db, {p.setup_id for p in picks.values()}, now)
+    reachable, heard_at = await _shown_reachable(db, {p.setup_id for p in picks.values()}, now)  # story 4979 (what is SHOWN)
     bound = await bound_devices(db, org_id=org_id, member_ids=agent_ids)
     # the person's own direct conversation with each agent (one read): both are participants of a `dm` of this org — newest wins
     from sqlalchemy.orm import aliased
@@ -353,6 +396,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             # story #4931: the computer that session runs on is the reader's own (`confirmed_by` = the reader) — the one rule `can_command` already uses for «whoever confirmed the device».
             # A question that stands at a terminal can only be answered by the person at THAT Mac, so the home counts a wait only when this is true. No session → false; a setup nobody confirmed → false.
             "device_is_mine": False,
+            "last_heard_at": None,  # story 4979
         }
         pick = picks.get(a.id)
         if pick is not None:
@@ -360,6 +404,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             full = _picked_view(pick, picked_setup, _shown_state(pick, pick.setup_id in reachable))
             row.update({k: full[k] for k in ("setup_id", "device_name", "state", "activity", "state_at", "limit", "first_screen")})
             row["device_is_mine"] = picked_setup.confirmed_by is not None and picked_setup.confirmed_by == user_id
+            row["last_heard_at"] = _iso(heard_at.get(pick.setup_id))
         out.append(row)
     return out, total
 
@@ -377,8 +422,31 @@ class CommandRequest(BaseModel):
     text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     conversation_id: uuid.UUID | None = None
     idempotency_key: str = Field(min_length=1, max_length=100)
-    signed: str = Field(min_length=1, max_length=16384)
+    # story 4976: `signed` is the plain road's (the phone's signature over fields that include a sha256 of the words); a SEALED instruction carries
+    # `envelope` instead — the words and the phone's signature over the whole envelope are in it, the server cannot open it, and no text · no hash of the words is anywhere beside it
+    signed: str | None = Field(default=None, min_length=1, max_length=16384)
+    envelope: dict | None = None
     phone_key_id: uuid.UUID
+
+    @field_validator("envelope")
+    @classmethod
+    def _envelope_shape(cls, env: dict | None) -> dict | None:
+        from app.services.envelope_shape import check_envelope
+
+        return None if env is None else check_envelope(env, kind="send_prompt")
+
+    @model_validator(mode="after")
+    def _one_road(self) -> CommandRequest:
+        if self.envelope is not None:
+            if self.kind != "send_prompt":
+                raise ValueError("only an instruction is sealed")
+            if self.text is not None or self.signed is not None:
+                raise ValueError("a sealed instruction carries no text and no plain signature beside its envelope")
+            if self.conversation_id is None:
+                raise ValueError("a sealed instruction names its conversation")
+        elif self.signed is None:
+            raise ValueError("a command carries its signature")
+        return self
 
 
 async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: uuid.UUID) -> bool:
@@ -391,18 +459,29 @@ async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: 
     )).first() is not None
 
 
+async def _sealed_prompt_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """story 4976 (A5): has this computer said it opens a sealed instruction? — its own mark, or the mark of any setup of the same Mac in the same organization (`org_id + machine_key`, revoked ones included: a replaced setup
+    keeps its mark, so a new setup_id does not open a plaintext window). A setup with no `machine_key` reads its own mark only. (Same reading as the card mark: agent_permissions._sealed_mark.)"""
+    from sqlalchemy import exists, or_
+
+    same_mac = [DesktopSetup.id == setup.id] + ([DesktopSetup.machine_key == setup.machine_key] if setup.machine_key is not None else [])
+    return bool((await db.execute(
+        select(exists().where(DesktopSetup.org_id == setup.org_id, DesktopSetup.sealed_prompts_at.is_not(None), or_(*same_mac)))
+    )).scalar())
+
+
 async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                          org_id: uuid.UUID, agent_id: uuid.UUID, body: CommandRequest) -> tuple[DesktopCommand | None, str]:
     """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working (an end on one that has
     stopped). A stop on a turn a macOS window holds is refused with its own closed reason (409 `system_wait_end_only`) — never an
     «already stopped», never an end of the session behind the person's back (story #4599 · PO 12:40Z ④ · 14:18Z)."""
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.agent_permissions import _lock_machine, _reachable, paired_phone
     from app.services.desktop_relay import enqueue_command
 
-    if body.kind == "send_prompt" and (body.text is None or body.conversation_id is None):
+    if body.kind == "send_prompt" and body.envelope is None and (body.text is None or body.conversation_id is None):
         raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
-    if body.kind == "send_prompt" and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
+    if body.kind == "send_prompt" and body.text is not None and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
         raise DesktopRelayError(422, "instruct_too_long", f"an instruction into the turn is {INSTRUCT_NOW_MAX} characters at most")
     if body.kind in ("stop_session", "end_session") and (body.text is not None or body.conversation_id is not None):
         raise DesktopRelayError(422, "invalid_payload", "a stop or an end carries no text or conversation")
@@ -436,6 +515,13 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    # story 4976 (A5 · AC4): a computer that has said it opens a sealed instruction takes no PLAINTEXT one — the words only ever pass the server as an envelope. The decision is made under the machine's lock (the one a report of
+    # its capabilities stands the mark under: both write the setup rows, so a plaintext instruction and the mark's standing are one after the other — no plaintext command is made AFTER the mark). Always 422 with a fixed sentence and
+    # no `detail`: not a word of the body comes back (an old shell's plain press included — it learns only that this computer wants the sealed road).
+    if body.kind == "send_prompt" and body.envelope is None:
+        await _lock_machine(db, setup)
+        if await _sealed_prompt_mark(db, setup):
+            raise DesktopRelayError(422, "sealed_required", "this computer takes sealed instructions")
     # story #4599 (PO 12:40Z ④ · 14:18Z): a stop while a macOS window holds the turn is refused with its own closed reason — the
     # session is not stopped, it is frozen in that window (an Esc cannot reach it), and a stop is never turned into an end of the
     # session behind the person's back. Asked BEFORE the «not working» line below: that line would answer «already_stopped», a false
@@ -451,9 +537,19 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         return None, "already_stopped"
     if body.kind == "send_prompt" and session.state != "working":
         raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
-    payload: dict = {"session_key": body.session_key, "signed": body.signed}
-    if body.kind == "send_prompt":
-        payload.update(text=body.text, conversation_id=str(body.conversation_id))
+    if body.envelope is not None:
+        # story 4976: the header the phone sealed must be about THIS press (a server cannot read it, but it can see that it is not a copy of another's):
+        # this computer · this session · this press's own key (the id the envelope's AAD names) · a time near now
+        e = body.envelope
+        now_ms = int(_now().timestamp() * 1000)
+        if e["setup_id"] != str(setup.id) or e["session_key"] != body.session_key or e["command_id"] != body.idempotency_key \
+                or abs(e["ts"] - now_ms) > ENVELOPE_TS_SKEW_MS or not e["ts"] <= e["expires_at"] <= e["ts"] + ENVELOPE_LIFETIME_MAX_MS:
+            raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this press's")
+        payload: dict = {"session_key": body.session_key, "conversation_id": str(body.conversation_id), "envelope": body.envelope}
+    else:
+        payload = {"session_key": body.session_key, "signed": body.signed}
+        if body.kind == "send_prompt":
+            payload.update(text=body.text, conversation_id=str(body.conversation_id))
     cmd = await enqueue_command(
         db, setup=setup, kind=body.kind, payload=payload, idempotency_key=f"b3:{member_id}:{body.idempotency_key}",
         requested_by=member_id,
@@ -587,14 +683,14 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     heard from, whether the person may command, and the projects the computer says it has a folder for that the person can open — ids
     and names, never a path. A computer that has said nothing lists none (the phone then says «start it at the Mac»)."""
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.agent_permissions import _shown_reachable, paired_phone
 
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id) \
             or not await may_converse(db, member_id=member_id, user_id=user_id, agent_id=agent_id):  # story 4714: no conversation to open = no start offered
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
     agent = await _agent(db, org_id, agent_id)
     setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
-    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    reachable, heard_at = await _shown_reachable(db, {s.id for s in setups}, _now())  # story 4979: what the phone is SHOWN (its own refusal of a start follows it)
     from app.services.desktop_computers import computer_index
 
     computer_of = await computer_index(db, org_id)  # story 4734: the computer each entry's setup belongs to — an ADDED id; the entry stays one per setup
@@ -604,7 +700,7 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
             continue
         computers.append({
             "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
-            "device_name": setup.device_name, "reachable": setup.id in reachable,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "last_heard_at": _iso(heard_at.get(setup.id)),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
             "projects": await _openable_startable_projects(db, setup, agent_id, user_id=user_id, org_id=org_id),
         })
@@ -632,7 +728,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
     from app.services import remote_control
-    from app.services.agent_permissions import _reachable
+    from app.services.agent_permissions import _shown_reachable
 
     setups = (await db.execute(
         select(DesktopSetup)
@@ -643,7 +739,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
         .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
     )).scalars().all()
-    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    reachable, heard_at = await _shown_reachable(db, {s.id for s in setups}, _now())  # story 4979: what the phone is SHOWN
     from app.services.desktop_computers import computer_index
 
     computer_of = await computer_index(db, org_id)  # story 4734: an ADDED id per entry (the entry stays one per setup — the phone shell reads it by `setup_id`)
@@ -691,9 +787,11 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
         agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
         computers.append({
             "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
-            "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "last_heard_at": _iso(heard_at.get(setup.id)), "agents": agents,
             # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
             "computer_press": "computer_press" in (setup.capabilities or []),
+            # story 4987 (P7): …and accepts a files request signed by a window key (the 10-minute window) — the phone asks for a window only then
+            "file_window": "file_window" in (setup.capabilities or []),
             # story 4714: agents of this computer the person can see but not talk to (the agent's message policy) were left out; when that is why the list
             # is empty the phone says so instead of «no agent yet — start the first at the Mac»
             **({"agents_hidden": "message_policy"} if hidden_by_policy and not agents else {}),
@@ -709,7 +807,7 @@ async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
     )).first() is not None
 
 
-async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str, command_id,
+async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sender_id, agent_id, text: str | None, command_id,
                              after_step: bool = False) -> None:
     """«지시 · 지금 턴에 보냄» + the text, from the person who sent it (명세 B-3). Not dispatched to the agent — it already has
     the instruction in its turn; a second copy as a message would be a second instruction."""
@@ -720,7 +818,9 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
     locale = await resolve_org_locale(db, org_id)
     db.add(ConversationMessage(
         id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id,
-        content=f"{t('desktop_command.prompt_line_after_step' if after_step else 'desktop_command.prompt_line', locale)}\n{text}",
+        # story 4976: a sealed instruction (no text) leaves only the fixed words — the server never had its text
+        content=(f"{t('desktop_command.prompt_line_after_step' if after_step else 'desktop_command.prompt_line', locale)}\n{text}" if text is not None
+                 else t("desktop_command.prompt_line_sealed_after_step" if after_step else "desktop_command.prompt_line_sealed", locale)),
         mentioned_ids=[],
         msg_metadata={"activation": {"audience": [], "kind": "remote_prompt", "expects_response": False},
                       "remote_prompt": {"command_id": str(command_id), "agent_member_id": str(agent_id)}},
@@ -809,9 +909,9 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
             select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == cmd.setup_id,
                                                          DesktopSession.session_key == cmd.session_key)
         )).scalar_one_or_none()
-        if setup is not None and agent_id is not None and payload.get("conversation_id") and payload.get("text") is not None:
+        if setup is not None and agent_id is not None and payload.get("conversation_id") and (payload.get("text") is not None or payload.get("envelope") is not None):
             await _write_prompt_line(db, org_id=setup.org_id, conversation_id=uuid.UUID(str(payload["conversation_id"])),
-                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload["text"], command_id=cmd.id,
+                                     sender_id=cmd.requested_by, agent_id=agent_id, text=payload.get("text"), command_id=cmd.id,
                                      after_step=cmd.result_code == "after_step")
 
 

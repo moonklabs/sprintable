@@ -331,6 +331,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/agents/{}/desktop-usage",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/agents/{}/message-policy",
 "kind": "object"
 },
@@ -876,6 +881,51 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/desktop/computers/{}/direct",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/computers/{}/direct/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/direct/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/computers/{}/files",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/computers/{}/files/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/files/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/files/{}/chunks/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/computers/{}/records",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/computers/{}/records",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/desktop/device-token-codes",
 "kind": "object"
 },
@@ -915,6 +965,26 @@
 "kind": "object"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/record-handoffs",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/record-handoffs/waiting",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/record-handoffs/{}/received",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/records",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/changes/{}",
 "kind": "unknown"
@@ -930,13 +1000,53 @@
 "kind": "unknown"
 },
 {
+"method": "PUT",
+"path": "/api/v2/desktop/relay/direct-count",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/direct/{}",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/relay/endpoints",
 "kind": "object"
 },
 {
+"method": "PUT",
+"path": "/api/v2/desktop/relay/files/{}",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/files/{}/chunks/{}",
+"kind": "unknown"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/relay/pairing-offers/{}/reveal",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/close",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/confirmed",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/pairing-sessions/{}/nonce",
 "kind": "unknown"
 },
 {
@@ -965,6 +1075,36 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/relay/presence",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/record-handoffs",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/record-handoffs/waiting",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/record-handoffs/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/relay/record-handoffs/{}/received",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/records",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/sessions",
 "kind": "unknown"
@@ -987,6 +1127,11 @@
 {
 "method": "GET",
 "path": "/api/v2/desktop/relay/stream",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/usage",
 "kind": "unknown"
 },
 {
@@ -1063,6 +1208,11 @@
 "method": "GET",
 "path": "/api/v2/desktop/setups/{}/hands",
 "kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/setups/{}/record-handoffs/{}",
+"kind": "unknown"
 },
 {
 "method": "GET",
@@ -3127,6 +3277,26 @@
 {
 "method": "GET",
 "path": "/api/v2/remote-devices/pairing-offers/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/remote-devices/pairing-sessions/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/close",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/commit",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/remote-devices/pairing-sessions/{}/reveal",
 "kind": "unknown"
 },
 {

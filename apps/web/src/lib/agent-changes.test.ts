@@ -75,10 +75,12 @@ describe('loadChanges (story 4951 ①c)', () => {
   });
 
   it('every outcome word of the computer is a closed word of the screen; an unknown one is the generic «failed», retryable', async () => {
-    for (const [code, problem] of [['no_folder', 'no_folder'], ['not_a_repo', 'not_a_repo'], ['not_repo_root', 'not_repo_root'], ['unsafe_repo_config', 'unsafe_repo_config'], ['state_inside', 'state_inside'], ['git_missing', 'git_missing'], ['timeout', 'timeout'], ['busy', 'busy'], ['upload_failed', 'upload_failed'], ['something_new', 'failed']] as const) {
+    for (const [code, problem] of [['no_folder', 'no_folder'], ['not_enabled', 'not_enabled'], ['not_a_repo', 'not_a_repo'], ['not_repo_root', 'not_repo_root'], ['unsafe_repo_config', 'unsafe_repo_config'], ['state_inside', 'state_inside'], ['git_missing', 'git_missing'], ['timeout', 'timeout'], ['busy', 'busy'], ['upload_failed', 'upload_failed'], ['something_new', 'failed']] as const) {
       const states = await run(world({ look: [json(200, { state: 'failed', code, files: null })] }));
       expect(states.at(-1)).toMatchObject({ kind: 'problem', problem });
     }
+    // `not_enabled` (the person's «폰에서 파일 보기» is off for this folder) is a word that a retry cannot change: no reload
+    expect((await run(world({ look: [json(200, { state: 'failed', code: 'not_enabled', files: null })] }))).at(-1)).toEqual({ kind: 'problem', problem: 'not_enabled', retry: false });
     // a stale rejection from the server's own queue (`rejected · expired`) reads as «expired»
     expect((await run(world({ look: [json(200, { state: 'rejected', code: 'expired', files: null })] }))).at(-1)).toMatchObject({ problem: 'expired' });
   });

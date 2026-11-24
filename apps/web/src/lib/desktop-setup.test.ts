@@ -5,7 +5,7 @@ import { NOT_CONNECTED_AFTER_HANDOVER_MS, heldProjectOf,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, parseOldRuntimes, setupRoleRows, workdirInputOk,
   setupProgress, listableRecipe, hasSetupFragment, type SetupRecipe, type SetupStatus,
   setupPollDelayMs, SETUP_STATUS_POLL_MS, SETUP_STATUS_SLOW_POLL_MS,
-  movedRowCount, ownerKey, startFailedLine, withAttachable, type AttachableAgent,
+  movedRowCount, ownerKey, startFailedLine, withAttachable, moveAfterTools, type AttachableAgent,
 } from './desktop-setup';
 
 const CODE = 'A'.repeat(20) + '_-' + 'b'.repeat(21); // 43
@@ -489,5 +489,23 @@ describe('[SID:4934] heldProjectOf', () => {
     for (const v of [null, undefined, 'x', 7, {}, { limit: 1 }, { existing_project: null }, { existing_project: { id: 'x', name: 'A' } }, { existing_project: { id: ID, name: '  ' } }, { existing_project: { id: ID } }, { existing_project: { name: 'A' } }, { existing_project: { id: 7, name: 'A' } }]) {
       expect(heldProjectOf(v), JSON.stringify(v)).toBeNull();
     }
+  });
+});
+
+// story 4986 AC5 — the tools the move panel's login line names
+describe('[SID:4986] moveAfterTools', () => {
+  const A = (id: string, runtime: 'claude' | 'codex', in_project = true) => ({ id, name: id, runtime, live_keys: 0, last_used_at: null, in_project });
+  it('nothing chosen → every tool an agent that can be moved uses (Claude Code first); a tool this computer lacks is not named', () => {
+    expect(moveAfterTools([A('a', 'claude'), A('b', 'codex')], ['claude', 'codex'], [])).toEqual(['claude', 'codex']);
+    expect(moveAfterTools([A('b', 'codex'), A('a', 'claude')], ['claude', 'codex'], [])).toEqual(['claude', 'codex']);
+    expect(moveAfterTools([A('a', 'claude'), A('b', 'codex')], ['claude'], [])).toEqual(['claude']);
+  });
+  it('chosen → only the chosen agents\' tools', () => {
+    expect(moveAfterTools([A('a', 'claude'), A('b', 'codex')], ['claude', 'codex'], ['b'])).toEqual(['codex']);
+    expect(moveAfterTools([A('a', 'claude'), A('b', 'codex')], ['claude', 'codex'], ['a', 'b'])).toEqual(['claude', 'codex']);
+  });
+  it('an agent not on the team yet still counts (the move puts it there); no agent → none', () => {
+    expect(moveAfterTools([A('a', 'codex', false)], ['codex'], [])).toEqual(['codex']);
+    expect(moveAfterTools([], ['claude'], [])).toEqual([]);
   });
 });

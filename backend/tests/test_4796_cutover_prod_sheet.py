@@ -949,7 +949,125 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     kinds = [h for h in hits if h.startswith("0477_")]
     assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds), kinds
     assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in kinds), kinds
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_"))]
+    # story 4972: 0479 is what the reading lists as FOUR lines of upgrade(): the column `sealed` (NOT NULL with a constant default — Postgres stores that without rewriting the table, and an old revision that never names it
+    # gets false), the old CHECK of `agent_permission_requests` dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan that does not block writers). Why a running old revision lives with it:
+    # it never writes `sealed` or `envelope` (the other new column — nullable, so not listed), and every row it writes (text tool + summary, a hash, no envelope, sealed false; or a terminal-only row with no hash) satisfies the new rule
+    # as it satisfied the old; nothing existing is renamed, dropped, backfilled or rewritten. The downgrade() is not read (it keeps the sealed rows as terminal-only cards, then restores the old CHECK).
+    sealed = [h for h in hits if h.startswith("0479_")]
+    assert len(sealed) == 4, sealed
+    assert any("add_column" in h and '"sealed"' in h and "nullable=False" in h and "server_default" in h for h in sealed), sealed
+    assert any("drop_constraint" in h and "_CHECK" in h for h in sealed) and any("NOT VALID" in h for h in sealed) and any("VALIDATE CONSTRAINT" in h for h in sealed), sealed
+    assert not any(k in h for h in sealed for k in ("DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no data written, no column dropped or retyped"
+    # story 4972: 0480 is THREE lines of upgrade(): the CHECK of 0479 dropped, the new one added NOT VALID (a brief lock, no scan) and then VALIDATEd (a scan; the lock is held to the commit). Why a running old revision lives with it: the rule
+    # only gets LOOSER where it changes anything (the terminal-only branch no longer says `NOT sealed`) and the one new coupling (a request holds its envelope exactly while pending) is what the code of 0479 already does, so every row an old revision writes still passes; no column is added, dropped, retyped or rewritten, and no row is written. Every migration of a run shares one transaction, so the lock is held through the VALIDATE scan: writes to this table wait that long (a small table). The downgrade() is not read.
+    loosened = [h for h in hits if h.startswith("0480_")]
+    assert len(loosened) == 3, loosened
+    assert any("drop_constraint" in h and "_CHECK" in h for h in loosened) and any("NOT VALID" in h for h in loosened) and any("VALIDATE CONSTRAINT" in h for h in loosened), loosened
+    assert not any(k in h for h in loosened for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column, no data touched"
+    # story 4972 (4a): 0482 is THREE lines of upgrade() the reading lists: the CHECKs on the two columns it adds to `remote_device_pairing_sessions` (the `add_column` lines of two NULLABLE columns are not listed — they are not rewrites).
+    # Why a running old revision lives with it: it never writes either column, so every row it writes has both NULL and every one of the three CHECKs passes for NULLs (both-or-neither · only-after-a-reveal · size); the table is tiny
+    # (an offer lives five minutes, rows older than an hour are deleted when the next QR is made), so the validating scan under the CHECK's brief lock is nothing; nothing existing is altered, dropped, renamed, backfilled or rewritten.
+    receipt = [h for h in hits if h.startswith("0482_")]
+    assert len(receipt) == 3 and all("create_check_constraint" in h and "ck_pairing_sessions_confirm_" in h for h in receipt), receipt
+    assert not any(k in h for h in receipt for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
+    # story 4972 (AC3 ①): 0483 is THREE lines of upgrade() the reading lists: the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_cards_one_way` — a new function; nothing existing is touched), `DROP TRIGGER IF EXISTS` (nothing is
+    # there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds (`sealed_cards_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never writes the column,
+    # so every UPDATE it makes to a `desktop_setups` row leaves it NULL (`OLD.sealed_cards_at IS NOT NULL` is false → the function raises nothing and returns the row); the check is one comparison per updated row; nothing existing is altered,
+    # dropped, renamed, backfilled or rewritten, and no data is written by the migration.
+    mark = [h for h in hits if h.startswith("0483_")]
+    assert len(mark) == 3, mark
+    assert any("DROP TRIGGER IF EXISTS trg_desktop_setups_sealed_cards_one_way ON desktop_setups" in h for h in mark), mark
+    assert not any(k in h for h in mark for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), "no column dropped or retyped, no data touched"
+    # (codex: the reading sees only the `op.execute(` line of a multi-line SQL string — so the SQL INSIDE the three calls is read here, from the file itself: nothing in upgrade() writes data, drops, renames or retypes)
+    up0483 = (_ROOT / "backend/alembic/versions/0483_desktop_setups_sealed_cards.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0483), "0483's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
+    # story 4972: 0484 is FIVE lines of upgrade(): the CHECK of 0480 dropped, the new one added NOT VALID (a brief lock, no scan), the two data statements (`_END_PENDING`: a PENDING row whose window passed and that still holds words ends as `expired` — what the
+    # minute job does for it from now on; `_CLEAR_ENDED`: every other ended row loses `tool · summary · workdir`, the network question's fixed words kept) and the VALIDATE. Why a running old revision lives with it: the new CHECK is only LOOSER (an ended plain
+    # row may lack its words; a pending one may not — every row the old code writes is pending with its words); the old code reads `tool · summary · workdir` as nullable columns (a sealed row has had none since 0479, a terminal-only one may lack them) so a row without
+    # them is a shape it already serves; open cards are not touched; nothing is renamed, dropped or added. The data change is irreversible by design (the downgrade keeps the rows as terminal-only history). The lock is held to the commit — the table keeps
+    # recent requests only (ended ones are deleted after about 30 days), so the scans are small, as 0480's were.
+    cleared = [h for h in hits if h.startswith("0484_")]
+    assert len(cleared) == 5, cleared
+    assert any("drop_constraint" in h and "_CHECK" in h for h in cleared) and any("NOT VALID" in h for h in cleared) and any("VALIDATE CONSTRAINT" in h for h in cleared), cleared
+    assert any("_END_PENDING" in h for h in cleared) and any("_CLEAR_ENDED" in h for h in cleared), cleared
+    assert not any(k in h for h in cleared for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "DELETE")), "no column added, dropped or retyped, no row deleted"
+    # story 4976: 0486 is ONE statement of upgrade(): an UPDATE of `desktop_commands` — a `send_prompt` command that is over (done · failed · rejected) keeps {session_key, conversation_id} and loses the words, the plain signature (a sha256 of the words) and the
+    # envelope. Why a running old revision lives with it: it only drops words from rows that are OVER (the old code never reads the payload of a finished command again — a result is stored on the row, the conversation line was written when it went `done`), no schema
+    # change (no CHECK on `payload`), open commands are not touched, nothing is renamed, dropped or added. Irreversible by design (the downgrade is a no-op). Row locks only, a few rows in dev (9, measured by the PO) and a table of recent commands in prod.
+    cmds = [h for h in hits if h.startswith("0486_")]
+    # …and the two partial INDEXES of the minute sweep (Kadir lens 5850): `create_index` lines on `desktop_commands` only — an index build is a brief write lock on a table of recent commands, nothing rewritten or altered
+    assert len(cmds) == 3 and sum("op.execute(" in h for h in cmds) == 1 and sum("create_index" in h for h in cmds) == 2, cmds
+    up0486 = (_ROOT / "backend/alembic/versions/0486_desktop_prompt_ended_payload.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert "UPDATE desktop_commands" in up0486 and "kind = 'send_prompt'" in up0486 and "state IN ('done', 'failed', 'rejected')" in up0486, "only the finished instruction rows"
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_", up0486), "0486 changes rows only: no column or table altered, no row deleted"
+    assert up0486.count("op.create_index(") == 2 and up0486.count('"desktop_commands"') == 2 and "postgresql_where" in up0486, "the two partial indexes, on `desktop_commands` only"
+    # story 4983: 0488 is the same shape as 0477 — one more word in the command-kind CHECK (`file_list`: dropped and made again; an old revision never writes the new word, every value it does write still passes), one new table with its
+    # two indexes and one partial index on `desktop_commands`; nothing existing is altered, backfilled or locked for long. The reading lists exactly those lines: the CHECK swap and index builds, nothing else.
+    files = [h for h in hits if h.startswith("0488_")]
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in files) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in files), files
+    assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in files), files
+    # story 4983 (P6): 0491 is 0488's shape again — one more word in the command-kind CHECK (`file_read`: dropped and made again; an old revision never writes the new word, every value it does write still passes) and the one partial index
+    # of the person's ask pause swapped for the same index over both kinds (the old revision never names it: it asks no files question at all). The reading lists exactly those four lines — the CHECK swap, the index dropped, the index built — nothing else.
+    file_read = [h for h in hits if h.startswith("0491_")]
+    assert len(file_read) == 4, file_read
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in file_read) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in file_read), file_read
+    assert sum("drop_index" in h and "ix_desktop_commands_file_list_by" in h for h in file_read) == 1 and sum("create_index" in h and "ix_desktop_commands_file_by" in h for h in file_read) == 1, file_read
+    up0491 = (_ROOT / "backend/alembic/versions/0491_desktop_file_read_kind.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table", up0491), "0491's upgrade() changes no row, no column and no table"
+    # story 4988 (P8): 0492 is 0491's shape once more — one more word in the command-kind CHECK (`file_download`: dropped and made again; an old revision never writes the new word) and the person's ask-pause index made again over the three
+    # file words (the old revision never names it) — plus what a download needs: TWO counters on `desktop_file_reads` (`chunks_written`, `chunks_read`: NOT NULL with a CONSTANT default 0 — no table rewrite, and a running old revision never names them,
+    # so every row it writes has 0 and 0), ONE CHECK over them (`chunks_read >= 0 AND chunks_read <= chunks_written AND chunks_written <= 57`: the table holds a few rows of the last ten minutes, so the scan under the CHECK's brief lock is
+    # nothing, and 0 ≤ 0 ≤ 0 passes) and a NEW table `desktop_file_chunks` (hanging from the request's row by a cascading foreign key — nothing existing is altered). The reading lists exactly these seven lines. No row is changed, nothing is dropped or renamed.
+    file_download = [h for h in hits if h.startswith("0492_")]
+    assert len(file_download) == 7, file_download
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in file_download) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in file_download), file_download
+    assert sum("drop_index" in h and "ix_desktop_commands_file_by" in h for h in file_download) == 1 and sum("create_index" in h and "ix_desktop_commands_file_by" in h for h in file_download) == 1, file_download
+    assert sum("add_column" in h and "nullable=False" in h and 'server_default="0"' in h and '"desktop_file_reads"' in h for h in file_download) == 2, "the two counters: NOT NULL with a constant default, on the short-lived table"
+    assert sum("create_check_constraint" in h and "ck_desktop_file_reads_chunks" in h for h in file_download) == 1, file_download
+    up0492 = (_ROOT / "backend/alembic/versions/0492_desktop_file_download.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|drop_column|alter_column|rename_|drop_table", up0492), "0492's upgrade() changes no row, drops nothing and renames nothing"
+    assert up0492.count("op.create_table(") == 1 and '"desktop_file_chunks"' in up0492 and 'ondelete="CASCADE"' in up0492, "the one new table, hanging from the request's row"
+    # story 4978 (C2): 0494 is ONE NEW table and nothing else — `desktop_record_handoffs` (a sealed record-key handoff in flight between two paired devices; hanging from the computer and the phone by two cascading foreign keys), its CHECK pair and its UNIQUE (inside
+    # the `create_table`) and its three indexes. The reading lists exactly the three `create_index` lines. Why a running old revision lives with it: it never names the table; no existing table, column, constraint or row is altered, backfilled, locked or rewritten.
+    # The downgrade() is not read (it drops the table nothing else refers to).
+    record_handoffs = [h for h in hits if h.startswith("0494_")]
+    assert len(record_handoffs) == 3 and all("create_index" in h and "desktop_record_handoffs" in h for h in record_handoffs), record_handoffs
+    up0494 = (_ROOT / "backend/alembic/versions/0494_desktop_record_handoffs.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|drop_constraint|drop_index|create_check_constraint", up0494), "0494's upgrade() changes no row, no column and no existing table"
+    assert up0494.count("op.create_table(") == 1 and '"desktop_record_handoffs"' in up0494 and up0494.count('ondelete="CASCADE"') == 2, "the one new table, hanging from the computer and the phone"
+    # story 4993 (P3): 0495 is 0491's shape plus ONE NEW table — one more word in the command-kind CHECK (`direct_open`: dropped and made again; the new CHECK is the old one plus exactly ONE word, so an old revision that never writes the word
+    # still passes it with every value it does write — it lives with the new schema), one partial index over `desktop_commands` that only the new word's rows ever enter (the old revision never names it), and the new table `desktop_direct_asks`
+    # (a short-lived sealed answer slot, 60 seconds; hanging from the command and the computer by two cascading foreign keys; its CHECK is inside the `create_table`, on a table that is new and empty) with its two indexes. The reading lists exactly
+    # these five lines — the CHECK swap and the three index builds — nothing else. No row is changed, nothing is dropped or renamed besides the CHECK made again; the downgrade() is not read.
+    direct_open = [h for h in hits if h.startswith("0495_")]
+    assert len(direct_open) == 5, direct_open
+    assert sum("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in direct_open) == 1 and sum("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in direct_open) == 1, direct_open
+    assert sum("create_index" in h for h in direct_open) == 3, direct_open
+    up0495 = (_ROOT / "backend/alembic/versions/0495_desktop_direct_open.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|drop_index", up0495), "0495's upgrade() changes no row, no column and no existing table"
+    assert up0495.count("op.create_table(") == 1 and '"desktop_direct_asks"' in up0495 and up0495.count('ondelete="CASCADE"') == 2, "the one new table, hanging from the command and the computer"
+    assert "_NEW = _OLD + (" in (_ROOT / "backend/alembic/versions/0495_desktop_direct_open.py").read_text(), "the new CHECK is the old words plus ONE — an old revision lives with it"
+    # story 4976 (A5): 0489 is FOUR lines of upgrade() the reading lists: ONE data `UPDATE` (the backfill: a computer whose capabilities already hold `sealed_prompt` gets `sealed_prompts_at = now()`; restricted by `capabilities @>` to those rows, row locks only —
+    # a few computers), the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_sealed_prompts_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the `CREATE TRIGGER` on `desktop_setups`. The column it adds
+    # (`sealed_prompts_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never names the column, so every UPDATE it makes to a `desktop_setups` row leaves the value as it was
+    # (`NEW.sealed_prompts_at IS DISTINCT FROM OLD.sealed_prompts_at` is false → the function raises nothing and returns the row); the check is one comparison per updated row; nothing existing is altered, dropped or renamed.
+    sealed_prompts = [h for h in hits if h.startswith("0489_")]
+    assert len(sealed_prompts) == 4, sealed_prompts
+    assert sum("UPDATE desktop_setups SET sealed_prompts_at = now() WHERE capabilities @>" in h for h in sealed_prompts) == 1, sealed_prompts
+    assert any("DROP TRIGGER IF EXISTS trg_desktop_setups_sealed_prompts_one_way ON desktop_setups" in h for h in sealed_prompts), sealed_prompts
+    assert not any(k in h for h in sealed_prompts for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "DELETE")), "no column dropped or retyped, nothing deleted"
+    up0489 = (_ROOT / "backend/alembic/versions/0489_desktop_setups_sealed_prompts.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|drop_column|alter_column|rename_", up0489), "0489's upgrade() adds a column, one bounded UPDATE, a function and a trigger — nothing dropped or retyped"
+    assert len(re.findall(r"\bUPDATE\s+\w+\s+SET\b", up0489)) == 1 and "capabilities @>" in up0489, "the one data statement is the bounded backfill"
+    # story 4986: 0490 is ONE line of upgrade() the reading lists: the CHECK on the NULLABLE column it adds to `desktop_usage` (the `add_column` of a nullable column is not listed — it is no rewrite). Why a running old revision lives with it: it never
+    # names `label`, so every row it writes has NULL and the CHECK (`label IS NULL OR char_length(label) BETWEEN 1 AND 40`) passes for NULL; the table holds at most eight rows per computer, so the scan under the CHECK's brief lock is nothing; nothing
+    # existing is altered, dropped, renamed, backfilled or rewritten, and no data is written by the migration. The downgrade() is not read.
+    named = [h for h in hits if h.startswith("0490_")]
+    assert len(named) == 1 and "create_check_constraint" in named[0] and "ck_desktop_usage_label" in named[0], named
+    assert not any(k in h for h in named for k in ("drop_", "DROP", "alter_column", "rename_", "UPDATE", "DELETE", "add_column")), "no column dropped or retyped, no data touched"
+    up0490 = (_ROOT / "backend/alembic/versions/0490_desktop_usage_label.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert up0490.count("op.add_column(") == 1 and "nullable=True" in up0490 and not re.search(r"drop_column|alter_column|rename_|\bUPDATE\b|\bDELETE\b|TRUNCATE|INSERT", up0490), "0490's upgrade() adds one nullable column and its CHECK — nothing else"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

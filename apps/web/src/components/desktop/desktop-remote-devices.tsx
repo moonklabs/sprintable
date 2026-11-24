@@ -13,6 +13,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useOrgRemoteControl } from '@/lib/org-remote-control';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { isComputerLabel } from '@/lib/device-kind';
 import { PhonePairEntry } from './phone-pairing';
 
 /**
@@ -113,11 +114,12 @@ export function DesktopRemoteDevices() {
   // story #4629: whether that phone's login was ended too · a server that does not say (older) → the line as before, no claim either way
   const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`, ({ removed, session }) => {
     if (!removed) return t('alreadyRemoved', { phone: phone.label });
-    if (session === 'ended') return t('phoneRemovedSignedOut', { phone: phone.label });
+    const device = isComputerLabel(phone.label); // story 4994: a row whose label is a computer's (the guest desktop app) is not «a phone»
+    if (session === 'ended') return t(device ? 'phoneRemovedSignedOutComputer' : 'phoneRemovedSignedOut', { phone: phone.label });
     // story #4630 AC3 (Yuna «4630» ③): the next hand when its login was not found — a link to «로그인한 다른 기기» (settings ›
     // account), never run from here: that card's own confirmation goes first
     if (session === 'not_found') {
-      return t.rich('phoneRemovedSessionNotFound', {
+      return t.rich(device ? 'phoneRemovedSessionNotFoundComputer' : 'phoneRemovedSessionNotFound', {
         phone: phone.label,
         lk: (chunks) => <Link href={flatHref('/settings?tab=profile')} className="underline underline-offset-2" data-testid="desktop-remote-devices-sign-out-elsewhere">{chunks}</Link>,
       });
@@ -153,8 +155,8 @@ export function DesktopRemoteDevices() {
                 {asking === phoneKey ? (
                   <Confirm text={phone.pairs.length === 0
                     // Yuna 08:14Z: no pair → no «승인 · 멈춤 · 지시를 할 수 없고» (a cost it does not have) — its own line
-                    ? t('confirmRemovePhoneUnpaired', { phone: phone.label })
-                    : t('confirmRemovePhone', { phone: phone.label, n: phone.pairs.length })}
+                    ? t(isComputerLabel(phone.label) ? 'confirmRemovePhoneUnpairedComputer' : 'confirmRemovePhoneUnpaired', { phone: phone.label })
+                    : t(isComputerLabel(phone.label) ? 'confirmRemovePhoneComputer' : 'confirmRemovePhone', { phone: phone.label, n: phone.pairs.length })}
                     onConfirm={() => void removePhone(phone)} onCancel={close(phoneKey)} />
                 ) : null}
                 {phone.pairs.length === 0 ? <p className="pl-4 text-xs text-muted-foreground">{t('noPairs')}</p> : (
@@ -165,7 +167,7 @@ export function DesktopRemoteDevices() {
                         <li key={key} className="flex flex-col gap-1" data-testid="desktop-remote-device-row">
                           <PairLine pair={pair} onRemove={open(key)} disabled={asking !== null} buttonRef={keep(key)} />
                           {asking === key ? (
-                            <Confirm text={t('confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') })} confirmLabel={t('unpair')}
+                            <Confirm text={t(isComputerLabel(phone.label) ? 'confirmRemoveComputer' : 'confirmRemove', { phone: phone.label, device: pair.device_name ?? t('unknownDevice') })} confirmLabel={t('unpair')}
                               onConfirm={() => void removePair(phone, pair)} onCancel={close(key)} />
                           ) : null}
                         </li>
@@ -197,9 +199,9 @@ function PhoneHead({ phone, onRemove, disabled, buttonRef }: {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <span className="text-sm font-medium">{phone.label}</span>
-      <span className="text-xs text-muted-foreground" title={t('confirmNumberHint')}>{t('confirmNumber', { number: phone.confirm_number })}</span>
+      <span className="text-xs text-muted-foreground" title={t(isComputerLabel(phone.label) ? 'confirmNumberHintComputer' : 'confirmNumberHint')}>{t(isComputerLabel(phone.label) ? 'confirmNumberComputer' : 'confirmNumber', { number: phone.confirm_number })}</span>
       {used ? <span className="text-xs text-muted-foreground">{t('lastUsed', { used })}</span> : null}
-      <Button ref={buttonRef} size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t('removePhone')}</Button>
+      <Button ref={buttonRef} size="sm" variant="outline" className="ml-auto" disabled={disabled} onClick={onRemove}>{t(isComputerLabel(phone.label) ? 'removePhoneComputer' : 'removePhone')}</Button>
     </div>
   );
 }

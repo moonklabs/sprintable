@@ -36,6 +36,21 @@ _KNOWN = {
     "app/routers/desktop_relay.py::post_command_result",
     # story #4951 — the same device token: its «changed files» list for one read command (the row is that device's own: command id + the token's setup id; a session of an agent it reads names, never a project's entity)
     "app/routers/desktop_relay.py::put_changes",
+    # story 4983 — the same device token: its SEALED answer to one files request (the row is that device's own: command id + the token's setup id; the server cannot open the envelope; the PERSON's routes judge the project access, on ask and on read)
+    # story 4993 (P3b) — the same device token: its running totals of the same-network direct road (two numbers and the name of a run of the host; the row is that device's own: the token's setup id; no project entity, no content)
+    "app/routers/desktop_relay.py::put_direct_count",
+    "app/routers/desktop_relay.py::put_direct",
+    "app/routers/desktop_relay.py::put_files",
+    # story 4988 — the same device token: ONE chunk of its SEALED answer to a DOWNLOAD (the row is that device's own: command id + the token's setup id; in order, a few ahead of the phone at most; the server cannot open the envelope; the PERSON's route judges the project)
+    "app/routers/desktop_relay.py::put_files_chunk",
+    # story 4977 B2 — the same device token: ONE sealed record of the person's history the computer keeps (the row is that computer's own: its setup id; the server cannot open the envelope; the room is judged to be
+    # of the token's own org; the PERSON's routes (desktop_records.py) judge the room per reader on every read, so a record written into a room its person is not in is reachable by nobody)
+    "app/routers/desktop_relay.py::put_record",
+    # story 4978 (C2) — the same device token: a SEALED record-key handoff it puts for a phone of its organization, the handoffs phones put for IT (read), and its «received» (delete): the rows are that device's own (setup id from the token; the phone is named by its own key id and must be of the same organization and not revoked; the server cannot open the envelope) — no project entity
+    "app/routers/desktop_relay.py::put_record_handoff_to_phone",
+    "app/routers/desktop_relay.py::get_record_handoffs_for_host",
+    "app/routers/desktop_relay.py::get_record_handoffs_waiting_for_host",
+    "app/routers/desktop_relay.py::post_record_handoff_received_by_host",
     "app/routers/desktop_relay.py::post_session_state",
     "app/routers/desktop_relay.py::put_sessions",
     # story #4533 — the same device token: a permission prompt on that device (its own session · its own agent), its withdrawal
@@ -49,7 +64,16 @@ _KNOWN = {
     "app/routers/desktop_relay.py::put_pairings",
     # story #4733 (S2) — the same device token: the computer's closed clock view (ids and closed words; rows of an agent it was not set up with are dropped) — setup-scoped, no project entity
     "app/routers/desktop_relay.py::put_clock_view",
+    # story 4979 — the same device token: the computer's own «I am here» (`POST /relay/presence`) — device-token authentication · stamps only THAT token's row (`last_heard_at` · `last_presence_at`) · counted per verified device (20/min, before any write) · no project-owned entity is read or written (Kadir 5851 ① measured: a presence changes no command gate)
+    "app/routers/desktop_relay.py::post_presence",
+    # story 4981 — the same device token: the computer's own agent-usage numbers (`PUT /relay/usage`) — device-token authentication · closed whole-number body (extra forbidden) · written only to THAT device's own rows (desktop_usage, keyed by the token's setup) · counted per verified device (20/min, before any write) · no project-owned entity is read or written
+    "app/routers/desktop_relay.py::put_usage",
     "app/routers/desktop_relay.py::post_pairing_reveal",  # story #4531 — the device token's own pairing offer (setup-scoped, not project-owned)
+    # story 4972 — the new pairing's device-token routes: the computer registers its OWN offer, answers a commitment with its nonce, closes its offer — rows of that device's setup (setup_id + offer_id), no project-owned entity is read
+    "app/routers/desktop_relay.py::post_pairing_session",
+    "app/routers/desktop_relay.py::post_pairing_session_nonce",
+    "app/routers/desktop_relay.py::post_pairing_session_close",
+    "app/routers/desktop_relay.py::post_pairing_session_confirmed",  # story 4972 (4a) — the same device token: the computer's signed receipt on ITS OWN offer (setup_id + offer_id, like nonce and close; the server only carries it)
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",
