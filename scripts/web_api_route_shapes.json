@@ -1120,6 +1120,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/relay/seal-targets",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/sessions",
 "kind": "unknown"

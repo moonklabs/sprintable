@@ -981,6 +981,14 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # (codex: the reading sees only the `op.execute(` line of a multi-line SQL string — so the SQL INSIDE the three calls is read here, from the file itself: nothing in upgrade() writes data, drops, renames or retypes)
     up0483 = (_ROOT / "backend/alembic/versions/0483_desktop_setups_sealed_cards.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0483), "0483's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
+    # story 5025 (B1): 0499 is the same shape as 0483, THREE lines of upgrade() the reading lists: the trigger FUNCTION (`CREATE OR REPLACE FUNCTION desktop_setups_seal_to_v1_one_way` — a new function), `DROP TRIGGER IF EXISTS` (nothing is there yet) and the
+    # `CREATE TRIGGER` on `desktop_setups`; the column (`seal_to_v1_at`, nullable, no default) is an `add_column` line the reading does not list (no rewrite). Why a running old revision lives with it: it never writes the column, so every UPDATE it makes to a
+    # `desktop_setups` row leaves it NULL (`OLD.seal_to_v1_at IS NOT NULL` is false → nothing raised, the row returned); one comparison per updated row; nothing existing is altered, dropped, renamed, backfilled or rewritten; no data is written by the migration.
+    seal_v1 = [h for h in hits if h.startswith("0499_")]
+    assert len(seal_v1) == 3, seal_v1
+    assert any("op.execute(" in h for h in seal_v1) and not any(k in h for h in seal_v1 for k in ("add_column", "DROP COLUMN", "drop_column", "alter_column", "rename_", "UPDATE", "DELETE")), seal_v1
+    up0499 = (_ROOT / "backend/alembic/versions/0499_desktop_setups_seal_to_v1.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|DROP\s+COLUMN|RENAME|ALTER\s+COLUMN|ALTER\s+TABLE)\b|\bUPDATE\s+\w+\s+SET\b|drop_column|alter_column|rename_", up0499), "0499's upgrade() adds a column, a function and a trigger — no data written, nothing dropped or retyped"
     # story 4972: 0484 is FIVE lines of upgrade(): the CHECK of 0480 dropped, the new one added NOT VALID (a brief lock, no scan), the two data statements (`_END_PENDING`: a PENDING row whose window passed and that still holds words ends as `expired` — what the
     # minute job does for it from now on; `_CLEAR_ENDED`: every other ended row loses `tool · summary · workdir`, the network question's fixed words kept) and the VALIDATE. Why a running old revision lives with it: the new CHECK is only LOOSER (an ended plain
     # row may lack its words; a pending one may not — every row the old code writes is pending with its words); the old code reads `tool · summary · workdir` as nullable columns (a sealed row has had none since 0479, a terminal-only one may lack them) so a row without
@@ -1078,7 +1086,7 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|create_index|drop_index", up0497), "0497's upgrade() only swaps three CHECKs"
     assert up0497.count("op.drop_constraint(") == 1 and up0497.count("op.create_check_constraint(") == 1 and "for table, name in _CHECKS" in up0497, "the one loop over the three runtime CHECKs"
     assert "_NEW" in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text() and 'raise RuntimeError(' in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text(), "the downgrade stops instead of deleting rows"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_"))]
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
