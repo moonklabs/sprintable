@@ -7415,7 +7415,8 @@
       "copyFailed": "Could not copy — select the command above and copy it by hand.",
       "folderNote": "~/work is the folder the agent works in. Change it to any folder you like.",
       "afterLead": "The command prints an address in the terminal. Open it in a browser signed in to this account and confirm — the agent is then attached to this server.",
-      "installNote": "If sprintable-host is not on that computer yet, do the install steps from the guide you followed to set this server up first."
+      "installNote": "If the agent host is not on that computer yet (Linux), find the download address in the list at the address below, then download and unpack it. The install guide inside tells you the install and pairing order.",
+      "installListLabel": "Where to get the Linux download"
     },
     "phoneRelayLocal": {
       "title": "Controlling from your phone works in hosted mode",

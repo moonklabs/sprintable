@@ -55,6 +55,9 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
     expect(container.textContent).toContain('이 서버에 에이전트 연결하기');
     expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host pair --folder ~/work --server https://team.example.com');
     expect(has('onboarding-first-server-host-card-copy')).toBe(true);
+    // the person reading this is a teammate who never saw the server's install guide: where the Linux download is listed is on the card (a literal line) — not «the guide you followed»
+    expect(text('onboarding-first-server-host-card-install-list')).toBe('https://storage.googleapis.com/sprintable-desktop-releases/linux-server-host/latest/manifest.json');
+    expect(text('onboarding-first-server-host-card-install-note')).not.toContain('서버를 세울 때');
     // none of the Mac screens: not the Mac title, not the download card, not «앱 열기», not the not-Mac fork
     expect(has('onboarding-first-mac')).toBe(false);
     expect(has('onboarding-first-not-mac')).toBe(false);

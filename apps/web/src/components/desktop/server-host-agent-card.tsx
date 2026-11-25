@@ -10,6 +10,9 @@ import { Card } from '@/components/ds/card';
 import { Button } from '@/components/ui/button';
 import { copyTextSafely } from '@/lib/clipboard';
 
+/** where the newest Linux download of the host is listed (public; its `url` is the tarball, whose own install guide says the install and pairing order) — a literal, like the command: never inside a translated sentence */
+export const SERVER_HOST_DOWNLOAD_LIST = 'https://storage.googleapis.com/sprintable-desktop-releases/linux-server-host/latest/manifest.json';
+
 /** the one command: `~/work` is the folder the agent works in (the host's `pair` needs one) — the card says it may be changed */
 export function serverHostPairCommand(origin: string): string {
   return `sprintable-host pair --folder ~/work --server ${origin}`;
@@ -40,6 +43,10 @@ export function ServerHostAgentCard({ origin, hideTitle = false, testId = 'serve
       <p className="break-keep text-xs text-muted-foreground" data-testid={`${testId}-folder-note`}>{t('folderNote')}</p>
       <p className="break-keep text-sm text-foreground" data-testid={`${testId}-after`}>{t('afterLead')}</p>
       <p className="break-keep text-xs text-muted-foreground" data-testid={`${testId}-install-note`}>{t('installNote')}</p>
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-ds-ink-2">{t('installListLabel')}</p>
+        <code className="block break-all rounded border border-ds-line bg-ds-surface px-2 py-1 font-mono text-ds-small text-ds-ink-2 select-all" data-testid={`${testId}-install-list`}>{SERVER_HOST_DOWNLOAD_LIST}</code>
+      </div>
     </Card>
   );
 }
