@@ -18,7 +18,7 @@ describe('onboarding first screen on ds parts', () => {
   it('the two press words that were small links are ds buttons / 44 rows (the way out is a ds quiet button; «앱 열기» and «고급» carry min-h-11)', () => {
     const src = readFileSync(path.join(here, 'first-screen.tsx'), 'utf8');
     expect(src).toMatch(/import \{ Button \} from '@\/components\/ds\/button'/);
-    expect(src.match(/variant="quiet"/g)?.length).toBe(2);
+    expect(src.match(/variant="quiet"/g)?.length).toBe(3); // the Mac and not-Mac ways' one each + story 5024 (AC4)'s server-host way (the same ds quiet button)
     expect(src).toMatch(/data-testid="onboarding-first-open-app"/);
     expect(src.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(2);
   });

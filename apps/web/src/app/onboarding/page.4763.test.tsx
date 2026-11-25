@@ -2,6 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const seen: Array<Record<string, unknown>> = [];
+// story 5024 (AC4): the deployment variable is named only by the reading code and its own test (story 4825's guard) — the helper is stood in for here
+const host = vi.hoisted(() => ({ origin: null as string | null }));
+vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => host.origin !== null, isServerHost: () => host.origin !== null, serverHostOrigin: () => host.origin }));
 vi.mock('next/navigation', () => ({ redirect: (url: string) => { throw new Error(`redirect:${url}`); } }));
 vi.mock('./onboarding-form', () => ({ OnboardingForm: (props: Record<string, unknown>) => { seen.push(props); return null; } }));
 vi.mock('@/components/auth/email-verify-gate', () => ({ EmailVerifyGate: ({ children }: { children: unknown }) => children }));
@@ -20,5 +23,14 @@ describe('[SID:4763 H6] the onboarding page', () => {
     expect((await formProps({})).afterOrgDelete).toBe(false);
     expect((await formProps({ after: 'something' })).afterOrgDelete).toBe(false);
     expect((await formProps({ after: 'org-deleted', step: 'project', orgId: 'o-1' })).afterOrgDelete).toBe(false);
+  });
+});
+
+describe('[SID:5024 AC4] the onboarding page hands the server host\'s own address to the form', () => {
+  it('whatever serverHostOrigin() says goes to the form as it is: an address on a server host · null anywhere else (the Mac screen stays)', async () => {
+    host.origin = 'https://team.example.com';
+    expect((await formProps({})).serverHostOrigin).toBe('https://team.example.com');
+    host.origin = null;
+    expect((await formProps({})).serverHostOrigin).toBeNull();
   });
 });

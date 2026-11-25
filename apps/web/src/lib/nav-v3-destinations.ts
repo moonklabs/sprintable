@@ -24,6 +24,8 @@ export interface NavV3Flags {
   /** story #4524 — `DESKTOP_DOWNLOAD_ENABLED` (server-only), the gate `/desktop` itself redirects on: the sidebar's «데스크톱 앱»
    * link shows only when it is on (no link to a page that sends you back). Absent = off (prod-safe, as the env's own default). */
   desktopDownloadEnabled?: boolean;
+  /** story 5024 (AC4) — this web process is a workspace SERVER HOST's (`isServerHost()`): its «/desktop» screen is where agents are attached to THIS server, not a Mac app's download, so the sidebar says so. Absent = off. */
+  serverHost?: boolean;
 }
 
 /** static = 그대로 href로 쓰는 절대경로. resource = org/project 접두가 필요한 조각(호출부의 resourceLink류가 해석). */

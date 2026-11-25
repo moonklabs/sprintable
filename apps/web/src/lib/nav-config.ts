@@ -146,9 +146,10 @@ export const NAV_GROUPS: NavGroupConfig[] = buildNavGroups(TEAM_VARIANT);
 // 데스크톱 앱 · 연결된 기기(/desktop)는 그 화면이 `DESKTOP_DOWNLOAD_ENABLED`가 꺼지면 되돌려 보내는 화면이라, 켜진 곳에서만 설정 묶음에 항목을 낸다(story #4524) — 버전 플래그가 아니라 화면 존재 플래그.
 export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
   if (!flags.desktopDownloadEnabled) return NAV_GROUPS;
-  const desktopItem: NavItemConfig = {
-    id: 'desktop-app', labelKey: 'desktopApp', descriptionKey: 'descDesktopApp', icon: Monitor, kind: 'static', path: '/desktop', scope: 'org',
-  };
+  // story 5024 (AC4): on a workspace SERVER HOST the screen is where agents are attached to this server (there is no app to download) — its name and its line say that. Two literal items (not a ternary on the keys): the dead-key guard reads `labelKey: '…'` literals.
+  const desktopItem: NavItemConfig = flags.serverHost
+    ? { id: 'desktop-app', labelKey: 'serverHostAgents', descriptionKey: 'descServerHostAgents', icon: Monitor, kind: 'static', path: '/desktop', scope: 'org' }
+    : { id: 'desktop-app', labelKey: 'desktopApp', descriptionKey: 'descDesktopApp', icon: Monitor, kind: 'static', path: '/desktop', scope: 'org' };
   return NAV_GROUPS.map((group) => (group.id === 'settings' ? { ...group, items: [...group.items, desktopItem] } : group));
 }
 

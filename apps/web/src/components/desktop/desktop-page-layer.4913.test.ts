@@ -13,6 +13,7 @@ const PAGE_CARDS = [
   'desktop-open-app-card.tsx',
   'desktop-download-card.tsx',
   'phone-relay-local-notice.tsx',
+  'server-host-agent-card.tsx', // story 5024 (AC4): a server host's one card (instead of the app cards)
   'desktop-remote-control-card.tsx',
   'desktop-remote-devices.tsx',
   'phone-session-management.tsx',

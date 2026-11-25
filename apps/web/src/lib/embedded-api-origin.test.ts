@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NextResponse } from 'next/server';
 import { createRequire } from 'node:module';
 import { NextRequest } from 'next/server';
-import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal, isEmbeddedServer, isServerHost, publicHostOf } from './embedded-api-origin';
+import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal, isEmbeddedServer, isServerHost, publicHostOf, serverHostOrigin } from './embedded-api-origin';
 
 const ENV_KEYS = ['SPRINTABLE_EMBEDDED', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -124,5 +124,25 @@ describe('story 5022 (b) — isServerHost: the one name for «this is the server
     expect(isServerHost(e({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
     expect(isServerHost(e({ SPRINTABLE_EMBEDDED: 'true', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
     for (const bad of ['http://team.example.com', 'https://10.0.0.5', 'https://localhost', 'https://team', '']) expect(isServerHost(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: bad })), bad).toBe(false);
+  });
+});
+
+describe('story 5024 (AC4) — serverHostOrigin: the address a person gives `sprintable-host pair --server`, from the server\'s own setting', () => {
+  const e = (o: Record<string, string>) => ({ ...o }) as NodeJS.ProcessEnv;
+  it('the https address of a server host — with its port when it has one, never an explicit :443 — and null for everything that is not a server host', () => {
+    expect(serverHostOrigin(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe('https://team.example.com');
+    expect(serverHostOrigin(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com:8443' }))).toBe('https://team.example.com:8443');
+    expect(serverHostOrigin(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com:443' }))).toBeNull();
+    expect(serverHostOrigin(e({ SPRINTABLE_EMBEDDED: '1' }))).toBeNull(); // the desktop app's own server: no public address
+    expect(serverHostOrigin(e({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBeNull(); // not embedded: a hosted deployment
+    for (const bad of ['http://team.example.com', 'https://10.0.0.5', 'https://localhost', 'https://team', 'https://team.example.com/path', '']) {
+      expect(serverHostOrigin(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: bad })), bad).toBeNull();
+    }
+  });
+  it('is non-null exactly when isServerHost is true (one rule, two names)', () => {
+    const envs: Array<Record<string, string>> = [{ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, { SPRINTABLE_EMBEDDED: '1' }, { SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, {}];
+    for (const env of envs) {
+      expect(serverHostOrigin(e(env)) !== null, JSON.stringify(env)).toBe(isServerHost(e(env)));
+    }
   });
 });

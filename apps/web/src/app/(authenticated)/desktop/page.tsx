@@ -10,7 +10,8 @@ import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-device
 import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
 import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
-import { isEmbeddedServer, isServerHost } from '@/lib/embedded-api-origin';
+import { isEmbeddedServer, isServerHost, serverHostOrigin } from '@/lib/embedded-api-origin';
+import { ServerHostAgentCard } from '@/components/desktop/server-host-agent-card';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
@@ -50,19 +51,27 @@ export default function DesktopPage() {
   }
 
   const local = embedded && !serverHost; // the app's own loopback server: no middle server at all
+  const origin = serverHost ? serverHostOrigin() : null; // story 5024 (AC4): the address the card's command gives `--server` — this server's own, from the server's own setting
   // story 4889 (W7~W10): the screen is one composition — a head, two columns (left: the app on this Mac · right: the phone), then the connected computers across the full width.
   // Each card keeps its own condition (a card that says nothing draws nothing), so the columns are plain stacks.
   return (
     <>
       {/* 4913: the title is on the app frame's top bar (the org-screen frame rule), the body starts with the note */}
-      <DesktopScreenTitle />
+      <DesktopScreenTitle serverHost={serverHost} />
       <PageFrame width="wide">
-        <DesktopPageHead />
+        <DesktopPageHead serverHost={serverHost} />
         <div className="grid items-start gap-4 lg:grid-cols-2" data-testid="desktop-columns">
           <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-app">
-            {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
-            <DesktopOpenAppCard />
-            <DesktopDownloadCard />
+            {serverHost ? (
+              /* story 5024 (AC4): a server host has no app to open or download — the way to attach an agent to THIS server is the one card */
+              origin ? <ServerHostAgentCard origin={origin} /> : null
+            ) : (
+              <>
+                {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
+                <DesktopOpenAppCard />
+                <DesktopDownloadCard />
+              </>
+            )}
           </div>
           <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-phone">
             {/* story 4829: local mode has no phone relay — the three phone cards are one line of guidance */}

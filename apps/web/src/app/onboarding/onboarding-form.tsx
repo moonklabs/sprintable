@@ -75,6 +75,8 @@ interface OnboardingFormProps {
   chatsHref: string;
   /** story 4714 AC2: resolved by the server page (`isDesktopDownloadEnabled`) — whether the phone app's first screen offers «메일로 받기» */
   macDownloadEnabled?: boolean;
+  /** story 5024 (AC4): this is a workspace SERVER HOST's onboarding — the server's own public address (`https://…`); the first screen then says how to attach an agent to THIS server instead of offering a Mac app. null/absent = not a server host. */
+  serverHostOrigin?: string | null;
   /** story 4763 (H6): the person was sent here by deleting their organization — they are told, and the new one is made on their press (never silently, with the same name) */
   afterOrgDelete?: boolean;
 }
@@ -83,7 +85,7 @@ interface OnboardingFormProps {
 type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, afterOrgDelete = false,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, afterOrgDelete = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
@@ -591,7 +593,7 @@ export function OnboardingForm({
         )}
 
         {step === 'first' && (
-          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} todayV3Enabled={todayV3Enabled} todayHref={todayHref} onFinish={handleFinish} />
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} serverHostOrigin={serverHostOrigin} orgName={orgName} todayV3Enabled={todayV3Enabled} todayHref={todayHref} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (
