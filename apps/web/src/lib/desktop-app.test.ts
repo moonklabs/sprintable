@@ -29,9 +29,9 @@ describe('[SID:4679] desktopAppOf — the bridge only when its shape checks', ()
     expect(desktopAppOf({ ...bridge(), inApp: 'true' })).toBeUndefined();
   });
 
-  it('a device without a name · runtimes not the closed shape (an unknown runtime · a missing field · not an array) → undefined', () => {
+  it('a device without a name · runtimes not the closed shape (a missing field · not an array) → undefined; a runtime NAME this web does not know is only left out (story 5009)', () => {
     expect(desktopAppOf({ ...bridge(), device: {} })).toBeUndefined();
-    expect(desktopAppOf({ ...bridge(), runtimes: [{ runtime: 'gemini', version: '1', executable: '/x' }] })).toBeUndefined();
+    expect(desktopAppOf({ ...bridge(), runtimes: [{ runtime: 'gemini', version: '1', executable: '/x' }] })?.runtimes).toEqual([]); // the bridge stays; the name is not shown
     expect(desktopAppOf({ ...bridge(), runtimes: [{ runtime: 'claude', version: '2.1.288' }] })).toBeUndefined();
     expect(desktopAppOf({ ...bridge(), runtimes: 'claude' })).toBeUndefined();
     expect(desktopAppOf({ ...bridge(), runtimes: [] })).toBeDefined(); // none found is a fine answer
@@ -140,7 +140,7 @@ describe('[SID:4691] subscribeDesktopApp · desktopApp() — a list that arrives
     g.window = { sprintableDesktop: live.b };
     const listen = vi.fn();
     subscribeDesktopApp(listen);
-    (live.push as (n: unknown) => void)([{ runtime: 'gemini', version: '1', executable: '/x' }]);
+    (live.push as (n: unknown) => void)([{ runtime: 'claude', version: 2, executable: '/x' }]); // a KNOWN name with a wrong shape
     (live.push as (n: unknown) => void)('claude');
     expect(listen).not.toHaveBeenCalled();
     expect(desktopApp()!.runtimes).toEqual([CLAUDE]);

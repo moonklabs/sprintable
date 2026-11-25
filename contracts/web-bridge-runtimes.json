@@ -1,0 +1,29 @@
+{
+  "_about": "The ONE contract of the runtimes list on the app ↔ web page bridge (`window.sprintableDesktop`, story 5009 · PO 11-25). The app's preload (mobile repo, desktop-electron/src/web-preload.ts) hands the page the programs it found; the web (apps/web/src/lib/desktop-app.ts) reads them. Both repos keep this file byte for byte the same and read the vectors below in their own tests — change one side and the vectors turn red. Why it exists: a web older than a program's name used to throw away the WHOLE bridge for one entry it did not know (the live dev walk lost the add-project folder field the day OpenCode was found), and an app must never be able to do that to a web of any age.",
+  "version": 1,
+  "legacy": ["claude", "codex"],
+  "negotiation": {
+    "call": "subscribeRuntimes(listener, { accepts: [names] })",
+    "rule": "The bridge's `runtimes` property and a call without `accepts` carry ONLY the legacy names (what a web of any age knows). A page that names more in `accepts` also gets the names it asked for that the app knows. Names the app does not know add nothing; nothing valid asked = the legacy names. An app older than this contract ignores the second argument and sends what it always sent. A listener is called only when ITS visible list changed."
+  },
+  "web_reads": {
+    "rule": "The web drops an entry whose runtime NAME it does not know — the bridge stays, that name is simply not shown (a name is never a refusal of the whole bridge). Everything else keeps its old strictness: an entry that is not an object, has no string `runtime`, or is a KNOWN name with a wrong shape (version · executable not strings) is not our app — the whole bridge is refused, as before.",
+    "known_in_vectors": ["claude", "codex"]
+  },
+  "web_vectors": [
+    { "name": "only known names: the bridge is kept as it came", "runtimes": [{ "runtime": "claude", "version": "2.1.9", "executable": "/a/claude" }], "bridge": "kept", "visible": ["claude"] },
+    { "name": "one name the web does not know, mixed in: the bridge is kept, that name is not shown", "runtimes": [{ "runtime": "claude", "version": "2.1.9", "executable": "/a/claude" }, { "runtime": "future-agent", "version": "1.0.0", "executable": "/a/future" }, { "runtime": "codex", "version": "0.9.0", "executable": "/a/codex" }], "bridge": "kept", "visible": ["claude", "codex"] },
+    { "name": "only an unknown name: the bridge is kept with an empty list", "runtimes": [{ "runtime": "future-agent", "version": "1.0.0", "executable": "/a/future" }], "bridge": "kept", "visible": [] },
+    { "name": "an unknown name with an odd shape is still just an unknown name", "runtimes": [{ "runtime": "future-agent" }], "bridge": "kept", "visible": [] },
+    { "name": "a known name with a wrong shape is not our app: the bridge is refused", "runtimes": [{ "runtime": "claude", "version": 2, "executable": "/a/claude" }], "bridge": "refused" },
+    { "name": "an entry that is not an object: refused", "runtimes": ["claude"], "bridge": "refused" },
+    { "name": "an entry without a string runtime: refused", "runtimes": [{ "version": "1", "executable": "/a" }], "bridge": "refused" },
+    { "name": "runtimes that is not a list: refused", "runtimes": "claude", "bridge": "refused" }
+  ],
+  "app_vectors": [
+    { "name": "no ask: legacy names only, OpenCode found or not", "found": ["claude", "opencode", "codex"], "accepts": null, "property": ["claude", "codex"], "subscribed": ["claude", "codex"] },
+    { "name": "asks for opencode by name: gets it (and the legacy names)", "found": ["claude", "opencode"], "accepts": ["claude", "codex", "opencode"], "property": ["claude"], "subscribed": ["claude", "opencode"] },
+    { "name": "asks for a name the app does not know: nothing more", "found": ["claude", "opencode"], "accepts": ["future-agent"], "property": ["claude"], "subscribed": ["claude"] },
+    { "name": "asks with something that is not a list: legacy names only", "found": ["claude", "opencode"], "accepts": "opencode", "property": ["claude"], "subscribed": ["claude"] }
+  ]
+}
