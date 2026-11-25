@@ -2,6 +2,8 @@
 // story 5024 (AC4) — a workspace SERVER HOST's onboarding «에이전트» step. Before: «에이전트는 내 Mac에서 돌아가요 · Mac 앱 받기 · 지금은 받을 수 없어요» — a Linux server has no Mac app, so the person who set it up
 // learned nothing about how an agent gets attached. Now: «이 서버에 에이전트 붙이기» with the one command for the computer that will run the agent (this server's own address filled in) and a copy button;
 // the Mac screens are not drawn. Any other deployment (no `serverHostOrigin`) is exactly what it was. Taking the `serverHostOrigin` branch out of first-screen.tsx turns the first test red.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -103,5 +105,13 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
     await render({});
     expect(has('onboarding-first-mac')).toBe(true);
     expect(has('onboarding-first-server-host')).toBe(false);
+  });
+});
+
+describe('[SID:5024 AC4] the form carries the address to the first screen', () => {
+  it('onboarding-form.tsx hands `serverHostOrigin` to <FirstScreen> (the form\'s own test would need the whole sign-up path: the pass-through is pinned in the source)', () => {
+    const src = readFileSync(join(__dirname, 'onboarding-form.tsx'), 'utf8');
+    const first = /<FirstScreen\b[^>]*>/.exec(src)?.[0] ?? '';
+    expect(first).toContain('serverHostOrigin={serverHostOrigin}');
   });
 });
