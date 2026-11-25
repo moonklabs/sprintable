@@ -2440,6 +2440,11 @@
 "kind": "array"
 },
 {
+"method": "POST",
+"path": "/api/v2/org-members/{}/password-reset-link",
+"kind": "object"
+},
+{
 "method": "GET",
 "path": "/api/v2/org-subscriptions/attempts/{}",
 "kind": "object"

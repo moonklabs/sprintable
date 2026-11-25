@@ -12,6 +12,7 @@ import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem } from '@/compon
 import { NativeSelect } from '@/components/ds/select';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { RemoveOrgMemberDialog } from '@/components/settings/remove-org-member-dialog';
+import { ResetLinkDialog } from '@/components/settings/reset-link-dialog';
 import { SettingsSection } from './settings-section';
 import { Tag } from './settings-parts';
 import { cn } from '@/lib/utils';
@@ -33,6 +34,8 @@ interface OrgMember {
   email?: string;
   role: 'owner' | 'admin' | 'member';
   joined_at?: string;
+  /** story 5023 (d): the server says this owner may hand THIS person a password-reset link (a workspace server with no mail · an owner asking · a person of this organization only) */
+  passwordResetAvailable?: boolean;
 }
 
 interface OrgInvite {
@@ -132,7 +135,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setOrgProjects((json.data ?? []).map((p) => ({ id: p.id, name: p.name })));
     }
     if (membersRes?.ok) {
-      const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; created_at: string }> };
+      const raw = await membersRes.json() as { data?: Array<{ id: string; user_id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; created_at: string; password_reset_link_available?: boolean }> };
       setMembers((raw.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
@@ -142,6 +145,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         email: m.email ?? undefined,
         role: m.role,
         joined_at: m.created_at,
+        passwordResetAvailable: m.password_reset_link_available === true,
       })));
     }
     if (invitesRes?.ok) {
@@ -241,6 +245,30 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
       setActionMessage({ type: 'error', text: t('memberRemoveFailed') });
     }
+  };
+
+  // story 5023 (d): an owner of a workspace server (no mail) hands a member a password-reset link; the dialog shows it once
+  const [resetLink, setResetLink] = useState<{ memberName: string; email?: string; url: string; minutes: number } | null>(null);
+  const [issuingResetId, setIssuingResetId] = useState<string | null>(null);
+  // the link belongs to the organization and the role it was made in: another workspace (or a changed role) must not keep showing it (codex pass 1)
+  useEffect(() => { setResetLink(null); }, [orgId, currentRole]);
+  const handleIssueResetLink = async (member: OrgMember, name: string) => {
+    setActionMessage(null);
+    setIssuingResetId(member.id);
+    const res = await fetchWithAuth(`/api/org-members/${member.id}/password-reset-link`, { method: 'POST' }).catch(() => null);
+    setIssuingResetId(null);
+    if (res?.ok) {
+      const json = await res.json().catch(() => null) as { reset_url?: string; expires_in_seconds?: number } | null;
+      if (json?.reset_url) {
+        setResetLink({ memberName: name, email: member.email, url: json.reset_url, minutes: Math.max(1, Math.round((json.expires_in_seconds ?? 1800) / 60)) });
+        return;
+      }
+    }
+    const body = await res?.json().catch(() => null) as { error?: { code?: string } } | null;
+    bumpActionMessageNonce();
+    if (body?.error?.code === 'ORG_RESET_PERSON_IN_OTHER_ORGS') setActionMessage({ type: 'error', text: t('orgMemberResetLinkOtherOrgs') });
+    else if (res?.status === 429) setActionMessage({ type: 'error', text: t('orgMemberResetLinkRateLimited') });
+    else setActionMessage({ type: 'error', text: t('orgMemberResetLinkFailed') });
   };
 
   const handleResendInvite = async (inviteId: string) => {
@@ -423,6 +451,15 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         열은 canEdit=false일 때도 같은 Button(같은 텍스트·크기, 그래서 폭이 로케일과
                         무관하게 정확히 같다)을 invisible로 그려 자리만 지킨다(클릭 불가·
                         aria-hidden — 보조기술 목록엔 아예 안 나온다). */}
+                    {member.passwordResetAvailable ? (
+                      <Button
+                        variant="secondary" disabled={issuingResetId === member.id} onClick={() => void handleIssueResetLink(member, label)}
+                        aria-label={t('orgMemberRowActionAriaLabel', { n: index + 1, label: t('orgMemberResetLink') })}
+                        data-testid="org-member-reset-link"
+                      >
+                        {t('orgMemberResetLink')}
+                      </Button>
+                    ) : null}
                     {canEdit ? (
                       <NativeSelect
                         className="w-28"
@@ -482,6 +519,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           />
         );
       })() : null}
+
+      {resetLink ? (
+        <ResetLinkDialog open member={{ name: resetLink.memberName, email: resetLink.email }} url={resetLink.url} minutes={resetLink.minutes} onClose={() => setResetLink(null)} />
+      ) : null}
 
       {/* 초대 대기 목록 */}
       {invites.length > 0 && (

@@ -1,13 +1,15 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.repositories.org_member import OrgMemberRepository
-from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
+from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate, PasswordResetLinkResponse
+from app.services import owner_password_reset
 
 router = APIRouter(prefix="/api/v2/org-members", tags=["org-members", "Organization"])
 
@@ -47,6 +49,7 @@ async def list_org_members(
     # 이 email 포함 org 전체 로스터는 admin/owner의 관리 행위로만 한정한다(전면 403,
     # FE 숨김이 아니라 서버 거부가 유일 정본).
     _repo: OrgMemberRepository = Depends(_require_admin),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답. admin/owner 전용."""
     # E-ONBOARDING S2: 실명 노출 — canonical Member.name → User.display_name(story #3758 —
@@ -72,6 +75,11 @@ async def list_org_members(
         ),
         {"org_id": str(org_id)},
     )
+    rows = list(result)
+    # story 5023 (d): where the caller (an owner of a server host) may hand out a reset link — decided here with the same rule the route uses (`owner_password_reset.eligible`)
+    caller = await _repo.get_by_user(uuid.UUID(auth.user_id))
+    offer = owner_password_reset.available_here() and caller is not None and caller.role == "owner"
+    others = await owner_password_reset.other_org_counts(session, org_id, [r.user_id for r in rows]) if offer else {}
     return [
         OrgMemberResponse(
             id=row.id,
@@ -82,8 +90,9 @@ async def list_org_members(
             deleted_at=row.deleted_at,
             email=row.email,
             name=row.name,
+            password_reset_link_available=bool(offer and caller is not None and owner_password_reset.eligible(caller_is_owner=True, caller_member_id=caller.id, target_id=row.id, target_role=row.role, other_orgs=others.get(row.user_id, 0))),
         )
-        for row in result
+        for row in rows
     ]
 
 
@@ -238,6 +247,41 @@ async def update_org_member(
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
     await repo.session.refresh(member)
     return OrgMemberResponse.model_validate(member)
+
+
+@router.post("/{id}/password-reset-link", response_model=PasswordResetLinkResponse)
+async def issue_password_reset_link(
+    id: uuid.UUID,
+    request: Request,
+    repo: OrgMemberRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story 5023 (d) — a server host has no mail: its OWNER hands a member a reset link (the ordinary `/reset-password?token=…`, 30 minutes, used once). Rules: `services/owner_password_reset`."""
+    from app.core.client_ip import audit_client_ip
+    from app.core.rate_limit import hit_person_limits
+    from app.routers.auth import _requires_interactive_session, _write_audit
+
+    def refuse(status_code: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:
+        return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}}, headers=headers)
+
+    if not owner_password_reset.available_here():
+        return refuse(404, "not_available", "not available here")
+    if _requires_interactive_session(auth):  # an API key or an agent never hands out a way into a person's account (the same rule as turning remote control on)
+        return refuse(403, "person_session_required", "a person's session is required")
+    caller = await repo.get_by_user(uuid.UUID(auth.user_id))
+    target = await repo.get(id)
+    try:
+        # the rules first, the limit after: a refused try is not a link and must not use up the owner's ten an hour
+        await owner_password_reset.check(repo.session, org_id=repo.org_id, caller=caller, target=target)
+    except owner_password_reset.ResetLinkRefused as e:
+        return refuse(e.status, e.code, e.message)
+    wait = hit_person_limits("owner_password_reset_link", auth.user_id, "10/hour")
+    if wait is not None:
+        return refuse(429, "RATE_LIMITED", "too many reset links — try again later", {"Retry-After": str(wait)})
+    link = await owner_password_reset.issue(repo.session, org_id=repo.org_id, caller=caller, target=target)
+    await _write_audit(repo.session, "owner_password_reset_link_issued", user_id=target.user_id, detail=f"by_owner_member={caller.id} org={repo.org_id}", ip_address=audit_client_ip(request))
+    await repo.session.commit()
+    return JSONResponse(status_code=200, content={"reset_url": link.url, "expires_in_seconds": link.expires_in_seconds}, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/{id}/affected-projects")
