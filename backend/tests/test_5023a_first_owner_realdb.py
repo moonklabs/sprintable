@@ -24,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import app.main  # noqa: F401 — imported HERE, with the embedded switch still off: `app.main` installs the loopback-only host guard AT IMPORT when the install is embedded, and a first import inside a world below (the switch on) would keep it for every later test of the process ("Invalid host header")
+
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
 _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 
@@ -105,6 +107,7 @@ def make_world(monkeypatch):
         else:
             monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)
         monkeypatch.setattr(settings, "server_owner_setup", rule)
+        was_enabled = limiter.enabled  # the suite's own setting (the register-handler tests call the route function directly and need it OFF): put it back as found, never «on»
         limiter.enabled = False
         eng = create_async_engine(_ASYNC, poolclass=NullPool)
         conn = await eng.connect()
@@ -116,7 +119,7 @@ def make_world(monkeypatch):
             holder.append(w)
             yield w
         finally:
-            limiter.enabled = True
+            limiter.enabled = was_enabled
             await outer.rollback()
             await conn.close()
             await eng.dispose()
