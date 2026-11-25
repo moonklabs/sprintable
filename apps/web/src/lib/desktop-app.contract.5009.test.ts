@@ -32,6 +32,17 @@ describe('[SID:5009] contracts/web-bridge-runtimes.json — the web reads the ap
     });
   }
 
+  it('a bridge with a name left out is the SAME object on every read while nothing changed (useSyncExternalStore wants a stable snapshot) — also when the app hands a new array each time', () => {
+    const entries = () => [{ runtime: 'claude', version: '1', executable: '/c' }, { runtime: 'future-agent', version: '1', executable: '/f' }];
+    const b = { ...base() } as unknown as { runtimes: unknown } & SprintableDesktop;
+    Object.defineProperty(b, 'runtimes', { get: () => entries(), enumerable: true }); // a NEW array object per read
+    (globalThis as { window?: unknown }).window = { sprintableDesktop: b };
+    const first = desktopApp();
+    expect(first!.runtimes.map((r) => r.runtime)).toEqual(['claude']);
+    expect(desktopApp()).toBe(first);
+    expect(desktopAppOf(b)).toBe(desktopAppOf(b));
+  });
+
   it('the update path reads the same way: an unknown name in a pushed list is left out (the list still arrives); a wrong shape of a known name is ignored', () => {
     const cbs = new Set<(r: unknown) => void>();
     const b = { ...base(), subscribeRuntimes: (cb: (r: unknown) => void) => { cbs.add(cb); return () => cbs.delete(cb); } } as unknown as SprintableDesktop;

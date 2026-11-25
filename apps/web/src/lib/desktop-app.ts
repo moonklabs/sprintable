@@ -105,8 +105,15 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   // 4971: the update hands are optional the same way (an older app has none → no update line); present means a function
   if (d.startUpdate !== undefined && typeof d.startUpdate !== 'function') return undefined;
   if (d.subscribeUpdate !== undefined && typeof d.subscribeUpdate !== 'function') return undefined;
-  return (readable.length === (d.runtimes as unknown[]).length ? d : { ...d, runtimes: readable }) as SprintableDesktop; // a name this web does not know was left out: the same bridge, without it
+  if (readable.length === (d.runtimes as unknown[]).length) return d as SprintableDesktop;
+  // a name this web does not know was left out: the same bridge, without it — ONE copy per (bridge · list the app gave): `desktopApp()` is read by useSyncExternalStore, which wants the same object while nothing changed
+  const hit = trimmed.get(d as object);
+  if (hit && sameList(hit.list, readable)) return hit.out; // (compared by content: a bridge that hands a new array object on every read is still the same list)
+  const out = { ...d, runtimes: readable } as SprintableDesktop;
+  trimmed.set(d as object, { list: readable, out });
+  return out;
 }
+const trimmed = new WeakMap<object, { list: readonly DesktopRuntimeFound[]; out: SprintableDesktop }>();
 
 /** story 4693: ask the app about a folder. The answer is read like the first read of the runtimes: anything off the closed shape is dropped (a
  *  trace of a file that is not in the table · an agent id the page did not ask about · more than eight ids), and an app without the hand, a
