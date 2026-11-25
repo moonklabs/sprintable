@@ -2587,7 +2587,12 @@ async def reset_password(
     if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
-    if not user.email_verified:
+    from app.services import server_owner_setup
+
+    # story 5023 (f): on a workspace SERVER (no mail) a reset link is never mailed — the owner HANDS it over (5023 d), and whoever opens it (the owner himself, too) has proved no mailbox. So there it does not take the
+    # «unproved account» road below: it would make the account `email_verified` (which opens `/invites/mine` — every other organization's pending invitation for that address, no token) and drop the person's two-factor
+    # secret and provider links (the owner stepping round them). It takes the road of a verified account: the password changes, every refresh session ends (an access token already issued lives out its hour, as for any verified account's reset), nothing else is touched.
+    if not user.email_verified and not server_owner_setup.enabled():
         # story 4725 (Didi): the mailed reset link proves the mailbox of an account nobody had proved — the owner takes it over: verified, the new password,
         # and what an earlier squatter may have left (provider identities, a two-factor secret, every sign-in) dropped. A VERIFIED account keeps its
         # provider links and its two-factor secret through a reset (only sessions end, below).

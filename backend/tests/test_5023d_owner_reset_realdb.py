@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.main  # noqa: F401 — imported HERE, with the embedded switch still off: `app.main` installs the loopback-only host guard AT IMPORT when the install is embedded, and `_client()` below first imports it with the switch ON (the fixture) — that guard would stay for every later test of the process ("Invalid host header")
 from app.core.config import settings
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
