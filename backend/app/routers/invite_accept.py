@@ -81,6 +81,8 @@ def _raise_for_failed_accept(result: dict) -> None:
         raise HTTPException(status_code=410, detail="Invite has expired")
     if reason == "email_mismatch":
         raise HTTPException(status_code=403, detail="Email does not match invite")
+    if reason == "invalid_role":  # story 5021: the invitation names a role its maker may not give (any more)
+        raise HTTPException(status_code=403, detail={"code": "INVITE_ROLE_NOT_ALLOWED", "message": "This invitation can no longer be accepted — ask the organization owner for a new one."})
     raise HTTPException(status_code=400, detail="Cannot accept invite")
 
 

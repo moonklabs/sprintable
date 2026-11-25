@@ -12,6 +12,7 @@ from app.repositories.org_invite import OrgInviteRepository, invite_email_key, i
 from app.repositories.organization import OrganizationRepository
 from app.schemas.org_invite import CreateOrgInvite, OrgInviteResponse
 from app.services.org_invite_email import send_invite_email
+from app.services.org_role_policy import can_grant_org_role
 
 router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites", "Organization"])
 
@@ -60,12 +61,14 @@ async def _require_owner_or_admin(
     id: uuid.UUID,
     auth: AuthContext,
     org_repo: OrganizationRepository,
-) -> None:
+) -> str:
+    """The caller's role (`owner` / `admin`) — 404 for a stranger to the organization, 403 for a plain member."""
     role = await org_repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
     if role is None:
         raise HTTPException(status_code=404, detail="Organization not found")
     if role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="owner or admin role required")
+    return role
 
 
 @router.get("/{id}/invites", response_model=list[OrgInviteResponse])
@@ -91,7 +94,13 @@ async def create_org_invite(
     session: AsyncSession = Depends(get_db),
 ) -> OrgInviteResponse:
     """초대 생성 — owner/admin만 가능. 이미 가입된 email이나 중복 초대 시 409."""
-    await _require_owner_or_admin(id, auth, org_repo)
+    caller_role = await _require_owner_or_admin(id, auth, org_repo)
+    # story 5021: an invitation never hands out a role its maker may not give (an admin makes no owner — the same rule as changing a member's role, story 3491)
+    if not can_grant_org_role(caller_role, body.role):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ORG_MEMBER_OWNER_ONLY_ACTION"},  # code only: the sentence is the front end's to translate (story 3779)
+        )
 
     # EE: Free 플랜 member 초대 제한 (OSS에서는 로드되지 않음)
     if settings.is_ee_enabled:
