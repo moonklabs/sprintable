@@ -12,6 +12,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     PLAIN,
     _addresses,
@@ -309,3 +310,39 @@ async def test_a_wordless_terminal_only_card_is_accepted_by_a_setup_that_seals_a
         assert tuple(row[:6]) == (None, None, None, None, None, None) and row[6] is True and row[7] is False, "the server holds no word of it: only the request id (and the session it belongs to)"
         notices = await _sql(fetch="SELECT count(*) FROM events WHERE event_type = 'dispatched' AND payload->>'event_type' = 'agent.permission_request'")
         assert notices[0][0] == 1, "a terminal-only card sends no notice (only the sealed card above did)"
+
+
+# ── codex round 1 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+async def test_a_key_that_moved_to_another_organization_is_not_a_person_of_this_computer_it_neither_makes_it_mixed_nor_is_a_target(world):
+    await _plain_member()
+    async with _client() as c:
+        device, token, agent, _ = await _computer(c, "d4424 mac 5025p")
+        mine, mine_id = await _phone(c, proof=False)  # the receiver's own older key (unproved)
+        moved, moved_id = await _phone(c, proof=False)
+        await _pin(c, token, mine, moved)
+        plain_member = await _member_of(PLAIN)
+        # a proof-based reclaim moved the key to another person of ANOTHER organization — its pairing row stays on this computer until the next snapshot
+        await _sql(f"UPDATE remote_devices SET org_id = '{ORG2}', member_id = '{plain_member}' WHERE id = '{moved_id}'")
+        r = await _ask_targets(c, token, agent, [mine_id, moved_id])
+        assert r.json()["seal_to"] == [mine_id], "the moved key is not named, and it did not make the computer «mixed» (the receiver's unproved key is still a target — one person of this organization)"
+
+
+async def test_f6_reads_the_mark_under_the_lock_a_report_that_stood_it_after_the_setup_was_loaded_still_checks_the_card(world, monkeypatch):
+    from app.services import agent_permissions
+
+    await _plain_member()
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025q")
+        mine, mine_id = await _phone(c)
+        other, other_id = await _phone(c, who=PLAIN)
+        await _pin(c, token, mine, other)  # NOT declared yet: the setup the request loads says «no mark»
+        original = agent_permissions._lock_machine
+
+        async def _lock_after_the_mark_stood(db, setup):
+            await _sql(f"UPDATE desktop_setups SET seal_to_v1_at = now() WHERE id = '{setup_id}'")  # another request commits the mark after this one loaded the setup, before it takes the lock
+            return await original(db, setup)
+
+        monkeypatch.setattr(agent_permissions, "_lock_machine", _lock_after_the_mark_stood)
+        r = await _post_ask(c, device, _sealed_card(agent, setup_id, [mine_id, other_id]))
+        assert r.status_code == 422 and "envelope_receivers_mismatch" in r.text, r.text

@@ -885,7 +885,7 @@ async def resolve_recipient(db: AsyncSession, setup: DesktopSetup, agent_member_
 # ── who may READ a card: the receiver's phones (story 5025 · B1 · contract v1.2 §2.1 · §2.3 · §4) ─────────────────────────────────────────────────────
 
 
-async def target_phones(db: AsyncSession, setup_id: uuid.UUID, recipient: uuid.UUID | None) -> set[uuid.UUID]:
+async def target_phones(db: AsyncSession, setup: DesktopSetup, recipient: uuid.UUID | None) -> set[uuid.UUID]:
     """The phone keys (`remote_devices.id` — what a sealed envelope names in `to`) a card of this setup may be sealed to: the ACTIVE pins of the card's one receiver.
     §4: a key that has not proved it holds its private key (`pop_verified_at` NULL — 5027) vouches for nothing once PEOPLE are mixed on the computer: with pins of more than one person on this setup, only a proved key is a target;
     with the pins of ONE person only there is no cross-person threat and an older app's unproved key stays a target (C1 — the setup of one person keeps working). A pin the server has no key for (never registered) is not a person
@@ -894,7 +894,8 @@ async def target_phones(db: AsyncSession, setup_id: uuid.UUID, recipient: uuid.U
         return set()
     rows = (await db.execute(
         select(RemoteDevice.id, RemoteDevice.member_id, RemoteDevice.pop_verified_at).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
-        .where(RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None), RemoteDevice.revoked_at.is_(None))
+        .where(RemoteDevicePairing.setup_id == setup.id, RemoteDevicePairing.removed_at.is_(None), RemoteDevice.revoked_at.is_(None),
+               RemoteDevice.org_id == setup.org_id)  # (codex: a key that moved to another organization by a proof-based reclaim keeps its pairing row until the next snapshot — it is not this organization's person and must not make the computer «mixed»)
     )).all()
     mixed = len({r.member_id for r in rows}) > 1
     return {r.id for r in rows if r.member_id == recipient and (r.pop_verified_at is not None or not mixed)}
@@ -914,7 +915,7 @@ async def seal_targets(db: AsyncSession, setup: DesktopSetup, body: SealTargetsR
     listed cannot disagree; the answer is the host's own names, a subset of what it sent, in the order it sent them, with its value given back. No card is named and nothing is stored."""
     _check_agent(setup, body.agent_member_id)
     recipient, reason = await resolve_recipient(db, setup, body.agent_member_id)
-    targets = {str(i) for i in await target_phones(db, setup.id, recipient)}
+    targets = {str(i) for i in await target_phones(db, setup, recipient)}
     chosen = [p for p in dict.fromkeys(body.phones) if p.lower() in targets]
     return {"seal_to": chosen, "nonce": body.nonce, "reason": reason, "server_time": _now().isoformat()}
 
@@ -1154,11 +1155,13 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
                 or abs(e["expires_at"] - int(body.expires_at.timestamp() * 1000)) > 1000:
             raise DesktopRelayError(422, "envelope_header_mismatch", "the envelope's header is not this request's")
     recipient, reason = await resolve_recipient(db, setup, body.agent_member_id)
-    if body.envelope is not None and setup.seal_to_v1_at is not None:
+    # the mark is READ HERE, under the machine lock, from the database (codex: the `setup` object was loaded before the lock — a pin report that stood the mark in between would not show in it, and the card would slip through unchecked)
+    mark = (await db.execute(select(DesktopSetup.seal_to_v1_at).where(DesktopSetup.id == setup.id))).scalar_one_or_none()
+    if body.envelope is not None and mark is not None:
         # story 5025 (B1 · F6 · contract §2.3): a setup that has said `seal_to_v1` seals only to the receiver's phones — the envelope's `to` must be a non-empty subset of them. The server cannot read the card, but it can read WHO it is sealed to;
         # a host that sealed wider (a bug · an older build joined later · a copy of another person's) is refused here, before the card exists. (An envelope's receivers are named in its header — `check_envelope` made it whole already)
         to = {str(t).lower() for t in body.envelope["to"]}
-        allowed = {str(i) for i in await target_phones(db, setup.id, recipient)}
+        allowed = {str(i) for i in await target_phones(db, setup, recipient)}
         if not to or not to <= allowed:
             raise DesktopRelayError(422, "envelope_receivers_mismatch", "the envelope names a receiver this card may not go to")
     row = AgentPermissionRequest(
