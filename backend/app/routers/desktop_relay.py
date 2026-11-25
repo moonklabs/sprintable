@@ -27,7 +27,7 @@ from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
 from app.services import desktop_changes, desktop_clock, desktop_usage, pairing_sessions
 from app.services import desktop_relay as relay
-from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
+from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, SealTargetsRequest, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -929,6 +929,18 @@ async def post_record_handoff_received_by_phone(
         return _error(exc)
     await db.commit()
     return {"deleted": deleted}
+
+
+@router.post("/relay/seal-targets")
+async def post_seal_targets(body: SealTargetsRequest, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story 5025 (B1 · contract v1.2 §2.1): which of the phones the host pinned may read this agent's cards — asked BEFORE a card is sealed. Reads only; a refusal ends the transaction (`_error`)."""
+    from app.services import agent_permissions
+
+    try:
+        return await agent_permissions.seal_targets(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
 
 
 @router.put("/relay/pairings")
