@@ -8,9 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const require_ = createRequire(import.meta.url);
 const guard = require_('./embedded-host-guard.cjs') as {
   install: (env?: Record<string, string | undefined>, target?: unknown, options?: { bodyBudget?: number }) => boolean;
-  isAllowedHost: (host: unknown, port?: number) => boolean;
-  targetAuthorityAllowed: (url: unknown, port?: number) => boolean;
-  crossSiteRequest: (req: unknown, port?: number) => boolean;
+  isAllowedHost: (host: unknown, port?: number, publicHost?: string | null) => boolean;
+  targetAuthorityAllowed: (url: unknown, port?: number, publicHost?: string | null) => boolean;
+  crossSiteRequest: (req: unknown, port?: number, publicHost?: string | null) => boolean;
+  publicHostOf: (env?: Record<string, string | undefined>) => string | null;
 };
 
 interface Rig { port: number; hits: string[]; bodies: number[]; upgrades: number; close: () => Promise<void> }
@@ -331,5 +332,64 @@ describe('the memory that request bodies in flight can take', () => {
     const out = await raw(r.port, head(r, 'Expect: 100-continue\r\nContent-Length: 5000\r\n'));
     expect(status(out)).toBe('503');
     expect(out).not.toContain('100 Continue');
+  });
+});
+
+
+// ── story 5022 (b) — the public name of a server host ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('publicHostOf — the one other name the door answers to', () => {
+  const of = (v: unknown) => guard.publicHostOf({ SPRINTABLE_PUBLIC_ORIGIN: v as string });
+  it('a lower-case DNS name (with its port when it is not 443) is the Host a browser sends; everything else is null — loopback only', () => {
+    expect(of('https://team.example.com')).toBe('team.example.com');
+    expect(of('https://server.tail1234.ts.net')).toBe('server.tail1234.ts.net');
+    expect(of('https://team.example.com:8443')).toBe('team.example.com:8443');
+    expect(of('https://xn--hxajbheg2az3al.example')).toBe('xn--hxajbheg2az3al.example');
+    for (const bad of ['', undefined, 'team.example.com', 'http://team.example.com', 'HTTPS://team.example.com', 'https://Team.example.com', 'https://team.example.com/', 'https://team.example.com/x', 'https://team.example.com?x=1', 'https://team.example.com#x',
+      'https://u@team.example.com', 'https://team.example.com:443', 'https://team.example.com:0', 'https://team.example.com:65536', 'https://team.example.com:08443', 'https://team.example.com:', 'https://team', 'https://team..example.com', 'https://-a.example.com',
+      'https://10.0.0.5', 'https://1.2.3.4:8443', 'https://[::1]', 'https://127.1', 'https://0x7f.0.0.1', 'https://127.0.0.0x1', 'https://a.0x', 'https://localhost', 'https://app.localhost', 'https://team.example.com ', ' https://team.example.com', 'https://team.example.com\n',
+      `https://${'a'.repeat(64)}.example.com`, `https://${'a.'.repeat(130)}com`]) expect(of(bad), JSON.stringify(bad)).toBeNull();
+    expect(of('https://x0.example.com')).toBe('x0.example.com'); expect(of('https://team.0xample.com')).toBe('team.0xample.com'); expect(guard.publicHostOf({})).toBeNull();
+  });
+});
+
+describe('the guard with a public name', () => {
+  const PUB = { SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' };
+  it('isAllowedHost / targetAuthorityAllowed / crossSiteRequest: the public Host is added; nothing else about the loopback rule changes', () => {
+    expect(guard.isAllowedHost('team.example.com', 8000, 'team.example.com')).toBe(true);
+    expect(guard.isAllowedHost('TEAM.Example.COM', 8000, 'team.example.com')).toBe(true);
+    for (const h of ['team.example.com:8000', 'team.example.com.', 'xteam.example.com', 'team.example.com:443', 'evil.example.com', 'team.example.com@evil.com', 'localhost:8000', undefined, '']) expect(guard.isAllowedHost(h, 8000, 'team.example.com'), String(h)).toBe(false);
+    expect(guard.isAllowedHost('127.0.0.1:8000', 8000, 'team.example.com')).toBe(true); expect(guard.isAllowedHost('127.0.0.1:8001', 8000, 'team.example.com')).toBe(false);
+    expect(guard.isAllowedHost('team.example.com', 8000)).toBe(false); expect(guard.isAllowedHost('team.example.com', 8000, null)).toBe(false); expect(guard.isAllowedHost('', 8000, '')).toBe(false);
+    expect(guard.targetAuthorityAllowed('https://team.example.com/api/v2/x', 8000, 'team.example.com')).toBe(true);
+    expect(guard.targetAuthorityAllowed('http://evil.example.com/', 8000, 'team.example.com')).toBe(false);
+    expect(guard.crossSiteRequest({ headers: { origin: 'https://team.example.com' } }, 8000, 'team.example.com')).toBe(false);
+    for (const o of ['http://team.example.com', 'https://evil.example.com', 'https://team.example.com.evil.com', 'null', 'https://team.example.com:8443']) expect(guard.crossSiteRequest({ headers: { origin: o } }, 8000, 'team.example.com'), o).toBe(true);
+    expect(guard.crossSiteRequest({ headers: { origin: 'https://team.example.com' } }, 8000)).toBe(true); // no public name known: it is another site
+  });
+  it('on a real server: the public Host reaches the app (any letter case), the loopback Host still does, every other Host is a 400', async () => {
+    const r = await rig(PUB);
+    const at = (host: string, extra = '') => raw(r.port, `GET /p HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n${extra}\r\n`);
+    expect(status(await at('team.example.com'))).toBe('200'); expect(status(await at('Team.Example.com'))).toBe('200'); expect(status(await at(`127.0.0.1:${r.port}`))).toBe('200');
+    for (const h of ['evil.example.com', 'team.example.com:9999', `team.example.com:${r.port}`, 'localhost', `127.0.0.1:${r.port + 1}`]) expect(status(await at(h)), h).toBe('400');
+    expect(r.hits).toEqual(['GET /p', 'GET /p', 'GET /p']);
+  });
+  it('the other-site check knows the public origin: its own Origin / Sec-Fetch-Site pass, any other Origin is a 403', async () => {
+    const r = await rig(PUB);
+    const at = (extra: string) => raw(r.port, `POST /p HTTP/1.1\r\nHost: team.example.com\r\nConnection: close\r\nContent-Length: 0\r\n${extra}\r\n`);
+    expect(status(await at('Origin: https://team.example.com\r\n'))).toBe('200');
+    expect(status(await at('Sec-Fetch-Site: same-origin\r\n'))).toBe('200');
+    expect(status(await at(''))).toBe('200'); // a tool
+    for (const e of ['Origin: https://evil.example.com\r\n', 'Origin: http://team.example.com\r\n', 'Origin: null\r\n', 'Sec-Fetch-Site: cross-site\r\n', 'Sec-Fetch-Site: same-site\r\n']) expect(status(await at(e)), e).toBe('403');
+  });
+  it('a public origin that is not usable changes nothing: the public name is a 400 like any other', async () => {
+    for (const bad of ['http://team.example.com', 'https://10.0.0.5', 'https://team.example.com/x', 'https://team']) {
+      const r = await rig({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: bad });
+      expect(status(await raw(r.port, `GET /p HTTP/1.1\r\nHost: ${bad.replace(/^https?:\/\//, '').split('/')[0]}\r\nConnection: close\r\n\r\n`)), bad).toBe('400');
+    }
+  });
+  it('an absolute-form target under the public name is judged like a Host; a foreign authority is not rescued by a good Host', async () => {
+    const r = await rig(PUB);
+    expect(status(await raw(r.port, 'GET https://team.example.com/p HTTP/1.1\r\nHost: team.example.com\r\nConnection: close\r\n\r\n'))).toBe('200');
+    expect(status(await raw(r.port, 'GET https://evil.example.com/p HTTP/1.1\r\nHost: team.example.com\r\nConnection: close\r\n\r\n'))).toBe('400');
   });
 });

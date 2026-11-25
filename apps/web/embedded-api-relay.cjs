@@ -16,6 +16,7 @@
 // embedded-entry.cjs therefore installs this one BEFORE the guard (the guard wraps `emit` after this has wrapped it). Plain CommonJS and no dependencies.
 const http = require('node:http');
 const https = require('node:https');
+const net = require('node:net');
 const { pipeline } = require('node:stream');
 
 const INSTALLED = Symbol.for('sprintable.embeddedApiRelay');
@@ -46,7 +47,41 @@ function relayTarget(rawUrl, env = process.env) {
 }
 
 /** the headers to send on: no hop-by-hop ones, nothing the connection names, no `Expect` (the door has answered it), `Host` of the backend, the forwarding headers set here (a client cannot write them) */
-function upstreamHeaders(req, target) {
+/**
+ * story 5022 (b) — the public host (`SPRINTABLE_PUBLIC_ORIGIN`): the SAME rules as `publicHostOf` in embedded-host-guard.cjs and lib/embedded-api-origin.ts (a test holds the three together). Null → only the loopback is served.
+ */
+function publicHostOf(env) {
+  const v = env && typeof env['SPRINTABLE_PUBLIC_ORIGIN'] === 'string' ? env['SPRINTABLE_PUBLIC_ORIGIN'] : '';
+  const m = /^https:\/\/((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::([1-9][0-9]{0,4}))?$/.exec(v);
+  if (!m) return null;
+  const name = m[1];
+  const port = m[2];
+  if (name.length > 253 || (port !== undefined && (Number(port) > 65535 || port === '443'))) return null;
+  const last = name.slice(name.lastIndexOf('.') + 1);
+  if (/^(?:[0-9]+|0x[0-9a-f]*)$/.test(last) || name === 'localhost' || name.endsWith('.localhost')) return null;
+  return port === undefined ? name : `${name}:${port}`;
+}
+
+/**
+ * Did this request come through the server host's TLS front? Yes only when the public host is set, the connection is from THIS computer (the front runs here) and the `Host` is exactly the public name. Then — and only then — the front's own
+ * `X-Forwarded-For` is the person's address: the rightmost entry (the one the front itself wrote; Caddy replaces what a client sent, and a longer chain still ends in the front's entry). Anything else: the address of the connection, as before.
+ */
+function throughFront(req, env) {
+  const publicHost = publicHostOf(env);
+  if (publicHost === null) return false;
+  const peer = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '';
+  if (peer !== '127.0.0.1' && peer !== '::1' && peer !== '::ffff:127.0.0.1') return false;
+  return String(req.headers['host'] || '').toLowerCase() === publicHost;
+}
+
+function frontClientIp(req) {
+  const xff = req.headers['x-forwarded-for']; // Node joins repeated lines with ", ": the last entry is the nearest hop's
+  if (typeof xff !== 'string') return '';
+  const last = xff.split(',').pop().trim();
+  return net.isIP(last) ? last : '';
+}
+
+function upstreamHeaders(req, target, env = process.env) {
   const named = new Set(String(req.headers['connection'] || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean));
   const out = {};
   for (const [name, value] of Object.entries(req.headers)) {
@@ -55,9 +90,11 @@ function upstreamHeaders(req, target) {
   }
   out['host'] = target.host;
   const peer = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '';
-  if (peer) out['x-forwarded-for'] = peer;
+  const front = throughFront(req, env);
+  const who = (front ? frontClientIp(req) : '') || peer; // story 5022 (b): behind the TLS front the person's address, not the front's own (every person would share one rate-limit bucket)
+  out['x-forwarded-for'] = who || 'unknown'; // ALWAYS set (even for a connection that has no address — «unknown» is not an address, the backend then uses its socket): the backend's loopback-only routes (local-bootstrap · server-setup) refuse any request that carries a forwarded header, so nothing that comes in through here can reach them
   if (req.headers['host']) out['x-forwarded-host'] = req.headers['host'];
-  out['x-forwarded-proto'] = 'http';
+  out['x-forwarded-proto'] = front ? 'https' : 'http';
   return out;
 }
 
@@ -124,4 +161,4 @@ function install(env = process.env, target = http.Server.prototype) {
   return true;
 }
 
-module.exports = { install, relayTarget };
+module.exports = { install, relayTarget, upstreamHeaders, publicHostOf };

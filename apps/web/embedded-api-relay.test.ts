@@ -16,6 +16,8 @@ const require_ = createRequire(import.meta.url);
 const relay = require_('./embedded-api-relay.cjs') as {
   install: (env?: Record<string, string | undefined>, target?: unknown) => boolean;
   relayTarget: (rawUrl: unknown, env?: Record<string, string | undefined>) => URL | null;
+  upstreamHeaders: (req: unknown, target: URL, env?: Record<string, string | undefined>) => Record<string, string>;
+  publicHostOf: (env?: Record<string, string | undefined>) => string | null;
 };
 const guard = require_('./embedded-host-guard.cjs') as { install: (env?: Record<string, string | undefined>, target?: unknown) => boolean };
 
@@ -76,13 +78,13 @@ async function backend(initial: Mode = 'end', lifeMs = 300): Promise<Backend> {
 
 interface Door { port: number; nextHits: string[]; connections: () => Promise<number> }
 /** the app's web server: a request listener that stands for Next, a server class of its own, and the layers installed in the order given (the first listed is installed first = innermost) */
-async function door(layers: Array<'relay' | 'guard'> = ['relay', 'guard']): Promise<Door> {
+async function door(layers: Array<'relay' | 'guard'> = ['relay', 'guard'], extraEnv: Record<string, string> = {}): Promise<Door> {
   class AppServer extends http.Server {}
   const nextHits: string[] = [];
   const server = new AppServer((req, res) => { nextHits.push(`${req.method} ${req.url}`); res.end('next'); });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const port = (server.address() as net.AddressInfo).port;
-  for (const layer of layers) (layer === 'relay' ? relay : guard).install({ SPRINTABLE_EMBEDDED: '1', PORT: String(port) }, AppServer.prototype);
+  for (const layer of layers) (layer === 'relay' ? relay : guard).install({ SPRINTABLE_EMBEDDED: '1', PORT: String(port), ...extraEnv }, AppServer.prototype);
   cleanups.push(() => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }));
   return { port, nextHits, connections: () => new Promise((r) => server.getConnections((_e, n) => r(n))) };
 }
@@ -366,5 +368,80 @@ http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.
     expect(await app.exited).not.toBe(0);
     expect(app.out()).toContain('some-other-file-that-is-missing');
     expect(app.out()).not.toContain(READY);
+  });
+});
+
+
+// ── story 5022 (b) — behind the server host's TLS front ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('the relay behind the TLS front of a server host (SPRINTABLE_PUBLIC_ORIGIN)', () => {
+  const PUBLIC = 'https://team.example.com';
+  const fake = (peer: string, headers: Record<string, string>) => ({ socket: { remoteAddress: peer }, headers }) as unknown;
+  const target = new URL('http://127.0.0.1:41000/api/v2/x');
+  const hdr = (peer: string, headers: Record<string, string>, env: Record<string, string | undefined> = { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }) => relay.upstreamHeaders(fake(peer, headers), target, env);
+
+  it('through the front (this computer · the public Host): the person\'s address is the rightmost X-Forwarded-For entry — the one the front wrote — and the scheme is https', () => {
+    const h = hdr('127.0.0.1', { host: 'team.example.com', 'x-forwarded-for': '203.0.113.9' });
+    expect(h['x-forwarded-for']).toBe('203.0.113.9'); expect(h['x-forwarded-proto']).toBe('https'); expect(h['x-forwarded-host']).toBe('team.example.com');
+    expect(hdr('127.0.0.1', { host: 'team.example.com', 'x-forwarded-for': '6.6.6.6, 203.0.113.9' })['x-forwarded-for']).toBe('203.0.113.9'); // what a person sent first, the front last
+    expect(hdr('127.0.0.1', { host: 'team.example.com', 'x-forwarded-for': '2001:db8::7' })['x-forwarded-for']).toBe('2001:db8::7');
+    expect(hdr('::1', { host: 'TEAM.example.com', 'x-forwarded-for': '203.0.113.9' })['x-forwarded-for']).toBe('203.0.113.9'); // a Host in another letter case is the same name
+    expect(hdr('::ffff:127.0.0.1', { host: 'team.example.com', 'x-forwarded-for': '203.0.113.9' })['x-forwarded-for']).toBe('203.0.113.9');
+    expect(hdr('127.0.0.1', { host: 'team.example.com:8443', 'x-forwarded-for': '203.0.113.9' }, { SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com:8443' })['x-forwarded-proto']).toBe('https');
+  });
+  it('an entry that is not an address, or none at all: the connection\'s own address (never a made-up one), still https', () => {
+    for (const x of ['not-an-ip', '203.0.113.9, nope', '203.0.113.9,', '']) {
+      const h = hdr('127.0.0.1', { host: 'team.example.com', 'x-forwarded-for': x });
+      expect(h['x-forwarded-for'], JSON.stringify(x)).toBe('127.0.0.1');
+    }
+    expect(hdr('127.0.0.1', { host: 'team.example.com' })['x-forwarded-for']).toBe('127.0.0.1');
+  });
+  it('NOT through the front — a connection from another address · a Host that is not the public name · no public origin set · an unusable one — the connection\'s address and http, whatever the headers claim', () => {
+    for (const [peer, host, env] of [
+      ['192.0.2.5', 'team.example.com', { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }],
+      ['127.0.0.1', '127.0.0.1:41000', { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }],
+      ['127.0.0.1', 'other.example.com', { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }],
+      ['127.0.0.1', 'team.example.com', {}],
+      ['127.0.0.1', 'team.example.com', { SPRINTABLE_PUBLIC_ORIGIN: 'http://team.example.com' }],
+      ['127.0.0.1', 'team.example.com', { SPRINTABLE_PUBLIC_ORIGIN: 'https://10.0.0.5' }],
+      ['127.0.0.1', '', { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }],
+    ] as Array<[string, string, Record<string, string>]>) {
+      const h = hdr(peer, { host, 'x-forwarded-for': '203.0.113.9' }, env);
+      expect(h['x-forwarded-for'], `${peer} ${host} ${JSON.stringify(env)}`).toBe(peer); expect(h['x-forwarded-proto']).toBe('http');
+    }
+  });
+  it('a forwarded header is ALWAYS set (the backend\'s loopback-only routes refuse any request that carries one): even for a connection that has no address', () => {
+    const h = relay.upstreamHeaders(fake('127.0.0.1', { host: 'team.example.com' }), target, { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC });
+    expect(h['x-forwarded-for']).toBeTruthy();
+    expect(Object.keys(relay.upstreamHeaders(fake('127.0.0.1', { host: '127.0.0.1:1' }), target, {})).some((k) => k === 'x-forwarded-for')).toBe(true);
+    // a connection that has NO address at all still carries the marker (a value that is not an address), through the front or not
+    for (const env of [{ SPRINTABLE_PUBLIC_ORIGIN: PUBLIC }, {}]) {
+      const none = relay.upstreamHeaders({ socket: {}, headers: { host: 'team.example.com', 'x-forwarded-for': '203.0.113.9' } }, target, env);
+      expect(none['x-forwarded-for']).toBe('unknown'); expect(none['x-forwarded-proto']).toBe('http');
+    }
+    expect(relay.upstreamHeaders({ headers: { host: 'a' } }, target, {})['x-forwarded-for']).toBe('unknown'); // not even a socket object
+  });
+  it('end to end: the door answers the public Host, the backend sees the person\'s address and https; the loopback Host with the same claim does not get it; a foreign Host is a 400', async () => {
+    const be = await backend();
+    process.env['SPRINTABLE_API_ORIGIN'] = `http://127.0.0.1:${be.port}`;
+    process.env['SPRINTABLE_PUBLIC_ORIGIN'] = PUBLIC;
+    cleanups.push(() => { delete process.env['SPRINTABLE_PUBLIC_ORIGIN']; });
+    const d = await door(['relay', 'guard'], { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC });
+    const via = await raw(d.port, get(d.port, '/api/v2/things', 'X-Forwarded-For: 203.0.113.9\r\nX-Forwarded-Proto: http\r\n', 'team.example.com'));
+    expect(status(via)).toBe('201');
+    expect(be.seen[0]?.headers['x-forwarded-for']).toBe('203.0.113.9'); expect(be.seen[0]?.headers['x-forwarded-proto']).toBe('https'); expect(be.seen[0]?.headers['x-forwarded-host']).toBe('team.example.com');
+    expect(be.seen[0]?.headers['host']).toBe(`127.0.0.1:${be.port}`); // the backend still sees its own Host (its TrustedHost rule stays as it is)
+    const local = await raw(d.port, get(d.port, '/api/v2/things', 'X-Forwarded-For: 203.0.113.9\r\n'));
+    expect(status(local)).toBe('201');
+    expect(be.seen[1]?.headers['x-forwarded-for']).toBe('127.0.0.1'); expect(be.seen[1]?.headers['x-forwarded-proto']).toBe('http');
+    expect(status(await raw(d.port, get(d.port, '/api/v2/things', '', 'evil.example.com')))).toBe('400');
+    expect(be.seen).toHaveLength(2);
+    expect(status(await raw(d.port, get(d.port, '/login', '', 'team.example.com')))).toBe('200'); // a page of Next under the public name
+  });
+  it('without the public origin the public name is NOT served at all (a 400 at the door) — the loopback rule is all there is', async () => {
+    const be = await backend();
+    process.env['SPRINTABLE_API_ORIGIN'] = `http://127.0.0.1:${be.port}`;
+    const d = await door();
+    expect(status(await raw(d.port, get(d.port, '/api/v2/things', '', 'team.example.com')))).toBe('400');
+    expect(be.seen).toHaveLength(0);
   });
 });
