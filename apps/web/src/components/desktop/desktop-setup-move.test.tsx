@@ -211,7 +211,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     await chooseMove();
     const row = rows().find((r) => r.textContent?.includes('오픈코드 담당'))!;
     expect(row.dataset.state).toBe('app-outdated');
-    expect(row.textContent).toContain('OpenCode는 지금 쓰는 앱 판에서는 아직 지원하지 않아요 · 앱을 업데이트해 주세요');
+    expect(row.textContent).toContain('OpenCode는 지금 쓰는 앱 버전에서는 아직 지원하지 않아요 · 앱을 업데이트해 주세요');
     expect(row.textContent).not.toContain('이 컴퓨터에 없어요');
     expect(isOff(row.querySelector('[role=checkbox]'))).toBe(true);
   });
@@ -263,7 +263,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     const move = container.querySelector('[data-testid=setup-kind-move]') as HTMLElement;
     expect(isOff(move.querySelector('[role=radio]'))).toBe(true);
-    expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 판에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
+    expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 버전에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
     expect(move.textContent).not.toContain('이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
     // a click on it changes nothing: still the recipe way, no move list, «시작»
     await act(async () => { (move.querySelector('[role=radio]') as HTMLElement).click(); (move as HTMLElement).click(); });
