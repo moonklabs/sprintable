@@ -28,32 +28,51 @@ const BODY = 'Invalid host header';
 const DEFAULT_BODY_BUDGET = 300 * 1024 * 1024;
 const REASONS = { 400: 'Bad Request', 403: 'Forbidden', 503: 'Service Unavailable' };
 
-/** `127.0.0.1:<port>` — exactly this server's port, and no other spelling of the loopback (localhost · [::1] · 127.1 · 0x7f… · a trailing dot · userinfo). With no port to compare with (nothing known) nothing is allowed. */
-function isAllowedHost(host, port) {
+/**
+ * story 5022 (b) — the ONE other name this server answers to: the server host's public address, `SPRINTABLE_PUBLIC_ORIGIN` (`https://<dns name>[:port]`, set by the supervisor only when the host has an owner and sign-up is closed — a
+ * TLS front on the same computer hands that name to this port with its `Host` unchanged). Read here with the same strictness as the host command that wrote it: lower-case DNS name with a dot, no IP in any spelling (a last
+ * part that is a number — decimal or `0x` hex — is how a browser reads an IPv4), no `localhost`, `https` only, no path · query · credentials, no explicit `:443`. Anything else → null → the public name is NOT served (loopback only).
+ * Returns the `Host` a browser sends for it (`name` or `name:port`), or null. The loopback rule below is unchanged.
+ */
+function publicHostOf(env) {
+  const v = env && typeof env['SPRINTABLE_PUBLIC_ORIGIN'] === 'string' ? env['SPRINTABLE_PUBLIC_ORIGIN'] : '';
+  const m = /^https:\/\/((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::([1-9][0-9]{0,4}))?$/.exec(v);
+  if (!m) return null;
+  const name = m[1];
+  const port = m[2];
+  if (name.length > 253 || (port !== undefined && (Number(port) > 65535 || port === '443'))) return null;
+  const last = name.slice(name.lastIndexOf('.') + 1);
+  if (/^(?:[0-9]+|0x[0-9a-f]*)$/.test(last) || name === 'localhost' || name.endsWith('.localhost')) return null;
+  return port === undefined ? name : `${name}:${port}`;
+}
+
+/** `127.0.0.1:<port>` — exactly this server's port, and no other spelling of the loopback (localhost · [::1] · 127.1 · 0x7f… · a trailing dot · userinfo) — or, when given, exactly the public host (`publicHost`, see publicHostOf). With no port to compare with (nothing known) nothing is allowed. */
+function isAllowedHost(host, port, publicHost) {
   if (typeof host !== 'string') return false;
+  if (typeof publicHost === 'string' && publicHost !== '' && host.toLowerCase() === publicHost) return true; // the browser sets Host in the case it likes: DNS names do not care
   const m = /^127\.0\.0\.1:(\d{1,5})$/.exec(host);
   if (!m) return false;
   return typeof port === 'number' && Number.isInteger(port) && port > 0 && Number(m[1]) === port; // closed when the port is not known
 }
 
 /** an absolute-form request target (`GET http://evil/ HTTP/1.1`) names its own authority, which takes precedence over `Host` — it must be the loopback too */
-function targetAuthorityAllowed(url, port) {
+function targetAuthorityAllowed(url, port, publicHost) {
   if (typeof url !== 'string') return true;
   const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url);
   if (!m) return true; // origin-form (`/path`) or asterisk-form: no authority of its own
-  return isAllowedHost(m[1], port);
+  return isAllowedHost(m[1], port, publicHost);
 }
 
 /**
  * Does the browser say this request is made on behalf of another site? `Sec-Fetch-Site` is set by the browser and cannot be changed by a page; a browser that does not send it sends `Origin`
  * on anything but a plain GET. Neither header: not a browser acting for a page (a tool, an agent, the app's own process) — passed.
  */
-function crossSiteRequest(req, port) {
+function crossSiteRequest(req, port, publicHost) {
   const h = req && req.headers ? req.headers : {};
   const site = h['sec-fetch-site'];
   if (typeof site === 'string') return site !== 'same-origin' && site !== 'none';
   const origin = h['origin'];
-  if (typeof origin === 'string') return !(typeof port === 'number' && origin === `http://127.0.0.1:${port}`);
+  if (typeof origin === 'string') return !((typeof port === 'number' && origin === `http://127.0.0.1:${port}`) || (typeof publicHost === 'string' && publicHost !== '' && origin === `https://${publicHost}`));
   return false;
 }
 
@@ -79,6 +98,7 @@ function install(env = process.env, target = http.Server.prototype, options = {}
   if (target[INSTALLED]) return true;
   const budget = Number.isFinite(options.bodyBudget) && options.bodyBudget > 0 ? options.bodyBudget : DEFAULT_BODY_BUDGET;
   const envPort = env['PORT'] ? Number(env['PORT']) : undefined;
+  const publicHost = publicHostOf(env); // story 5022 (b): read once, when the guard is installed (the supervisor sets it before it starts this server)
   const original = target.emit;
   let inflight = 0; // bytes of request bodies being received / held right now
 
@@ -125,8 +145,8 @@ function install(env = process.env, target = http.Server.prototype, options = {}
     // the env value is only the fallback for a server that cannot say (none in practice)
     const bound = typeof server.address === 'function' ? server.address() : null;
     const port = bound && typeof bound === 'object' && typeof bound.port === 'number' ? bound.port : envPort;
-    if (!isAllowedHost(host, port) || !targetAuthorityAllowed(req && req.url, port)) return { status: 400, text: BODY };
-    if (crossSiteRequest(req, port)) return { status: 403, text: 'Forbidden' };
+    if (!isAllowedHost(host, port, publicHost) || !targetAuthorityAllowed(req && req.url, port, publicHost)) return { status: 400, text: BODY };
+    if (crossSiteRequest(req, port, publicHost)) return { status: 403, text: 'Forbidden' };
     if (BODY_EVENTS.has(event) && takeBody(req, args[1])) return { status: 503, text: 'Busy' };
     return null;
   }
@@ -157,4 +177,4 @@ function install(env = process.env, target = http.Server.prototype, options = {}
   return true;
 }
 
-module.exports = { install, isAllowedHost, targetAuthorityAllowed, crossSiteRequest };
+module.exports = { install, isAllowedHost, targetAuthorityAllowed, crossSiteRequest, publicHostOf };

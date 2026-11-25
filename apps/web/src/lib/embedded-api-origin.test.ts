@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { NextResponse } from 'next/server';
-import { carryOnToTarget, embeddedApiTarget, isEmbeddedServer } from './embedded-api-origin';
+import { createRequire } from 'node:module';
+import { NextRequest } from 'next/server';
+import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal, isEmbeddedServer, isServerHost, publicHostOf } from './embedded-api-origin';
 
 const ENV_KEYS = ['SPRINTABLE_EMBEDDED', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -80,5 +82,47 @@ describe('story 4824 — the app\'s own server forwards /api/v2 at request time'
       const denied = new NextResponse('{}', { status: 403 });
       expect(carryOnToTarget(denied, target)).toBe(denied);
     });
+  });
+});
+
+
+// ── story 5022 (b) — the public name of a server host ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('story 5022 (b) — embeddedHostRefusal knows the public name of a server host', () => {
+  const req = (host: string) => new NextRequest('http://127.0.0.1:3000/x', { headers: { host } });
+  const env = (o: Record<string, string>) => ({ ...o }) as NodeJS.ProcessEnv;
+  it('loopback as before; the public Host (any letter case) when SPRINTABLE_PUBLIC_ORIGIN is usable; every other Host a 400; a server that is not the app\'s is untouched', () => {
+    const e = env({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' });
+    expect(embeddedHostRefusal(req('127.0.0.1:41000'), e)).toBeNull();
+    expect(embeddedHostRefusal(req('team.example.com'), e)).toBeNull();
+    expect(embeddedHostRefusal(req('Team.Example.COM'), e)).toBeNull();
+    for (const h of ['evil.example.com', 'team.example.com:8443', 'team.example.com.', 'localhost:3000', '']) expect(embeddedHostRefusal(req(h), e)?.status, h).toBe(400);
+    expect(embeddedHostRefusal(req('team.example.com'), env({ SPRINTABLE_EMBEDDED: '1' }))?.status).toBe(400);
+    expect(embeddedHostRefusal(req('team.example.com'), env({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'http://team.example.com' }))?.status).toBe(400);
+    expect(embeddedHostRefusal(req('anything.example'), env({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBeNull(); // not embedded: no rule at all
+  });
+  it('the THREE readers of the public origin (the door, the relay, this file) answer every spelling alike', () => {
+    const require_ = createRequire(import.meta.url);
+    const door = require_('../../embedded-host-guard.cjs') as { publicHostOf: (e: Record<string, string | undefined>) => string | null };
+    const relay = require_('../../embedded-api-relay.cjs') as { publicHostOf: (e: Record<string, string | undefined>) => string | null };
+    const table = ['https://team.example.com', 'https://team.example.com:8443', 'https://team.example.com:443', 'https://Team.example.com', 'http://team.example.com', 'https://10.0.0.5', 'https://0x7f.1', 'https://127.1', 'https://localhost', 'https://a.localhost', 'https://team',
+      'https://team.example.com/', 'https://u@team.example.com', 'https://team.example.com:65536', 'https://team.example.com:0', 'https://xn--hxajbheg2az3al.example', 'https://x0.example.com', 'https://a.0x', '', 'nonsense', `https://${'a'.repeat(64)}.example.com`];
+    for (const v of table) {
+      const e = { SPRINTABLE_PUBLIC_ORIGIN: v };
+      expect(publicHostOf(e as unknown as NodeJS.ProcessEnv), JSON.stringify(v)).toBe(door.publicHostOf(e));
+      expect(relay.publicHostOf(e), JSON.stringify(v)).toBe(door.publicHostOf(e));
+    }
+    expect(publicHostOf({} as unknown as NodeJS.ProcessEnv)).toBeNull();
+  });
+});
+
+describe('story 5022 (b) — isServerHost: the one name for «this is the server host\'s web», read by 5024 and the 5023 screens', () => {
+  const e = (o: Record<string, string>) => ({ ...o }) as NodeJS.ProcessEnv;
+  it('embedded AND a usable public origin; the desktop app\'s server (no public address), a hosted deployment (not embedded) and an unusable value are not', () => {
+    expect(isServerHost(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(true);
+    expect(isServerHost(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com:8443' }))).toBe(true);
+    expect(isServerHost(e({ SPRINTABLE_EMBEDDED: '1' }))).toBe(false);
+    expect(isServerHost(e({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
+    expect(isServerHost(e({ SPRINTABLE_EMBEDDED: 'true', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
+    for (const bad of ['http://team.example.com', 'https://10.0.0.5', 'https://localhost', 'https://team', '']) expect(isServerHost(e({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: bad })), bad).toBe(false);
   });
 });
