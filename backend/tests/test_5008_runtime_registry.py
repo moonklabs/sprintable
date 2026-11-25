@@ -86,6 +86,15 @@ def test_the_web_keeps_the_same_names_in_its_one_module():
     assert tuple(re.findall(r"'([a-z]+)'", m.group(1))) == ar.DESKTOP_RUNTIME_IDS
 
 
+def test_the_web_keeps_the_capability_words_of_the_enabled_runtimes_in_its_one_module():
+    """story 5009: the web drops a runtime the app reports but whose word it did not say — its table must be the registry's (enabled rows that need a word)."""
+    text = (ROOT.parent / "apps/web/src/lib/desktop-runtimes.ts").read_text(encoding="utf-8")
+    m = re.search(r"RUNTIME_CAPABILITY_WORD[^=]*=\s*\{([^}]*)\}", text)
+    assert m, "apps/web/src/lib/desktop-runtimes.ts must declare RUNTIME_CAPABILITY_WORD"
+    web = dict(re.findall(r"(\w+):\s*'([^']+)'", m.group(1)))
+    assert web == {r.id: r.capability for r in ar.DESKTOP_RUNTIME_REGISTRY if r.enabled and r.capability}
+
+
 # ── an app says what it can drive; the server offers only that ───────────────────────────
 def test_runtime_capability_words_are_known_to_setup_codes_and_unknown_words_are_dropped():
     assert set(ar.RUNTIME_CAPABILITIES) == {"rt-opencode", "rt-gemini", "rt-cursor"}

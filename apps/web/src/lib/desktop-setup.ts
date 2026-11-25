@@ -8,7 +8,7 @@
 // - 작업 폴더는 제안일 뿐 — 최종 판단은 데스크톱 로컬 층(홈 안 · `..` 없음 …)이 한다(PO 08:15Z).
 /** A role's kind from the server (4831): human → the person confirming · agent → one of this computer's agents · either → an agent,
  * or «나». The same union the recipe preset uses. */
-import { ENABLED_DESKTOP_RUNTIME_IDS, NO_SIGN_IN_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+import { ENABLED_DESKTOP_RUNTIME_IDS, NO_SIGN_IN_RUNTIME_IDS, RUNTIME_CAPABILITY_WORD, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
 
 export type RoleActorKind = 'human' | 'agent' | 'either';
 
@@ -86,13 +86,15 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   if (!CODE_RE.test(code)) return null;
   const asked = new Set((params.get('runtimes') ?? '').split(',').map((s) => s.trim()));
   const setup = params.get('setup') ?? '';
-  const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
-  const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
+  const rtWords = [...caps].filter((c) => /^rt-[a-z0-9]{1,24}$/.test(c)).slice(0, 8);
+  // story 5009: only a runtime the app can drive is a choice anywhere on the page (recipe rows · solo · quick start): one that needs a word the app did not say is dropped here, once
+  const wordOf = (r: string): string | undefined => (RUNTIME_CAPABILITY_WORD as Partial<Record<string, string>>)[r];
+  const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r) && (wordOf(r) === undefined || rtWords.includes(wordOf(r)!)));
+  const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
   const solo = caps.has('solo') ? { canSolo: true as const } : {};
   const workdir = caps.has('workdir') ? { canWorkdir: true as const } : {};
-  const rtWords = [...caps].filter((c) => /^rt-[a-z0-9]{1,24}$/.test(c)).slice(0, 8);
   const pickAsked = params.get('pick') ?? '';
   const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
   const versions = parseRuntimeVersions(params.get('rv'), runtimes);

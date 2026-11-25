@@ -19,7 +19,7 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
-import { agentRoomOf, heldProjectOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type HeldProject, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
+import { agentRoomOf, heldProjectOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, appCannotDrive, type AgentRoom, type AttachableAgent, type HeldProject, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
 import { AGENT_NAME_MAX, AGENT_ROLE_MAX, defaultSoloRuntime, folderTracePick, readTypedAgent, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes, writeTypedAgent } from '@/lib/desktop-setup-quick';
@@ -543,11 +543,11 @@ export function DesktopSetupAgent({ query, onTeam }: { query: SetupQuery; onTeam
     // leaving a project (or the page): nothing of its answer is kept for the next one — A → B → A never shows A's old list while A is read again (self-QA)
     return () => { off = true; clearTimeout(limit); setRead(null); };
   }, [wanted, project]);
-  const fallback = <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
+  const fallback = <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} appRuntimeWords={query.appRuntimeWords ?? []} />;
   if (!wanted) return fallback;
   if (!read || read.project !== project) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   const found = gone ? undefined : read.agents?.find((a) => a.id === query.agent);
   const runtimes = usableRuntimes(query);
-  if (!found || movableState(found, runtimes) !== 'ok') return fallback;
+  if (!found || appCannotDrive(found, query.appRuntimeWords ?? []) || movableState(found, runtimes) !== 'ok') return fallback; // story 5009: an agent of a runtime this app cannot drive is the recipe page's «app outdated» row, never a quick start
   return <DesktopSetupQuick query={query} onTeam={onTeam} agent={found} onNotMovable={() => setGone(true)} />;
 }

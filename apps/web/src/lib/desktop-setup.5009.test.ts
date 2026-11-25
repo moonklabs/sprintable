@@ -27,6 +27,15 @@ describe('[SID:5009] the app\'s runtime words', () => {
     expect(preselectHoldOf([oc()], 'nobody-here', ['claude'], [], [])).toEqual({ reason: 'unlisted' });
   });
 
+  it('a runtime the app reports but whose word it did not say is dropped once, at the address: not a recipe choice, not a solo default (an old or odd app)', () => {
+    const without = parseSetupQuery(new URLSearchParams(`code=${CODE}&runtimes=claude,opencode&caps=move,solo`))!;
+    expect(without.runtimes).toEqual(['claude']);
+    const withWord = parseSetupQuery(new URLSearchParams(`code=${CODE}&runtimes=claude,opencode&caps=move,solo,rt-opencode`))!;
+    expect(withWord.runtimes).toEqual(['claude', 'opencode']);
+    // another runtime's word does not open it; claude · codex need none
+    expect(parseSetupQuery(new URLSearchParams(`code=${CODE}&runtimes=claude,codex,opencode&caps=rt-gemini`))!.runtimes).toEqual(['claude', 'codex']);
+  });
+
   it('the page reads the words from `caps=` (closed shape · at most 8) and keeps them in the address it writes back; an app from before has none', () => {
     const q = parseSetupQuery(new URLSearchParams(`code=${CODE}&runtimes=claude,opencode&caps=move,solo,rt-opencode,workdir,not a word,RT-X,rt-`));
     expect(q?.appRuntimeWords).toEqual(['rt-opencode']);

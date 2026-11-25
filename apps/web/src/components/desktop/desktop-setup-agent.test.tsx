@@ -60,6 +60,20 @@ const text = () => container.textContent ?? '';
 const start = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement | undefined;
 
 describe('[SID:4711] the `agent=` branch of the setup page', () => {
+  it('[SID:5009] an OpenCode agent with an app that did NOT say rt-opencode is never a quick start: the page falls to the recipe page, nothing is moved', async () => {
+    agents = list({ runtime: 'opencode', needs_capability: 'rt-opencode' });
+    await open(`#code=${CODE}&runtimes=claude,opencode&caps=move,solo&rv=claude:2.1.289&agent=${AGENT}`);
+    expect(start()).toBeUndefined(); // (this harness has no recipe list, so the recipe page shows its own empty card — the «app outdated» hold line has its own tests in desktop-setup.test.tsx)
+    expect(text()).not.toContain('Dan'); // no card fixed to the agent
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/setup-codes/confirm'))).toBe(false);
+  });
+
+  it('[SID:5009] the same agent with an app that said rt-opencode: the quick start shows', async () => {
+    agents = list({ runtime: 'opencode', needs_capability: 'rt-opencode' });
+    await open(`#code=${CODE}&runtimes=claude,opencode&caps=move,solo,rt-opencode&rv=claude:2.1.289&agent=${AGENT}`);
+    expect(start()).toBeDefined();
+  });
+
   it('a movable recruiter\'s agent: the card with ① fixed to it (no radio · no folder step · no team link) and the project line', async () => {
     await open(frag('move,solo'));
     expect(container.querySelector('[data-testid=quick-agent-fixed]')!.textContent).toContain('Dan');
