@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // story 5024 (AC4) — a workspace SERVER HOST's onboarding «에이전트» step. Before: «에이전트는 내 Mac에서 돌아가요 · Mac 앱 받기 · 지금은 받을 수 없어요» — a Linux server has no Mac app, so the person who set it up
-// learned nothing about how an agent gets attached. Now: «이 서버에 에이전트 붙이기» with the one command for the computer that will run the agent (this server's own address filled in) and a copy button;
+// learned nothing about how an agent gets attached. Now: «이 서버에 에이전트 연결하기» with the one command for the computer that will run the agent (this server's own address filled in) and a copy button;
 // the Mac screens are not drawn. Any other deployment (no `serverHostOrigin`) is exactly what it was. Taking the `serverHostOrigin` branch out of first-screen.tsx turns the first test red.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,7 +52,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
   it('says how to attach an agent to THIS server: the title, the command with this server\'s address, a copy button — and draws none of the Mac screens', async () => {
     await render({ serverHostOrigin: 'https://team.example.com' });
     expect(has('onboarding-first-server-host')).toBe(true);
-    expect(container.textContent).toContain('이 서버에 에이전트 붙이기');
+    expect(container.textContent).toContain('이 서버에 에이전트 연결하기');
     expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host pair --folder ~/work --server https://team.example.com');
     expect(has('onboarding-first-server-host-card-copy')).toBe(true);
     // none of the Mac screens: not the Mac title, not the download card, not «앱 열기», not the not-Mac fork

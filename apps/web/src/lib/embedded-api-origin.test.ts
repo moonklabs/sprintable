@@ -140,7 +140,8 @@ describe('story 5024 (AC4) — serverHostOrigin: the address a person gives `spr
     }
   });
   it('is non-null exactly when isServerHost is true (one rule, two names)', () => {
-    for (const env of [{ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, { SPRINTABLE_EMBEDDED: '1' }, { SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, {}]) {
+    const envs: Array<Record<string, string>> = [{ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, { SPRINTABLE_EMBEDDED: '1' }, { SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, {}];
+    for (const env of envs) {
       expect(serverHostOrigin(e(env)) !== null, JSON.stringify(env)).toBe(isServerHost(e(env)));
     }
   });

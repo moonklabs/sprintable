@@ -19,7 +19,7 @@ describe('[SID:5024 AC4] the sidebar entry of /desktop', () => {
     expect(desktopItem({ ...base, desktopDownloadEnabled: false, serverHost: true })).toBeUndefined();
   });
   it('the sidebar name and the screen title are the same word, in ko and en', () => {
-    for (const m of [koMessages, enMessages] as Array<{ nav: Record<string, string>; desktop: Record<string, string> }>) {
+    for (const m of [koMessages, enMessages] as unknown as Array<{ nav: Record<string, string>; desktop: Record<string, string> }>) {
       expect(m.nav['serverHostAgents']).toBe(m.desktop['pageTitleServerHost']);
       expect(m.nav['serverHostAgents']).toBeTruthy();
       expect(m.nav['descServerHostAgents']).toBeTruthy();
