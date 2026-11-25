@@ -8,7 +8,7 @@
 // - 작업 폴더는 제안일 뿐 — 최종 판단은 데스크톱 로컬 층(홈 안 · `..` 없음 …)이 한다(PO 08:15Z).
 /** A role's kind from the server (4831): human → the person confirming · agent → one of this computer's agents · either → an agent,
  * or «나». The same union the recipe preset uses. */
-import { ENABLED_DESKTOP_RUNTIME_IDS, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
+import { ENABLED_DESKTOP_RUNTIME_IDS, NO_SIGN_IN_RUNTIME_IDS, RUNTIME_CAPABILITY_WORD, type EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
 
 export type RoleActorKind = 'human' | 'agent' | 'either';
 
@@ -33,6 +33,8 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   /** story 4832: the app said `caps=workdir` — it answers the move progress page's per-agent [작업 폴더 고르기] link (`intent=workdir`). Absent = an app from before: the
    *  page keeps «창 아래 알림에서 고르기» and shows NO link (an older app would read the link as «start a setup»). Only present when true. */
   canWorkdir?: true;
+  /** story 5009 (A2): the runtime words the app said in `caps=` (`rt-opencode` …) — what THIS app can drive beyond Claude Code and Codex. Absent = none (an app from before). */
+  appRuntimeWords?: string[];
   /** story 4832: `kind=move` — the app was asked to open the page with «이미 있는 에이전트 옮기기» chosen (the sidebar's own door). Only with `caps=move`
    *  (an app that cannot take a move would show a choice it cannot keep); absent otherwise. */
   kind?: 'move';
@@ -84,9 +86,12 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   if (!CODE_RE.test(code)) return null;
   const asked = new Set((params.get('runtimes') ?? '').split(',').map((s) => s.trim()));
   const setup = params.get('setup') ?? '';
-  const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
-  const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
+  const rtWords = [...caps].filter((c) => /^rt-[a-z0-9]{1,24}$/.test(c)).slice(0, 8);
+  // story 5009: only a runtime the app can drive is a choice anywhere on the page (recipe rows · solo · quick start): one that needs a word the app did not say is dropped here, once
+  const wordOf = (r: string): string | undefined => (RUNTIME_CAPABILITY_WORD as Partial<Record<string, string>>)[r];
+  const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r) && (wordOf(r) === undefined || rtWords.includes(wordOf(r)!)));
+  const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
   const solo = caps.has('solo') ? { canSolo: true as const } : {};
   const workdir = caps.has('workdir') ? { canWorkdir: true as const } : {};
@@ -94,7 +99,7 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
   const versions = parseRuntimeVersions(params.get('rv'), runtimes);
   const folder = parseSoloFolder(params);
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...workdir, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...workdir, ...(rtWords.length ? { appRuntimeWords: rtWords } : {}), ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
 }
 
 
@@ -152,7 +157,14 @@ export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime
 /** story #4565 — `GET /api/v2/desktop/setup/agents` row: an agent the setup may attach (this org · this project · a desktop
  * runtime), its live key count (any → moving it cuts its current connection) and when one was last used. No key value. */
 /** `in_project` false (PO 04:37Z): the person has to add it to the project first — shown turned off with why, never chosen. */
-export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean }
+export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean;
+  /** story 5009 (A2 · AC5): the word an app must say (`caps=rt-…`) to drive this agent's runtime — null/absent = every app can. The server sends it; the page compares it with the words THIS app said. */
+  needs_capability?: string | null }
+
+/** story 5009 (AC5): the app that opened this page cannot drive this agent's runtime (an app from before it — it never said the runtime's word): shown as «update the app», never as «not on this computer». */
+export function appCannotDrive(a: Pick<AttachableAgent, 'needs_capability'>, appRuntimeWords: readonly string[] = []): boolean {
+  return typeof a.needs_capability === 'string' && a.needs_capability !== '' && !appRuntimeWords.includes(a.needs_capability);
+}
 
 /** story 4703 — why the recruiter's agent (`agent=` · the preselect) cannot take a row of this list, from the server's own list and the
  * runtimes the app found (never a guessed reason). null = nothing to say: no preselect, or it lands (in the project, its runtime usable here).
@@ -166,14 +178,15 @@ export interface AttachableAgent { id: string; name: string; runtime: DesktopRun
  * - `outside_project`: in the organization, its runtime usable here, but not in this project (the page's [프로젝트 팀에 넣기] road). */
 export type PreselectHold =
   | { reason: 'unlisted' }
-  | { reason: 'runtime_missing' | 'runtime_blocked' | 'outside_project'; agent: AttachableAgent };
+  | { reason: 'app_outdated' | 'runtime_missing' | 'runtime_blocked' | 'outside_project'; agent: AttachableAgent };
 
 export function preselectHoldOf(
-  list: readonly AttachableAgent[], preselect: string | null | undefined, usable: readonly DesktopRuntime[], blocked: readonly DesktopRuntime[] = [],
+  list: readonly AttachableAgent[], preselect: string | null | undefined, usable: readonly DesktopRuntime[], blocked: readonly DesktopRuntime[] = [], appRuntimeWords: readonly string[] = [],
 ): PreselectHold | null {
   if (!preselect) return null;
   const agent = list.find((a) => a.id === preselect);
   if (!agent) return { reason: 'unlisted' };
+  if (appCannotDrive(agent, appRuntimeWords)) return { reason: 'app_outdated', agent }; // story 5009: before «not on this computer» — the app is the one that is behind
   if (blocked.includes(agent.runtime)) return { reason: 'runtime_blocked', agent };
   if (!usable.includes(agent.runtime)) return { reason: 'runtime_missing', agent };
   if (!agent.in_project) return { reason: 'outside_project', agent };
@@ -428,22 +441,25 @@ export function movableState(a: AttachableAgent, runtimes: readonly DesktopRunti
 }
 /** story 4832 — the MOVE list's own reading of a row (the recruiter's single-agent branch keeps `movableState`): an agent off the project's team whose program is found
  *  here can be ticked — moving it puts it on the team (`add_to_team`, the admin the list is read for may do that); only a program this computer lacks blocks. */
-export type MoveRowState = 'ok' | 'needs-team' | 'runtime-missing';
-export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MoveRowState {
-  return !runtimes.includes(a.runtime) ? 'runtime-missing' : a.in_project ? 'ok' : 'needs-team';
+export type MoveRowState = 'ok' | 'needs-team' | 'runtime-missing' | 'app-outdated';
+export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRuntime[], appRuntimeWords: readonly string[] = []): MoveRowState {
+  return appCannotDrive(a, appRuntimeWords) ? 'app-outdated' : !runtimes.includes(a.runtime) ? 'runtime-missing' : a.in_project ? 'ok' : 'needs-team';
 }
+/** a row that cannot be ticked: the program is not here, or this app cannot drive it */
+export const moveRowBlocked = (state: MoveRowState): boolean => state === 'runtime-missing' || state === 'app-outdated';
 /**
  * story 4986 AC5: the tools the «옮긴 뒤에 알아 둘 것» login line names — the CHOSEN agents' tools (in the list's order: Claude Code, then Codex), or, before anything is chosen,
  * every tool of an agent that can be moved. A tool no agent here uses is never named (a Codex agent is not told to «log in to Claude Code»).
  */
-export function moveAfterTools(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], chosen: readonly string[]): DesktopRuntime[] {
-  const pool = attachable.filter((a) => moveRowState(a, runtimes) !== 'runtime-missing');
+export function moveAfterTools(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], chosen: readonly string[], appRuntimeWords: readonly string[] = []): DesktopRuntime[] {
+  const pool = attachable.filter((a) => !moveRowBlocked(moveRowState(a, runtimes, appRuntimeWords)));
   const picked = chosen.length > 0 ? pool.filter((a) => chosen.includes(a.id)) : pool;
-  return DESKTOP_RUNTIMES.filter((r) => picked.some((a) => a.runtime === r));
+  // the line says «sign in to …»: a runtime that needs no sign-in is never named in it (an OpenCode-only move has no such line to draw — the page hides the item when this is empty)
+  return DESKTOP_RUNTIMES.filter((r) => !(NO_SIGN_IN_RUNTIME_IDS as readonly string[]).includes(r) && picked.some((a) => a.runtime === r));
 }
 /** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
-export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {
-  return (['ok', 'needs-team', 'runtime-missing'] as const).flatMap((state) => attachable.filter((a) => moveRowState(a, runtimes) === state));
+export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[], appRuntimeWords: readonly string[] = []): AttachableAgent[] {
+  return (['ok', 'needs-team', 'runtime-missing', 'app-outdated'] as const).flatMap((state) => attachable.filter((a) => moveRowState(a, runtimes, appRuntimeWords) === state));
 }
 
 /** (나) confirm-new-org's body (design doc 9a4cb445): the usual fields without a project, plus the new organization's and first
@@ -466,7 +482,7 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
-  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : []), ...(q.canWorkdir ? ['workdir'] : [])];
+  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : []), ...(q.appRuntimeWords ?? []), ...(q.canWorkdir ? ['workdir'] : [])];
   if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
   if (q.kind) p.set('kind', q.kind);

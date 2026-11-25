@@ -201,6 +201,44 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(isOff(kadir.querySelector('[role=checkbox]'))).toBe(true);
   });
 
+  // story 5009 (A2 · AC5): an agent of a runtime that needs the app's word (`rt-opencode`) — an app from before never said it
+  const OCODE: AttachableAgent = { id: 'a-oc', name: '오픈코드 담당', runtime: 'opencode', live_keys: 0, last_used_at: null, in_project: true, needs_capability: 'rt-opencode' };
+
+  it('[5009 AC5] an app from before OpenCode: the OpenCode agent\'s row is off and says «update the app» — never «not on this computer», never a failed attach', async () => {
+    stub(() => new Response('{}'));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN, OCODE] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />); // the old app never lists opencode and never said rt-opencode
+    await chooseMove();
+    const row = rows().find((r) => r.textContent?.includes('오픈코드 담당'))!;
+    expect(row.dataset.state).toBe('app-outdated');
+    expect(row.textContent).toContain('OpenCode는 지금 쓰는 앱 버전에서는 아직 지원하지 않아요 · 앱을 업데이트해 주세요');
+    expect(row.textContent).not.toContain('이 컴퓨터에 없어요');
+    expect(isOff(row.querySelector('[role=checkbox]'))).toBe(true);
+  });
+
+  it('[5009 AC5] the same list in English; and an app that said rt-opencode (and found it) ticks the row like any other', async () => {
+    stub(() => new Response('{}'));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN, OCODE] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />, 'en');
+    await chooseMove();
+    expect(rows().find((r) => r.textContent?.includes('오픈코드 담당'))!.textContent).toContain("OpenCode isn't supported in this version of the app yet · update the app");
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'opencode']} appRuntimeWords={['rt-opencode']} canMove />);
+    await chooseMove();
+    const ok = rows().find((r) => r.textContent?.includes('오픈코드 담당'))!;
+    expect(ok.dataset.state).toBe('ok');
+    expect(isOff(ok.querySelector('[role=checkbox]'))).toBe(false);
+  });
+
+  it('[5009 AC5] the helpers: a word the app did not say is «outdated» (before «not on this computer»), the list puts those last, and a runtime that needs no word is untouched', () => {
+    expect(moveRowState(OCODE, ['claude'])).toBe('app-outdated');
+    expect(moveRowState(OCODE, ['claude', 'opencode'], ['rt-opencode'])).toBe('ok');
+    expect(moveRowState(OCODE, ['claude'], ['rt-opencode'])).toBe('runtime-missing'); // the app can, the program is not here: the old line
+    expect(moveRowState(DAN, ['claude'])).toBe('ok'); // no needs_capability: as before
+    expect(moveListOrder([OCODE, KADIR, DAN], ['claude'], []).map((a) => a.id)).toEqual(['a-dan', 'a-kadir', 'a-oc']);
+  });
+
   it('a tick shows the 4565 note under it (live key only) · [옮기기] = one confirm with no recipe, no folder, only the ticked agents', async () => {
     stub(() => new Response(JSON.stringify({ setup_id: 's-1', work_item_id: null, members: [] }), { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove setupId="s-1" />);
@@ -225,7 +263,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     const move = container.querySelector('[data-testid=setup-kind-move]') as HTMLElement;
     expect(isOff(move.querySelector('[role=radio]'))).toBe(true);
-    expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 판에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
+    expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 버전에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
     expect(move.textContent).not.toContain('이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
     // a click on it changes nothing: still the recipe way, no move list, «시작»
     await act(async () => { (move.querySelector('[role=radio]') as HTMLElement).click(); (move as HTMLElement).click(); });

@@ -40,9 +40,10 @@ def _migration_0497():
 
 
 # ── the registry and what is derived from it ─────────────────────────────────────────────
-def test_the_registry_is_the_one_list_and_today_only_claude_and_codex_are_enabled():
+def test_the_registry_is_the_one_list_and_claude_codex_and_opencode_are_enabled():
     assert ar.DESKTOP_RUNTIME_IDS == ("claude", "codex", "opencode", "gemini", "cursor")
-    assert ar.DESKTOP_RUNTIME_TYPES == {"claude": "claude-code", "codex": "codex"}  # zero change for what an app is offered today
+    assert ar.DESKTOP_RUNTIME_TYPES == {"claude": "claude-code", "codex": "codex", "opencode": "opencode"}  # story 5009 (A2): OpenCode switched on (offered only to an app that says rt-opencode)
+    assert {r.id for r in ar.DESKTOP_RUNTIME_REGISTRY if not r.enabled} == {"gemini", "cursor"}
     assert len(set(ar.DESKTOP_RUNTIME_IDS)) == len(ar.DESKTOP_RUNTIME_IDS)
     for r in ar.DESKTOP_RUNTIME_REGISTRY:  # every member type is one the product already knows
         assert r.member_type in {t.value for t in ar.RuntimeType}
@@ -85,6 +86,15 @@ def test_the_web_keeps_the_same_names_in_its_one_module():
     assert tuple(re.findall(r"'([a-z]+)'", m.group(1))) == ar.DESKTOP_RUNTIME_IDS
 
 
+def test_the_web_keeps_the_capability_words_of_the_enabled_runtimes_in_its_one_module():
+    """story 5009: the web drops a runtime the app reports but whose word it did not say — its table must be the registry's (enabled rows that need a word)."""
+    text = (ROOT.parent / "apps/web/src/lib/desktop-runtimes.ts").read_text(encoding="utf-8")
+    m = re.search(r"RUNTIME_CAPABILITY_WORD[^=]*=\s*\{([^}]*)\}", text)
+    assert m, "apps/web/src/lib/desktop-runtimes.ts must declare RUNTIME_CAPABILITY_WORD"
+    web = dict(re.findall(r"(\w+):\s*'([^']+)'", m.group(1)))
+    assert web == {r.id: r.capability for r in ar.DESKTOP_RUNTIME_REGISTRY if r.enabled and r.capability}
+
+
 # ── an app says what it can drive; the server offers only that ───────────────────────────
 def test_runtime_capability_words_are_known_to_setup_codes_and_unknown_words_are_dropped():
     assert set(ar.RUNTIME_CAPABILITIES) == {"rt-opencode", "rt-gemini", "rt-cursor"}
@@ -106,8 +116,16 @@ def test_an_enabled_runtime_that_needs_a_word_is_offered_only_to_an_app_that_sai
     assert not ar.runtime_offered_to("nonsense", ["rt-opencode"])
 
 
-def test_without_the_registry_switching_it_on_a_newer_app_is_offered_nothing_new():
-    assert not ar.runtime_offered_to("opencode", ["move", "solo", "rt-opencode"])  # an older server: the word is dropped, the name is not enabled
+def test_an_older_server_that_does_not_have_it_switched_on_offers_a_newer_app_nothing_new(monkeypatch):
+    monkeypatch.delitem(ar.DESKTOP_RUNTIME_TYPES, "opencode")  # «an older server»: not enabled there (the word is dropped by it, the name is not enabled)
+    assert not ar.runtime_offered_to("opencode", ["move", "solo", "rt-opencode"])
+
+
+def test_opencode_is_offered_to_an_app_that_said_rt_opencode_and_to_no_other():
+    assert ar.runtime_offered_to("opencode", ["solo", "rt-opencode"])
+    for caps in (None, [], ["move", "solo"], ["rt-gemini"]):
+        assert not ar.runtime_offered_to("opencode", caps), caps  # an app from before the runtime
+    assert ar.runtime_offered_to("claude", None) and ar.runtime_offered_to("codex", [])  # claude · codex: every app
 
 
 # ── request bodies: only an enabled name; one closed word otherwise ──────────────────────
@@ -120,7 +138,8 @@ def _usage_entry(runtime: str):
 def test_request_bodies_take_enabled_names_and_say_one_closed_word_for_anything_else():
     _usage_entry("claude")
     _usage_entry("codex")
-    for bad in ("opencode", "gemini", "nonsense", ""):
+    _usage_entry("opencode")  # story 5009: enabled now
+    for bad in ("gemini", "cursor", "nonsense", ""):
         with pytest.raises(ValidationError) as e:
             _usage_entry(bad)
         assert "runtime_unsupported" in str(e.value)
@@ -147,7 +166,7 @@ def test_answer_models_take_a_runtime_name_this_reader_does_not_know():
 def test_the_run_profile_table_is_the_registrys_enabled_rows_the_other_way_round():
     from app.services.agent_run_profile import DESKTOP_RUNTIMES
 
-    assert DESKTOP_RUNTIMES == {"claude-code": "claude", "codex": "codex"}
+    assert DESKTOP_RUNTIMES == {"claude-code": "claude", "codex": "codex", "opencode": "opencode"}
 
 
 # ── the capability gate is on EVERY path that picks a runtime for a setup (codex QA round 1: it was on the solo start only) ───────────────────

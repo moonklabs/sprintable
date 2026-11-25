@@ -32,7 +32,8 @@ export interface SprintableDesktop {
   /** story 4691: the app's «found here» list as it changes. `listener` is called ONCE right away with the newest list (so a page that
    *  loaded before detection finished — or after — is never raced), then only when the list CHANGES. Returns the unsubscribe.
    *  Absent in an older app (that page keeps the one read above). Read it through `subscribeDesktopApp` — never call it from a screen. */
-  subscribeRuntimes?(listener: (runtimes: readonly DesktopRuntimeFound[]) => void): () => void;
+  /** `accepts` (story 5009): the names this web can act on — the app hands a page only claude · codex unless it asks for more by name (a web older than a name rejects the whole bridge for one entry it does not know) */
+  subscribeRuntimes?(listener: (runtimes: readonly DesktopRuntimeFound[]) => void, opts?: { accepts?: readonly string[] }): () => void;
   /** the OS folder chooser: a folder inside home, or null (canceled · refused — the reason comes back from setProjectFolder) */
   pickFolder(): Promise<string | null>;
   /** start that agent on this computer: the app opens its setup page (with `agent=` in the fragment) — no link round trip */
@@ -65,6 +66,23 @@ const isRuntime = (v: unknown): v is DesktopRuntimeFound => {
   return !!r && typeof r === 'object' && (DESKTOP_RUNTIMES_IN_APP as readonly string[]).includes(r.runtime as string) && typeof r.version === 'string' && typeof r.executable === 'string';
 };
 
+/**
+ * story 5009 · contracts/web-bridge-runtimes.json: the app's list as THIS web can use it. An entry whose runtime NAME this web does not know is left out — the bridge stays, that name is simply not
+ * shown (a name is never a reason to refuse the whole bridge: the next program the app finds must not take the bridge from a web that is older than its name). Everything else keeps its old strictness:
+ * an entry that is no object, has no string `runtime`, or is a KNOWN name with a wrong shape is not our app → undefined (the bridge is refused).
+ */
+export function readRuntimes(list: unknown): DesktopRuntimeFound[] | undefined {
+  if (!Array.isArray(list)) return undefined;
+  const out: DesktopRuntimeFound[] = [];
+  for (const r of list) {
+    if (!r || typeof r !== 'object' || typeof (r as { runtime?: unknown }).runtime !== 'string') return undefined;
+    if (!(DESKTOP_RUNTIMES_IN_APP as readonly string[]).includes((r as { runtime: string }).runtime)) continue;
+    if (!isRuntime(r)) return undefined;
+    out.push(r);
+  }
+  return out;
+}
+
 const MAX_APP_VERSION = 64;
 /** story 4970: the app's build string, or undefined (an older app · anything that is not a short string) */
 export function appVersionOf(bridge: SprintableDesktop | undefined): string | undefined {
@@ -77,7 +95,8 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   const d = candidate as Partial<SprintableDesktop> | null | undefined;
   if (!d || typeof d !== 'object' || d.inApp !== true) return undefined;
   if (!d.device || typeof d.device !== 'object' || typeof d.device.name !== 'string') return undefined;
-  if (!Array.isArray(d.runtimes) || !d.runtimes.every(isRuntime)) return undefined;
+  const readable = readRuntimes(d.runtimes);
+  if (!readable) return undefined;
   if (typeof d.pickFolder !== 'function' || typeof d.startHere !== 'function' || typeof d.setProjectFolder !== 'function') return undefined;
   // 4691: the fourth hand is OPTIONAL (an older app has none → the page keeps its first read) — but present means a function
   if (d.subscribeRuntimes !== undefined && typeof d.subscribeRuntimes !== 'function') return undefined;
@@ -86,8 +105,15 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   // 4971: the update hands are optional the same way (an older app has none → no update line); present means a function
   if (d.startUpdate !== undefined && typeof d.startUpdate !== 'function') return undefined;
   if (d.subscribeUpdate !== undefined && typeof d.subscribeUpdate !== 'function') return undefined;
-  return d as SprintableDesktop;
+  if (readable.length === (d.runtimes as unknown[]).length) return d as SprintableDesktop;
+  // a name this web does not know was left out: the same bridge, without it — ONE copy per (bridge · list the app gave): `desktopApp()` is read by useSyncExternalStore, which wants the same object while nothing changed
+  const hit = trimmed.get(d as object);
+  if (hit && sameList(hit.list, readable)) return hit.out; // (compared by content: a bridge that hands a new array object on every read is still the same list)
+  const out = { ...d, runtimes: readable } as SprintableDesktop;
+  trimmed.set(d as object, { list: readable, out });
+  return out;
 }
+const trimmed = new WeakMap<object, { list: readonly DesktopRuntimeFound[]; out: SprintableDesktop }>();
 
 /** story 4693: ask the app about a folder. The answer is read like the first read of the runtimes: anything off the closed shape is dropped (a
  *  trace of a file that is not in the table · an agent id the page did not ask about · more than eight ids), and an app without the hand, a
@@ -162,12 +188,13 @@ export function subscribeDesktopApp(listen: () => void): () => void {
     try {
       stopBridge = raw.subscribeRuntimes((next) => {
         // the app's answer is checked like the first read: anything off the closed shape is ignored (the page keeps what it has)
-        if (!Array.isArray(next) || !next.every(isRuntime)) return;
+        const list = readRuntimes(next);
+        if (!list) return;
         const have = latestRuntimes ?? rawBridge()?.runtimes ?? [];
-        if (sameList(have, next)) return;
-        latestRuntimes = [...next];
+        if (sameList(have, list)) return;
+        latestRuntimes = list;
         for (const l of [...listeners]) l();
-      });
+      }, { accepts: DESKTOP_RUNTIMES_IN_APP });
     } catch { stopBridge = null; }
   }
   return () => {

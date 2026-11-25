@@ -202,10 +202,10 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('nothing found: the no-agent block with an install line each and «다시 찾기»; steps ② ③ are not drawn', async () => {
     await mount(`#code=${CODE}&runtimes=&caps=solo`);
-    expect(container.querySelector('[data-testid=quick-no-agent]')!.textContent).toContain('이 컴퓨터에서 Claude Code나 Codex를 찾지 못했어요');
-    expect(container.querySelectorAll('code').length).toBe(2);
+    expect(container.querySelector('[data-testid=quick-no-agent]')!.textContent).toContain('이 컴퓨터에서 Claude Code · Codex · OpenCode를 찾지 못했어요');
+    expect(container.querySelectorAll('code').length).toBe(3);
     const rows = [...container.querySelectorAll('[data-testid=quick-no-agent] li')].map((li) => li.firstElementChild!.textContent);
-    expect(rows).toEqual(['Claude Code', 'Codex']); // Yuna 5121 ③: each row starts with the program's name
+    expect(rows).toEqual(['Claude Code', 'Codex', 'OpenCode']); // Yuna 5121 ③: each row starts with the program's name
     expect(linkOf('다시 찾기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup');
     expect(buttonOf('만들기')).toBeUndefined();
   });

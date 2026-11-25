@@ -170,9 +170,23 @@ async def test_04_effort_is_judged_per_runtime_and_model_on_the_saved_result(wor
         many = await c.put(MANY, json={"agent_ids": [codex], "model": "gpt-5.5"}, headers=_person(OWNER))  # effort kept
         assert _code(many) == (422, "invalid_effort") and await _row(codex) == ("gpt-6-sol", "ultra", 2)
 
-        await _set_runtime(claude, "opencode")
+        await _set_runtime(claude, "hermes")  # a runtime no desktop app runs (story 5009: OpenCode is a desktop runtime now)
         assert _code(await put(claude, {"model": None, "effort": None})) == (422, "runtime_not_desktop")
         assert _code(await c.get(OWN, headers=_key(device))) == (409, "runtime_not_desktop")
+
+
+async def test_04b_an_opencode_agent_saves_no_model_and_no_effort_and_the_daemon_reads_it(world):
+    # story 5009 (A2) + 5011: OpenCode is switched on and names no model or effort — «not named» saves, anything named is a 422 (never a 500)
+    async with _client() as c:
+        device = await _device(c, name=f"d5009 mac {uuid.uuid4().hex[:6]}")
+        agent = device["agents"][0]["member_id"]
+        await _set_runtime(agent, "opencode")
+        put = lambda body: c.put(_one(agent), json=body, headers=_person(OWNER))  # noqa: E731
+        assert (await put({"model": None, "effort": None})).status_code == 200
+        assert _code(await put({"model": "some-model", "effort": None})) == (422, "invalid_model")
+        assert _code(await put({"model": None, "effort": "low"})) == (422, "invalid_effort")
+        got = await c.get(OWN, headers=_key(device))
+        assert got.status_code == 200 and (got.json()["runtime"], got.json()["model"], got.json()["effort"]) == ("opencode", None, None)
 
 
 async def test_05_a_runtime_change_from_either_path_sends_model_and_effort_back_to_defaults(world):

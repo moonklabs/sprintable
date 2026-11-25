@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
+import { NO_SIGN_IN_RUNTIME_IDS } from '@/lib/desktop-runtimes';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
@@ -31,7 +32,7 @@ import {
   agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
-  moveConfirmBody, moveRowState, moveListOrder, moveAfterTools } from '@/lib/desktop-setup';
+  moveConfirmBody, moveRowState, moveRowBlocked, appCannotDrive, moveListOrder, moveAfterTools } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -60,12 +61,13 @@ export function useAppSetupLinks(): { open: string; reopen: string } {
   const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
   return { open: appSetupLink(app), reopen: appSetupLink(app, 'reopen') };
 }
-export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
 // code.claude.com/docs/en/setup and github.com/openai/codex). story 4765: the README's chatgpt.com/codex/install.sh answers 404 (measured on two
 // machines, 10-24) — the same installer is an asset of the official GitHub release, so that is the address (the Mac app's command table has the
 // same string: desktop-electron/src/runtime-install.ts, pinned by test/runtime-install-4658.test.ts)
-export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh' };
+// story 5009: OpenCode's official installer (the app's table has the same string: desktop-electron/src/runtime-install.ts)
+export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh', opencode: 'curl -fsSL https://opencode.ai/install | bash' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
   // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
@@ -238,7 +240,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, canWorkdir = false, preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4832: the app answers the progress page's per-agent folder link (`caps=workdir`) */ canWorkdir?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, canWorkdir = false, appRuntimeWords = [], preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; /** story 5009 (A2): the runtime words the app said in `caps=` (`rt-opencode` …) */ appRuntimeWords?: string[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4832: the app answers the progress page's per-agent folder link (`caps=workdir`) */ canWorkdir?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -446,7 +448,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     attachableRef.current = list;
     setAttachable(list);
     // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
-    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing')));
+    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && !moveRowBlocked(moveRowState(a, runtimes, appRuntimeWords)))));
     // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
     // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
     // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); a
@@ -489,7 +491,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // story 4703: why the recruiter's agent did not land although the list is here (Yuna 4703-copy-1015) — null while it is read, when the
   // person let it go, or when it lands. «시작» is off while a reason shows; a reason is never a quiet fall to a new agent.
   const preselectHold: PreselectHold | null = attachableWanted && attachableHold === null && !preselectLetGo
-    ? preselectHoldOf(attachable, preselect, runtimes, blocked) : null;
+    ? preselectHoldOf(attachable, preselect, runtimes, blocked, appRuntimeWords) : null;
   // «시작» when it is on; else the first agent row's role select — so focus never falls to the page (Yuna 4701 non-blocking ② · 4703 §②)
   const focusStartOrRoles = () => {
     const b = startRef.current;
@@ -573,15 +575,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // just made is an «existing agent»), so a tick that left that way out left the usual new-customer road without it.
   const embedded = useEmbeddedServer(); // story 4832: the app's own server has no phone relay — no tick, so no PUT either (`turnPhoneControlOn` gates on this)
   const showPhoneControl = !embedded && (newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled))));
-  const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
+  const movable = useMemo(() => moveListOrder(attachable, runtimes, appRuntimeWords), [attachable, runtimes, appRuntimeWords]);
   // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
   // the team would still leave it unusable: that is the line the move list gives instead)
   const outsiders = attachable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
-  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing'));
+  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && !moveRowBlocked(moveRowState(a, runtimes, appRuntimeWords))));
   // story 4832: the ticked agents that are not on the team yet — the confirmation asks the server to put them there (`add_to_team`)
   const moveAddToTeam = moveChosen.filter((id) => attachable.some((a) => a.id === id && !a.in_project));
-  const anyMovable = movable.some((a) => moveRowState(a, runtimes) !== 'runtime-missing');
-  const afterTools = moveAfterTools(attachable, runtimes, moveChosen).map((r) => RUNTIME_LABEL[r]).join(' · ');
+  const anyMovable = movable.some((a) => !moveRowBlocked(moveRowState(a, runtimes, appRuntimeWords)));
+  const afterTools = moveAfterTools(attachable, runtimes, moveChosen, appRuntimeWords).map((r) => RUNTIME_LABEL[r]).join(' · ');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -710,7 +712,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
   const reloadKeepingSetup = () => {
     // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(appRuntimeWords.length ? { appRuntimeWords } : {}), ...(preselect ? { agent: preselect } : {}) }));
     window.location.reload();
   };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
@@ -848,12 +850,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           ) : (
           <ul className="mt-2 flex flex-col divide-y rounded-md border">
             {movable.map((a) => {
-              const state = moveRowState(a, runtimes);
-              const tickable = state !== 'runtime-missing';
+              const state = moveRowState(a, runtimes, appRuntimeWords);
+              const tickable = !moveRowBlocked(state);
               const on = tickable && moving.includes(a.id);
               // story 4832: an agent off the team can be ticked — the line says so BEFORE the tick (moving it puts it on the team too, in the same confirmation); a program this
               // computer lacks is the blocker that stays
-              const second = state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+              const second = state === 'app-outdated' ? t('move.rowAppOutdated', { runtime: RUNTIME_LABEL[a.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[a.runtime]) })
+                : state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
                 : state === 'needs-team' ? t('move.rowNeedsTeam', { runtime: RUNTIME_LABEL[a.runtime] })
                   : t('move.rowOk', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
@@ -881,7 +884,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             <div className="mt-3 rounded-md border p-3 text-xs text-muted-foreground" data-testid="setup-move-after">
               <p className="font-medium text-foreground">{t('move.afterTitle')}</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                <li>{t('move.afterLogin', { tools: afterTools, josa: pickEunNeunJosa(afterTools) })}</li>
+                {afterTools ? <li>{t('move.afterLogin', { tools: afterTools, josa: pickEunNeunJosa(afterTools) })}</li> : null}
                 <li>{t('move.afterOldComputer')}</li>
                 <li>{t('move.afterMemo')}</li>
               </ul>
@@ -1025,11 +1028,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                             {attachable.filter((a) => a.in_project).map((a) => {
                               const key = `agent:${a.id}`;
                               const elsewhere = rows.some((o) => o.role !== r.role && o.owner.kind === 'existing' && o.owner.agentId === a.id);
-                              const missing = !runtimes.includes(a.runtime);
+                              const outdated = appCannotDrive(a, appRuntimeWords);
+                              const missing = outdated || !runtimes.includes(a.runtime);
                               // story 4678: an agent not on this project's team is not an option here (a disabled line cannot hold the
                               // button) — it is in the «프로젝트 팀에 없는 에이전트» list under the rows, with [프로젝트 팀에 넣기]
                               // story #4576: the reason is the move list's own line (one text, never two that overlap) after «{name} · »
-                              const label = missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
+                              const label = outdated ? `${a.name} · ${t('move.rowAppOutdated', { runtime: RUNTIME_LABEL[a.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[a.runtime]) })}`
+                                : missing ? `${a.name} · ${t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })}`
                                 : elsewhere ? t('existingPickedElsewhere', { name: a.name }) : a.name;
                               return <option key={key} value={key} disabled={missing || elsewhere}>{label}</option>;
                             })}
@@ -1072,7 +1077,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           <p role="status" aria-live="polite" className="mt-2 break-keep text-xs text-foreground empty:hidden" data-testid="setup-put-on-team-done">
             {putDone ? t('putOnTeamDone', { name: putDone }) : null}
           </p>
-          {claudeBlocked && runtimes.length > 0 ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
+          {claudeBlocked && runtimes.includes('codex') ? <p className="mt-2 text-xs text-muted-foreground" data-testid="setup-blocked-note">{t('blockedClaudeNote')}</p> : null}
           <p className="mt-2 text-xs text-muted-foreground">{t('humanNote')}</p>
         </section>
   
@@ -1128,9 +1133,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           <div className="flex flex-col gap-2" data-testid="setup-preselect-hold">
             <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status" data-testid="setup-preselect-reason" data-reason={preselectHold.reason}>
               {preselectHold.reason === 'unlisted' ? t('preselect.notListed')
+                : preselectHold.reason === 'app_outdated' ? t('preselect.appOutdated', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
                 : preselectHold.reason === 'outside_project' ? t('preselect.notInProject', { name: preselectHold.agent.name })
                   : preselectHold.reason === 'runtime_missing'
-                    ? t('preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
+                    ? t(NO_SIGN_IN_RUNTIME_IDS.includes(preselectHold.agent.runtime as never) ? 'preselect.runtimeMissingNoSignIn' : 'preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
                     : t('preselect.runtimeBlocked', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })}
             </p>
             {preselectHold.reason === 'runtime_missing' ? (
@@ -1712,7 +1718,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
   if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
   if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} canWorkdir={query.canWorkdir === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} appRuntimeWords={query.appRuntimeWords ?? []} canWorkdir={query.canWorkdir === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

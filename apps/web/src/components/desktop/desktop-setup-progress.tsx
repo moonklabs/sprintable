@@ -29,16 +29,18 @@ import type { EnabledDesktopRuntimeId } from '@/lib/desktop-runtimes';
  * 안 붙음 = ⑦ 블록). 설정 id가 없으면(옛 앱) 임시 한 장만.
  */
 // story 4658: the login command each runtime names for itself (the app's AUTH_COMMAND — the same two strings)
-const SIGN_IN_COMMAND: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude auth login', codex: 'codex login' };
+// OpenCode has none (its free models need no login — the app's first-run card treats it as ready the same way)
+const SIGN_IN_COMMAND: Partial<Record<EnabledDesktopRuntimeId, string>> = { claude: 'claude auth login', codex: 'codex login' };
 
 /** story 4658 (Yuna 4658-design.md · 480 CHANGES ①): the sentence, then the command of each runtime on its own line — the CLI's own (the app's AUTH_COMMAND) */
 export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   const t = useTranslations('desktop.setup');
-  if (runtimes.length === 0) return null;
+  const withLogin = runtimes.filter((r) => SIGN_IN_COMMAND[r]);
+  if (withLogin.length === 0) return null; // OpenCode alone: nothing to sign in to
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3 text-sm" role="status" data-testid="setup-agent-sign-in">
       <p>{t('signInBody')}</p>
-      {runtimes.map((r) => <code key={r} className="block break-all text-xs">{SIGN_IN_COMMAND[r]}</code>)}
+      {withLogin.map((r) => <code key={r} className="block break-all text-xs">{SIGN_IN_COMMAND[r]}</code>)}
     </div>
   );
 }
@@ -163,7 +165,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
     const last = names.at(-1) ?? '';
     return { text: names.join(' · '), last, bare: endsWithAgentWord(last, locale), count: names.length };
   };
-  const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+  const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
   // the first agent's name follows the same rule as the title (Yuna v29 — never «에이전트 에이전트»), its particle the name it ends in
   const firstNotReadyLine = (firstRole: string | null) => {
     if (!firstRole) return t('startFailed.firstNotReadyNoRole');
@@ -370,7 +372,7 @@ function PhoneHandoffCardBody({ isAdmin, app }: { isAdmin: boolean; app: NativeR
 function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, isAdmin, app, canWorkdir }: { move: MoveProgress; kind: 'move' | 'solo'; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null; canWorkdir: boolean }) {
   const t = useTranslations('desktop.setup');
   const flatHref = useFlatHref();
-  const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+  const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
   if (move.blocked) return <Failure failure="managed" />;
   if (move.expired) return <Failure failure="expired" />;
   const group = (names: string[]) => ({ text: names.join(' · '), last: names.at(-1) ?? '', count: names.length });

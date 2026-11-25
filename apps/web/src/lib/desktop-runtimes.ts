@@ -12,12 +12,27 @@ export const DESKTOP_RUNTIME_IDS = ['claude', 'codex', 'opencode', 'gemini', 'cu
 export type DesktopRuntimeId = (typeof DESKTOP_RUNTIME_IDS)[number];
 
 /** The runtimes an app is offered today — switched on by the registry's `enabled` mark; the web does not decide this. */
-export const ENABLED_DESKTOP_RUNTIME_IDS = ['claude', 'codex'] as const satisfies readonly DesktopRuntimeId[];
+export const ENABLED_DESKTOP_RUNTIME_IDS = ['claude', 'codex', 'opencode'] as const satisfies readonly DesktopRuntimeId[];
 export type EnabledDesktopRuntimeId = (typeof ENABLED_DESKTOP_RUNTIME_IDS)[number];
 
+/**
+ * story 5009 (A2): the runtimes the by-hand «고급 연결» (a key + one pasted line per CLI) has words for — Claude Code and Codex. It is NOT the enabled list: OpenCode is offered through
+ * the app's setup, and a manual line for it (its own config file and key place) is a separate piece of work — a chip for it here would read as Codex's text.
+ */
+export const MANUAL_CONNECT_RUNTIME_IDS = ['claude', 'codex'] as const satisfies readonly EnabledDesktopRuntimeId[];
+export type ManualConnectRuntimeId = (typeof MANUAL_CONNECT_RUNTIME_IDS)[number];
+
 /** id → the members.runtime_type value the product uses (the server's DESKTOP_RUNTIME_TYPES, enabled rows). */
-export const MEMBER_RUNTIME_TYPE: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude-code', codex: 'codex' };
+export const MEMBER_RUNTIME_TYPE: Record<EnabledDesktopRuntimeId, string> = { claude: 'claude-code', codex: 'codex', opencode: 'opencode' };
 export const ENABLED_MEMBER_RUNTIME_TYPES = ENABLED_DESKTOP_RUNTIME_IDS.map((id) => MEMBER_RUNTIME_TYPE[id]) as readonly string[];
+
+/** story 5009: runtimes that need no sign-in to start (OpenCode runs on its free models) — copy that says «sign in to X» never names them. */
+export const NO_SIGN_IN_RUNTIME_IDS = ['opencode'] as const satisfies readonly EnabledDesktopRuntimeId[];
+/**
+ * story 5009: the capability word an app must have said (`caps=` of the setup address) before this runtime is offered for it — the server's registry says the same (`needs_capability` of each row; a test holds the two equal).
+ * claude · codex need none (every app drives them). A runtime of this table that the app reports but whose word it did not say is NOT a choice (an old or odd app; the server refuses it on every path anyway).
+ */
+export const RUNTIME_CAPABILITY_WORD: Partial<Record<EnabledDesktopRuntimeId, string>> = { opencode: 'rt-opencode' };
 
 /** A value that came over the wire: is it a runtime this web build can act on? (anything else is kept as text and shown as unsupported). */
 export function isEnabledRuntimeId(value: unknown): value is EnabledDesktopRuntimeId {

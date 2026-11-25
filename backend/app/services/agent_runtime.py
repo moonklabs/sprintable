@@ -84,7 +84,8 @@ DESKTOP_RUNTIME_REGISTRY: tuple[DesktopRuntime, ...] = (
         ),
         custom_efforts=_CODEX_COMMON_EFFORTS, model_pattern=MODEL_NAME)),
     # the other three name no model or effort for now (their lists are filled when their adapter lands) — saved as «not named» only
-    DesktopRuntime("opencode", "opencode", False, "rt-opencode", "OpenCode", NO_CHOICES),
+    # story 5009 (A2): OpenCode is switched ON — offered only to an app that says rt-opencode
+    DesktopRuntime("opencode", "opencode", True, "rt-opencode", "OpenCode", NO_CHOICES),
     DesktopRuntime("gemini", "gemini", False, "rt-gemini", "Gemini CLI", NO_CHOICES),
     DesktopRuntime("cursor", "cursor", False, "rt-cursor", "Cursor", NO_CHOICES),
 )

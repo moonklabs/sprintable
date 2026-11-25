@@ -15,6 +15,8 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 vi.mock('@/lib/ee', () => ({ isEEEnabled: () => false }));
 
 import { ATTACHABLE_READ_LIMIT_MS, DesktopSetupEntry } from './desktop-setup';
+import { DesktopSetupAgent } from './desktop-setup-quick';
+import { parseSetupFragment } from '@/lib/desktop-setup';
 import { __resetOrgRemoteControlForTest } from '@/lib/org-remote-control';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,6 +62,31 @@ const text = () => container.textContent ?? '';
 const start = () => [...container.querySelectorAll('button')].find((b) => b.textContent === '시작') as HTMLButtonElement | undefined;
 
 describe('[SID:4711] the `agent=` branch of the setup page', () => {
+  it('[SID:5009] an OpenCode agent with an app that did NOT say rt-opencode is never a quick start: the page falls to the recipe page, nothing is moved', async () => {
+    agents = list({ runtime: 'opencode', needs_capability: 'rt-opencode' });
+    await open(`#code=${CODE}&runtimes=claude,opencode&caps=move,solo&rv=claude:2.1.289&agent=${AGENT}`);
+    expect(start()).toBeUndefined(); // (this harness has no recipe list, so the recipe page shows its own empty card — the «app outdated» hold line has its own tests in desktop-setup.test.tsx)
+    expect(text()).not.toContain('Dan'); // no card fixed to the agent
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/setup-codes/confirm'))).toBe(false);
+  });
+
+  it('[SID:5009] the quick path checks the app\'s words ITSELF (a query built by hand that lists opencode but carries no word): no quick start, no confirm', async () => {
+    agents = list({ runtime: 'opencode', needs_capability: 'rt-opencode' });
+    const base = parseSetupFragment(`#code=${CODE}&runtimes=claude,opencode&caps=move,solo,rt-opencode&rv=claude:2.1.289&agent=${AGENT}`)!;
+    expect(base.runtimes).toContain('opencode');
+    const query = { ...base }; delete (query as { appRuntimeWords?: string[] }).appRuntimeWords; // the address filter is bypassed on purpose: the component must not rely on it alone
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupAgent query={query} onTeam={() => {}} /></NextIntlClientProvider>); });
+    for (let i = 0; i < 12; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(start()).toBeUndefined();
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/setup-codes/confirm'))).toBe(false);
+  });
+
+  it('[SID:5009] the same agent with an app that said rt-opencode: the quick start shows', async () => {
+    agents = list({ runtime: 'opencode', needs_capability: 'rt-opencode' });
+    await open(`#code=${CODE}&runtimes=claude,opencode&caps=move,solo,rt-opencode&rv=claude:2.1.289&agent=${AGENT}`);
+    expect(start()).toBeDefined();
+  });
+
   it('a movable recruiter\'s agent: the card with ① fixed to it (no radio · no folder step · no team link) and the project line', async () => {
     await open(frag('move,solo'));
     expect(container.querySelector('[data-testid=quick-agent-fixed]')!.textContent).toContain('Dan');

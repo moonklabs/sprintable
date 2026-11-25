@@ -95,7 +95,7 @@ def test_claude_and_codex_lists_patterns_and_options_are_what_they_were():
     got = {k: {"models": {n: list(e) for n, e in v["models"].items()}, "custom": list(v["custom"])} for k, v in rp.CATALOG.items()}
     assert got == FIXTURE["catalog"]
     assert {k: p.pattern for k, p in rp.MODEL_NAMES.items()} == FIXTURE["patterns"]
-    assert rp.DESKTOP_RUNTIMES == FIXTURE["desktop_runtimes"]
+    assert {k: v for k, v in rp.DESKTOP_RUNTIMES.items() if k in FIXTURE["desktop_runtimes"]} == FIXTURE["desktop_runtimes"]  # claude · codex as they were (opencode joined in story 5009)
     assert list(FIXTURE["catalog"]) == ["claude-code", "codex"]  # the order the web shows
 
 
