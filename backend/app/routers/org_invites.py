@@ -46,7 +46,20 @@ def _to_response(invite) -> OrgInviteResponse:
     invite_url = None
     if invite.status == "pending" and invite.expires_at > datetime.now(timezone.utc):
         invite_url = f"{settings.app_url}/invite/accept?token={invite.token}"
-    return base.model_copy(update={"invite_url": invite_url})
+    return base.model_copy(update={"invite_url": invite_url, "link_is_local": invite_url is not None and _link_opens_only_on_this_computer()})
+
+
+def _link_opens_only_on_this_computer() -> bool:
+    """story 5023 (e): only on a workspace server (embedded + the host's own switch): its links carry `settings.app_url`, which is `localhost` until the owner sets a public address
+    (`sprintable-host server set-public-origin`). Hosted and the desktop app: never (their links are the product's own address / not used)."""
+    from urllib.parse import urlsplit
+
+    from app.services import server_owner_setup
+
+    if not server_owner_setup.enabled():
+        return False
+    host = (urlsplit(settings.app_url).hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost")
 
 
 def _get_invite_repo(session: AsyncSession = Depends(get_db)) -> OrgInviteRepository:
