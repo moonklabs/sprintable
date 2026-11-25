@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.models.org_invite import OrgInvite
 from app.models.organization import Organization
 from app.models.project import OrgMember, Project
+from app.services.org_role_policy import can_grant_org_role
 
 
 # story #4427 (Qadir 4833 · PO 05:12Z · 05:15Z) — the one way an invite's email is compared with an address (an invite's
@@ -254,6 +255,13 @@ class OrgInviteRepository:
             # is already a member → treat as success rather than a 409 error. Only a *different*
             # user hitting an already-consumed invite gets already_accepted.
             if invite_email_key(invite.email) == invite_email_key(user_email):
+                # story 5021: this branch gives the role AGAIN to someone who has no membership now (they left, or the account was made again with the same address): not by an
+                # invitation whose maker may not give that role any more. A person who IS a member (a double click) just hears «ok».
+                is_member = (await self.session.execute(
+                    select(OrgMember.id).where(OrgMember.org_id == invite.organization_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+                )).scalar_one_or_none() is not None
+                if not is_member and not await self._maker_may_still_give(invite):
+                    return {"ok": False, "reason": "invalid_role"}
                 # ensure membership exists (prior accept may predate a backfill) — idempotent
                 await self.session.execute(
                     pg_insert(OrgMember)
@@ -286,6 +294,12 @@ class OrgInviteRepository:
             return {"ok": False, "reason": "expired"}
         if invite_email_key(invite.email) != invite_email_key(user_email):
             return {"ok": False, "reason": "email_mismatch"}
+
+        # story 5021 — the role is given only if the one who made the invitation may STILL give it (the rule in services/org_role_policy.py): an invitation made before the rule
+        # existed, or by someone since demoted · removed · deleted, or with a role outside owner/admin/member, is not a way to a role its maker may not hand out.
+        # Every accept path (the token route · by id · sign-in auto-accept · sign-up with a token) goes through here. A plain `member` invitation needs no maker.
+        if not await self._maker_may_still_give(invite):
+            return {"ok": False, "reason": "invalid_role"}
 
         # story #2477 AC②③ — Free cap 재검증(accept 시점) + 동시 수락 레이스 방어.
         # org_id 해시 기반 advisory xact lock으로 같은 org를 겨눈 동시 accept 트랜잭션을
@@ -326,6 +340,22 @@ class OrgInviteRepository:
 
         # story #3217(Referral 계측) — invite_created_at도 함께(위 idempotent 분기와 동일 계약).
         return {"ok": True, "org_id": str(invite.organization_id), "role": invite.role, "invite_created_at": invite.created_at}
+
+    async def _maker_may_still_give(self, invite: OrgInvite) -> bool:
+        """story 5021 — may the one who made this invitation STILL hand out its role (services/org_role_policy.py)? The maker's role is read as everywhere else
+        (`OrganizationRepository.get_member_role`: the row of this organization that is not soft-deleted); a plain `member` invitation needs no maker."""
+        if invite.role == "member":
+            return True
+        maker_role = None
+        if invite.created_by is not None:
+            # FOR SHARE: a demotion of the maker that is still uncommitted is WAITED for (and read after it commits), and one that starts after this read waits for this accept to commit — the
+            # role given and the maker's role at that moment never disagree (several accepts of one maker's invitations do not block each other: it is a share lock)
+            maker_role = (await self.session.execute(
+                select(OrgMember.role).where(
+                    OrgMember.org_id == invite.organization_id, OrgMember.user_id == invite.created_by, OrgMember.deleted_at.is_(None),
+                ).with_for_update(read=True)
+            )).scalar_one_or_none()
+        return can_grant_org_role(maker_role, invite.role)
 
     async def _ensure_member_anchor(self, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """수락자(휴먼)의 canonical members 앵커(type='human', id=org_member.id)를 멱등 보장.

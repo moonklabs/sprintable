@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 
 class CreateOrgInvite(BaseModel):
     email: str
-    role: str = "member"
+    # story 5021: only the three organization roles (schemas/org_member.ORG_ROLES — a test holds the two together); anything else is 422, never stored
+    role: Literal["owner", "admin", "member"] = "member"
     # 정책B: 초대 시 부여할 프로젝트 ids(선택). 빈 리스트 = org-only 초대.
     project_ids: list[uuid.UUID] = []
 
