@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -12,6 +12,7 @@ import { Input } from '@/components/ds/input';
 import { cn } from '@/lib/utils';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
+import { inviteTokenOf } from '@/lib/auth/invite-token-of';
 import { isImeComposing } from '@/lib/ime-composition';
 import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { useSubmitLatch } from '@/hooks/use-submit-latch';
@@ -30,11 +31,21 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
   return [rules.upper, rules.lower, rules.digit, rules.special].filter(Boolean).length;
 }
 
+/** story 5023 — the command a person types ON THE SERVER to see the setup code: drawn in code type UNDER the hint, outside the translated words (a Korean value holds no English word) */
+const SERVER_STATUS_COMMAND = 'sprintable-host server status';
+
 export default function RegisterPage() {
   const t = useTranslations('register');
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextParam = searchParams.get('next');
+  // story 5023 — a workspace server whose sign-up is closed lets an invited e-mail in: the invitation's token rides on the sign-up request. It is read from the invitation link's own address
+  // (`next` = /invite/accept?token=…, the journey of story 3220) — the same place the accept page reads it.
+  const inviteToken = useMemo(() => inviteTokenOf(nextParam), [nextParam]);
+  // story 5023 — a workspace server with NO owner yet asks the first account for its setup code. The field is not shown to everybody: it appears when the server says so (SETUP_CODE_REQUIRED), or at once when the
+  // address says `?setup=1` (what the install notes link to).
+  const [needsSetupCode, setNeedsSetupCode] = useState(searchParams.get('setup') === '1');
+  const [setupCode, setSetupCode] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -66,7 +77,7 @@ export default function RegisterPage() {
   const [touched, setTouched] = useState(false);
   useEffect(() => { if (startedFilling) setTouched(true); }, [startedFilling]);
   // the Google press already says the terms sentence in the banner above: the same words are not drawn twice
-  const submitReason = !(touched || startedFilling) ? null : !displayName.trim() || !email.trim() || !password.trim() ? t('fieldsRequiredHint') : !tosAccepted && error !== t('tosRequiredError') ? t('tosRequiredError') : null;
+  const submitReason = !(touched || startedFilling) ? null : !displayName.trim() || !email.trim() || !password.trim() ? t('fieldsRequiredHint') : !tosAccepted && error !== t('tosRequiredError') ? t('tosRequiredError') : needsSetupCode && !setupCode.trim() && error !== t('registerSetupCodeRequired') ? t('registerSetupCodeRequired') : null;
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -85,7 +96,11 @@ export default function RegisterPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, display_name: displayName.trim(), tos_accepted: true }),
+        body: JSON.stringify({
+          email: email.trim(), password, display_name: displayName.trim(), tos_accepted: true,
+          ...(inviteToken ? { invite_token: inviteToken } : {}),
+          ...(needsSetupCode && setupCode.trim() ? { setup_code: setupCode.trim() } : {}),
+        }),
       });
       const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
       if (!res.ok || !json.data?.ok) {
@@ -95,6 +110,12 @@ export default function RegisterPage() {
           setError(t('registerEmailTaken'));
         } else if (json.error?.code === 'TOS_NOT_ACCEPTED') {
           setError(t('registerTosRequired'));
+        } else if (json.error?.code === 'SETUP_CODE_REQUIRED') {
+          // story 5023 — a server with no owner yet: the field appears (and stays); the words say whether a code was missing or was not right
+          setNeedsSetupCode(true);
+          setError(setupCode.trim() ? t('registerSetupCodeWrong') : t('registerSetupCodeRequired'));
+        } else if (json.error?.code === 'SIGNUP_CLOSED') {
+          setError(t('registerSignupClosed')); // story 5023 — a server with an owner: only an invitation opens it
         } else {
           setError(t('registrationFailed'));
         }
@@ -202,6 +223,23 @@ export default function RegisterPage() {
         )}
 
         <div className="space-y-3" data-testid="register-email-form">
+          {needsSetupCode && (
+            <div className="space-y-1" data-testid="register-setup-code">
+              <Input
+                type="text"
+                placeholder={t('setupCodePlaceholder')}
+                aria-label={t('setupCodePlaceholder')}
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                value={setupCode}
+                onChange={(e) => setSetupCode(e.target.value)}
+                disabled={loading}
+              />
+              <p className="text-ds-small text-ds-ink-3">{t('setupCodeHint')}</p>
+              <code className="block break-all rounded border border-ds-line bg-ds-surface px-2 py-1 font-mono text-ds-small text-ds-ink-2" data-testid="register-setup-command">{SERVER_STATUS_COMMAND}</code>
+            </div>
+          )}
           <Input
             type="text"
             placeholder={t('namePlaceholder')}
@@ -256,7 +294,7 @@ export default function RegisterPage() {
             size="lg"
             className="w-full"
             onClick={handleRegister}
-            disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
+            disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted || (needsSetupCode && !setupCode.trim())}
             aria-describedby={submitReason ? submitReasonId : undefined}
             data-testid="register-submit"
           >
