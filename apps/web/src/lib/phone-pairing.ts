@@ -139,6 +139,53 @@ async function readPhones(setupId: string): Promise<PhonesRead> {
   }
 }
 
+/** `sha256:<hex>` of a public key's bytes (the server's fingerprint of it) — null where this view cannot compute one (then the proof is simply made again) */
+async function fingerprintOf(publicKeyB64url: string): Promise<string | null> {
+  try {
+    const bytes = Uint8Array.from(atob(publicKeyB64url.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return 'sha256:' + Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
+
+type PopProof = { payload: string; sig: string };
+
+/**
+ * story 5027 (lens 5025 · F1) — before the key is registered the phone proves it holds the key's private half: the server hands out a one-time value, the SHELL signs it (it builds the signed bytes itself from three
+ * ids and its own key — the page never names what is signed), and the registration carries the proof. A shell that does not say `key_proof: 1` (an older app) sends none and registers as it always did. A key the
+ * server's own list already calls proved (`pop_verified`) is not proved again — no prompt for a phone that has done it. `{}` = go on without a proof · `{ pop }` = go on with it · `{ end }` = this step ends.
+ */
+async function proveKey(head: OfferHead, publicKey: string, deps: PairDeps): Promise<{ pop?: PopProof } | { end: OfferOutcome }> {
+  const caps = await safeCall(deps, 'shell.caps', {});
+  const can = caps.ok === true && !!caps.caps && typeof caps.caps === 'object' && (caps.caps as { key_proof?: unknown }).key_proof === 1;
+  if (!can) return {};
+  const fp = await fingerprintOf(publicKey);
+  if (fp) {
+    const listed = await readPhones(head.setup_id);
+    if ('phones' in listed && listed.phones.some((d) => (d as { fingerprint?: unknown; pop_verified?: unknown }).fingerprint === fp && (d as { pop_verified?: unknown }).pop_verified === true)) return {};
+  }
+  let ch: { nonce?: unknown; member_id?: unknown; org_id?: unknown };
+  try {
+    const res = await fetchWithAuth('/api/remote-devices/challenge', { method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) }, body: '{}' });
+    if (!res.ok) return { end: { kind: res.status === 401 ? 'signedOut' : 'failed' } };
+    ch = ((await res.json()) as { nonce?: unknown; member_id?: unknown; org_id?: unknown }) ?? {};
+  } catch {
+    return { end: { kind: 'failed' } };
+  }
+  if (typeof ch.nonce !== 'string' || typeof ch.member_id !== 'string' || typeof ch.org_id !== 'string') return { end: { kind: 'failed' } };
+  const proved = await safeCall(deps, 'device.key.prove', { member_id: ch.member_id, org_id: ch.org_id, nonce: ch.nonce });
+  if (!proved.ok) {
+    if (proved.code === 'no_screen_lock') return { end: { kind: 'noScreenLock' } };
+    if (proved.code === 'biometric_required') return { end: { kind: 'biometricRequired' } };
+    return { end: { kind: 'failed' } }; // (the person closed the prompt: the same «not sent — try again» as any other step that did not finish)
+  }
+  const pop = proved.pop as { payload?: unknown; sig?: unknown } | undefined;
+  if (!pop || typeof pop.payload !== 'string' || typeof pop.sig !== 'string') return { end: { kind: 'failed' } };
+  return { pop: { payload: pop.payload, sig: pop.sig } };
+}
+
 /**
  * The first half of both procedures: this phone's key (the shell's own) → the computer's org → register the key (the same key again = the same row) → already paired?
  * → `{ phoneKeyId }`, or the outcome that ends the step. Shared as it was (story 4972 moved these lines into a function; the old procedure's calls and answers are the same ones).
@@ -154,7 +201,17 @@ async function prepareKey(head: OfferHead, label: string, deps: PairDeps, opts: 
   if (org) targetOrgOf.set(head.setup_id, org); else targetOrgOf.delete(head.setup_id);
   let phoneKeyId: string;
   try {
-    const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) }, body: JSON.stringify({ label, public_key: key.public_key }) });
+    // story 5027: the proof of holding the key rides with the registration (none from an older shell). A value that ran out on its way (`pop_expired`) is asked for once more — one more prompt, then the step ends.
+    let res: Response;
+    let attempt = 0;
+    for (;;) {
+      const proof = typeof key.public_key === 'string' ? await proveKey(head, key.public_key, deps) : {};
+      if ('end' in proof) return { end: proof.end };
+      res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) }, body: JSON.stringify({ label, public_key: key.public_key, ...(proof.pop ? { pop: proof.pop } : {}) }) });
+      if (res.ok || attempt >= 1 || !proof.pop) break;
+      if ((await read(res.clone())).code !== 'pop_expired') break;
+      attempt += 1;
+    }
     const { code, body } = await read(res);
     if (!res.ok) {
       if (code === 'remote_device_limit') return { end: { kind: 'limit' } };

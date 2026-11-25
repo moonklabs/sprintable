@@ -3301,6 +3301,11 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/remote-devices/challenge",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/remote-devices/pairing-offers",
 "kind": "unknown"
 },

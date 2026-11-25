@@ -28,6 +28,11 @@ describe('[4629] POST /api/remote-devices — this session\'s refresh token ride
     expect(proxied.requests.at(-1)!.headers.get('authorization')).toBe('Bearer at');
   });
 
+  it('[5027] the phone\'s proof of holding the key (`pop`) goes on untouched next to the cookie\'s refresh token', async () => {
+    const pop = { payload: 'eyJ2IjoxfQ', sig: 'MEUCIQ' };
+    await POST(post({ label: '폰', public_key: 'pk', pop }));
+    expect(await forwardedBody()).toEqual({ label: '폰', public_key: 'pk', pop, refresh_token: 'rt-this-session' });
+  });
   it('a refresh_token in the body is never the caller\'s: replaced by the cookie\'s, or dropped when there is none', async () => {
     await POST(post({ label: '폰', public_key: 'pk', refresh_token: 'someone-elses' }));
     expect((await forwardedBody()).refresh_token).toBe('rt-this-session');
