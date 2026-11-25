@@ -42,6 +42,9 @@ interface OrgInvite {
   status: 'pending' | 'accepted' | 'expired' | 'revoked';
   expires_at: string;
   invite_url?: string;
+  /** story 5023 — set when the mail went out; a server with no mail (or a mail that failed) leaves it empty: the person is told to hand the link over */
+  email_sent_at?: string | null;
+  email_error?: string | null;
 }
 
 interface OrgMembersSectionProps {
@@ -174,7 +177,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, project_ids: inviteProjectIds }),
     });
     const json = await res.json() as {
-      data?: { invite_url?: string };
+      data?: { invite_url?: string; email_sent_at?: string | null; email_error?: string | null };
       error?: { code?: string; message?: string; limit?: number };
     };
     if (!res.ok) {
@@ -187,7 +190,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         setInviteResult({ type: 'error', text: t('memberInviteFailed') });
       }
     } else {
-      setInviteResult({ type: 'success', text: `${t('orgMemberInviteSuccess')}${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
+      // story 5023 — «sent» only when the mail really went out; on a server with no mail the person is told, in plain words, that nothing was sent and the link is theirs to hand over
+      const mailSent = Boolean(json.data?.email_sent_at) && !json.data?.email_error;
+      setInviteResult({ type: 'success', text: `${t(mailSent ? 'orgMemberInviteSuccess' : 'orgMemberInviteNoMail')}${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
       setInviteEmail('');
       setInviteProjectIds([]);
       setShowProjectPicker(false);
@@ -496,6 +501,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-ds-body text-ds-ink">{invite.email}</div>
                   <div className="mt-0.5 text-ds-small text-ds-ink-3">{t('orgInviteMeta', { role: invite.role, date: formatViewerScheduledAt(invite.expires_at, displayTimezone).display })}</div>
+                  {(!invite.email_sent_at || invite.email_error) && invite.invite_url ? <div className="mt-0.5 text-ds-small text-ds-ink-3" data-testid="org-invite-no-mail-note">{t('orgInviteNoMailNote')}</div> : null}
                 </div>
                 {canManage ? (
                   <div className="flex shrink-0 flex-wrap gap-1">

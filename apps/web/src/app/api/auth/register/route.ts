@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
 
-  const body = await request.json() as { email: string; password: string; display_name?: string; tos_accepted?: boolean; invite_token?: string };
+  const body = await request.json() as { email: string; password: string; display_name?: string; tos_accepted?: boolean; invite_token?: string; setup_code?: string };
 
   // story #3204 — proxy.ts가 랜딩 시점에 심어둔 first-touch 귀속 쿠키를 그대로 BE로 relay.
   const cookieStore = await cookies();
@@ -42,6 +42,8 @@ export async function POST(request: Request) {
       ...(body.display_name !== undefined ? { display_name: body.display_name } : {}),
       tos_accepted: body.tos_accepted ?? false,
       ...(body.invite_token ? { invite_token: body.invite_token } : {}),
+      // story 5023 — a workspace server with no owner yet asks for its setup code (backend services/server_owner_setup.py); any other deployment ignores the field
+      ...(typeof body.setup_code === 'string' && body.setup_code.trim() ? { setup_code: body.setup_code.trim().slice(0, 64) } : {}),
       ...(utmSource ? { signup_utm_source: utmSource } : {}),
       ...(utmMedium ? { signup_utm_medium: utmMedium } : {}),
       ...(utmCampaign ? { signup_utm_campaign: utmCampaign } : {}),

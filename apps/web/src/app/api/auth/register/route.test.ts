@@ -136,3 +136,33 @@ describe('POST /api/auth/register — Accept-Language to the backend (story 4891
     expect(sentHeaders()['Accept-Language']).toBeUndefined();
   });
 });
+
+
+// story 5023 — a workspace server with no owner yet asks for its setup code; a closed one lets an invited e-mail in: both ride on the sign-up request to the backend (any other deployment ignores them).
+describe('POST /api/auth/register — setup code and invitation token (story 5023)', () => {
+  beforeEach(() => { mockFetch.mockReset(); h.cookiesGetMock.mockReset(); h.cookiesGetMock.mockReturnValue(undefined); });
+  const ok = () => mockFetch.mockResolvedValue({ ok: true, status: 201, json: async () => ({ data: { access_token: 'a', refresh_token: 'r', token_type: 'bearer' } }) });
+  const sent = () => JSON.parse((mockFetch.mock.calls[0]![1] as { body: string }).body) as Record<string, unknown>;
+  it('a setup code goes over trimmed (and at most 64 characters); a blank one, a non-string one and none are not sent', async () => {
+    for (const [given, want] of [['  ABCD-EFGH-IJKL-MNOP ', 'ABCD-EFGH-IJKL-MNOP'], ['x'.repeat(100), 'x'.repeat(64)]] as const) {
+      mockFetch.mockReset(); ok();
+      await POST(makeRequest({ email: 'a@b.c', password: 'p', display_name: 'n', tos_accepted: true, setup_code: given }));
+      expect(sent()['setup_code']).toBe(want);
+    }
+    for (const given of ['   ', '', 5, null, undefined, { a: 1 }]) {
+      mockFetch.mockReset(); ok();
+      await POST(makeRequest({ email: 'a@b.c', password: 'p', display_name: 'n', tos_accepted: true, ...(given === undefined ? {} : { setup_code: given }) }));
+      expect(sent(), JSON.stringify(given)).not.toHaveProperty('setup_code');
+    }
+  });
+  it('the invitation token goes over; the backend\'s refusal (SETUP_CODE_REQUIRED · SIGNUP_CLOSED) comes back whole with its status, no cookie set', async () => {
+    ok();
+    await POST(makeRequest({ email: 'a@b.c', password: 'p', display_name: 'n', tos_accepted: true, invite_token: 'tok_1' }));
+    expect(sent()['invite_token']).toBe('tok_1');
+    for (const code of ['SETUP_CODE_REQUIRED', 'SIGNUP_CLOSED']) {
+      mockFetch.mockReset(); mockFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ data: null, error: { code, message: 'm' } }) });
+      const res = await POST(makeRequest({ email: 'a@b.c', password: 'p', display_name: 'n', tos_accepted: true }));
+      expect(res.status).toBe(403); expect(((await res.json()) as { error: { code: string } }).error.code).toBe(code); expect(res.headers.get('set-cookie')).toBeNull();
+    }
+  });
+});
