@@ -346,3 +346,15 @@ async def test_f6_reads_the_mark_under_the_lock_a_report_that_stood_it_after_the
         monkeypatch.setattr(agent_permissions, "_lock_machine", _lock_after_the_mark_stood)
         r = await _post_ask(c, device, _sealed_card(agent, setup_id, [mine_id, other_id]))
         assert r.status_code == 422 and "envelope_receivers_mismatch" in r.text, r.text
+
+
+async def test_the_answer_names_only_phones_the_host_asked_about_not_every_target_of_the_receiver(world):
+    async with _client() as c:
+        device, token, agent, _ = await _computer(c, "d4424 mac 5025r")
+        a, a_id = await _phone(c)
+        b, b_id = await _phone(c)
+        await _pin(c, token, a, b)  # both are the receiver's targets
+        r = await _ask_targets(c, token, agent, [b_id])
+        assert r.json()["seal_to"] == [b_id], "a subset of what the host sent — never more (the host drops an answer that names a phone it did not ask about)"
+        r2 = await _ask_targets(c, token, agent, [b_id, b_id, a_id])
+        assert r2.json()["seal_to"] == [b_id, a_id], "in the order sent, each name once"
