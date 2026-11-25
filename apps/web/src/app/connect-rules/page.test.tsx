@@ -57,7 +57,7 @@ describe('/connect-rules page — 플래그 게이트', () => {
     delete process.env.DESKTOP_DOWNLOAD_ENABLED;
     const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
     expect(result.type).toBe(screenMock);
-    expect(result.props.flags).toEqual({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true, desktopDownloadEnabled: false });
+    expect(result.props.flags).toEqual({ todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true, desktopDownloadEnabled: false, serverHost: false });
   });
 
   it('오늘·대화 v3 플래그 on — 화면 element props의 flags에 true/true', () => {
@@ -66,6 +66,6 @@ describe('/connect-rules page — 플래그 게이트', () => {
     process.env.CHAT_V3_ENABLED = 'true';
     process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
     const result = ConnectRulesV3Page() as unknown as { type: unknown; props: { flags: Record<string, unknown> } };
-    expect(result.props.flags).toEqual({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true, desktopDownloadEnabled: true });
+    expect(result.props.flags).toEqual({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true, desktopDownloadEnabled: true, serverHost: false });
   });
 });

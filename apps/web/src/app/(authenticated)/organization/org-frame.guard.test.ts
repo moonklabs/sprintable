@@ -59,7 +59,7 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
       const c = code(rel);
       const frames = c.match(/<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
       // 제목 = OrgScreenTitle 또는 그것을 감싼 화면 제목 컴포넌트(서버 page가 글을 못 쥘 때 — /desktop의 DesktopScreenTitle: 안에서 OrgScreenTitle을 그린다 · 아래 «감싼 제목» 시험이 그것을 못박는다)
-      const pairs = c.match(/<(?:OrgScreenTitle\b[^>]*>[\s\S]*?<\/OrgScreenTitle>|DesktopScreenTitle \/>)\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
+      const pairs = c.match(/<(?:OrgScreenTitle\b[^>]*>[\s\S]*?<\/OrgScreenTitle>|DesktopScreenTitle(?: serverHost=\{serverHost\})? \/>)\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
       expect(frames.length).toBeGreaterThanOrEqual(1);
       expect(pairs.length).toBe(frames.length);
     });
@@ -74,11 +74,11 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
     });
     it('⭐감싼 제목은 OrgScreenTitle(= 위 막대 슬롯)로 «사이드바와 같은 이름(desktop.pageTitle)»을 그린다', () => {
       const c = readFileSync(join(COMP, 'desktop-screen-title.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-      expect(c).toMatch(/<OrgScreenTitle>\{t\('pageTitle'\)\}<\/OrgScreenTitle>/);
+      expect(c).toMatch(/<OrgScreenTitle>\{t\((?:serverHost \? 'pageTitleServerHost' : )?'pageTitle'\)\}<\/OrgScreenTitle>/); // story 5024 (AC4): on a server host the screen's title (and the sidebar's name) is «에이전트 연결»
       expect(c).not.toMatch(/<h[1-6][\s>]/);
     });
     it('⭐화면은 제목 컴포넌트를 PageFrame 앞에 그린다', () => {
-      expect(code('desktop/page.tsx')).toMatch(/<DesktopScreenTitle \/>\s*<PageFrame width="wide">/);
+      expect(code('desktop/page.tsx')).toMatch(/<DesktopScreenTitle(?: serverHost=\{serverHost\})? \/>\s*<PageFrame width="wide">/);
     });
   });
 
