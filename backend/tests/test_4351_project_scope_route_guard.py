@@ -57,6 +57,8 @@ _KNOWN = {
     # and its list of QR-pinned phone keys — the device's own rows, no project entity
     "app/routers/desktop_relay.py::post_permission_request",
     "app/routers/desktop_relay.py::post_permission_withdraw",
+    # story 5025 (B1) — the same device token: the question «which of the phones I pinned may read this agent's cards?» — it reads only that computer's own pins and the card's receiver chain (people of the token's organization), no project-owned entity; it stores nothing
+    "app/routers/desktop_relay.py::post_seal_targets",
     # story #4580 AC2 — the same device token: a network question's host for its second answer (confirm-host) and the host it then
     # added (host-added) — that device's own permission request row (setup_id · request_id), its own agent; no project entity
     "app/routers/desktop_relay.py::post_permission_confirm_host",
