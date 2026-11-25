@@ -10,8 +10,16 @@ vi.mock('@/components/desktop/desktop-devices', () => ({ DesktopDevices: () => n
 
 const KEYS = ['SPRINTABLE_EMBEDDED', 'SPRINTABLE_PUBLIC_ORIGIN', 'DESKTOP_DOWNLOAD_ENABLED'] as const;
 let saved: Record<string, string | undefined>;
-beforeEach(() => { saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]])); process.env.DESKTOP_DOWNLOAD_ENABLED = 'true'; });
+// story 5024 F1: the page asks its own backend (`/api/v2/server-setup/state`) whether it is a server host that has no public address yet — each case says what the backend answers (null: it does not answer)
+let stateAnswer: unknown = null;
+const asked: string[] = [];
+beforeEach(() => {
+  saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]])); process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
+  stateAnswer = null; asked.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { asked.push(String(url)); return { ok: stateAnswer !== null, json: async () => stateAnswer }; }));
+});
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   vi.resetModules();
 });
@@ -21,7 +29,7 @@ async function cardsWith(embedded: string | undefined, publicOrigin?: string): P
   if (publicOrigin === undefined) delete process.env.SPRINTABLE_PUBLIC_ORIGIN; else process.env.SPRINTABLE_PUBLIC_ORIGIN = publicOrigin;
   vi.resetModules();
   const { default: DesktopPage } = await import('./page');
-  return componentTypes(frameOf(DesktopPage()).props.children);
+  return componentTypes(frameOf(await DesktopPage()).props.children);
 }
 // 4913: the page is the top-bar title + the frame (PageFrame) — the cards live inside the frame
 function frameOf(page: unknown): { props: { children?: unknown; width?: string } } {
@@ -93,7 +101,7 @@ describe('[SID:5024] /desktop — a server host', () => {
       if (origin === undefined) delete process.env.SPRINTABLE_PUBLIC_ORIGIN; else process.env.SPRINTABLE_PUBLIC_ORIGIN = origin;
       vi.resetModules();
       const { default: DesktopPage } = await import('./page');
-      const [title, frame] = (DesktopPage() as unknown as { props: { children: Array<{ props: Record<string, unknown> }> } }).props.children;
+      const [title, frame] = ((await DesktopPage()) as unknown as { props: { children: Array<{ props: Record<string, unknown> }> } }).props.children;
       const head = (frame!.props.children as Array<{ type: unknown; props: Record<string, unknown> }>)[0]!;
       const find = (node: unknown, type: unknown): Array<{ props: Record<string, unknown> }> => {
         if (Array.isArray(node)) return node.flatMap((n) => find(n, type));
@@ -130,5 +138,48 @@ describe('[SID:5024] /desktop — a server host', () => {
       const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice'); // (after the page's own module reset: the same instance the page drew)
       expect(types, `public origin ${JSON.stringify(bad)}`).toContain(PhoneRelayLocalNotice);
     }
+  });
+});
+
+// story 5024 (F1) — a server host is known by its backend's own answer («an owner, and sign-up is closed»), not only by a public address: the first owner has just signed up, the address is set AFTER an owner exists.
+describe('[SID:5024 F1] /desktop — a server host that has no public address yet', () => {
+  it('the backend says «owner, sign-up closed»: the page is a server host\'s (no redirect without the download switch); its card has no address — it says to set one first; the app column is not the Mac app\'s', async () => {
+    stateAnswer = { owner_exists: true, signup_open: false };
+    const { redirect } = await import('next/navigation');
+    vi.mocked(redirect).mockClear();
+    delete process.env.DESKTOP_DOWNLOAD_ENABLED;
+    const types = await cardsWith('1');
+    const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
+    const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
+    const { ServerHostAgentCard } = await import('@/components/desktop/server-host-agent-card');
+    const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
+    expect(redirect).not.toHaveBeenCalled();
+    expect(types).toEqual([DesktopPageHead, ServerHostAgentCard, DesktopRemoteControlCard]);
+    expect(types).not.toContain(DesktopOpenAppCard);
+    expect(asked.map((u) => new URL(u).pathname)).toEqual(['/api/v2/server-setup/state']); // the backend's own address (never the browser's)
+  });
+
+  it('the app\'s own server (sign-up stays open), a server with no owner yet, an unreadable answer and a refusal are all NOT a server host: the guidance card and the redirect rules are exactly as before', async () => {
+    const { redirect } = await import('next/navigation');
+    for (const answer of [{ owner_exists: true, signup_open: true }, { owner_exists: false, signup_open: false }, { owner_exists: 'yes', signup_open: false }, { signup_open: false }, [], 'x', null]) {
+      stateAnswer = answer;
+      vi.mocked(redirect).mockClear();
+      delete process.env.DESKTOP_DOWNLOAD_ENABLED;
+      await cardsWith('1');
+      expect(redirect, JSON.stringify(answer)).toHaveBeenCalledTimes(1);
+    }
+    stateAnswer = { owner_exists: true, signup_open: true };
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
+    const types = await cardsWith('1');
+    const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice');
+    expect(types).toContain(PhoneRelayLocalNotice);
+  });
+
+  it('the question is asked only by an embedded server: a hosted deployment (no marker) never asks, and a server that already has its address does not need to', async () => {
+    stateAnswer = { owner_exists: true, signup_open: false };
+    await cardsWith(undefined);
+    expect(asked).toEqual([]);
+    await cardsWith('1', 'https://team.example.com');
+    expect(asked).toEqual([]);
   });
 });

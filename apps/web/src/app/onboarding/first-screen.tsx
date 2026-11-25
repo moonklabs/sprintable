@@ -35,6 +35,8 @@ interface FirstScreenProps {
   macDownloadEnabled?: boolean;
   /** story 5024 (AC4): the server's own public address when this is a workspace SERVER HOST's onboarding — the screen then tells how to attach an agent to THIS server (no Mac app is offered there). null = not a server host. */
   serverHostOrigin?: string | null;
+  /** story 5024 (F1): a SERVER HOST whose public address is not set yet — the same screen, its card saying «set the public address first» (the address cannot be set before an owner exists, so this is where the first owner lands). */
+  serverHostPending?: boolean;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
   /** story 4766: the landing the web way's fold ends on (the person's «오늘»/«대시보드» word follows this) */
@@ -45,7 +47,7 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
@@ -64,7 +66,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [inMacApp]);
   // story 5024 (AC4): a workspace SERVER HOST has no Mac app to get — «에이전트는 내 Mac에서 돌아가요 · 지금은 받을 수 없어요» told the person who set the server up nothing about how an agent gets attached. Here: the one command for the
   // computer that will run the agent, with this server's own address filled in. (Any browser — the server host's people are not on a Mac by assumption: no Mac-or-not fork.)
-  if (serverHostOrigin !== null) {
+  if (serverHostOrigin !== null || serverHostPending) {
     const hostFinishLabel = todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta');
     return (
       <div className="space-y-4" data-testid="onboarding-first-server-host">

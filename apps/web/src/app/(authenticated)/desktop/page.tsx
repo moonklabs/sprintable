@@ -10,7 +10,8 @@ import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-device
 import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
 import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
-import { isEmbeddedServer, isServerHost, serverHostOrigin } from '@/lib/embedded-api-origin';
+import { isEmbeddedServer } from '@/lib/embedded-api-origin';
+import { serverHostMode } from '@/lib/server-host-mode';
 import { ServerHostAgentCard } from '@/components/desktop/server-host-agent-card';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -43,15 +44,16 @@ import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
  * without the download switch (a headless server has none), and the phone column draws the «원격 제어» card and nothing else of the phone cards (those wait for the lap on a real
  * server host). The desktop app's own loopback server (`isEmbeddedServer()` without a public address) is exactly as before.
  */
-export default function DesktopPage() {
+export default async function DesktopPage() {
   const embedded = isEmbeddedServer();
-  const serverHost = embedded && isServerHost();
+  const mode = embedded ? await serverHostMode() : ({ host: false } as const); // story 5024 F1: a server host is known by its backend's own answer too — it may not have its public address yet
+  const serverHost = mode.host;
   if (!serverHost && !isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) {
     redirect(resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path);
   }
 
   const local = embedded && !serverHost; // the app's own loopback server: no middle server at all
-  const origin = serverHost ? serverHostOrigin() : null; // story 5024 (AC4): the address the card's command gives `--server` — this server's own, from the server's own setting
+  const origin = mode.host ? mode.origin : null; // story 5024 (AC4): the address the card's command gives `--server` — this server's own, from the server's own setting (null: not set yet — the card then says to set it first)
   // story 4889 (W7~W10): the screen is one composition — a head, two columns (left: the app on this Mac · right: the phone), then the connected computers across the full width.
   // Each card keeps its own condition (a card that says nothing draws nothing), so the columns are plain stacks.
   return (
@@ -64,7 +66,7 @@ export default function DesktopPage() {
           <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-app">
             {serverHost ? (
               /* story 5024 (AC4): a server host has no app to open or download — the way to attach an agent to THIS server is the one card */
-              origin ? <ServerHostAgentCard origin={origin} /> : null
+              <ServerHostAgentCard origin={origin} />
             ) : (
               <>
                 {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
