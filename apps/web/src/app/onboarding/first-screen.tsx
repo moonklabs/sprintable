@@ -12,6 +12,7 @@ import { Button } from '@/components/ds/button';
 import { cardVariants } from '@/components/ds/card';
 import { cn } from '@/lib/utils';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
+import { ServerHostAgentCard } from '@/components/desktop/server-host-agent-card';
 import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
 import { Chip } from '@/components/ds/chip';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
@@ -32,6 +33,8 @@ interface FirstScreenProps {
   chatsHref?: string;
   /** story 4714 AC2: the server's judgement that the Mac app is offered here — the phone screen's mail button is drawn only then */
   macDownloadEnabled?: boolean;
+  /** story 5024 (AC4): the server's own public address when this is a workspace SERVER HOST's onboarding — the screen then tells how to attach an agent to THIS server (no Mac app is offered there). null = not a server host. */
+  serverHostOrigin?: string | null;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
   /** story 4766: the landing the web way's fold ends on (the person's «오늘»/«대시보드» word follows this) */
@@ -42,7 +45,7 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
@@ -59,6 +62,25 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   const wentToSetup = useRef(false);
   const flatHref = useFlatHref(); // story 4763 AC14: the app's own setup page (folder · agent · [시작]) is a flat destination — it carries the project like every other entrance (the ratchet: no bare flat destination)
   useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [inMacApp]);
+  // story 5024 (AC4): a workspace SERVER HOST has no Mac app to get — «에이전트는 내 Mac에서 돌아가요 · 지금은 받을 수 없어요» told the person who set the server up nothing about how an agent gets attached. Here: the one command for the
+  // computer that will run the agent, with this server's own address filled in. (Any browser — the server host's people are not on a Mac by assumption: no Mac-or-not fork.)
+  if (serverHostOrigin !== null) {
+    const hostFinishLabel = todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta');
+    return (
+      <div className="space-y-4" data-testid="onboarding-first-server-host">
+        <div className="text-center">
+          <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t('serverHostTitle')}</h1>
+          <p className="mt-2 break-keep text-sm text-muted-foreground">{t('serverHostLead')}</p>
+        </div>
+        <ServerHostAgentCard origin={serverHostOrigin} hideTitle testId="onboarding-first-server-host-card" />
+        {orgName ? <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground" data-testid="onboarding-first-org">{t('orgLead')} <Chip className="min-w-0 max-w-full truncate">{orgName}</Chip></p> : null}
+        <p className="flex flex-wrap items-center gap-x-1.5 break-keep border-t border-border pt-2 text-xs text-muted-foreground" data-testid="onboarding-first-later">
+          {t('laterShort')}
+          <Button variant="quiet" className="px-2 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">{hostFinishLabel}</Button>
+        </p>
+      </div>
+    );
+  }
   if (elsewhere === null || inMacApp === null) return null;
   if (inMacApp) return null; // the page is going to the setup page
   // story 4891: the way out's word follows where it lands (resolveOnboardingLandingHref: flag ON → Today, OFF → «대화»), as the three other onboarding exits already do

@@ -147,7 +147,8 @@ export const NAV_GROUPS: NavGroupConfig[] = buildNavGroups(TEAM_VARIANT);
 export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
   if (!flags.desktopDownloadEnabled) return NAV_GROUPS;
   const desktopItem: NavItemConfig = {
-    id: 'desktop-app', labelKey: 'desktopApp', descriptionKey: 'descDesktopApp', icon: Monitor, kind: 'static', path: '/desktop', scope: 'org',
+    // story 5024 (AC4): on a workspace SERVER HOST the screen is where agents are attached to this server (there is no app to download) — its name and its line say that
+    id: 'desktop-app', labelKey: flags.serverHost ? 'serverHostAgents' : 'desktopApp', descriptionKey: flags.serverHost ? 'descServerHostAgents' : 'descDesktopApp', icon: Monitor, kind: 'static', path: '/desktop', scope: 'org',
   };
   return NAV_GROUPS.map((group) => (group.id === 'settings' ? { ...group, items: [...group.items, desktopItem] } : group));
 }

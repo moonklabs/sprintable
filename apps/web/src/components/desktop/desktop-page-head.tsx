@@ -6,13 +6,13 @@ import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { desktopApp, subscribeDesktopApp, type SprintableDesktop } from '@/lib/desktop-app';
 
-export function DesktopPageHead() {
+export function DesktopPageHead({ serverHost = false }: { serverHost?: boolean }) {
   const t = useTranslations('desktop');
   // story 4970: inside the app there is no «getting the app» (the person is in it) — the same sentence without that clause (the one mark is desktopApp(), never a user-agent guess)
   const inApp = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
   return (
     <header data-testid="desktop-page-head">
-      <p className="break-keep text-sm text-muted-foreground">{t(inApp ? 'pageNoteInApp' : 'pageNote')}</p>
+      <p className="break-keep text-sm text-muted-foreground">{t(serverHost ? 'pageNoteServerHost' : inApp ? 'pageNoteInApp' : 'pageNote')}</p>
     </header>
   );
 }

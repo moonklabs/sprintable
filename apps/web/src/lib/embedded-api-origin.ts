@@ -59,6 +59,16 @@ export function isServerHost(env: NodeJS.ProcessEnv = process.env): boolean {
   return isEmbeddedServer(env) && publicHostOf(env) !== null;
 }
 
+/**
+ * story 5024 (AC4) — the server host's own public address as a person types it (`https://team.example.com` — the same rules as `publicHostOf`), or null when this is not a server host. A SERVER component asks (and hands the string down as a
+ * prop): the screens that tell a person which address to give `sprintable-host pair --server` fill it in from here — never from the browser's location (a proxy or a rewrite could make that another name).
+ */
+export function serverHostOrigin(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!isEmbeddedServer(env)) return null;
+  const host = publicHostOf(env);
+  return host === null ? null : `https://${host}`;
+}
+
 /** where `/api/v2/...` goes at request time inside the app's own server — or null when this server is not that (or the path is not an API path) */
 export function embeddedApiTarget(pathname: string, search: string, env: NodeJS.ProcessEnv = process.env): URL | null {
   if (!isEmbeddedServer(env) || !pathname.toLowerCase().startsWith(EMBEDDED_API_PREFIX)) return null; // any letter case: `/API/V2/…` is the same route for Next

@@ -19,6 +19,7 @@ export function readNavV3FlagsFromEnv(): NavV3Flags {
     todayV3Enabled: process.env['TODAY_V3_ENABLED'] === 'true',
     chatV3Enabled: process.env['CHAT_V3_ENABLED'] === 'true',
     connectRulesV3Enabled: process.env['CONNECT_RULES_V3_ENABLED'] === 'true',
+    serverHost: isServerHost(), // story 5024 (AC4): the sidebar's name for /desktop on a server host
     desktopDownloadEnabled: isServerHost() || (isDesktopDownloadEnabled(process.env['DESKTOP_DOWNLOAD_ENABLED']) && !isEmbeddedServer()),  // story #4524 — /desktop's own gate · story 4832: no «데스크톱 앱 · 연결된 기기» entry in the app's own server
   };
 }

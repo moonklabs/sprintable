@@ -5,7 +5,8 @@
 import { useTranslations } from 'next-intl';
 import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 
-export function DesktopScreenTitle() {
+// story 5024 (AC4): on a workspace server host the screen is «에이전트 연결» (the sidebar says the same: verify-nav-label-matches-title)
+export function DesktopScreenTitle({ serverHost = false }: { serverHost?: boolean }) {
   const t = useTranslations('desktop');
-  return <OrgScreenTitle>{t('pageTitle')}</OrgScreenTitle>;
+  return <OrgScreenTitle>{t(serverHost ? 'pageTitleServerHost' : 'pageTitle')}</OrgScreenTitle>;
 }

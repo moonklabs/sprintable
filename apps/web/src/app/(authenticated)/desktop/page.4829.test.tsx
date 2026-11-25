@@ -79,8 +79,35 @@ describe('[SID:5024] /desktop — a server host', () => {
     const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
     const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice');
     const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
-    expect(types).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard]);
+    const { ServerHostAgentCard } = await import('@/components/desktop/server-host-agent-card');
+    // story 5024 (AC4): a server host has no app to open or download — its left column is the one «이 서버에 에이전트 붙이기» card
+    expect(types).toEqual([DesktopPageHead, ServerHostAgentCard, DesktopRemoteControlCard]);
+    expect(types).not.toContain(DesktopOpenAppCard);
+    expect(types).not.toContain(DesktopDownloadCard);
     expect(types).not.toContain(PhoneRelayLocalNotice);
+  });
+
+  it('[SID:5024 AC4] a server host: the screen\'s title and head are told so («에이전트 연결» — the sidebar\'s name); the card gets this server\'s own address; anything else is told not', async () => {
+    const heads = async (embedded: string | undefined, origin?: string) => {
+      if (embedded === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = embedded;
+      if (origin === undefined) delete process.env.SPRINTABLE_PUBLIC_ORIGIN; else process.env.SPRINTABLE_PUBLIC_ORIGIN = origin;
+      vi.resetModules();
+      const { default: DesktopPage } = await import('./page');
+      const [title, frame] = (DesktopPage() as unknown as { props: { children: Array<{ props: Record<string, unknown> }> } }).props.children;
+      const head = (frame!.props.children as Array<{ type: unknown; props: Record<string, unknown> }>)[0]!;
+      const find = (node: unknown, type: unknown): Array<{ props: Record<string, unknown> }> => {
+        if (Array.isArray(node)) return node.flatMap((n) => find(n, type));
+        if (!node || typeof node !== 'object') return [];
+        const el = node as { type?: unknown; props?: { children?: unknown } };
+        return [...(el.type === type ? [el as { props: Record<string, unknown> }] : []), ...find(el.props?.children, type)];
+      };
+      const { ServerHostAgentCard } = await import('@/components/desktop/server-host-agent-card');
+      return { title: title!.props.serverHost, head: head.props.serverHost, cards: find(frame!.props.children, ServerHostAgentCard).map((c) => c.props.origin) };
+    };
+    expect(await heads('1', PUBLIC)).toEqual({ title: true, head: true, cards: [PUBLIC] });
+    for (const [embedded, origin] of [['1', undefined], [undefined, undefined]] as const) {
+      expect(await heads(embedded, origin), `embedded ${String(embedded)}`).toEqual({ title: false, head: false, cards: [] });
+    }
   });
 
   it('a server host opens /desktop WITHOUT the download switch (a headless server has none): no redirect; any other server with the switch off still redirects', async () => {
