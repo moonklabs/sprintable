@@ -111,6 +111,9 @@ class RemoteDevice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 5027: when the phone PROVED it holds this key's private key (it signed a one-time value of the server's, `register_phone` proof). NULL: an older app registered it
+    # without a proof (or the key moved to another member of the same person, which a proof was not made for) — such a key is accepted as before but vouches for nothing: no proof, no claim to be «this person's phone»
+    pop_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #4629 (0446): the refresh token the phone was logged in with when it registered this key (the row id — never the
     # token) · removing the key revokes that session (its rotation chain's live end). NULL: registered before 0446, or no token sent
     session_token_id: Mapped[uuid.UUID | None] = mapped_column(

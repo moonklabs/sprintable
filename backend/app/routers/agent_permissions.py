@@ -3,7 +3,8 @@ Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §9 ② ③ · §10 �
 
 - GET    /api/v2/agent-permission-requests                 — the requests sent to me (the web shows them, never answers)
 - POST   /api/v2/agent-permission-requests/{id}/answer     — the phone's signed decision, carried down as it is
-- POST   /api/v2/remote-devices                            — the phone registers its key (three a person)
+- POST   /api/v2/remote-devices/challenge                  — story 5027: the one-time value the phone signs to prove it holds the key it registers
+- POST   /api/v2/remote-devices                            — the phone registers its key (three a person · with that proof of holding it, story 5027)
 - POST   /api/v2/remote-devices/pairing-offers             — the phone that scanned a desktop QR carries its key there (#4531)
 - GET    /api/v2/remote-devices/pairing-offers/{id}        — that phone reads the desktop's value for the pairing number (v1.11)
 - GET    /api/v2/remote-devices                            — my phones and what each is paired with (`?scope=org`: owner/admin)
@@ -78,6 +79,21 @@ async def post_permission_answer(
         return _error(exc)
     await db.commit()
     return {"id": str(row.id), "state": row.state}
+
+
+@router.post("/remote-devices/challenge")
+async def post_remote_device_challenge(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 5027 — the one-time value a phone signs with the key it is registering (the proof that it holds the key's private key): for THIS person in THIS organization, good for five minutes, stored nowhere."""
+    member = await _person(db, auth, org_id, interactive=True)
+    try:
+        view = agent_permissions.issue_registration_challenge(member_id=uuid.UUID(str(member.id)), org_id=org_id)
+    except DesktopRelayError as exc:
+        return _error(exc)
+    return JSONResponse(status_code=200, content=view, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/remote-devices")

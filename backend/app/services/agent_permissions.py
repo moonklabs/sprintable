@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import json
 import logging
+import os
 import re
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
@@ -26,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.services.agent_runtime import DesktopRuntimeId
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.desktop_relay import DesktopDeviceToken, DesktopSession
@@ -75,14 +80,107 @@ def _decode_public_key(value: str) -> bytes:
     return der
 
 
+class RegistrationProof(BaseModel):
+    """story 5027 — the phone's proof that it holds the private key of the key it registers: the bytes it signed (base64url of a JSON object that carries the server's one-time value) and the signature
+    (base64url · ECDSA P-256 / SHA-256 in DER — the same signature the phone makes for every command it signs)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    payload: str = Field(min_length=1, max_length=2048)
+    sig: str = Field(min_length=1, max_length=512)
+
+
 class RemoteDeviceRegistration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str = Field(min_length=1, max_length=64)
     public_key: str = Field(min_length=1, max_length=2048)
+    # story 5027: an app that can sign sends the proof; an older one sends none and is accepted as before (the key is then NOT proved — see `RemoteDevice.pop_verified_at`)
+    pop: RegistrationProof | None = None
     # story #4629: the phone's own refresh token, added by the web route from its session cookie (never by the phone) — only
     # its hash is looked up, to record which session registered the key; never stored, never echoed back
     refresh_token: str | None = Field(default=None, max_length=4096, repr=False)
+
+
+# ── story 5027 — a phone proves it holds the key it registers ──────────────────────────────────────────────────────────────────────────────────────────────────
+# The server hands the logged-in person a one-time value; the phone signs `{v, kind, member_id, org_id, fingerprint, nonce}` with the key it is registering; the server checks the signature with the key it was
+# handed. Without this a person could register ANOTHER person's phone key (public — a computer's owner sees it in the pins) in their own name first, and the server would hold «that key = them».
+POP_KIND = "register_phone"
+POP_WINDOW = timedelta(minutes=5)  # a value is good for this long
+_POP_SLACK = timedelta(seconds=30)  # a value from the future by this much is a clock, not an attack
+
+
+def _pop_key() -> bytes:
+    """The key the one-time values are MAC'd with: derived from the app's signing secret under its own label, so the value cannot be made without the server and the secret is not used as it is."""
+    secret = (getattr(settings, "jwt_secret", None) or os.environ.get("JWT_SECRET", "")).encode()  # the same source the app's own login tokens are signed with (`core/security.py`)
+    if not secret:
+        raise DesktopRelayError(503, "pop_unavailable", "the server cannot make a registration value now")
+    return hmac.new(secret, b"sprintable/register_phone/challenge/v1", hashlib.sha256).digest()
+
+
+def _pop_mac(member_id: uuid.UUID, org_id: uuid.UUID, issued: int, rnd: str) -> str:
+    msg = f"{member_id}|{org_id}|{issued}|{rnd}".encode()
+    return base64.urlsafe_b64encode(hmac.new(_pop_key(), msg, hashlib.sha256).digest()[:16]).rstrip(b"=").decode()
+
+
+def issue_registration_challenge(*, member_id: uuid.UUID, org_id: uuid.UUID, now: datetime | None = None) -> dict:
+    """The value for THIS person in THIS organization: `<issued>.<random>.<mac>`, good for five minutes, nothing stored. It is not single-use: a captured proof only proves, to the same person in the same organization, the same
+    key it was made with — nobody else can submit it (the sign-in and the member it names must match) and it cannot be turned into another key's proof (the fingerprint is inside what was signed)."""
+    at = now or _now()
+    issued = int(at.timestamp())
+    rnd = secrets.token_urlsafe(16)
+    return {"nonce": f"{issued}.{rnd}.{_pop_mac(member_id, org_id, issued, rnd)}", "member_id": str(member_id), "org_id": str(org_id),
+            "expires_at": (datetime.fromtimestamp(issued, timezone.utc) + POP_WINDOW).isoformat()}
+
+
+def _b64url_strict(value: str) -> bytes:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise ValueError("not base64url")
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def check_registration_proof(pop: RegistrationProof, *, der: bytes, fingerprint: str, member_id: uuid.UUID, org_id: uuid.UUID, now: datetime | None = None) -> None:
+    """Raises `DesktopRelayError` (422) unless the phone signed a value of THIS server for THIS person, THIS organization and THIS key. Every refusal is the same shape (`pop_invalid`, or `pop_expired` — fetch a new value —
+    or `pop_unsupported_key` for a key that is not ECDSA P-256); none of them says which part was wrong."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import load_der_public_key
+
+    invalid = DesktopRelayError(422, "pop_invalid", "the proof of holding this key was not accepted")
+    try:
+        payload_bytes = _b64url_strict(pop.payload)
+        sig = _b64url_strict(pop.sig)
+        body = json.loads(payload_bytes.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — any shape we cannot read is the same refusal
+        raise invalid from exc
+    if not isinstance(body, dict) or set(body) != {"v", "kind", "member_id", "org_id", "fingerprint", "nonce"} or body.get("v") != 1 or body.get("kind") != POP_KIND:
+        raise invalid
+    if body["member_id"] != str(member_id) or body["org_id"] != str(org_id) or body["fingerprint"] != fingerprint or not isinstance(body["nonce"], str):
+        raise invalid
+    # the value: ours (MAC), for this person and organization, and not older than the window
+    parts = body["nonce"].split(".")
+    if len(parts) != 3 or not parts[0].isdigit() or len(parts[0]) > 12:
+        raise invalid
+    issued = int(parts[0])
+    if not hmac.compare_digest(parts[2].encode(), _pop_mac(member_id, org_id, issued, parts[1]).encode()):
+        raise invalid
+    at = now or _now()
+    issued_at = datetime.fromtimestamp(issued, timezone.utc)
+    if issued_at - _POP_SLACK > at:
+        raise invalid
+    if at - issued_at > POP_WINDOW:
+        raise DesktopRelayError(422, "pop_expired", "the value to sign has run out — ask for a new one")
+    try:
+        key = load_der_public_key(der)
+    except Exception as exc:  # noqa: BLE001
+        raise invalid from exc
+    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
+        raise DesktopRelayError(422, "pop_unsupported_key", "only an ECDSA P-256 key can prove it holds itself")
+    try:
+        key.verify(sig, payload_bytes, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature as exc:
+        raise invalid from exc
 
 
 async def _session_row_id(db: AsyncSession, *, user_id: uuid.UUID, raw: str | None) -> uuid.UUID | None:
@@ -106,6 +204,7 @@ def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
         "id": str(d.id), "label": d.label, "fingerprint": d.fingerprint, "confirm_number": confirm_number(der),
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "last_used_at": d.last_used_at.isoformat() if d.last_used_at else None,
+        "pop_verified": d.pop_verified_at is not None,  # story 5027: the phone proved it holds this key's private key
         **({"pairs": pairs} if pairs is not None else {}),
     }
 
@@ -139,6 +238,25 @@ async def _org_name_if_member(db: AsyncSession, *, key_org_id: uuid.UUID, user_i
     )).scalars().first()
 
 
+async def _reclaim_unproved_key(db: AsyncSession, key: RemoteDevice, *, member_id: uuid.UUID, org_id: uuid.UUID, session_id: uuid.UUID | None, label: str) -> None:
+    """story 5027 — the holder of a key's private key takes it from whoever registered it without proving they held it. The row keeps its pairings (a pair is the COMPUTER's pin of that key: the person who really holds it is who it now belongs
+    to). The new owner's phone limit applies like any registration (nothing is changed when it is full)."""
+    # only READ the taker's other phones: the key's row is already locked, the taker's own registrations are serialized by the person-level lock, and a second row lock here would let two people who each hold
+    # the OTHER's key wait on each other (codex pass 3 — a test with the two requests held together went red with `FOR UPDATE` on this query)
+    live = (await db.execute(
+        select(RemoteDevice).where(RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None), RemoteDevice.id != key.id)
+        .order_by(RemoteDevice.created_at)
+    )).scalars().all()
+    if len(live) >= PHONES_PER_PERSON:
+        raise DesktopRelayError(409, "remote_device_limit", "at most three phones", detail={"devices": [_device_view(d) for d in live]})
+    previous = key.member_id
+    key.member_id, key.org_id, key.label, key.revoked_at = member_id, org_id, label, None
+    key.session_token_id = session_id
+    key.pop_verified_at = _now()
+    await db.flush()
+    logger.warning("phone key taken back by the holder of its private key: device=%s from_member=%s to_member=%s", key.id, previous, member_id)
+
+
 async def register_phone(
     db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration, user_id: uuid.UUID | None = None,
 ) -> tuple[dict, bool]:
@@ -148,6 +266,14 @@ async def register_phone(
     sent that is not a live login of the person → 401 session_ended."""
     der = _decode_public_key(body.public_key)
     fp = fingerprint_of(der)
+    # story 5027: a proof that is sent must hold — a bad one is refused before anything is read or written (never «accepted without the proof»); none sent = an older app (accepted as before, not proved)
+    proven = False
+    if body.pop is not None:
+        check_registration_proof(body.pop, der=der, fingerprint=fp, member_id=member_id, org_id=org_id)
+        proven = True
+    # story 5027 (codex pass 1): ONE registration per person at a time. A row lock cannot hold the place where a NEW row lands, so two registrations (a new key and a reclaim, or two of either) could both count «two»
+    # and make four phones. The lock is the person's own (transaction-scoped, taken before any row lock so every path takes them in the same order — no wait can go round in a circle).
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("remote_device_registration:" + str(member_id), 0))))
     session_id = await _session_row_id(db, user_id=user_id, raw=body.refresh_token) if user_id is not None else None
     # Kadir (5012): a phone whose login was ended with its key still holds an access token for up to an hour, and the web sends its
     # now-dead refresh token along — that registration would bring the removed key back. A refresh token that is not a live login
@@ -161,15 +287,26 @@ async def register_phone(
         # no live pairing there (a pair belongs to its organization's computer: that key stays where it is). Another person's → taken.
         kind = await _key_of_same_person(db, existing, user_id)
         if kind is None:
-            raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
-        if kind == "has_pairings":
+            # story 5027: a key someone registered WITHOUT proving they hold it vouches for nothing — whoever DOES prove it (signed the server's one-time value with that very key) takes it. A key that was proved stays with
+            # the one who proved it (409 as before): two people cannot both hold one private key
+            if not (proven and existing.pop_verified_at is None):
+                raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+            await _reclaim_unproved_key(db, existing, member_id=member_id, org_id=org_id, session_id=session_id, label=body.label)
+        elif kind == "has_pairings":
             # the same person's own key — not «someone else's»: it pairs with computers of another organization of theirs
             # which organization — the person is told where to remove the phone (they are a member there, so its name is theirs to see);
             # a person who has since left that organization is told without a name
             org_name = await _org_name_if_member(db, key_org_id=existing.org_id, user_id=user_id)
             raise DesktopRelayError(409, "remote_device_other_org", "this phone key is paired with a computer of another organization of yours",
                                     detail={"org_name": org_name} if org_name else None)
+        else:
+            # story 5027: the key of the SAME person moves to their member of another organization — what a proof said was said for the member and organization it had: it says nothing for the new ones (the registration
+            # that moves it brings its own proof, set just below, or leaves it NULL)
+            existing.pop_verified_at = None
         existing.member_id, existing.org_id = member_id, org_id
+        await db.flush()
+    if existing is not None and proven and existing.pop_verified_at is None:
+        existing.pop_verified_at = _now()  # the holder of the private key signed the server's value for THIS person and organization (a key already proved keeps its first time)
         await db.flush()
     if existing is not None and existing.revoked_at is None:
         if session_id is not None:
@@ -191,7 +328,7 @@ async def register_phone(
         return _device_view(existing), True
     row = RemoteDevice(
         id=uuid.uuid4(), member_id=member_id, org_id=org_id, label=body.label, public_key=body.public_key.rstrip("="), fingerprint=fp,
-        session_token_id=session_id,
+        session_token_id=session_id, pop_verified_at=_now() if proven else None,
     )
     db.add(row)
     await db.flush()

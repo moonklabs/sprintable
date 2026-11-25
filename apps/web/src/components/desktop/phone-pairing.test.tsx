@@ -136,7 +136,9 @@ describe('[4532] phone pairing screen', () => {
     expect(text()).not.toMatch(/\d{3} \d{3}/); // no number before the computer takes the offer
     expect(buttons()).toEqual(['페어링', '취소']);
     await press('페어링');
-    expect(sent.map((s) => s.type)).toEqual(['pair.scan', 'device.key.info', 'pair.mac']);
+    // [5027] after the key is read the page asks what this shell can do (`shell.caps`): this test's shell is an older one (no `key_proof`) → no proof is made, no signing prompt, the registration goes as it always did
+    expect(sent.map((s) => s.type)).toEqual(['pair.scan', 'device.key.info', 'shell.caps', 'pair.mac']);
+    expect(sent.some((s) => s.type === 'device.key.prove')).toBe(false);
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…');
     await tick();
     expect(line()).toBe('컴퓨터 화면을 확인하는 중…'); // still «sent»
