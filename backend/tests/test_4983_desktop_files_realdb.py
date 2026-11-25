@@ -683,9 +683,11 @@ def test_15_the_command_words_of_the_code_and_the_migration_are_the_same():
         spec.loader.exec_module(mod)
         return mod
 
+    m0500 = _load("m0500", "0500_capability_set.py")  # story 5025 (C1): the LATEST one that changed the CHECK (`capability_set`)
+    assert tuple(m0500._NEW) == tuple(COMMAND_KINDS) and "capability_set" in COMMAND_KINDS and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS and "file_download" in COMMAND_KINDS and "direct_open" in COMMAND_KINDS
+    assert tuple(m0500._OLD) + ("capability_set",) == tuple(COMMAND_KINDS), "0500 adds exactly one word to what 0495 left"
     m0495 = _load("m0495", "0495_desktop_direct_open.py")
-    assert tuple(m0495._NEW) == tuple(COMMAND_KINDS) and "file_list" in COMMAND_KINDS and "file_read" in COMMAND_KINDS and "file_download" in COMMAND_KINDS and "direct_open" in COMMAND_KINDS
-    assert tuple(m0495._OLD) + ("direct_open",) == tuple(COMMAND_KINDS), "0495 adds exactly one word to what 0492 left"
+    assert tuple(m0495._NEW) == tuple(m0500._OLD) and tuple(m0495._OLD) + ("direct_open",) == tuple(m0495._NEW), "0495 adds exactly one word to what 0492 left, and 0500 starts where 0495 ended"
     mod = _load("m0492", "0492_desktop_file_download.py")
     assert tuple(mod._NEW) == tuple(m0495._OLD) and tuple(mod._OLD) + ("file_download",) == tuple(mod._NEW), "0492 adds exactly one word to what 0491 left, and 0495 starts where 0492 ended"
     old = _load("m0491", "0491_desktop_file_read_kind.py")

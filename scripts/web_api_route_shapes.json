@@ -1000,6 +1000,21 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/relay/attest-keys",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/capabilities",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/capability-rejections",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/desktop/relay/changes/{}",
 "kind": "unknown"

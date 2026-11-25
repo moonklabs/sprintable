@@ -1076,6 +1076,13 @@ class FileListPayload(_Payload):
     envelope: dict
 
 
+class CapabilitySetPayload(_Payload):
+    """story 5025 (C1 · contract v1.2 §3.1): the server's SIGNED capability set for this computer — exactly {envelope}: {v, kid, p (base64url of the signed bytes), sig}. The host verifies the bytes it was given; nothing
+    here is read by the server again."""
+
+    envelope: dict
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
@@ -1088,6 +1095,7 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "file_read": FileListPayload,  # story 4983 (P6): the same two fields — the project and the sealed request (the file's name is inside it)
     "file_download": FileListPayload,  # story 4988 (P8): the same two fields again
     "direct_open": DirectOpenPayload,  # story 4993 (P2): {envelope} only
+    "capability_set": CapabilitySetPayload,  # story 5025 (C1): {envelope} only — the server's own signed set, pushed
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 

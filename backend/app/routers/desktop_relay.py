@@ -15,8 +15,11 @@ import re
 import time
 import uuid
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,10 +111,10 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
     deadline = time.monotonic() + _LIFESPAN_SEC + random.uniform(0, _LIFESPAN_JITTER_SEC)
 
     async def generate():
-        from app.services import agent_permissions
+        from app.services import agent_permissions, capability_set
 
         last_seq = start_seq
-        last_beat = last_check = time.monotonic()
+        last_beat = last_check = last_capability = time.monotonic()  # story 5025 (C1): the host pulls the whole set when it connects; the first push of the half life is that far away
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
         session_frames_sent: set[str] = set()  # story 4972 — each commitment · reveal of the new pairing once per connection
@@ -144,6 +147,11 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                             if not await remote_control.is_enabled(s, org_id):
                                 terminal = f"event: {remote_control.OFF_CODE}\ndata: {{}}\n\n"
                     if terminal is None:
+                        if now - last_capability >= capability_set.HALF_LIFE.total_seconds():  # story 5025 (C1 · §3.2): a computer that stays connected hears a fresh signed set at least every half life
+                            last_capability = now
+                            fresh_setup = await s.get(DesktopSetup, setup_id)
+                            if fresh_setup is not None:
+                                await capability_set.push_capability_set(s, fresh_setup, force=True)
                         commands = await relay.commands_to_send(s, setup_id, last_seq)
                         removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                         offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
@@ -429,6 +437,71 @@ async def post_presence(
     await relay.touch_presence(db, setup.id, x_desktop_device_token)
     await db.commit()
     return {"ok": True}
+
+
+# ── story 5025 (C1 · contract v1.2 §3 · §5 · §6): what a phone may do — signed by the server ──────────────────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/relay/capabilities")
+async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+    """The computer's pull, whenever it (re)connects: the WHOLE current set of what each of its pinned phones may do with each agent — signed now (`{envelope: {v, kid, p, sig}, server_time}`). The host replaces what it holds with it.
+    Once in ten seconds per computer (counted per VERIFIED device): over it, 429 + `Retry-After` — a host that is refused waits and asks again (never reads it as «no capability»). 404 `capability_not_available` on a server with no signing
+    key: a host sees an older server."""
+    from app.core.rate_limit import hit_person_limits
+    from app.services import capability_set
+
+    retry = hit_person_limits("desktop-capabilities", str(setup.id), capability_set.PULL_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    out = await capability_set.pull(db, setup)
+    if out is None:
+        raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
+    await db.commit()
+    return out
+
+
+@router.get("/relay/attest-keys")
+async def get_attest_keys(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+    """The keys a host checks capability sets with — for a computer that was paired BEFORE the server had a key (the first receipt: only when the host has pinned none). `{attest_keys: [{kid, public_key}], rotations: […], server_time}`;
+    `rotations` are envelopes signed by a RETIRED key that hand the host on to the current one. 404 on a server with no signing key (an older server)."""
+    from app.services import capability_set
+
+    keys = capability_set.attest_keys()
+    if not keys:
+        raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
+    return {"attest_keys": keys, "rotations": capability_set.rotations(), "server_time": capability_set.server_time()}
+
+
+class _RejectionEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["no_capability", "capability_expired", "not_in_seal_to"]
+    phone_key_id: uuid.UUID
+    agent_member_id: uuid.UUID
+    count: int = Field(ge=1, le=10_000)
+
+
+class CapabilityRejectionReport(BaseModel):
+    """What a computer says of its own refusals (§6): a closed word, the server's own two ids, a count — nothing about what was refused. At most 50 entries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rejections: list[_RejectionEntry] = Field(max_length=50)
+
+
+@router.put("/relay/capability-rejections")
+async def put_capability_rejections(
+    body: CapabilityRejectionReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.core.rate_limit import hit_person_limits
+    from app.services import capability_set
+
+    retry = hit_person_limits("desktop-capability-rejections", str(setup.id), capability_set.REPORT_LIMIT)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
+    taken = await capability_set.record_rejections(db, setup, [e.model_dump() for e in body.rejections])
+    await db.commit()
+    return {"taken": taken}
 
 
 @router.put("/relay/usage")

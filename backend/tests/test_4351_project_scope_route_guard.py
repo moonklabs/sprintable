@@ -43,6 +43,10 @@ _KNOWN = {
     "app/routers/desktop_relay.py::put_files",
     # story 4988 — the same device token: ONE chunk of its SEALED answer to a DOWNLOAD (the row is that device's own: command id + the token's setup id; in order, a few ahead of the phone at most; the server cannot open the envelope; the PERSON's route judges the project)
     "app/routers/desktop_relay.py::put_files_chunk",
+    # story 5025 (C1) — the same device token: the computer pulls the SIGNED set of what its own pinned phones may do (the rows are this setup's own pins · agents; the set is computed from `can_command` · `can_view`, which ARE the access resolvers), the keys it checks sets with (no row at all), and reports counts of its own refusals (ids + a number)
+    "app/routers/desktop_relay.py::get_capabilities",
+    "app/routers/desktop_relay.py::get_attest_keys",
+    "app/routers/desktop_relay.py::put_capability_rejections",
     # story 4977 B2 — the same device token: ONE sealed record of the person's history the computer keeps (the row is that computer's own: its setup id; the server cannot open the envelope; the room is judged to be
     # of the token's own org; the PERSON's routes (desktop_records.py) judge the room per reader on every read, so a record written into a room its person is not in is reachable by nobody)
     "app/routers/desktop_relay.py::put_record",
