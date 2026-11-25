@@ -146,6 +146,14 @@ describe('[SID:4691] subscribeDesktopApp · desktopApp() — a list that arrives
     expect(desktopApp()!.runtimes).toEqual([CLAUDE]);
   });
 
+  it('[SID:5009] the subscription names the runtimes this web can act on (`accepts`) — the app hands an older web only claude · codex, so a name it does not know can never take the bridge away', () => {
+    const live = liveBridge([]);
+    g.window = { sprintableDesktop: live.b };
+    subscribeDesktopApp(vi.fn());
+    const call = live.subscribeRuntimes.mock.calls[0] as unknown[];
+    expect(call[1]).toEqual({ accepts: ['claude', 'codex', 'opencode'] });
+  });
+
   it('one subscription to the app for all listeners · released when the last one leaves', () => {
     const live = liveBridge([]);
     g.window = { sprintableDesktop: live.b };

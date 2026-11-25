@@ -32,7 +32,8 @@ export interface SprintableDesktop {
   /** story 4691: the app's «found here» list as it changes. `listener` is called ONCE right away with the newest list (so a page that
    *  loaded before detection finished — or after — is never raced), then only when the list CHANGES. Returns the unsubscribe.
    *  Absent in an older app (that page keeps the one read above). Read it through `subscribeDesktopApp` — never call it from a screen. */
-  subscribeRuntimes?(listener: (runtimes: readonly DesktopRuntimeFound[]) => void): () => void;
+  /** `accepts` (story 5009): the names this web can act on — the app hands a page only claude · codex unless it asks for more by name (a web older than a name rejects the whole bridge for one entry it does not know) */
+  subscribeRuntimes?(listener: (runtimes: readonly DesktopRuntimeFound[]) => void, opts?: { accepts?: readonly string[] }): () => void;
   /** the OS folder chooser: a folder inside home, or null (canceled · refused — the reason comes back from setProjectFolder) */
   pickFolder(): Promise<string | null>;
   /** start that agent on this computer: the app opens its setup page (with `agent=` in the fragment) — no link round trip */
@@ -167,7 +168,7 @@ export function subscribeDesktopApp(listen: () => void): () => void {
         if (sameList(have, next)) return;
         latestRuntimes = [...next];
         for (const l of [...listeners]) l();
-      });
+      }, { accepts: DESKTOP_RUNTIMES_IN_APP });
     } catch { stopBridge = null; }
   }
   return () => {
