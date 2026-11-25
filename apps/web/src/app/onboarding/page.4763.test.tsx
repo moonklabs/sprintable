@@ -1,7 +1,10 @@
 // story #4763 (H6) — the onboarding page hands «came from deleting the organization» to the form (a page that is not past the organization step only).
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const seen: Array<Record<string, unknown>> = [];
+// story 5024 (AC4): the deployment variable is named only by the reading code and its own test (story 4825's guard) — the helper is stood in for here
+const host = vi.hoisted(() => ({ origin: null as string | null }));
+vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => host.origin !== null, isServerHost: () => host.origin !== null, serverHostOrigin: () => host.origin }));
 vi.mock('next/navigation', () => ({ redirect: (url: string) => { throw new Error(`redirect:${url}`); } }));
 vi.mock('./onboarding-form', () => ({ OnboardingForm: (props: Record<string, unknown>) => { seen.push(props); return null; } }));
 vi.mock('@/components/auth/email-verify-gate', () => ({ EmailVerifyGate: ({ children }: { children: unknown }) => children }));
@@ -24,16 +27,10 @@ describe('[SID:4763 H6] the onboarding page', () => {
 });
 
 describe('[SID:5024 AC4] the onboarding page hands the server host\'s own address to the form', () => {
-  const KEYS = ['SPRINTABLE_EMBEDDED', 'SPRINTABLE_PUBLIC_ORIGIN'] as const;
-  const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
-  afterEach(() => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
-
-  it('a server host: its public address · the desktop app\'s server and a hosted deployment: null (the Mac screen stays)', async () => {
-    process.env['SPRINTABLE_EMBEDDED'] = '1'; process.env['SPRINTABLE_PUBLIC_ORIGIN'] = 'https://team.example.com';
+  it('whatever serverHostOrigin() says goes to the form as it is: an address on a server host · null anywhere else (the Mac screen stays)', async () => {
+    host.origin = 'https://team.example.com';
     expect((await formProps({})).serverHostOrigin).toBe('https://team.example.com');
-    delete process.env['SPRINTABLE_PUBLIC_ORIGIN'];
-    expect((await formProps({})).serverHostOrigin).toBeNull();
-    delete process.env['SPRINTABLE_EMBEDDED'];
+    host.origin = null;
     expect((await formProps({})).serverHostOrigin).toBeNull();
   });
 });

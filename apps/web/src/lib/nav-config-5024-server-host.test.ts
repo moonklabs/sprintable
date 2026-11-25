@@ -1,6 +1,11 @@
 // story 5024 (AC4) — on a workspace SERVER HOST the sidebar's /desktop entry is «에이전트 연결» (the screen is where agents are attached to THIS server), not «데스크톱 앱»; everywhere else it is what it was.
 // The sidebar's name and the screen's title are one word (verify-nav-label-matches-title) — checked here for the server-host pair, in both languages.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// the deployment variable is named only by the reading code and its own test (story 4825's guard): here the helper is stood in for
+const host = vi.hoisted(() => ({ on: false }));
+vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => host.on, isServerHost: () => host.on, serverHostOrigin: () => (host.on ? 'https://team.example.com' : null) }));
+
 import koMessages from '../../messages/ko.json';
 import enMessages from '../../messages/en.json';
 import { resolveNavGroups } from './nav-config';
@@ -27,16 +32,11 @@ describe('[SID:5024 AC4] the sidebar entry of /desktop', () => {
   });
 });
 
-describe('[SID:5024 AC4] the server reads the flag from its own environment', () => {
-  const KEYS = ['SPRINTABLE_EMBEDDED', 'SPRINTABLE_PUBLIC_ORIGIN'] as const;
-  const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
-  afterEach(() => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
-  it('serverHost is true on a workspace server host (embedded + a public address) and false anywhere else', () => {
-    process.env['SPRINTABLE_EMBEDDED'] = '1'; process.env['SPRINTABLE_PUBLIC_ORIGIN'] = 'https://team.example.com';
+describe('[SID:5024 AC4] the server reads the flag from isServerHost()', () => {
+  it('serverHost follows isServerHost() (the one name for «a workspace server host»: the helper\'s own test pins the environment it reads)', () => {
+    host.on = true;
     expect(readNavV3FlagsFromEnv().serverHost).toBe(true);
-    delete process.env['SPRINTABLE_PUBLIC_ORIGIN']; // the desktop app's own server
-    expect(readNavV3FlagsFromEnv().serverHost).toBe(false);
-    delete process.env['SPRINTABLE_EMBEDDED']; // hosted
+    host.on = false;
     expect(readNavV3FlagsFromEnv().serverHost).toBe(false);
   });
 });
