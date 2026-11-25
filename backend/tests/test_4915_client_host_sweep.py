@@ -7,6 +7,7 @@ The sign-in / second-factor / provider-link audit rows now take the address from
 | app/core/client_ip.py                              | the rule's own last step                      | it IS the rule |
 | app/routers/local_auth.py  local_bootstrap (host)  | «is the caller the local machine» decision    | EMBEDDED-ONLY route (registered only when `settings.is_embedded`, re-checked in the handler) — a hosted/VM deployment never serves it; the question is who is connected, and any proxy header already refuses the call |
 | app/routers/local_auth.py  local-set-password audit | embedded build's audit row                    | EMBEDDED-ONLY route (same registration + re-check); no front door exists in the embedded build, so the socket address is the person's |
+| app/routers/server_setup.py  server_setup_state    | «is the caller the local machine» decision    | EMBEDDED-ONLY route (story 5023: registered only when `settings.is_embedded`, re-checked in the handler); the same question as local_bootstrap — who is CONNECTED, not what a header claims — and any proxy header already refuses the call, which is exactly how nothing that comes in through the web relay and the TLS front can read it |
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ _SECRET = "edge-secret-4915-sweep"
 _ALLOWED = {
     "app/core/client_ip.py": 2,      # the rule's last step
     "app/routers/local_auth.py": 4,  # the loopback decision (2) + the embedded set-password audit (2)
+    "app/routers/server_setup.py": 2,  # story 5023: the loopback decision of the state route (`request.client.host if request.client else ""`)
 }
 
 

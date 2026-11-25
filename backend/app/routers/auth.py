@@ -140,6 +140,7 @@ class RegisterRequest(BaseModel):
     display_name: str  # AC3: 필수
     tos_accepted: bool = False
     invite_token: str | None = None  # AC2: 초대 토큰 (가입 후 자동 수락)
+    setup_code: str | None = None  # story 5023: a workspace server with no owner yet asks for its setup code (see services/server_owner_setup.py)
     # story #3204(acquisition 계측) — proxy.ts의 first-touch 쿠키를 FE route.ts가 그대로
     # 실어 보낸다(신뢰 경계 밖 값, 자유 텍스트로만 취급 — 인가/조회 키로 안 씀).
     signup_utm_source: str | None = None
@@ -1266,6 +1267,12 @@ async def register(
     if not body.tos_accepted:
         return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
 
+    # story 5023: a workspace server's first-owner rule is judged BEFORE anything about the e-mail is said (a closed server does not tell a stranger which addresses exist)
+    from app.services import server_owner_setup
+    refusal = await server_owner_setup.signup_refusal(session, email=body.email, setup_code_given=body.setup_code, invite_token=body.invite_token)
+    if refusal is not None:
+        return _err(refusal[0], refusal[1], 403)
+
     existing = await _get_user_by_email(session, body.email)
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
@@ -2314,6 +2321,12 @@ async def oauth_callback(
             # `email_verified` 참) — 예전엔 무조건 True여서 공급자가 «미확인»이라 한 주소도 초대 자동 수락 문을 열었다.
             if not body.tos_accepted:
                 return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
+            # story 5023: a workspace server's first-owner rule holds for a sign-up by a provider too. BY DESIGN a provider can never make the FIRST owner of a server: the setup code is typed with a password sign-up (the server host has no provider
+            # configured anyway), so here there is no code — with no owner this is refused (SETUP_CODE_REQUIRED) and with an owner only an invitation opens it.
+            from app.services import server_owner_setup
+            refusal = await server_owner_setup.signup_refusal(session, email=email, setup_code_given=None, invite_token=body.invite_token)
+            if refusal is not None:
+                return _err(refusal[0], refusal[1], 403)
             from app.services.agent_onboarding_config import resolve_locale_from_request
             user = User(
                 email=email,

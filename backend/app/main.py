@@ -695,6 +695,9 @@ from app.routers import local_auth as _local_auth  # noqa: E402
 
 _local_auth.register_local_auth_routes(app)
 _local_auth.apply_embedded_host_guard(app)
+from app.routers import server_setup as _server_setup  # noqa: E402  story 5023 — same switch: only an embedded install has it
+
+_server_setup.register_server_setup_routes(app)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

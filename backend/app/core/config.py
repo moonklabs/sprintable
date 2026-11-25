@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     # route exists only when it is on. The value is never logged or printed.
     local_bootstrap_secret: str = ""
 
+    # story 5023 (B2-2 a) — a WORKSPACE SERVER (the headless Linux host) asks for the first-owner rule: with no owner a sign-up needs the setup code, once an owner exists sign-up is closed to everybody but an invited e-mail
+    # (`app/services/server_owner_setup.py`). Off by default and only ever on an embedded install (`is_embedded`): the desktop app and a hosted deployment keep their sign-up exactly as it is.
+    server_owner_setup: bool = False
+
     # story 4826 (공개 2-③ (나)) — the app's own server runs the scheduled jobs itself (`app/services/embedded_timers.py`), in-process, instead of a cloud scheduler.
     # On by default (`is_embedded` still decides WHERE it can run: only the app's own server); the test configuration (tests/conftest.py) turns it off, and the
     # one test that checks the lifespan turns it back on. An explicit setting, not a look at whether pytest is running.
