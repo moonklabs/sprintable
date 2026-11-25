@@ -31,3 +31,5 @@ class OrgInviteResponse(BaseModel):
     email_error: str | None = None
     project_ids: list[uuid.UUID] = []
     invite_url: str | None = None
+    # story 5023 (e): True when this link's address is a name only the server computer itself knows (a workspace server before its public address is set: `localhost`) — the screen says so beside the link
+    link_is_local: bool = False

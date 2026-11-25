@@ -38,6 +38,9 @@ interface OrgMember {
   passwordResetAvailable?: boolean;
 }
 
+// story 5023 (e): the command is a literal, shown on its own line (the same way the sign-up page shows `server status`) — never inside a translated sentence
+const SET_PUBLIC_ORIGIN_COMMAND = 'sprintable-host server set-public-origin https://team.example.com --restart';
+
 interface OrgInvite {
   id: string;
   email: string;
@@ -48,6 +51,18 @@ interface OrgInvite {
   /** story 5023 — set when the mail went out; a server with no mail (or a mail that failed) leaves it empty: the person is told to hand the link over */
   email_sent_at?: string | null;
   email_error?: string | null;
+  /** story 5023 (e) — the link's address is a name only the server computer itself knows (a workspace server before its public address is set) */
+  link_is_local?: boolean;
+}
+
+/** story 5023 (e): «this link opens only on the server computer» + the command that sets the public address, on its own line */
+function LinkLocalNote({ note, testId }: { note: string; testId: string }) {
+  return (
+    <div className="mt-0.5 space-y-1" data-testid={testId}>
+      <p className="text-ds-small text-ds-ink-3">{note}</p>
+      <code className="block break-all rounded border border-ds-line bg-ds-surface px-2 py-1 font-mono text-ds-small text-ds-ink-2" data-testid={`${testId}-command`}>{SET_PUBLIC_ORIGIN_COMMAND}</code>
+    </div>
+  );
 }
 
 interface OrgMembersSectionProps {
@@ -89,6 +104,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [inviteLinkLocal, setInviteLinkLocal] = useState(false);
 
   // 정책B(05fa365f): 초대 시 부여할 프로젝트 선택(멀티). 0개=미지정(조직만).
   const [inviteProjectIds, setInviteProjectIds] = useState<string[]>([]);
@@ -181,7 +197,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, project_ids: inviteProjectIds }),
     });
     const json = await res.json() as {
-      data?: { invite_url?: string; email_sent_at?: string | null; email_error?: string | null };
+      data?: { invite_url?: string; email_sent_at?: string | null; email_error?: string | null; link_is_local?: boolean };
       error?: { code?: string; message?: string; limit?: number };
     };
     if (!res.ok) {
@@ -197,6 +213,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       // story 5023 — «sent» only when the mail really went out; on a server with no mail the person is told, in plain words, that nothing was sent and the link is theirs to hand over
       const mailSent = Boolean(json.data?.email_sent_at) && !json.data?.email_error;
       setInviteResult({ type: 'success', text: `${t(mailSent ? 'orgMemberInviteSuccess' : 'orgMemberInviteNoMail')}${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
+      setInviteLinkLocal(Boolean(json.data?.invite_url) && json.data?.link_is_local === true);
       setInviteEmail('');
       setInviteProjectIds([]);
       setShowProjectPicker(false);
@@ -403,6 +420,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             // 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert, 성공=status(ds Banner의 역할 규칙).
             <Banner tone={inviteResult.type === 'success' ? 'info' : 'failed'} className="break-all">{inviteResult.text}</Banner>
           )}
+          {inviteResult?.type === 'success' && inviteLinkLocal ? <LinkLocalNote note={t('orgInviteLinkLocalNote')} testId="org-invite-link-local-note" /> : null}
         </SettingsSection>
       )}
 
@@ -543,6 +561,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                   <div className="truncate text-ds-body text-ds-ink">{invite.email}</div>
                   <div className="mt-0.5 text-ds-small text-ds-ink-3">{t('orgInviteMeta', { role: invite.role, date: formatViewerScheduledAt(invite.expires_at, displayTimezone).display })}</div>
                   {(!invite.email_sent_at || invite.email_error) && invite.invite_url ? <div className="mt-0.5 text-ds-small text-ds-ink-3" data-testid="org-invite-no-mail-note">{t('orgInviteNoMailNote')}</div> : null}
+                  {invite.link_is_local && invite.invite_url ? <LinkLocalNote note={t('orgInviteLinkLocalNote')} testId="org-invite-link-local-row-note" /> : null}
                 </div>
                 {canManage ? (
                   <div className="flex shrink-0 flex-wrap gap-1">
