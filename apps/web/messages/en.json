@@ -2072,6 +2072,7 @@
     "orgMemberInviteSuccess": "Invite sent",
     "orgMemberInviteNoMail": "Invite created. No email was sent — copy the link below and send it yourself",
     "orgInviteNoMailNote": "No email was sent · copy the link and send it yourself",
+    "orgInviteLinkLocalNote": "No public address is set yet, so this link opens only on this server computer — first set one on the server computer with the command below",
     "orgMemberRoleChangeSuccess": "Role updated.",
     "orgMemberRemoveSuccess": "Member removed.",
     "orgMembersListHeading": "Members",

@@ -235,7 +235,7 @@ export function OnboardingForm({
       // `/api/auth/me` answers from the JWT claims — 200 with or without an organization (story #3195 · 카디르 QA PR#3617)
       // rule 4832 for this read too (Kadir QA 5124): an answer that cannot be read is NOT «no organization» — folding it would make a second
       // organization for a person who already has one. Stop with [다시 확인]; nothing is made.
-      let me: { data?: { member_id?: string | null; org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
+      let me: { data?: { member_id?: string | null; org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; email_verification_required?: boolean | null; display_name?: string | null } } | null;
       try {
         const res = await fetchWithAuth('/api/auth/me');
         if (!res.ok) throw new Error(String(res.status));
@@ -272,7 +272,8 @@ export function OnboardingForm({
       // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
       if (existing) { setOrgId(existing); setStep('first'); return; }
       // the e-mail gate normally stands before this page; if it is still unverified, say so and make nothing (story #2441)
-      if (me?.data?.email_verified === false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
+      // story 5023 (e): only when the server ASKS for it (`email_verification_required` — a server with no mail turns it off, and the page must not ask a person for what that server can never give); a server that says nothing keeps the old behaviour
+      if (me?.data?.email_verified === false && me?.data?.email_verification_required !== false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
       if (!ownOrg) {
         let pending: MyInvite[];
         try {
