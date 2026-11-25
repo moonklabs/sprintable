@@ -31,3 +31,12 @@ class OrgMemberResponse(BaseModel):
     deleted_at: datetime | None = None
     email: str | None = None
     name: str | None = None  # E-ONBOARDING S2: 실명(canonical Member.name → display_name, story #3758부터 email 폴백 0)
+    # story 5023 (d): the caller may hand THIS person a password-reset link (a server host, the caller an owner, the person eligible — `services/owner_password_reset.eligible`). False everywhere else (hosted · the desktop app · every list but the owner's)
+    password_reset_link_available: bool = False
+
+
+class PasswordResetLinkResponse(BaseModel):
+    """story 5023 (d): the link the owner hands over; it is a secret for its 30 minutes (whoever opens it sets the person's password) — never stored, never logged"""
+
+    reset_url: str
+    expires_in_seconds: int
