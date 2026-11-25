@@ -1,5 +1,5 @@
 import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
-import { isEmbeddedServer } from '@/lib/embedded-api-origin';
+import { isEmbeddedServer, isServerHost } from '@/lib/embedded-api-origin';
 import { DesktopRemoteConfirm } from '@/components/desktop/desktop-remote-confirm';
 
 /**
@@ -9,8 +9,8 @@ import { DesktopRemoteConfirm } from '@/components/desktop/desktop-remote-confir
 export default function DesktopRemotePage() {
   return (
     <div className="mx-auto w-full max-w-2xl p-6">
-      {/* story 4832: the app's own server has no remote control to turn on — the same one line as the pairing page */}
-      {isEmbeddedServer() ? <PhoneRelayLocalNotice /> : <DesktopRemoteConfirm />}
+      {/* story 4832: the app's own server has no remote control to turn on — the same one line as the pairing page. story 5024 AC2: a server host is the exception — it is the middle server, and its owner turns the org's remote control on here */}
+      {isEmbeddedServer() && !isServerHost() ? <PhoneRelayLocalNotice /> : <DesktopRemoteConfirm />}
     </div>
   );
 }

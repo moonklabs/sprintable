@@ -9,8 +9,8 @@ import { NAV_GROUPS, resolveNavGroups } from './nav-config';
 import { DEFAULT_NAV_V3_FLAGS } from './nav-v3-destinations';
 import { readNavV3FlagsFromEnv } from './nav-v3-flags-server';
 
-const embeddedMock = vi.hoisted(() => ({ on: false }));
-vi.mock('./embedded-api-origin', () => ({ isEmbeddedServer: () => embeddedMock.on }));
+const embeddedMock = vi.hoisted(() => ({ on: false, serverHost: false }));
+vi.mock('./embedded-api-origin', () => ({ isEmbeddedServer: () => embeddedMock.on || embeddedMock.serverHost, isServerHost: () => embeddedMock.serverHost }));
 
 const ids = (groups: ReturnType<typeof resolveNavGroups>, groupId: string) =>
   groups.find((g) => g.id === groupId)?.items.map((i) => i.id) ?? [];
@@ -71,6 +71,7 @@ describe('[SID:4832] the «데스크톱 앱» entry on the app\'s own server', (
   const saved = process.env.DESKTOP_DOWNLOAD_ENABLED;
   afterEach(() => {
     embeddedMock.on = false;
+    embeddedMock.serverHost = false;
     if (saved === undefined) delete process.env.DESKTOP_DOWNLOAD_ENABLED; else process.env.DESKTOP_DOWNLOAD_ENABLED = saved;
   });
 
@@ -83,6 +84,20 @@ describe('[SID:4832] the «데스크톱 앱» entry on the app\'s own server', (
     expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(true);
     expect(resolveNavGroups(readNavV3FlagsFromEnv()).flatMap((g) => g.items.map((i) => i.id))).toContain('desktop-app');
     process.env.DESKTOP_DOWNLOAD_ENABLED = 'false';
+    expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(false);
+  });
+
+  // story 5024 (AC2) — a workspace SERVER HOST (an embedded server with a public address) is where its owner turns the org's «원격 제어» on (/desktop): the entry is there, with or without the download switch
+  it('[SID:5024] a server host: the entry is drawn — with the download gate off AND on; the app\'s own loopback server (no public address) still draws none', () => {
+    embeddedMock.serverHost = true;
+    for (const gate of [undefined, 'false', 'true']) {
+      if (gate === undefined) delete process.env.DESKTOP_DOWNLOAD_ENABLED; else process.env.DESKTOP_DOWNLOAD_ENABLED = gate;
+      expect(readNavV3FlagsFromEnv().desktopDownloadEnabled, `gate ${String(gate)}`).toBe(true);
+      expect(resolveNavGroups(readNavV3FlagsFromEnv()).flatMap((g) => g.items.map((i) => i.id)), `gate ${String(gate)}`).toContain('desktop-app');
+    }
+    embeddedMock.serverHost = false;
+    embeddedMock.on = true; // the app's own server: embedded, no public address
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
     expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(false);
   });
 });
