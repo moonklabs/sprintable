@@ -287,3 +287,25 @@ async def test_the_check_reads_the_pins_at_the_moment_of_the_card_a_phone_unpinn
         await _pin(c, token, a)  # b was unpinned
         r = await _post_ask(c, device, _sealed_card(agent, setup_id, [a_id, b_id]))
         assert r.status_code == 422 and "envelope_receivers_mismatch" in r.text
+
+
+# ── the wordless card (contract v1.3 §1 ③): what the host may upload when it cannot learn who may read the real one ───────────────────────────────────
+
+async def test_a_wordless_terminal_only_card_is_accepted_by_a_setup_that_seals_and_the_server_holds_nothing_of_it_but_its_request_id(world):
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025o")
+        mine, mine_id = await _phone(c)
+        await _pin(c, token, mine, capabilities=["seal_to_v1"])
+        assert (await _post_ask(c, device, _sealed_card(agent, setup_id, [mine_id]))).status_code == 201  # the computer has sealed: a plaintext card WITH words is refused from now on
+        words = _ask(agent)
+        refused = await _post_ask(c, device, words)
+        assert refused.status_code == 422 and "sealed_required" in refused.text
+        wordless = {"request_id": str(uuid.uuid4()), "session_key": "s-1", "agent_member_id": agent, "runtime": "claude", "terminal_only": True,
+                    "expires_at": _ask(agent)["expires_at"]}
+        r = await _post_ask(c, device, wordless)
+        assert r.status_code == 201, r.text
+        row = (await _sql(fetch=("SELECT tool, summary, workdir, preview, envelope, input_hash, terminal_only, sealed FROM agent_permission_requests "
+                                 f"WHERE request_id = '{wordless['request_id']}'")))[0]
+        assert tuple(row[:6]) == (None, None, None, None, None, None) and row[6] is True and row[7] is False, "the server holds no word of it: only the request id (and the session it belongs to)"
+        notices = await _sql(fetch="SELECT count(*) FROM events WHERE event_type = 'dispatched' AND payload->>'event_type' = 'agent.permission_request'")
+        assert notices[0][0] == 1, "a terminal-only card sends no notice (only the sealed card above did)"
