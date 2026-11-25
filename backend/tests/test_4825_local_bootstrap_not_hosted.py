@@ -26,6 +26,7 @@ ALLOWED = {
     "backend/tests/test_4796_vm_env.py",
     "backend/tests/test_4825_local_bootstrap_not_hosted.py",
     "backend/tests/test_4825_local_bootstrap_realdb.py",
+    "backend/tests/test_5023a_first_owner_realdb.py",  # story 5023: a test that switches the embedded install on to try the server's first-owner rule
     "deploy/vm/bin/render_env.py",
     # story 4824's web side: SOURCE code (and its test) that reads the switch the app sets for its own server — not a deployment file; a hosted
     # web deployment never sets it and keeps the build-time rewrite
