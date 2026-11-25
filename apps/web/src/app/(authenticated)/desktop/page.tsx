@@ -10,7 +10,7 @@ import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-device
 import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
 import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
-import { isEmbeddedServer } from '@/lib/embedded-api-origin';
+import { isEmbeddedServer, isServerHost } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
@@ -36,13 +36,20 @@ import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
  * story 4829 (공개 2-⑥ (나)) — the phone relay needs the Sprintable server on the internet, which the app's own server (local mode, `isEmbeddedServer()`) does not have: there the three phone
  * cards («원격 제어» · «원격 기기» · «세션 관리») are one line of guidance. Hosted mode draws them as before — each card has its own condition, so the hosted children are
  * exactly what they were.
+ *
+ * story 5024 (AC2) — a workspace SERVER HOST (`isServerHost()`: an embedded server with a public address) is the app's own server too, but it IS the middle server a phone relays through, and this page
+ * is where its OWNER turns the org's «원격 제어» on (the card's own rule: the switch only for an owner — the server's `can_change` — everyone else reads the state). So there: the page opens
+ * without the download switch (a headless server has none), and the phone column draws the «원격 제어» card and nothing else of the phone cards (those wait for the lap on a real
+ * server host). The desktop app's own loopback server (`isEmbeddedServer()` without a public address) is exactly as before.
  */
 export default function DesktopPage() {
-  if (!isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) {
+  const embedded = isEmbeddedServer();
+  const serverHost = embedded && isServerHost();
+  if (!serverHost && !isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) {
     redirect(resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path);
   }
 
-  const local = isEmbeddedServer();
+  const local = embedded && !serverHost; // the app's own loopback server: no middle server at all
   // story 4889 (W7~W10): the screen is one composition — a head, two columns (left: the app on this Mac · right: the phone), then the connected computers across the full width.
   // Each card keeps its own condition (a card that says nothing draws nothing), so the columns are plain stacks.
   return (
@@ -62,14 +69,15 @@ export default function DesktopPage() {
             {local ? <PhoneRelayLocalNotice /> : null}
             {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
             {local ? null : <DesktopRemoteControlCard />}
+            {/* story 5024 AC2: …and on a server host (the only phone card drawn there) — an owner switches it on, the server decides who may */}
             {/* story #4533 — «원격 기기»: my phones as pairs, [빼기] only (the web never pairs) */}
-            {local ? null : <DesktopRemoteDevices />}
+            {embedded ? null : <DesktopRemoteDevices />}
             {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
-            {local ? null : <PhoneSessionManagement />}
+            {embedded ? null : <PhoneSessionManagement />}
           </div>
         </div>
         {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) · story 4832: a local install has one computer — nothing to list or disconnect */}
-        {local ? null : <DesktopDevices />}
+        {embedded ? null : <DesktopDevices />}
       </PageFrame>
     </>
   );

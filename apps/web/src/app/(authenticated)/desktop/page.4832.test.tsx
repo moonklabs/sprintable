@@ -6,8 +6,8 @@
 // deployment variable name it — and the helper's own test pins the exact value).
 import { describe, expect, it, vi } from 'vitest';
 
-const embedded = vi.hoisted(() => ({ on: false }));
-vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => embedded.on }));
+const embedded = vi.hoisted(() => ({ on: false, serverHost: false }));
+vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => embedded.on || embedded.serverHost, isServerHost: () => embedded.serverHost }));
 vi.mock('@/components/desktop/desktop-remote-confirm', () => ({ DesktopRemoteConfirm: () => null }));
 vi.mock('@/components/desktop/desktop-remote-on', () => ({ DesktopRemoteOn: () => null }));
 
@@ -25,5 +25,9 @@ describe('[SID:4832] /desktop/remote · /desktop/remote-on in local mode', () =>
     expect(mod.default().props.children.type).toBe(PhoneRelayLocalNotice);
     embedded.on = false;
     expect(mod.default().props.children.type).toBe(comp);
+    // story 5024 (AC2): a SERVER HOST is the middle server — its owner turns the org's remote control on here, so the page's own component is drawn (not the local guidance)
+    embedded.serverHost = true;
+    expect(mod.default().props.children.type).toBe(comp);
+    embedded.serverHost = false;
   });
 });
