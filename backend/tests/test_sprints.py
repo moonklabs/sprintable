@@ -304,7 +304,10 @@ async def test_cancel_planning_sprint_folds_via_transition_closed():
 async def test_cancel_non_planning_sprint_409_and_never_transitions(status):
     resp, transition = await _cancel_call(status)
     assert resp.status_code == 409, resp.text
-    assert "planning" in resp.json()["error"]["message"]
+    err = resp.json()["error"]
+    assert err["code"] == "SPRINT_NOT_PLANNING", err
+    assert err["status"] == status, err
+    assert "planning" in err["message"]
     transition.assert_not_awaited()
 
 

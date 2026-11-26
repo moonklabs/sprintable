@@ -100,7 +100,10 @@ async def test_cancel_non_planning_sprint_409_row_unchanged(status, velocity):
         try:
             resp = await client.post(f"/api/v2/sprints/{sprint_a}/cancel")
             assert resp.status_code == 409, resp.text
-            assert "planning" in resp.json()["error"]["message"]
+            err = resp.json()["error"]
+            assert err["code"] == "SPRINT_NOT_PLANNING", err
+            assert err["status"] == status, err
+            assert "planning" in err["message"]
         finally:
             await client.aclose()
 

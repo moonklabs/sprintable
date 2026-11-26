@@ -557,11 +557,15 @@ async def cancel_planning_sprint(
     if _sprint_for_scope.status != "planning":
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"시작 안 한(planning) 스프린트만 접을 수 있습니다 (현재 상태: {_sprint_for_scope.status}). "
-                "Only never-started (planning) sprints can be folded; "
-                "in-progress or review sprints are closed via the close endpoint."
-            ),
+            # the person-facing sentence is the web's (it translates the code); the API says it in English plus the code (no new Korean user-facing string — story 3779 guard)
+            detail={
+                "code": "SPRINT_NOT_PLANNING",
+                "message": (
+                    f"Only never-started (planning) sprints can be folded (current status: {_sprint_for_scope.status}); "
+                    "in-progress or review sprints are closed via the close endpoint."
+                ),
+                "status": _sprint_for_scope.status,
+            },
         )
     try:
         sprint = await transition_sprint(db, org_id, caller, id, "closed")
