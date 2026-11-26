@@ -86,6 +86,13 @@ describe('WorkItemPanel (container)', () => {
     await flush();
     expect(q('reading-view')!.dataset.id).toBe(S2); expect(q('panel-error')).toBeNull();
   });
+  it('⭐a page that is gone before its first read\'s turn never starts that read (codex: the queued first read must not run after the cleanup)', async () => {
+    const local = createRoot(document.createElement('div'));
+    act(() => { local.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><WorkItemPanel agentId={AGENT} /></NextIntlClientProvider>); });
+    act(() => { local.unmount(); }); // both synchronous: the queued microtask has not had its turn yet
+    await flush();
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled();
+  });
   it('⭐a late answer of an OLDER read is dropped (the retry\'s answer stands)', async () => {
     let release!: (r: Response) => void;
     answer = () => new Promise<Response>((r) => { release = r; });

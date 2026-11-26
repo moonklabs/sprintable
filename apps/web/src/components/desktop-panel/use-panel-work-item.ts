@@ -51,9 +51,10 @@ export function usePanelWorkItem(agentId: string): PanelWorkItem & { retry: () =
   // (a new agent id is a new page: the component is keyed by it — see WorkItemPanel — so the state starts at «loading» without a reset here)
   useEffect(() => {
     if (!isPanelId(agentId)) return; // an address that is not a uuid is never read (the page says so itself)
-    queueMicrotask(() => { void read(); }); // (the first read starts right after the effect — never a state change inside the effect body)
+    let gone = false; // the page may be gone before the first read's turn comes (codex): a read queued by a page that is gone is never started
+    queueMicrotask(() => { if (!gone) void read(); }); // (the first read starts right after the effect — never a state change inside the effect body)
     const timer = setInterval(() => { void read(); }, POLL_MS);
-    return () => { seq.current += 1; clearInterval(timer); };
+    return () => { gone = true; seq.current += 1; clearInterval(timer); };
   }, [agentId, read]);
 
   const retry = useCallback(() => { if (!isPanelId(agentId)) return; setState({ phase: 'loading' }); void read(); }, [agentId, read]);
