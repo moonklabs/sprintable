@@ -237,12 +237,18 @@ async def test_end_to_end_full_hitl_roundtrip_via_real_gate_service():
                 id=delegate_id, org_id=org_id, project_id=project_id, type="agent",
                 name="SA3 E2E Delegate", role="member", is_active=True,
             )
+            # story #5032 (C2): a task is read through its ROOM (the task's context room, made with it by SendMessage) — the delegate is a participant of it; a task with no room reads nothing
+            room_id = uuid.uuid4()
+            from app.models.conversation import Conversation, ConversationParticipant
+
             task = A2ATask(
-                id=uuid.uuid4(), context_id=uuid.uuid4(), root_message_id=uuid.uuid4(),
+                id=uuid.uuid4(), context_id=room_id, root_message_id=uuid.uuid4(),
                 member_id=delegate_id, state="TASK_STATE_WORKING", history=[], artifacts=[],
                 task_metadata={},
             )
-            s.add_all([delegate_member, task])
+            s.add_all([delegate_member, Conversation(id=room_id, project_id=project_id, org_id=org_id, type="group", title="A2A task")])
+            await s.flush()
+            s.add_all([task, ConversationParticipant(conversation_id=room_id, member_id=delegate_id)])
             await s.commit()
             task_id = task.id
 

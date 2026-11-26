@@ -58,8 +58,14 @@ async def _seed(session):
         id=delegate_id, org_id=org_id, project_id=project_id, type="agent",
         name="SA5 Delegate", role="member", is_active=True,
     )
+    # story #5032 (C2): a task is read through its ROOM (the task's context room, made with it by SendMessage) — the delegate is a participant of it; a task with no room reads nothing
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    room_id = uuid.uuid4()
+    room = Conversation(id=room_id, project_id=project_id, org_id=org_id, type="group", title="A2A task")
+    seat = ConversationParticipant(conversation_id=room_id, member_id=delegate_id)
     task = A2ATask(
-        id=uuid.uuid4(), context_id=uuid.uuid4(), root_message_id=uuid.uuid4(),
+        id=uuid.uuid4(), context_id=room_id, root_message_id=uuid.uuid4(),
         member_id=delegate_id, state="TASK_STATE_WORKING", history=[], artifacts=[],
         task_metadata={},
     )
@@ -67,7 +73,9 @@ async def _seed(session):
         id=uuid.uuid4(), org_id=org_id, work_item_id=uuid.uuid4(), work_item_type="story",
         gate_type="pr_review", status="pending",
     )
-    session.add_all([member, task, gate])
+    session.add_all([member, room, gate])
+    await session.flush()
+    session.add_all([task, seat])
     await session.commit()
     return org_id, delegate_id, task, gate
 
