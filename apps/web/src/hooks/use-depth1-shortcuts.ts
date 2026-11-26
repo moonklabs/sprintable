@@ -18,6 +18,7 @@ export function useDepth1Shortcuts(): void {
   const flatHref = useFlatHref();
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (event.isComposing) return; // an IME is composing text (Korean · Japanese · Chinese): the key belongs to the composition, not to the shell
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (!['1', '2', '3', '4'].includes(event.key)) return;
       const target = event.target as HTMLElement | null;

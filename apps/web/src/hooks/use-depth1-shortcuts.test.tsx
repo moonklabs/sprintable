@@ -9,7 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace: vi.fn(), back: vi.fn() }) }));
-vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
+vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => `${href}?p=P` })); // not the identity: a regression to a bare router.push(place.path) must fail
 const { useDepth1Shortcuts } = await import('./use-depth1-shortcuts');
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -37,7 +37,7 @@ function press(init: KeyboardEventInit, target: EventTarget = window): KeyboardE
 
 describe('⌘1~⌘4 — 1뎁스 넷', () => {
   it.each([
-    ['1', '/org-briefing'], ['2', '/chats'], ['3', '/organization/workforce'], ['4', '/settings'],
+    ['1', '/org-briefing?p=P'], ['2', '/chats?p=P'], ['3', '/organization/workforce?p=P'], ['4', '/settings?p=P'],
   ])('⭐⌘%s → %s 으로 간다(막는 기본 동작도 막는다)', async (key, path) => {
     await mount();
     const e = press({ key, metaKey: true });
@@ -49,7 +49,7 @@ describe('⌘1~⌘4 — 1뎁스 넷', () => {
   it('Windows · Linux는 Ctrl이다(Ctrl+3 → 에이전트)', async () => {
     await mount();
     press({ key: '3', ctrlKey: true });
-    expect(push).toHaveBeenCalledWith('/organization/workforce');
+    expect(push).toHaveBeenCalledWith('/organization/workforce?p=P');
   });
 
   it.each([
@@ -58,6 +58,7 @@ describe('⌘1~⌘4 — 1뎁스 넷', () => {
     ['⌘ 없이 숫자만', { key: '2' }],
     ['5는 자리가 없다', { key: '5', metaKey: true }],
     ['0도 아니다', { key: '0', metaKey: true }],
+    ['한글 등 입력기가 글자를 조립하는 중(isComposing)', { key: '2', metaKey: true, isComposing: true }],
   ] as const)('⭐아무 일도 없다: %s', async (_name, init) => {
     await mount();
     const e = press({ ...init });
@@ -80,7 +81,7 @@ describe('⌘1~⌘4 — 1뎁스 넷', () => {
     await mount();
     const field = container.querySelector('[data-testid="field"]')!;
     press({ key: '4', metaKey: true }, field);
-    expect(push).toHaveBeenCalledWith('/settings');
+    expect(push).toHaveBeenCalledWith('/settings?p=P');
   });
 
   it('화면이 사라지면(unmount) 키 처리도 거둬진다 — 남은 리스너가 없다', async () => {
