@@ -781,6 +781,11 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/conversations/{}/card",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/conversations/{}/circuit-breaker/release",
 "kind": "unknown"
 },
