@@ -114,7 +114,7 @@ async function build() {
         import { ToastProvider } from './src/components/ui/toast';
         window.__mount = (w) => {
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, React.createElement(ToastProvider, null,
-            React.createElement('div', { id: 'slot', className: 'flex flex-col overflow-hidden', style: { width: w + 'px', height: '640px' } },
+            React.createElement('div', { id: 'slot', className: 'flex flex-col overflow-hidden @container', style: { width: w + 'px', height: '640px' } },
               React.createElement(ThreadPanel, { parentMessage: ${JSON.stringify(PARENT)}, conversationId: 'c1', currentTeamMemberId: 'me-1', projectId: 'p1', onClose() {} })))));
         };`,
       resolveDir: WEB, loader: 'tsx',
@@ -125,7 +125,7 @@ async function build() {
     plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...tailwindCandidates(js), 'flex flex-col overflow-hidden'];
+  const candidates = [...tailwindCandidates(js), 'flex flex-col overflow-hidden @container'];
   built = { js, css: await css(candidates) };
   return built;
 }

@@ -1296,7 +1296,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           // `isMobileThreadView ? 'flex-1' : 'hidden w-80 …'` therefore always took the first branch, and on desktop the thread panel was `flex-1` like the main
           // column — an even split of the space, not the fixed 320 px slot the second branch described (that branch was dead code). Now: full screen on a phone
           // (`flex-1`), a FIXED slot from lg up (`flex-none`): 300 px between lg and xl, 320 px from xl.
-          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden flex-1 lg:w-[300px] lg:flex-none xl:w-64">
+          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 @container flex flex-col overflow-hidden flex-1 lg:w-[300px] lg:flex-none xl:w-64">
             <ThreadPanel
               key={activeThread.id}
               parentMessage={activeThread}
