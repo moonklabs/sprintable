@@ -47,8 +47,8 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
   const folded = short && Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
-    // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20 · py-3 = 24 + 40 + room), folded or not, so the short window needs no smaller padding of its own
-    <header data-testid="room-head" className="min-h-20 flex-shrink-0 border-b border-ds-line px-6 py-3 max-lg:hidden">
+    // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20). Folded (short window) the content is two rows of 40-px controls (62), so py-2 (16) lands it on exactly 80; py-3 would make it 86
+    <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'py-2' : 'py-3'}`}>
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
