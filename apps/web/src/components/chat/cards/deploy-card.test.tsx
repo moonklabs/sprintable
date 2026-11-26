@@ -99,6 +99,33 @@ describe('what the card is a card of', () => {
   });
 });
 
+describe('a press shows its own result at once (PO, dev 11-26: the text stayed until a reload while the server had changed)', () => {
+  const ROWS_NOT = () => json(200, { data: [{ id: 'rec-other', member_id: 'someone' }] });
+  const ROWS_IN = () => json(200, { data: [{ id: REC, member_id: AGENT, permission: 'granted' }] });
+  it('«넣기» → «들어 있어요» + «빼기» even when every later read still sees the old rows (the write answered 201 with the record)', async () => {
+    stub({ access: ROWS_NOT }); await show();
+    await press('이 프로젝트에 넣기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요'); expect(container.textContent).not.toContain('들어 있지 않아요');
+    expect(btn('이 프로젝트에서 빼기')).toBeTruthy(); expect(btn('이 프로젝트에 넣기')).toBeUndefined();
+  });
+  it('«빼기» → «들어 있지 않아요» + «넣기» even when every later read still sees the old rows — and the next press uses the NEW state (a second «넣기» is a grant, not a stale take-back)', async () => {
+    stub({ access: ROWS_IN }); await show();
+    await press('이 프로젝트에서 빼기'); await press('빼기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); expect(container.textContent).not.toContain('이 프로젝트에 들어 있어요');
+    expect(btn('이 프로젝트에 넣기')).toBeTruthy(); expect(btn('이 프로젝트에서 빼기')).toBeUndefined();
+    await press('이 프로젝트에 넣기');
+    expect(writes().map((c) => c.method)).toEqual(['DELETE', 'POST']);
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
+  });
+  it('a write that answers without a usable record is not claimed: the card READS again and shows what the read says', async () => {
+    stub({ post: () => json(201, { data: {} }) }); await show();
+    const getsBefore = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+    await press('이 프로젝트에 넣기');
+    expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length).toBe(getsBefore + 1);
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
+  });
+});
+
 describe('placing and taking out', () => {
   it('«넣기» sends exactly ONE project-access grant of THIS agent to THIS project, then the card shows «들어 있어요» and offers «빼기»', async () => {
     stub(); await show();

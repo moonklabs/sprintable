@@ -55,3 +55,14 @@ describe('«nothing to show» and «not found» are quiet', () => {
     expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
   });
 });
+
+describe('the «this app cannot show this card» card is quiet too', () => {
+  it('a card of a kind this build does not know is two supporting lines, not a bold title in a framed empty state', async () => {
+    const { UnknownCard } = await import('./card-catalog');
+    await draw(<UnknownCard />);
+    const ps = Array.from(container.querySelectorAll('[data-testid="chat-card-unknown"] p'));
+    expect(ps.map((p) => p.textContent)).toEqual(['이 앱 버전에서는 이 카드를 볼 수 없어요', '앱을 새 버전으로 올리면 보여요']);
+    for (const p of ps) { expect(p.className).toMatch(/text-ds-small/); expect(p.className).not.toMatch(/font-(semibold|bold|medium)|text-ds-card-title/); }
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
+  });
+});
