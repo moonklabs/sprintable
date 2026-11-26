@@ -3550,6 +3550,11 @@
 "kind": "object"
 },
 {
+"method": "POST",
+"path": "/api/v2/sprints/{}/cancel",
+"kind": "object"
+},
+{
 "method": "GET",
 "path": "/api/v2/sprints/{}/checkin",
 "kind": "unknown"
