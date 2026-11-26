@@ -6121,7 +6121,7 @@
     "cardSampleStatus": "In progress",
     "cardSampleLong": "A sample to check that a very long title does not make the card wider: it shows two lines and cuts the rest. A sample to check that a very long title does not make the card wider: it shows two lines and cuts the rest.",
     "kanbanNow": "Working on now",
-    "kanbanTotal": "{count} stories",
+    "kanbanTotal": "{count, plural, one {# story} other {# stories}}",
     "kanbanOpen": "Open the sprint in the side panel",
     "closeThread": "Close thread",
     "threadKindEvent": "Event",

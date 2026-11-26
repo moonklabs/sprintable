@@ -33,7 +33,12 @@ async function dataOf(res: Response): Promise<{ data: unknown; meta: unknown }> 
 
 export async function fetchKanbanSummary(sprintId: string): Promise<KanbanSummary> {
   const id = encodeURIComponent(sprintId);
-  const [sprintRes, storiesRes] = await Promise.all([fetchWithAuth(`/api/sprints/${id}`), fetchWithAuth(`/api/stories?sprint_id=${id}&limit=${KANBAN_PAGE}`)]);
+  let sprintRes: Response; let storiesRes: Response;
+  try {
+    [sprintRes, storiesRes] = await Promise.all([fetchWithAuth(`/api/sprints/${id}`), fetchWithAuth(`/api/stories?sprint_id=${id}&limit=${KANBAN_PAGE}`)]);
+  } catch {
+    throw new EntitySummaryError(502); // a read that did not even answer (network) is a fault worth a «try again», whichever leg it was
+  }
   const sprint = (await dataOf(sprintRes)).data;
   const { data: stories, meta } = await dataOf(storiesRes);
   if (typeof sprint !== 'object' || sprint === null || Array.isArray(sprint) || !Array.isArray(stories)) throw new EntitySummaryError(502);
