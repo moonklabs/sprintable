@@ -51,9 +51,9 @@ describe('키트 규칙 ① 글자 — 글꼴 하나 · 굵기 셋 · 줄높이 
     for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) expect(lh(n) / size(n), n).toBe(1.5);
   });
 
-  it('⭐16 아래 글자는 고정폭(mono) 칩 · 알약 · 숫자 배지 자리 둘뿐(14) — 쪽 제목 · 이름 · 기본 · 설명 단은 모두 16 이상', () => {
-    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg']) expect(size(n), n).toBeGreaterThanOrEqual(16);
-    expect([size('mono-md'), size('mono-sm')]).toEqual([14, 14]);
+  it('⭐ds 글자 단은 전부 16 이상 — 쪽 제목 · 이름 · 기본 · 설명 · 고정폭 셋(story 5048 ②d: 고정폭 둘 14 → 16, D1 = 가)', () => {
+    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) expect(size(n), n).toBeGreaterThanOrEqual(16);
+    expect([size('mono-md'), size('mono-sm')]).toEqual([16, 16]);
   });
 
   it('⭐굵기는 400 · 500 · 600 셋만 쓴다', () => {
@@ -119,5 +119,24 @@ describe('키트 규칙 ① 색 역할 — 글자 셋 · 면 넷 · 선 · 진�
 
   it('⭐라이트의 «패널»(내용 칸)은 흰색이고 글자 본문은 검정(키트: 면 #ffffff · 본문 #000000)', () => {
     expect([light['surface'], light['ink']]).toEqual(['#ffffff', '#000000']);
+  });
+});
+
+describe('키트 규칙 ②d — 가장 작은 글자도 16(D1 = 가) · 정의 한 곳', () => {
+  const globals = readFileSync(join(__dirname, '..', 'app', 'globals.css'), 'utf8');
+  const sizeOf = (name: string) => {
+    const m = new RegExp(`--text-${name}:\\s*([\\d.]+)(rem|px);`).exec(globals);
+    if (!m) throw new Error(`--text-${name} not defined in globals.css`);
+    return Number(m[1]) * (m[2] === 'rem' ? 16 : 1);
+  };
+  it('⭐xs · sm · micro는 16 — Tailwind 기본(12 · 14)과 옛 10을 한 곳에서 다시 정의(호출부 0곳 변경)', () => {
+    expect([sizeOf('xs'), sizeOf('sm'), sizeOf('micro')]).toEqual([16, 16, 16]);
+    for (const n of ['xs', 'sm', 'micro']) expect(globals).toMatch(new RegExp(`--text-${n}--line-height:\\s*1\\.5;`));
+  });
+  it('⭐ds 고정폭 글자도 16/24(mono-lg · md · sm)', () => {
+    for (const n of ['mono-lg', 'mono-md', 'mono-sm']) {
+      expect(new RegExp(`--text-ds-${n}:\\s*16px;`).test(theme)).toBe(true);
+      expect(new RegExp(`--text-ds-${n}--line-height:\\s*24px;`).test(theme)).toBe(true);
+    }
   });
 });
