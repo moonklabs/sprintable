@@ -3,7 +3,7 @@
  * (the org's projects · the epics' progress · every agent's state · who is placed where) and this decides the channel lines, the faces in them and the «열외» lane.
  *
  * The rules (each has a test that fails when it is undone):
- *  1. One line per project (a «channel»): its progress = the done stories / all stories of the project's IN-PROGRESS (`active`) epics. No epic in progress = no number (never «0/0»).
+ *  1. One line per project (a «channel»): its progress = the done stories / all stories of the project's IN-PROGRESS (`active`) epics. No epic in progress = no number (never «0/0»); an unreadable read = «unknown», not «none».
  *  2. A face stands in a channel when the agent has access to that project (a grant record); an agent with no grant in the scope stands in the «열외» lane. The scope is the whole org, or the one
  *     project the filter picked (then «열외» = «not placed in THIS project»).
  *  3. The state dot is the state the Today list already shows: the SAME rank (`stateRank`, through `toShown`) read as four words — the dot cannot disagree with the list it replaces.
@@ -40,6 +40,8 @@ export interface BoardChannel {
   name: string;
   /** null = no epic in progress (no number drawn) */
   progress: { done: number; total: number } | null;
+  /** true = the epics could not be read: said as «unknown» (never as «no goal in progress») */
+  progressUnknown: boolean;
   faces: BoardFace[];
   /** how many rows in «내 손이 필요해요» belong to this project */
   needsHand: number;
@@ -56,7 +58,8 @@ export const grantKey = (agentId: string, projectId: string): string => `${agent
 
 export interface ControlBoardInput {
   projects: BoardProject[];
-  epics: BoardEpic[];
+  /** null = the read of the epics failed */
+  epics: BoardEpic[] | null;
   /** every agent of the org (system publisher already left out by the caller) */
   agents: AgentStateRow[];
   /** `${agentId}::${projectId}` → grant record id; `null` = the viewer may not read it (readOnly) */
@@ -76,13 +79,14 @@ export function deriveControlBoard(input: ControlBoardInput): ControlBoardModel 
   const scope = [...projects].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).filter((p) => filterProjectId === null || p.id === filterProjectId);
 
   const channels: BoardChannel[] = scope.map((p) => {
-    const mine = epics.filter((e) => e.projectId === p.id && e.status === 'active' && e.total > 0);
+    const mine = (epics ?? []).filter((e) => e.projectId === p.id && e.status === 'active' && e.total > 0);
     const total = mine.reduce((n, e) => n + e.total, 0);
     const done = mine.reduce((n, e) => n + e.done, 0);
     return {
       projectId: p.id,
       name: p.name,
       progress: total > 0 ? { done, total } : null,
+      progressUnknown: epics === null,
       faces: readOnly ? [] : faces.filter((f) => grants[grantKey(f.agentId, p.id)] !== undefined),
       needsHand: needsHandByProject[p.id] ?? 0,
     };

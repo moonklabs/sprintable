@@ -11,8 +11,8 @@ const REREAD_MS = 30_000;
  * story #4833 — every agent's state in one read (the proxy answers the standard envelope `{ data: rows, meta: { totalCount } }`): again every 30 s and when any `desktop.session_changed` comes (the DM strip's own rule, for all agents).
  * A read that fails keeps the last rows (a network blip must not blank the list); `loaded` is false until the first answer (no «0명» flash).
  */
-export function useAgentStates(): { rows: AgentStateRow[]; loaded: boolean; readAt: number } {
-  const [state, setState] = useState<{ rows: AgentStateRow[]; loaded: boolean; readAt: number }>({ rows: [], loaded: false, readAt: 0 });
+export function useAgentStates(): { rows: AgentStateRow[]; loaded: boolean; readAt: number; failed: boolean } {
+  const [state, setState] = useState<{ rows: AgentStateRow[]; loaded: boolean; readAt: number; failed: boolean }>({ rows: [], loaded: false, readAt: 0, failed: false });
   const [nudges, setNudges] = useState(0);
 
   useSseNotifications({
@@ -29,8 +29,9 @@ export function useAgentStates(): { rows: AgentStateRow[]; loaded: boolean; read
         .then((rows) => {
           if (off) return;
           // a failed read keeps the rows but moves the clock on: a limit's «풀리는 때가 지났어요» is judged on this page's time, not on the last good read's
-          if (!rows) { setState((prev) => (prev.loaded ? { ...prev, readAt: Date.now() } : prev)); return; }
-          setState({ rows, loaded: true, readAt: Date.now() });
+          // story 5033: `failed` = the FIRST read has not succeeded yet (the board draws an error with a retry instead of an endless skeleton); a later success clears it
+          if (!rows) { setState((prev) => (prev.loaded ? { ...prev, readAt: Date.now() } : { ...prev, failed: true })); return; }
+          setState({ rows, loaded: true, readAt: Date.now(), failed: false });
         });
     };
     read();

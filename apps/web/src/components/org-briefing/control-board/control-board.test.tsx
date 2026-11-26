@@ -31,10 +31,10 @@ const onDrop = vi.fn();
 const onFilter = vi.fn();
 beforeEach(() => { onPlace.mockReset(); onTakeOut.mockReset(); onDrop.mockReset(); onFilter.mockReset(); });
 
-async function mount(opts: { grants: Record<string, string> | null; agents: AgentStateRow[]; epics?: Array<{ projectId: string; total: number; done: number }>; needsHand?: Record<string, number>; outcome?: ControlBoardViewProps['outcome']; filter?: string | null }) {
+async function mount(opts: { grants: Record<string, string> | null; agents: AgentStateRow[]; epics?: Array<{ projectId: string; total: number; done: number }> | null; needsHand?: Record<string, number>; outcome?: ControlBoardViewProps['outcome']; filter?: string | null }) {
   const projects = [P1, P2];
   const filter = opts.filter ?? null;
-  const model = deriveControlBoard({ projects, epics: (opts.epics ?? []).map((e) => ({ ...e, status: 'active' })), agents: opts.agents, grants: opts.grants, filterProjectId: filter, needsHandByProject: opts.needsHand ?? {} });
+  const model = deriveControlBoard({ projects, epics: opts.epics === null ? null : (opts.epics ?? []).map((e) => ({ ...e, status: 'active' })), agents: opts.agents, grants: opts.grants, filterProjectId: filter, needsHandByProject: opts.needsHand ?? {} });
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -96,9 +96,18 @@ describe('structure: the areas and their order', () => {
     expect(/\d/.test(clone.textContent!.replace('4/10', ''))).toBe(false);
     expect(qa('[data-testid="control-channel-needs-hand"]').length).toBe(1); // a project with nothing waiting draws no badge
   });
+  it('⭐the words a person reads: lane «빠진 에이전트», a took-out line that says it comes back (the particle follows the name), never «열외» / «배치»', async () => {
+    await mount({ grants: GRANTS, agents: AGENTS, outcome: { kind: 'tookOut', agentName: '댄', projectName: 'Beta' } });
+    expect(q('[data-testid="control-outcome"]')!.textContent).toBe('댄을 Beta에서 뺐어요. 다시 넣으면 돌아와요.');
+    expect(container.textContent).not.toMatch(/열외|배치/);
+  });
+  it('⭐an unreadable epics read says «진행률을 읽지 못했어요», not «진행 중인 목표가 없어요»', async () => {
+    await mount({ grants: GRANTS, agents: AGENTS, epics: null });
+    expect(qa('[data-testid="control-channel-progress"]').map((e) => e.textContent)).toEqual(['진행률을 읽지 못했어요', '진행률을 읽지 못했어요']);
+  });
   it('a failed or done outcome is said under the board', async () => {
-    await mount({ grants: GRANTS, agents: AGENTS, outcome: { kind: 'failed', agentName: 'Ann', projectName: 'Beta' } });
-    expect(q('[data-testid="control-outcome"]')!.textContent).toContain('바꾸지 못했어요');
+    await mount({ grants: GRANTS, agents: AGENTS, outcome: { kind: 'placeFailed', agentName: 'Ann', projectName: 'Beta' } });
+    expect(q('[data-testid="control-outcome"]')!.textContent).toContain('지금 넣을 수 없어요');
     expect(q('[data-testid="control-outcome"] [role="alert"]')).not.toBeNull();
   });
 });
@@ -108,7 +117,7 @@ describe('press counts (held): the menu is TWO presses, nothing needs a third', 
     await mount({ grants: GRANTS, agents: AGENTS });
     const ann = q('[data-testid="control-channel"] [data-testid="control-face"] [data-testid="control-face-menu"]')!;
     await press(ann);
-    expect(menuItems().map((m) => m.textContent)).toEqual(['Beta에 배치', 'Alpha에서 열외']);
+    expect(menuItems().map((m) => m.textContent)).toEqual(['Beta에 넣기', 'Alpha에서 빼기']);
     await press(menuItems()[0]!);
     expect(presses).toBe(2);
     expect(onPlace).toHaveBeenCalledTimes(1);
@@ -119,7 +128,7 @@ describe('press counts (held): the menu is TWO presses, nothing needs a third', 
   it('⭐⋯ button → «열외» entry = 2 presses → takeOut of THAT channel (no confirm step in between)', async () => {
     await mount({ grants: GRANTS, agents: AGENTS });
     await press(q('[data-testid="control-channel"] [data-testid="control-face-menu"]')!);
-    await press(menuItems().find((m) => m.textContent === 'Alpha에서 열외')!);
+    await press(menuItems().find((m) => m.textContent === 'Alpha에서 빼기')!);
     expect(presses).toBe(2);
     expect(onTakeOut).toHaveBeenCalledTimes(1);
     expect(onTakeOut.mock.calls[0]![0].agentId).toBe('id-Ann');
@@ -132,7 +141,7 @@ describe('press counts (held): the menu is TWO presses, nothing needs a third', 
     presses += 1;
     await act(async () => { face.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 5, clientY: 5 })); });
     const viaRightClick = menuItems().map((m) => m.textContent);
-    expect(viaRightClick).toEqual(['Beta에 배치', 'Alpha에서 열외']);
+    expect(viaRightClick).toEqual(['Beta에 넣기', 'Alpha에서 빼기']);
     await press(menuItems()[0]!);
     expect(presses).toBe(2);
     expect(onPlace).toHaveBeenCalledTimes(1);
@@ -140,7 +149,7 @@ describe('press counts (held): the menu is TWO presses, nothing needs a third', 
   it('a benched face\'s menu offers a place per project and no «열외» entry', async () => {
     await mount({ grants: GRANTS, agents: AGENTS });
     await press(q('[data-testid="control-bench"] [data-testid="control-face-menu"]')!);
-    expect(menuItems().map((m) => m.textContent)).toEqual(['Alpha에 배치', 'Beta에 배치']);
+    expect(menuItems().map((m) => m.textContent)).toEqual(['Alpha에 넣기', 'Beta에 넣기']);
   });
 });
 
@@ -151,13 +160,13 @@ describe('who gets the hands', () => {
     expect(qa('[data-testid="control-face-handle"], [data-testid="control-face-menu"]').length).toBe(0);
     expect(q('[data-testid="control-bench"]')!.textContent).not.toContain('끌면');
     expect(q('[data-testid="control-bench"] h3')!.textContent).toBe('에이전트');
-    expect(q('[data-testid="control-channel"]')!.textContent).toContain('배치는 조직 관리자만 볼 수 있어요');
+    expect(q('[data-testid="control-channel"]')!.textContent).toContain('조직 관리자만 볼 수 있어요');
   });
-  it('an org admin gets a handle (drag) and a ⋯ button on every face, and the lane is called «열외»', async () => {
+  it('an org admin gets a handle (drag) and a ⋯ button on every face, and the lane is called «빠진 에이전트»', async () => {
     await mount({ grants: GRANTS, agents: AGENTS });
     expect(qa('[data-testid="control-face-handle"]').length).toBe(2);
     expect(qa('[data-testid="control-face-menu"]').length).toBe(2);
-    expect(q('[data-testid="control-bench"] h3')!.textContent).toBe('열외');
+    expect(q('[data-testid="control-bench"] h3')!.textContent).toBe('빠진 에이전트');
   });
 });
 

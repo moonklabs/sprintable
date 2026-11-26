@@ -17,7 +17,7 @@ function row(name: string, over: Partial<AgentStateRow> = {}): AgentStateRow {
   };
 }
 const epic = (projectId: string | null, total: number, done: number, status = 'active'): BoardEpic => ({ projectId, status, total, done });
-const base = { projects: [P1, P2], epics: [] as BoardEpic[], agents: [] as AgentStateRow[], grants: {} as Record<string, string>, filterProjectId: null as string | null, needsHandByProject: {} as Record<string, number> };
+const base = { projects: [P1, P2], epics: [] as BoardEpic[] | null, agents: [] as AgentStateRow[], grants: {} as Record<string, string>, filterProjectId: null as string | null, needsHandByProject: {} as Record<string, number> };
 
 describe('progress = the done stories / all stories of the project\'s IN-PROGRESS epics', () => {
   it('⭐sums only the active epics of that project (a finished epic and another project\'s epic do not count)', () => {
@@ -27,6 +27,11 @@ describe('progress = the done stories / all stories of the project\'s IN-PROGRES
   it('⭐a project with no epic in progress has NO number (never «0/0»)', () => {
     const m = deriveControlBoard({ ...base, epics: [epic('p2', 8, 1), epic('p1', 100, 100, 'done'), epic('p1', 0, 0)] });
     expect(m.channels.find((c) => c.projectId === 'p1')!.progress).toBeNull();
+  });
+  it('⭐an unreadable epics read = «unknown» on every channel, never «none in progress»', () => {
+    const m = deriveControlBoard({ ...base, epics: null });
+    expect(m.channels.map((c) => [c.progress, c.progressUnknown])).toEqual([[null, true], [null, true]]);
+    expect(deriveControlBoard({ ...base, epics: [] }).channels.map((c) => c.progressUnknown)).toEqual([false, false]);
   });
   it('channels are ordered by project name (not by the order the server listed them)', () => {
     const m = deriveControlBoard({ ...base, projects: [P3, P2, P1] });

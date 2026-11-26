@@ -139,8 +139,8 @@ export function OrgBriefingShell() {
             </div>
           ) : null}
           {/* story 5033 (C3) — the home opens on the control board: one line per project (progress · the faces placed in it · what needs you), the «열외» lane, one filter; «내 손이 필요해요» (the list + its detail) stays right under it.
-              The old «에이전트 상태» line list is replaced by the faces (the same state words); every agent's full state sentence stays on the face's tooltip and in the agents place. */}
-          <ControlBoard needsHandByProject={needsHandByProject} />
+              The old «에이전트 상태» line list is replaced by the faces (the same state words); every agent's full state sentence stays on the face's tooltip and in the agents place. Keyed by the organization: switching organizations drops everything the board held (codex 5958). */}
+          <ControlBoard key={dashboard.orgId ?? 'no-org'} needsHandByProject={needsHandByProject} />
           <HomeScreen model={model} sources={sources} partial={partial || loadError} />
           <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>

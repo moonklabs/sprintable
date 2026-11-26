@@ -14,6 +14,8 @@ import { ProgressBar } from '@/components/ds/progress-bar';
 import { NativeSelect } from '@/components/ds/select';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { sessionStateLabel } from '@/components/chat/agent-session-strip';
+import { useEmbeddedServer } from '@/components/embedded-server-context';
+import { pickEulReulJosa } from '@/lib/korean-particle';
 import { cn } from '@/lib/utils';
 import { withProjectParam } from '@/lib/with-project-param';
 import { deriveControlBoard, type BoardFace, type BoardProject, type FaceWord } from './derive-control-board';
@@ -75,11 +77,12 @@ function Face({ face, channel, actions }: { face: BoardFace; channel: BoardProje
   const t = useTranslations('orgBriefing');
   const tState = useTranslations('chats.agentSession');
   const tAgents = useTranslations('agents');
+  const embedded = useEmbeddedServer(); // the app's own server: one computer, no device name (the list's rule)
   const dragId = `${channel?.id ?? BENCH_ID}::${face.agentId}`;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: dragId, data: { agentId: face.agentId, projectId: channel?.id ?? null }, disabled: !actions.canWrite });
   const { row } = face;
   const href = row.conversation_id && row.conversation_project_id ? withProjectParam(`/chats/${row.conversation_id}`, row.conversation_project_id) : null;
-  const sentence = row.state === null ? tAgents('agentNotConnected') : sessionStateLabel(row, tState);
+  const sentence = row.state === null ? (row.bound_device_name && !embedded ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : tAgents('agentNotConnected')) : sessionStateLabel(row, tState);
   const body = (
     <div
       className={cn('flex min-w-0 items-center gap-2 rounded-ds-control border border-ds-line bg-ds-surface px-2 py-1.5', isDragging && 'opacity-50')}
@@ -142,8 +145,14 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
     const action = resolveDrop(from, e.over ? String(e.over.id) : null);
     if (action) onDrop(action);
   };
-  const outcomeText = outcome
-    ? t(outcome.kind === 'placed' ? 'outcomePlaced' : outcome.kind === 'tookOut' ? 'outcomeTookOut' : 'outcomeFailed', { agent: outcome.agentName, project: outcome.projectName })
+  const outcomeKey = outcome ? ({ placed: 'outcomePlaced', tookOut: 'outcomeTookOut', placeFailed: 'outcomePlaceFailed', takeOutFailed: 'outcomeTakeOutFailed' } as const)[outcome.kind] : null;
+  const outcomeText = outcome && outcomeKey
+    ? ({
+      outcomePlaced: () => t('outcomePlaced', { agent: outcome.agentName, project: outcome.projectName, eul: pickEulReulJosa(outcome.agentName) }),
+      outcomeTookOut: () => t('outcomeTookOut', { agent: outcome.agentName, project: outcome.projectName, eul: pickEulReulJosa(outcome.agentName) }),
+      outcomePlaceFailed: () => t('outcomePlaceFailed', { agent: outcome.agentName, project: outcome.projectName }),
+      outcomeTakeOutFailed: () => t('outcomeTakeOutFailed', { agent: outcome.agentName, project: outcome.projectName }),
+    })[outcomeKey]()
     : null;
   return (
     <section aria-label={t('boardTitle')} data-testid="control-board" className="space-y-3">
@@ -167,7 +176,7 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
                 <div className="min-w-40 flex-1 sm:max-w-80" data-testid="control-channel-progress">
                   {c.progress
                     ? <ProgressBar value={c.progress.done} max={c.progress.total} aria-label={t('boardProgressLabel', { project: c.name })} ariaValueText={t('boardProgressText', { done: c.progress.done, total: c.progress.total })} />
-                    : <span className="text-ds-small text-ds-ink-3">{t('boardNoEpic')}</span>}
+                    : <span className="text-ds-small text-ds-ink-3">{c.progressUnknown ? t('boardProgressUnknown') : t('boardNoEpic')}</span>}
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap gap-2" data-testid="control-channel-faces">
@@ -190,7 +199,7 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
           </div>
         </DropZone>
       </DndContext>
-      {outcomeText ? <div data-testid="control-outcome"><Banner tone={outcome?.kind === 'failed' ? 'failed' : 'info'}>{outcomeText}</Banner></div> : null}
+      {outcomeText ? <div data-testid="control-outcome"><Banner tone={outcome?.kind === 'placeFailed' || outcome?.kind === 'takeOutFailed' ? 'failed' : 'info'}>{outcomeText}</Banner></div> : null}
     </section>
   );
 }
