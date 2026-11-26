@@ -184,5 +184,131 @@
       ],
       "expect": "reject"
     }
-  ]
+  ],
+  "rotate_cases": [
+    {
+      "name": "valid",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "valid"
+    },
+    {
+      "name": "valid one millisecond before exp (slack 0)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-26T00:09:59.999Z",
+      "expect": "valid"
+    },
+    {
+      "name": "expired exactly at exp",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-26T00:10:00.000Z",
+      "expect": "expired"
+    },
+    {
+      "name": "not yet issued (iat in the future by more than the slack)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-25T23:59:29.000Z",
+      "expect": "not_yet_valid"
+    },
+    {
+      "name": "an envelope that carries no exp at all (what a server before the follow-up issued: a captured one would live for ever)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "1bzwqGFvbCasFa5Ola8Y6utzfgWHyg_QPGmEG4NJMKxLmKUNdH8W03UpRY0XePiXIgf2cv0tyuPnQPdaHQHGAg"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "missing_exp"
+    },
+    {
+      "name": "signed for another purpose (the capability_set domain)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "d17IAjPwNHH6C0JknWhaj-5VuhFT58zJ4oCR9sCsP7yTgi60qUXf7qX3LJGSY349vxd2RtqM-yaZXmMEttiwAQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "signed by a key the host never pinned",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-6a3803d5f059902a",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "JKDv4qJ_ET-ES4Ezlkyj2DukP9I7q0GSkotV4fcWEMLq_tQjaUyVfq5NkSqGlre_kXVZjH8zyje9GXRxF-wKAQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "unknown_kid"
+    },
+    {
+      "name": "one byte of the payload changed after signing",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlB7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "a payload of another kind (a capability_set signed with the rotation domain)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiY2FwYWJpbGl0eV9zZXQiLCJyZW1vdmUiOlsiYWsxLTM0NzUwZjk4YmQ1OWZjZmMiXSwidiI6MX0",
+        "sig": "JuwdBUTqx7vOtT6TOZkKxPmx_V434rlQ19z5c3KL38ENaVyrIVCP5pI_UO20cIZkPAUxamkdOGhsz-50PJySBw"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_kind"
+    },
+    {
+      "name": "an epoch below the one the host has pinned",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoxLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "SN69ukcdiPdVjt1N-sYAcFYh1pKERkTPd1iNPCDnU1eOzBefQl9_0CxLb9MbXsl2GAva5FNfWJKjQCwY41pODQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "pinned_epoch": 2,
+      "expect": "epoch_too_low"
+    },
+    {
+      "name": "an epoch equal to the one the host has pinned",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJhZGQiOlt7ImtpZCI6ImFrMS02YTM4MDNkNWYwNTk5MDJhIiwicHVibGljX2tleSI6ImdUbDNEcWg5RjE5V28xUm13MHgtek11TmlwRzA3amVpWGZZUFc0X0pzNVEifV0sImVwb2NoIjoyLCJleHAiOiIyMDI2LTExLTI2VDAwOjEwOjAwLjAwMFoiLCJpYXQiOiIyMDI2LTExLTI2VDAwOjAwOjAwLjAwMFoiLCJraW5kIjoiYXR0ZXN0X3JvdGF0ZSIsInJlbW92ZSI6WyJhazEtMzQ3NTBmOThiZDU5ZmNmYyJdLCJ2IjoxfQ",
+        "sig": "ro7Ct8w197ZwoTfGAnsgloSGVoowu46RMe5FIk842g9P6aw7b2Hlxzlk6yF8mJe1UEOkUDvTXQSeUBRh14XDBg"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "pinned_epoch": 2,
+      "expect": "valid"
+    }
+  ],
+  "rotate_about": "story 5025 (C1 follow-up · contract v1.2 §5.3): rotation envelopes {v,kid,p,sig}, signed by the key the host has PINNED over `rotate_domain ‖ the exact bytes of p`; `payload` = {kind:\"attest_rotate\", v:1, add:[{kid,public_key}], remove:[kid], epoch, iat, exp}. A host takes one only when: the signature verifies under a PINNED kid · kind is attest_rotate · exp is present and `now` (its trusted time = local + skew, slack 30 s as the sets) is inside [iat − slack, exp) · epoch ≥ the epoch it has pinned — and, in C2, only when the same server's TLS attest-keys answer also lists the added key. `pinned_epoch` (default 1) is what the host has pinned. `expect` is the verdict a correct host gives."
 }

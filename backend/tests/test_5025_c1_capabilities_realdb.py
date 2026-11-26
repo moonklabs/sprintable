@@ -173,6 +173,8 @@ async def test_a_host_that_paired_before_the_server_had_a_key_gets_the_keys_and_
         [door] = body["rotations"]
         payload = _verify(door, _public_of(old), ROTATE)  # signed BY the retired key: «hand on to the new one»
         assert payload["kind"] == "attest_rotate" and payload["epoch"] == 3
+        iat, exp = (datetime.fromisoformat(payload[k].replace("Z", "+00:00")) for k in ("iat", "exp"))
+        assert exp - iat == timedelta(minutes=10)  # a captured door dies like an old set (follow-up F): the host refuses an envelope that carries no `exp` or whose `exp` has passed
         assert [k["public_key"] for k in payload["add"]] == [_public_of(new)] and payload["remove"] == [door["kid"]]
         assert datetime.fromisoformat(body["server_time"].replace("Z", "+00:00")).tzinfo is not None
         with pytest.raises(Exception):
@@ -590,7 +592,8 @@ def _entry(code="no_capability", phone=None, agent=None, count=1):
 async def test_a_report_of_refusals_is_added_up_as_counts_with_nothing_else(world, key):
     async with _client() as c:
         device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1s")
-        phone = uuid.uuid4()
+        p, phone = await _phone(c)  # (the ids are CHECKED now: a phone this computer was paired with, an agent of this computer)
+        await _pin(c, token, p)
         r = await c.put(REJECT, json={"rejections": [_entry("no_capability", phone, agent, 2), _entry("capability_expired", phone, agent, 1)]}, headers=_tok(token))
         assert r.status_code == 200 and r.json() == {"taken": 2}
         r = await c.put(REJECT, json={"rejections": [_entry("no_capability", phone, agent, 3)]}, headers=_tok(token))
@@ -740,3 +743,156 @@ def test_the_order_vectors_are_the_pair_epoch_then_serial():
         (he, hs), (ie, is_) = row["high_water"], row["incoming"]
         accepted = (ie, is_) > (he, hs)
         assert accepted == (row["expect"] == "accept"), row["name"]
+
+
+# ── the follow-up of the security audit (E · F · G · key file · same secret) ─────────────────────────────────────────────────────────────────────
+
+async def test_a_report_keeps_only_ids_that_are_this_computers_own_a_phone_it_was_paired_with_and_an_agent_of_it(world, key):
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025f1a")
+        mine, mine_id = await _phone(c)
+        other_phone, other_id = await _phone(c)
+        await _pin(c, token, mine)
+        device2, token2, agent2, setup2 = await _computer(c, "d4424 mac 5025f1b")
+        await _pin(c, token2, other_phone)  # a phone of ANOTHER computer
+        entries = [
+            _entry("no_capability", mine_id, agent, 1),            # kept: its phone, its agent
+            _entry("capability_expired", mine_id, agent, 2),       # kept: another word, same pair
+            _entry("no_capability", uuid.uuid4(), agent, 1),       # dropped: a phone nobody paired
+            _entry("no_capability", mine_id, uuid.uuid4(), 1),     # dropped: an agent that is not on this computer
+            _entry("no_capability", other_id, agent, 1),           # dropped: a phone of another computer
+            _entry("no_capability", mine_id, agent2, 1),           # dropped: an agent of another computer
+        ]
+        r = await c.put(REJECT, json={"rejections": entries}, headers=_tok(token))
+        assert r.status_code == 200 and r.json() == {"taken": 2}
+        rows = await _sql(fetch=f"SELECT code, phone_key_id::text, agent_member_id::text, count FROM desktop_capability_rejections WHERE setup_id = '{setup_id}' ORDER BY code")
+        assert [(r[0], r[1], r[2], r[3]) for r in rows] == [("capability_expired", mine_id, agent, 2), ("no_capability", mine_id, agent, 1)]
+        # a report made only of ids it invented stores nothing — the table of a computer cannot be filled with them (3 words × its phones × its agents is all it can ever hold)
+        reset_person_limits()
+        r = await c.put(REJECT, json={"rejections": [_entry() for _ in range(50)]}, headers=_tok(token))
+        assert r.status_code == 200 and r.json() == {"taken": 0}
+        assert (await _sql(fetch=f"SELECT count(*) FROM desktop_capability_rejections WHERE setup_id = '{setup_id}'"))[0][0] == 2
+
+
+async def test_a_phone_that_was_just_removed_may_still_be_reported_as_refused_its_pairing_row_is_still_this_computers(world, key):
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025f1c")
+        p, pid = await _phone(c)
+        await _pin(c, token, p)
+        await _pin(c, token)  # the phone is unpinned
+        r = await c.put(REJECT, json={"rejections": [_entry("not_in_seal_to", pid, agent, 3)]}, headers=_tok(token))
+        assert r.status_code == 200 and r.json() == {"taken": 1}
+
+
+async def test_the_rotation_door_is_good_for_ten_minutes_like_a_set(world, monkeypatch):
+    from app.services import capability_set
+
+    old, new = _seed(), _seed()
+    monkeypatch.setattr(settings, "capability_signing_key", new)
+    monkeypatch.setattr(settings, "capability_retired_keys", old)
+    [door] = capability_set.rotations()
+    payload = _verify(door, _public_of(old), ROTATE)
+    assert set(payload) == {"kind", "v", "add", "remove", "epoch", "iat", "exp"}
+    assert datetime.fromisoformat(payload["exp"].replace("Z", "+00:00")) - datetime.fromisoformat(payload["iat"].replace("Z", "+00:00")) == capability_set.ROTATE_LIFETIME == timedelta(minutes=10)
+
+
+async def test_the_attest_keys_pull_has_a_per_minute_limit_per_computer_and_a_refused_host_is_told_to_wait(world, key):
+    async with _client() as c:
+        device, token, *_ = await _computer(c, "d4424 mac 5025f1d")
+        seen = [(await c.get(KEYS, headers=_tok(token))) for _ in range(8)]
+        assert [r.status_code for r in seen] == [200] * 6 + [429, 429]
+        assert int(seen[6].headers["Retry-After"]) >= 1 and "RATE_LIMITED" in seen[6].text and "attest_keys" not in seen[6].text  # «wait», not «no keys»
+        device2, token2, *_ = await _computer(c, "d4424 mac 5025f1e")
+        assert (await c.get(KEYS, headers=_tok(token2))).status_code == 200  # another computer has its own count
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o620, 0o604, 0o666, 0o777])
+async def test_a_key_file_that_others_can_read_or_write_turns_the_road_off(world, monkeypatch, tmp_path, mode):
+    seed = _seed()
+    f = tmp_path / "cap.key"
+    f.write_text(seed + "\n")
+    f.chmod(mode)
+    monkeypatch.setattr(settings, "capability_signing_key", "")
+    monkeypatch.setattr(settings, "capability_signing_key_file", str(f))
+    from app.services import capability_set
+
+    assert capability_set.enabled() is False and capability_set.attest_keys() == []
+    f.chmod(0o600)
+    assert capability_set.enabled() is True and [k["public_key"] for k in capability_set.attest_keys()] == [_public_of(seed)]
+    f.chmod(0o400)  # read-only for its owner is fine
+    assert capability_set.enabled() is True
+    f.chmod(0o644)
+    monkeypatch.setattr(capability_set, "_POSIX_FILE_MODES", False)  # a system with no file modes (Windows): the mode is not a thing to read there
+    assert capability_set.enabled() is True
+
+
+async def test_a_signing_key_that_is_the_same_string_as_another_secret_of_the_server_turns_the_road_off(world, monkeypatch):
+    from app.services import capability_set
+
+    seed, retired = _seed(), _seed()
+    monkeypatch.setattr(settings, "capability_signing_key", seed)
+    monkeypatch.setattr(settings, "capability_retired_keys", "")
+    assert capability_set.enabled() is True
+    for name in ("jwt_secret", "local_bootstrap_secret"):
+        original = getattr(settings, name)
+        monkeypatch.setattr(settings, name, seed)
+        assert capability_set.enabled() is False, name  # the current key = that secret
+        monkeypatch.setattr(settings, name, original)
+        assert capability_set.enabled() is True
+        monkeypatch.setattr(settings, "capability_retired_keys", retired)
+        monkeypatch.setattr(settings, name, retired)
+        assert capability_set.enabled() is False, name  # a RETIRED key = that secret
+        monkeypatch.setattr(settings, name, original)
+        monkeypatch.setattr(settings, "capability_retired_keys", "")
+    monkeypatch.setattr(settings, "jwt_secret", _seed())  # a different secret is no reason to turn it off
+    assert capability_set.enabled() is True
+    for env_name in ("CRON_SECRET", "SLACK_SIGNING_SECRET", "STORAGE_LOCAL_SIGNING_SECRET"):  # secrets that live only in the environment (not in `settings`)
+        monkeypatch.setenv(env_name, seed)
+        assert capability_set.enabled() is False, env_name
+        monkeypatch.delenv(env_name)
+        assert capability_set.enabled() is True
+    monkeypatch.setenv("CAPABILITY_SIGNING_KEY", seed)  # the key's own name is never «another» secret
+    monkeypatch.setenv("HOME_TOKEN_SHORT", "short")  # short values (a flag · a port) are no secret
+    assert capability_set.enabled() is True
+
+
+def test_the_rotation_vectors_are_what_the_servers_signing_makes_and_say_what_a_host_must_do():
+    from app.services import capability_set
+
+    v = _vectors()
+    seed = v["seeds"]["pinned"]
+    key = capability_set._from_seed(seed)
+    pinned = v["keys"]
+    names = [c["name"] for c in v["rotate_cases"]]
+    assert len(set(names)) == len(names) and {c["expect"] for c in v["rotate_cases"]} >= {"valid", "expired", "not_yet_valid", "missing_exp", "bad_signature", "unknown_kid", "bad_kind", "epoch_too_low"}
+    for case in v["rotate_cases"]:
+        env = case["envelope"]
+        pub = pinned.get(env["kid"])
+        ok = False
+        if pub is not None:
+            try:
+                _verify(env, pub, ROTATE)
+                ok = True
+            except Exception:
+                ok = False
+        assert ok == (case["expect"] not in ("bad_signature", "unknown_kid")), case["name"]
+        if ok:  # the payload tells the rest of the verdict
+            body = json.loads(_unb64u(env["p"]))
+            now = datetime.fromisoformat(case["now"].replace("Z", "+00:00"))
+            slack = timedelta(seconds=30)
+            if body.get("kind") != "attest_rotate":
+                want = "bad_kind"
+            elif "exp" not in body:
+                want = "missing_exp"
+            elif now >= datetime.fromisoformat(body["exp"].replace("Z", "+00:00")):
+                want = "expired"
+            elif datetime.fromisoformat(body["iat"].replace("Z", "+00:00")) > now + slack:
+                want = "not_yet_valid"
+            elif body["epoch"] < case.get("pinned_epoch", 1):
+                want = "epoch_too_low"
+            else:
+                want = "valid"
+            assert want == case["expect"], case["name"]
+    valid = next(c for c in v["rotate_cases"] if c["name"] == "valid")
+    assert set(json.loads(_unb64u(valid["envelope"]["p"]))) == {"kind", "v", "add", "remove", "epoch", "iat", "exp"}  # the same field set the server issues now (the rotation test above pins that)
+    assert key.sign(capability_set.ROTATE_DOMAIN, _unb64u(valid["envelope"]["p"])) == valid["envelope"]["sig"]  # deterministic: the server's signer reproduces the file's signature
