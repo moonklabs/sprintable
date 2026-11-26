@@ -101,6 +101,9 @@ def key(monkeypatch):
 
 
 async def _commands(setup_id, kind="capability_set"):
+    from app.services.pg_pubsub import drain_background_tasks
+
+    await drain_background_tasks(timeout=15.0)  # the push goes out AFTER the change has committed, in a task of its own: wait for it
     return await _sql(fetch=f"SELECT device_seq, payload FROM desktop_commands WHERE setup_id = '{setup_id}' AND kind = '{kind}' ORDER BY device_seq")
 
 
@@ -391,6 +394,50 @@ async def test_the_facts_are_read_again_under_the_lock_an_agent_moved_off_the_co
             envelope = await capability_set.build_envelope(s, stale)
             named = {e["agent_member_id"] for e in _verify(envelope, key[1])["caps"]}
             assert moved not in named and named == set(agents[1:])
+
+
+async def test_a_set_is_never_signed_for_a_computer_that_was_cut_off_even_by_a_request_let_in_before_the_cut_off(world, key):
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import capability_set
+    from app.services.desktop_relay import DesktopRelayError
+
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m4")
+        async with async_session_factory() as s:
+            stale = await s.get(DesktopSetup, setup_id)  # the request's object: loaded before the cut-off
+            await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{setup_id}'")
+            with pytest.raises(DesktopRelayError) as e:
+                await capability_set.build_envelope(s, stale)
+            assert e.value.status == 409 and e.value.code == "device_disconnected"
+
+
+async def test_a_push_that_fails_never_fails_the_pairing_change_it_follows(world, key, monkeypatch):
+    from app.services import capability_set
+
+    async def boom(*a, **k):
+        raise RuntimeError("signing is broken")
+
+    monkeypatch.setattr(capability_set, "push_capability_set", boom)
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m5")
+        phone, pid = await _phone(c)
+        snap = await _pin(c, token, phone)  # the pin goes through
+        assert snap["pairings"] == 1
+        assert await _commands(setup_id) == []  # and nothing was pushed — the half life (or the next change) carries it
+
+
+async def test_a_pairing_change_that_rolls_back_pushes_nothing(world, key):
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import capability_set
+
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m6")
+        async with async_session_factory() as s:
+            await capability_set.tell(s, [setup_id])
+            await s.rollback()
+        assert await _commands(setup_id) == []
 
 # ── pull · push ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

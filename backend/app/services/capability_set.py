@@ -12,6 +12,7 @@ is a second way to fill `_load_keys` and is not in this change.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
 import logging
@@ -31,7 +32,8 @@ from app.core.config import settings
 from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
 from app.models.desktop_relay import DesktopCapabilityRejection
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import DesktopRelayError, enqueue_command
+from app.core.database import async_session_factory
+from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError, enqueue_command
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +215,8 @@ async def build_envelope(db: AsyncSession, setup: DesktopSetup, caps: list[dict]
     fresh = await _lock_fresh(db, setup.id)
     if fresh is None:
         return None
+    if fresh.revoked_at is not None:  # a request that was let in before the cut-off and got the lock after it commits is told the truth — no new set (codex: it would extend what a cut-off took away)
+        raise DesktopRelayError(409, DISCONNECTED_CODE, "that computer has been disconnected")
     setup = fresh
     if caps is None:
         caps = await compute_caps(db, setup)
@@ -250,18 +254,25 @@ async def push_capability_set(db: AsyncSession, setup: DesktopSetup, *, force: b
 
 
 async def tell(db: AsyncSession, setup_ids) -> None:
-    """After a pairing or a key was changed (inside the same transaction): push the new set of each computer concerned. Never makes the change fail — a push that cannot be made (a signing error · a lock that
-    could not be taken) is left to the NEXT change or the half life, at most five minutes away (the set expires after ten); it runs in a savepoint, so what it wrote before failing is not kept."""
+    """After a pairing or a key was changed: push the new set of each computer concerned — AFTER the change has committed, in a session of its own that holds nothing else (codex: pushing inside the changing transaction took the
+    computer's row after the pairing rows, while other requests take the row first and the pairing rows next — a lock-order cycle; a push that starts from nothing can only wait, never cycle). The change never waits for it and never
+    fails because of it: a push that cannot be made (a signing error · a lock that could not be taken) is left to the NEXT change or the half life, at most five minutes away (the set expires after ten). A change that rolls back
+    schedules nothing (`schedule_after_commit` drops what a rolled-back transaction scheduled)."""
     if not enabled():
         return
-    for setup_id in sorted({s for s in setup_ids}, key=str):
-        try:
-            async with db.begin_nested():
-                setup = await db.get(DesktopSetup, setup_id)
-                if setup is not None:
-                    await push_capability_set(db, setup)
-        except Exception:  # noqa: BLE001 — see above
-            logger.exception("capability_set push failed for a computer: left to the next change or the half life")
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_push_after_commit, setup_id) for setup_id in sorted({s for s in setup_ids}, key=str)])
+
+
+async def _push_after_commit(setup_id: uuid.UUID) -> None:
+    try:
+        async with async_session_factory() as s:
+            setup = await s.get(DesktopSetup, setup_id)
+            if setup is not None and await push_capability_set(s, setup):
+                await s.commit()
+    except Exception:  # noqa: BLE001 — logged; the next change or the half life carries it
+        logger.exception("capability_set push failed for a computer: left to the next change or the half life")
 
 
 async def pull(db: AsyncSession, setup: DesktopSetup) -> dict | None:
