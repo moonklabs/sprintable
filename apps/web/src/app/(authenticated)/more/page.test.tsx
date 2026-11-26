@@ -90,7 +90,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
     expect(cards).toHaveLength(6);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['구성원', '문서', '결재', '일감', '성과 보드', '리워드'],
+      ['조직 구성원', '문서', '결재', '일감', '성과 보드', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
     expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
@@ -277,8 +277,8 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     await mount();
     const labels = [...container.querySelectorAll('[data-testid="more-menu-link"]')].map((a) => a.querySelector('span span')?.textContent);
     const at = (name: string) => labels.indexOf(name);
-    expect(at('구성원')).toBeGreaterThan(-1);
-    expect(at('구성원')).toBeLessThan(at('문서'));
+    expect(at('조직 구성원')).toBeGreaterThan(-1);
+    expect(at('조직 구성원')).toBeLessThan(at('문서'));
     expect(at('문서')).toBeLessThan(at('일감'));
     expect(at('일감')).toBeLessThan(at('목표'));
     expect(at('목표')).toBeLessThan(at('채널 연결'));

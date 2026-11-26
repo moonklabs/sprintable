@@ -163,17 +163,23 @@ describe('[SID:4677] AC2 — the copy of 유나 §L ⑥, key by key (ko · en); 
     expect(e('agentScopeAllProjectsHint', { count: 3 })).toBe('Joins all 3 project teams.');
   });
 
-  it('the project-settings tab is named «구성원과 접근» / "Members & access" (PO 11-10, story 4891; ko uses 「구성원」 — the story #3758 canon, 「멤버」 is phased out) and the way-finding lines + the section title say exactly that real tab name', () => {
+  it('the project members tab is named «프로젝트 구성원과 접근» / "Project members & access" (story 5037 C7: it stands beside the organization list «조직 구성원» under «사람과 역할», so the two read apart; ko uses 「구성원」 — the story #3758 canon, 「멤버」 is phased out) and the way-finding lines + the section title say exactly that real tab name AND the real group it sits under', () => {
     const byKey = (all: { path: string; value: string }[], key: string) => all.filter((x) => x.path.endsWith(`.${key}`)).map((x) => x.value);
     const koTab = at(ko, 'settings', 'tabMembers');
     const enTab = at(en, 'settings', 'tabMembers');
-    expect(koTab).toBe('구성원과 접근');
-    expect(enTab).toBe('Members & access');
-    for (const v of byKey(koStrings, 'switcherAccessLoadError')) expect(v).toContain(`프로젝트 설정 › ${koTab}`);
-    for (const v of byKey(koStrings, 'switcherAccessPartial')) expect(v).toContain(`프로젝트 설정 › ${koTab}`);
+    const koGroup = at(ko, 'settings', 'groupPeopleRoles');
+    const enGroup = at(en, 'settings', 'groupPeopleRoles');
+    expect(koTab).toBe('프로젝트 구성원과 접근');
+    expect(enTab).toBe('Project members & access');
+    expect(koGroup).toBe('사람과 역할');
+    expect(enGroup).toBe('People & roles');
+    expect(at(ko, 'nav', 'orgMembers')).toBe('조직 구성원'); // the organization list — the other row of the same group
+    expect(at(en, 'nav', 'orgMembers')).toBe('Organization members');
+    for (const v of byKey(koStrings, 'switcherAccessLoadError')) expect(v).toContain(`설정 › ${koGroup} › ${koTab}`);
+    for (const v of byKey(koStrings, 'switcherAccessPartial')) expect(v).toContain(`설정 › ${koGroup} › ${koTab}`);
     for (const all of [koStrings, enStrings]) for (const key of ['switcherAccessLoadError', 'switcherAccessPartial']) expect(byKey(all, key).length, `${key} exists in both languages`).toBeGreaterThan(0); // the lines exist — the loops are not empty
-    for (const v of byKey(enStrings, 'switcherAccessLoadError')) expect(v).toContain(`settings › ${enTab}`);
-    for (const v of byKey(enStrings, 'switcherAccessPartial')) expect(v).toContain(`settings › ${enTab}`);
+    for (const v of byKey(enStrings, 'switcherAccessLoadError')) expect(v).toContain(`settings › ${enGroup} › ${enTab}`);
+    for (const v of byKey(enStrings, 'switcherAccessPartial')) expect(v).toContain(`settings › ${enGroup} › ${enTab}`);
     expect(at(ko, 'settings', 'projectAccessTitle')).toBe(koTab);
     expect(at(en, 'settings', 'projectAccessTitle')).toBe(enTab);
   });
