@@ -175,3 +175,42 @@ describe('ReportMessageSummary — 발동 조건 미충족(회귀 0)', () => {
     for (const b of buttons) expect(b.hasAttribute('data-copy-ui'), b.textContent ?? '').toBe(true);
   });
 });
+
+// story 5048 T0 ① — the own-message face is dark (light theme) / white (dark theme): a card drawn on it must use the on-mine text set, never the fixed ink / brand / muted colours
+// (those are unreadable there — codex round 3). The contrast of the on-mine set on that face is pinned in styles/layer-rule.test.ts (on-mine · on-mine-2 · on-mine-link ≥ 4.5:1).
+describe('ReportMessageSummary — own message (story 5048 T0 ①)', () => {
+  const FIXED = /(^|\s)(text-primary|text-foreground|text-brand|text-muted-foreground|text-ds-ink-2|text-ds-ink-3|text-destructive)(\s|$)/;
+  const withNext = `${PASS_REPORT}\n다음: 카디르군 QA 요청`;
+
+  it('every text colour on a folded own card is an on-mine one (kicker · evidence label · next-action zone · view-full)', async () => {
+    await act(async () => {
+      root.render(wrap(<ReportMessageSummary content={withNext} messageKind="result" isMine references={undefined} />));
+    });
+    const bad = [...container.querySelectorAll<HTMLElement>('*')].filter((el) => FIXED.test(el.getAttribute('class') ?? '')).map((el) => `${el.tagName}.${el.className}`);
+    expect(bad, 'fixed text colours on the own face').toEqual([]);
+    expect(container.querySelector('[data-slot="material-chip"]')!.className).toContain('text-ds-on-mine-2');
+    expect(container.textContent).toContain('근거');
+    expect(container.textContent).toContain('카디르군 QA 요청');
+    expect(container.querySelector('.bg-brand\\/10'), 'the brand-tinted box is not drawn on the dark face').toBeNull();
+  });
+
+  it('the same card for someone else keeps its own colours (nothing changed for others)', async () => {
+    await act(async () => {
+      root.render(wrap(<ReportMessageSummary content={withNext} messageKind="result" isMine={false} references={undefined} />));
+    });
+    expect(container.querySelector('[data-slot="material-chip"]')!.className).toContain('text-muted-foreground');
+    expect(container.querySelector('.bg-brand\\/10')).not.toBeNull();
+  });
+
+  it('the «collapse» button of an expanded own card is on-mine link colour', async () => {
+    await act(async () => {
+      root.render(wrap(<ReportMessageSummary content={withNext} messageKind="result" isMine references={undefined} />));
+    });
+    const viewFull = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('전문'))!;
+    expect(viewFull.className).toContain('text-ds-on-mine-link');
+    await act(async () => { viewFull.click(); });
+    const collapse = container.querySelector('button[data-copy-ui]') as HTMLButtonElement;
+    expect(collapse.className).toContain('text-ds-on-mine-link');
+    expect(collapse.className).not.toContain('text-primary');
+  });
+});

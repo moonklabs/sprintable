@@ -1183,7 +1183,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           펼쳐지게 끌어올린다(하나를 펼치면 다른 하나는 자동 접힘). */}
       {/* story 4887 (UI-4 screen PR · the approved layout) — the list head is ONE line: «대화 N» + «+» (a new room) + «⋯». Everything that used to sit above the rooms and eat ~230 px —
           the «지금» strip and the project card, the project filter, the «내 대화 / 에이전트 대화» tabs — lives in the «⋯» popover now (none is removed); a narrowing that is ON shows as one chip under the head so it is never forgotten. */}
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-2" data-testid="chat-list-head">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-1" data-testid="chat-list-head">
         {/* one h1 per page: the list owns it on /chats only; beside an open room the room head owns it and this is an h2 (codex round 1) */}
         {headingLevel === 2 ? <h2 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h2> : <h1 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h1>}
         <span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-count">{headCount}</span>

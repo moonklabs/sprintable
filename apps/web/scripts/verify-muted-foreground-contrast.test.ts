@@ -69,8 +69,8 @@ describe('real repo globals.css — story #2480: muted-foreground가 muted/backg
   // story #3826(2026-09-13, doc 3dc24888) — v3 룩앤필로 ink-3이 #6E6C67로 재조정(doc §⑥
   // sunk 위 4.56:1 — bg 팔레트 자체도 같이 바뀌어 이 조합의 실측은 4.56). 4.5 문턱 자체는
   // 위 「every combination passes 4.5」 테스트가 계속 지킨다.
-  it('light on bg-muted lands at ~5.10 (story 4919 — muted-foreground=ds-ink-3 #586274 on muted=ds-surface-sunk #e6eaf1, 옛 4.56에서 올랐다 · 회귀 시 4.5 쪽으로 움직인다)', () => {
+  it('light on bg-muted lands at ~4.87 (story 5048 T0 ① — muted-foreground=ds-ink-3 #646464 on muted=ds-surface-sunk #e9e9e9 · 이전 5.10(보라 결 #586274 on #e6eaf1) · 회귀 시 4.5 쪽으로 움직인다)', () => {
     const lightOnMuted = results.find((r) => r.theme === 'light' && r.bgVar === 'muted')!;
-    expect(lightOnMuted.ratio).toBeCloseTo(5.1, 1);
+    expect(lightOnMuted.ratio).toBeCloseTo(4.87, 1);
   });
 });

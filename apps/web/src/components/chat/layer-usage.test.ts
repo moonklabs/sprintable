@@ -22,8 +22,10 @@ describe('대화 방은 화면 층 규칙의 토큰을 쓴다 (4906)', () => {
 
   it('⭐말풍선 안 보조 글 · 링크 · 가림 글은 ds 글자 토큰(옛 muted-foreground/primary는 새 면 위에서 4.5:1 미달)', () => {
     const src = read('chat-bubble.tsx');
-    expect(src).toContain("const muted = 'text-ds-ink-2'");
-    expect(src).toContain('text-ds-action-text underline decoration-ds-action-text/40');
+    // story 5048 T0 ①: 내 글 줄(ds-mine)은 진한 바탕이라 isMine이면 ds-on-mine 세트 — 남의 글 줄 쪽은 옛 ds 글자 토큰 그대로
+    expect(src).toContain("const muted = isMine ? 'text-ds-on-mine-2' : 'text-ds-ink-2'");
+    expect(src).toContain("const text = isMine ? 'text-ds-on-mine' : 'text-foreground'");
+    expect(src).toContain("'text-ds-on-mine-link decoration-ds-on-mine-link/40' : 'text-ds-action-text decoration-ds-action-text/40'");
     expect(src).not.toMatch(/rounded-xl px-3\.5 py-2 text-sm italic text-muted-foreground/);
   });
 

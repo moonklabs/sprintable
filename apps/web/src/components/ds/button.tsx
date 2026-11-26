@@ -8,7 +8,7 @@ import { ARIA_DISABLED_FACE, DISABLED_FACE } from './disabled-face';
 import { Icon } from './icon';
 
 /**
- * UI-3(a9d56577) 새 Button — doc ui3-token-names-and-component-list-v0 §4 #1. 변형 넷(주 · 보조 · 조용 · 위험) × 크기 둘(28 · 36).
+ * UI-3(a9d56577) 새 Button — doc ui3-token-names-and-component-list-v0 §4 #1. 변형 넷(주 · 보조 · 조용 · 위험) × 크기 둘(md · lg — story 5048 T0 ①부터 둘 다 높이 40: 조작 높이는 40 하나).
  * 상태: 호버 · 눌림 · 초점(2px action 링) · 비활성(실선 흐린 면 + 글 ink-3 — disabled-face.ts) · 로딩(글 유지 + 도는 아이콘 · 눌러도 안 간다).
  * 위험은 «모양»만 — 확인 한 단계는 호출부가 Dialog로 붙인다. 폰은 누름 영역이 44 이상(보이는 크기와 무관).
  */

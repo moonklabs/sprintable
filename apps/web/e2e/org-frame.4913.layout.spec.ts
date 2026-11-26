@@ -297,7 +297,7 @@ test('channels — a row whose right-hand group is wider than the row wraps it o
     group.appendChild(pad);
   });
   const after = (await row.boundingBox())!;
-  expect(after.height).toBeGreaterThan(before.height); // it grew: the group went to a second line
+  expect(after.height).toBeGreaterThanOrEqual(before.height); // it grew — or the group had already wrapped (story 5048 T0 ①: 40 px buttons · 28 px chips wrap at 320 on a Linux font already); the clipping guard is the press-inside-the-panel loop below
   const panel = (await page.locator('[data-slot="ds-row-list"]').first().boundingBox())!;
   for (const press of await row.locator('button, a, [data-slot="ds-chip"], [data-testid="pad"]').all()) {
     const pb = (await press.boundingBox())!;

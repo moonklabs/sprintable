@@ -240,7 +240,7 @@ test.describe('the notification panel on a touch phone (390 × 844)', () => {
     expect(m.tiny, `text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
     expect(m.groups).toEqual(['notification-group-unread', 'notification-group-earlier']);
     expect(m.rows).toHaveLength(4);
-    for (const r of m.rows) { expect(r.lines, 'two lines').toBe(2); expect(r.h, 'a row is a ≥56 press').toBeGreaterThanOrEqual(56); expect(r.h, 'and stays compact (before: ~78 px rows of three lines)').toBeLessThanOrEqual(72); }
+    for (const r of m.rows) { expect(r.lines, 'two lines').toBe(2); expect(r.h, 'a row is a ≥56 press').toBeGreaterThanOrEqual(56); expect(r.h, 'and stays compact (before: ~78 px rows of three lines; story 5048 T0 ①: two 16/24 lines + 24 = 73 — a three-line row is ≥ 96 now)').toBeLessThanOrEqual(76); }
     // an unread headline is heavier than a read one (the quiet button must not make every row bold)
     const wUnread = m.weights.filter((x) => x.id === 'notification-group-unread').map((x) => x.w);
     const wRead = m.weights.filter((x) => x.id === 'notification-group-earlier').map((x) => x.w);

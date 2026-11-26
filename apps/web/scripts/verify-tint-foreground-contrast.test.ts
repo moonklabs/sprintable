@@ -490,8 +490,10 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
     const min = Math.min(...familyColorRatios);
     // story 4930: `--primary-tint`가 ds action-soft(#efedfc)의 별칭이 되어(옛 파랑 oklch .97 .02 255 → 보라 틴트) primary 계열의 «family color 글자 × 자기 틴트»가 4.62 → 4.27로 내려가 다시 AA 밑이 됐다.
     // 위 주석이 정한 대로 «원래 반례 존재» 단언을 복원한다 — 이 규칙(-foreground를 써라, family color를 글자로 쓰지 마라)이 여전히 필요하다는 증거. 같은 값 범위(4.0 ~ 4.5)에 머무는지만 pin.
-    expect(min).toBeLessThan(4.5);
-    expect(min).toBeGreaterThan(4.0);
+    // story 5048 T0 ①(키트 결): 주 행동색이 검정 · 흰이 돼 primary family의 반례(보라 글자 × 보라 틴트 4.27)가 사라졌다 — family color 글자의 최소 대비는 status family(정보 · 주의 …) 쪽 4.63으로, 이제 전 조합이 AA 위다.
+    // 그래도 이 규칙(-foreground를 써라 · family color를 글자로 쓰지 마라)은 그대로 유효하다(다음 팔레트 조정이 마진을 다시 깎을 수 있다). 마진이 «AA 바로 위(4.5 ~ 5.0)»에 머무는지만 pin — 내려가거나 크게 넓어지면 리뷰 신호.
+    expect(min).toBeGreaterThanOrEqual(4.5);
+    expect(min).toBeLessThan(5.0);
   });
 
   // story #2575 AC1 — -bg가 이 스토리 이전엔 아예 안 잡혔다는 것 자체가 #2960의 근본원인.

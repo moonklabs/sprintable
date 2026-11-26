@@ -159,7 +159,7 @@ function hasSelectedText(): boolean {
 /** how long a plain click on an inline code span waits before it copies (a second click or a selection in that time ends it) */
 export const INLINE_CODE_COPY_DELAY_MS = 400;
 
-function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
+function CopyableCode({ raw, inline, className, onMine = false }: { raw: string; inline: boolean; className: string; onMine?: boolean }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
@@ -220,7 +220,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
             실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
             이미 선택 가능한 원문이라 여기선 문구만). */}
         {copyFailed && (
-          <span role="alert" data-copy-ui="" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+          <span role="alert" data-copy-ui="" className={`ml-1 text-xs ${onMine ? 'text-ds-on-mine' : 'text-destructive'}`}>{tc('copyFailedSelectManually')}</span>
         )}
       </>
     );
@@ -244,7 +244,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content: rawContent, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -257,11 +257,13 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
   // 됐다(옛 solid bg-primary 위 흰 글자 전제가 깨졌다). 이제 양쪽 다 밝은 무채/blue-soft
   // 패널 위 어두운 ink라 isMine으로 갈릴 이유가 없다 — Proof Capsule(proof-capsule.tsx)도
   // 발화자와 무관하게 항상 proof-ink/proof-ink-2를 쓰는 것과 같은 이치.
-  const text = 'text-foreground';
+  // story 5048 T0 ①(키트 결): 내 글 줄(ds-mine)은 «진한 바탕»(라이트 검정 · 다크 흰)이라 그 위 글자는 ds-on-mine 세트다 — 위 «양쪽 다 밝은 패널이라 isMine으로 갈릴 이유가 없다»는 전제는 이번에 끝났다.
+  const text = isMine ? 'text-ds-on-mine' : 'text-foreground';
   // 4906 — 글 줄 면(남의 글 ds-surface-high · 내 글 ds-mine) 위의 보조 글 · 링크는 ds 글자 토큰: 옛 muted-foreground/primary는 새 면 위에서 4.5:1을 못 넘었다(다크 ds-mine 위 3.5:1).
-  const muted = 'text-ds-ink-2';
-  const codeBg = 'bg-muted text-foreground';
-  const border = 'border-border';
+  const muted = isMine ? 'text-ds-on-mine-2' : 'text-ds-ink-2';
+  const codeBg = isMine ? 'bg-ds-surface text-ds-ink' : 'bg-muted text-foreground'; // 진한 바탕 위 코드는 «밝은 칩»(면 색 + 본문 글자)
+  const border = isMine ? 'border-ds-on-mine-2' : 'border-border';
+  const mentionText = isMine ? 'text-ds-on-mine-link decoration-ds-on-mine-link/40' : 'text-ds-action-text decoration-ds-action-text/40';
 
   // story #4197 — 내부 HTML 주석(`<!-- linear-comment-id … -->`). 마크다운·코드 문법이 하나라도 있으면(들여쓰기 코드 포함)
   // 마크다운 경로에서 remarkStripHtmlComments가 AST의 주석 노드만 뺀다(코드 안 `<!--`는 안 건드림). 문법이 전혀 없는
@@ -334,6 +336,7 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
         <CopyableCode
           raw={raw}
           inline={inline}
+          onMine={isMine}
           className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
         />
       );
@@ -363,7 +366,7 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
         // 전제였다. blue-soft로 바뀐 지금은 발화자 무관하게 같은 밝은 배경이라 갈릴 이유가
         // 없다(위 text/muted/codeBg/border와 동일 논리).
         return (
-          <span className="font-medium text-ds-action-text underline decoration-ds-action-text/40">
+          <span className={`font-medium underline ${mentionText}`}>
             {children}
           </span>
         );
@@ -406,7 +409,7 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
       if (kind === 'mail') return <a href={href} draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
       return <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
+  }), [isMine, text, muted, codeBg, border, mentionText, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -872,7 +875,7 @@ export function ChatBubble({
                 <div className="mt-0.5 font-mono text-ds-body text-ds-ink-2 [&_p]:mb-0">
                   <ChatMarkdown
                     content={args}
-                    isMine={isMine}
+                    isMine={false} /* story 5048 T0 ①: the args sit on the command Card's own (light) face, not on the own-message face — the on-mine colours would be white on white */
                     references={message.references}
                     entityStatusByKey={entityStatusByKey}
                     onOpenReadingPanel={onOpenReadingPanel}
@@ -889,7 +892,7 @@ export function ChatBubble({
                 refs={eventTarget?.refs as Record<string, unknown> | undefined}
                 definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
                 eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
-                renderWords={(words) => <ChatMarkdown content={words} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
+                renderWords={(words) => <ChatMarkdown content={words} isMine={false} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
               />
             </div>
           ) : noVisibleText ? (
@@ -908,7 +911,7 @@ export function ChatBubble({
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
             // story 4887 (UI-4 P4-b · AC3 B3) — an AGENT's message has no bubble: the head line above (name · tag · time) says who, and the text sits on the page. A person's message (mine or another person's) keeps its bubble — it is the bubble that tells the two kinds apart at a glance (B3: «에이전트 글만 말풍선 없는 평문»).
-            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed ${isMine ? 'text-ds-on-mine' : 'text-foreground'} [overflow-wrap:anywhere] ${
               plainRow
                 ? `rounded-lg ${isMine ? LAYER.rowMine : LAYER.rowOthers} px-3 py-2`
                 : isMine
