@@ -12,23 +12,23 @@
 /* `.ds-theme-light`: 어두운 화면 안에서 «밝음»을 강제로 보여야 할 때(견본 화면의 밝음 틀) 같은 밝음 값을 그 가지에 다시 건다 — 값은 한 벌(이 규칙)뿐. */
 :root,
 .ds-theme-light {
-  --ds-surface-sunk: #e6eaf1;
-  --ds-background: #f3f5f9;
+  --ds-surface-sunk: #e9e9e9;
+  --ds-background: #f4f4f4;
   --ds-surface: #ffffff;
-  --ds-surface-raised: #f7f8fb;
-  --ds-surface-high: #e0e4ea;
-  --ds-surface-highest: #cfd6e1;
-  --ds-line: #d8dee8;
-  --ds-line-strong: #b7bfcc;
-  --ds-line-control: #757e8f;
-  --ds-ink: #0f1420;
-  --ds-ink-2: #3f4859;
-  --ds-ink-3: #586274;
-  --ds-action: #5b4be0;
+  --ds-surface-raised: #ffffff;
+  --ds-surface-high: #e2e2e2;
+  --ds-surface-highest: #d0d0d0;
+  --ds-line: #e6e6e6;
+  --ds-line-strong: #d4d4d4;
+  --ds-line-control: #818181;
+  --ds-ink: #000000;
+  --ds-ink-2: #454545;
+  --ds-ink-3: #646464;
+  --ds-action: #000000;
   --ds-on-action: #ffffff;
-  --ds-action-text: #4a3bc8;
-  --ds-action-soft: #efedfc;
-  --ds-mine: #cdc6f5;
+  --ds-action-text: #000000;
+  --ds-action-soft: #f4f4f4;
+  --ds-mine: #cccccc;
   --ds-needs-hand: #9a4b00;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -40,26 +40,28 @@
   --ds-info: #1f5fbf;
   --ds-info-soft: #edf2fa;
   --ds-scrim: #000000;
+  --ds-pin: #767676;
+  --ds-on-pin: #ffffff;
 }
 
 .dark {
-  --ds-surface-sunk: #080c12;
-  --ds-background: #0f141a;
-  --ds-surface: #181c23;
-  --ds-surface-raised: #1c2027;
-  --ds-surface-high: #262a32;
-  --ds-surface-highest: #31353d;
-  --ds-line: #343541;
-  --ds-line-strong: #474554;
-  --ds-line-control: #7a7788;
-  --ds-ink: #dfe2ec;
-  --ds-ink-2: #c8c4d6;
-  --ds-ink-3: #928f9f;
-  --ds-action: #8e7fff;
-  --ds-on-action: #24008c;
-  --ds-action-text: #c7bfff;
-  --ds-action-soft: #2b2c46;
-  --ds-mine: #34365c;
+  --ds-surface-sunk: #141414;
+  --ds-background: #1e1e1e;
+  --ds-surface: #2c2c2c;
+  --ds-surface-raised: #323232;
+  --ds-surface-high: #3c3c3c;
+  --ds-surface-highest: #4a4a4a;
+  --ds-line: #383838;
+  --ds-line-strong: #4d4d4d;
+  --ds-line-control: #8f8f8f;
+  --ds-ink: #f5f5f5;
+  --ds-ink-2: #c2c2c2;
+  --ds-ink-3: #a8a8a8;
+  --ds-action: #ffffff;
+  --ds-on-action: #000000;
+  --ds-action-text: #ffffff;
+  --ds-action-soft: #363636;
+  --ds-mine: #4a4a4a;
   --ds-needs-hand: #ffb77d;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -71,25 +73,47 @@
   --ds-info: #7db4ff;
   --ds-info-soft: #242e3d;
   --ds-scrim: #000000;
+  --ds-pin: #767676;
+  --ds-on-pin: #ffffff;
 }
 
 /*
  * 밀도 · 그림자 · 움직임 토큰 (UI-3 4886 AC1 · PO 11-11). 값은 부품 안에 흩어져 있던 그대로다(화면 변화 0) — 이름만 붙였다.
- * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다):
- *   control-sm 28(작은 단추) · compact 32(탭 · 메뉴 항목 · 달력 칸) · control 36(큰 단추 · 입력칸) · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄).
- * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널).
+ * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다). story 5048 T0 ①부터 «조작 높이는 40 하나»:
+ *   control-sm = compact = control = 40 · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄) · tag 28 · bar 64 · head 80 · chat-row 88 · nav-item 폭 240.
+ * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널) — 이름은 남기되 값은 «없음»(키트: 그림자 0).
  * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`)
  *   · 토스트 들어오기 0.3초(`--ds-duration-enter`, `animate-ds-slide-in` — 옛 `slide-in`과 같은 값: 오른쪽에서 밀려 들어오며 투명 → 불투명).
  */
 @theme {
-  --spacing-ds-control-sm: 1.75rem;
-  --spacing-ds-compact: 2rem;
-  --spacing-ds-control: 2.25rem;
+  /* story 5048 T0 ① (Desktop App Kit by Figma의 «결의 규칙» · 선생님 11-26 «밀도도 키트 그대로»): 조작 높이는 «40 하나» — 단추 · 입력 · 검색 · 탭 목록 · 탐색 항목이 모두 같은 높이다.
+   * 옛 이름(control-sm · compact · control)은 그대로 두고 값만 40으로 모은다(호출부 클래스가 이름으로 이 값을 읽는다). 폰 바닥 44(touch)는 접근성 하한이라 그대로. 태그만 28. */
+  --spacing-ds-control-sm: 2.5rem;
+  --spacing-ds-compact: 2.5rem;
+  --spacing-ds-control: 2.5rem;
   --spacing-ds-touch: 2.75rem;
   --spacing-ds-control-xl: 3rem;
   --spacing-ds-row: 3.5rem;
-  --shadow-ds-popup: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-ds-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --spacing-ds-tag: 1.75rem;
+  /* 부품 규격의 큰 높이(키트 문서 §2.3): 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240 */
+  --spacing-ds-bar: 4rem;
+  --spacing-ds-head: 5rem;
+  --spacing-ds-chat-row: 5.5rem;
+  --spacing-ds-nav-item: 15rem;
+  /* 칸 폭(키트 Chat · 탐색 화면, 1440 기준 — 셸 배치는 C1(민)이 이 이름을 읽는다): 왼쪽 탐색 256 · 대화 목록 400 · 옆 프로필 패널 256 */
+  --spacing-ds-nav: 16rem;
+  --spacing-ds-chat-list: 25rem;
+  --spacing-ds-side: 16rem;
+  /* 간격 단계: 4 · 8 · 12 · 16 · 24 · 32 — 키트의 실측 값이 모두 이 안에 든다(`p-ds-4` · `gap-ds-2` · `mt-ds-6`처럼 쓴다) */
+  --spacing-ds-1: 0.25rem;
+  --spacing-ds-2: 0.5rem;
+  --spacing-ds-3: 0.75rem;
+  --spacing-ds-4: 1rem;
+  --spacing-ds-6: 1.5rem;
+  --spacing-ds-8: 2rem;
+  /* 그림자 없음 — 칸은 1px 선과 면 색 차이로만 가른다(키트 규칙). 이름은 남겨 호출부 클래스(shadow-ds-popup · shadow-ds-overlay)가 그대로 «없음»을 읽는다. */
+  --shadow-ds-popup: none;
+  --shadow-ds-overlay: none;
   --animate-ds-pulse: ds-pulse var(--ds-duration-pulse) cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-ds-slide-in: ds-slide-in var(--ds-duration-enter) ease-out;
   @keyframes ds-pulse {
@@ -174,26 +198,39 @@
   --color-ds-info: var(--ds-info);
   --color-ds-info-soft: var(--ds-info-soft);
   --color-ds-scrim: var(--ds-scrim);
+  --color-ds-pin: var(--ds-pin);
+  --color-ds-on-pin: var(--ds-on-pin);
 
-  /* 글자 눈금(굵기는 400 · 600 두 가지만 — 호출부가 font-normal / font-semibold) */
-  --text-ds-title: 18px;
-  --text-ds-title--line-height: 24px;
-  --text-ds-card-title: 14px;
-  --text-ds-card-title--line-height: 20px;
-  --text-ds-body: 13px;
-  --text-ds-body--line-height: 20px;
-  --text-ds-small: 12px;
-  --text-ds-small--line-height: 16px;
-  --text-ds-mono-lg: 13px;
-  --text-ds-mono-lg--line-height: 18px;
-  --text-ds-mono-md: 11px;
-  --text-ds-mono-md--line-height: 16px;
-  --text-ds-mono-sm: 11px;
-  --text-ds-mono-sm--line-height: 14px;
+  /* 글자 눈금 — 키트 규칙(story 5048 T0 ①): 글꼴 하나 · 굵기 셋(400 · 500 · 600) · 줄높이 모두 1.5. 가장 작은 글자가 16이다(작은 글자를 쓰지 않는 결).
+   *   쪽 제목 24 Semibold -1% · 칸 제목 / 목록의 이름 20 Medium · 기본 UI 글자(단추 · 탐색 · 탭 · 말풍선 · 값) 16 Medium · 설명 · 미리보기 · 자리글 · 시각 16 Regular.
+   * 굵기 · 자간은 단 이름에 붙어 있다(`text-ds-body`가 16 / 24 / Medium) — 호출부가 `font-semibold` · `font-normal`로 바꾸는 것은 그대로 된다.
+   * 고정폭(mono) 세 단은 키트에 없는 «칩 · 알약 · 숫자 배지» 자리: 키트 태그(28)에 들어가는 14까지 — 16 아래는 이 셋뿐이다. */
+  --text-ds-title: 24px;
+  --text-ds-title--line-height: 36px;
+  --text-ds-title--font-weight: 600;
+  --text-ds-title--letter-spacing: -0.01em;
+  --text-ds-card-title: 20px;
+  --text-ds-card-title--line-height: 30px;
+  --text-ds-card-title--font-weight: 500;
+  --text-ds-body: 16px;
+  --text-ds-body--line-height: 24px;
+  --text-ds-body--font-weight: 500;
+  --text-ds-small: 16px;
+  --text-ds-small--line-height: 24px;
+  --text-ds-small--font-weight: 400;
+  --text-ds-mono-lg: 16px;
+  --text-ds-mono-lg--line-height: 24px;
+  --text-ds-mono-md: 14px;
+  --text-ds-mono-md--line-height: 21px;
+  --text-ds-mono-sm: 14px;
+  --text-ds-mono-sm--line-height: 21px;
 
-  /* 모서리 */
-  --radius-ds-tag: 2px;
-  --radius-ds-control: 4px;
+  /* 모서리 단계: 8(모든 조작 · 카드 · 태그) · 16(말풍선 — 꼬리 쪽 한 귀만 4) · 원(아바타). 선은 1px 하나. */
+  --radius-ds-tag: 8px;
+  --radius-ds-control: 8px;
   --radius-ds-panel: 8px;
-  --radius-ds-pill: 12px;
+  --radius-ds-pill: 16px;
+  --radius-ds-bubble: 16px;
+  --radius-ds-tail: 4px;
+  --radius-ds-circle: 9999px;
 }

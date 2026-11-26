@@ -51,12 +51,16 @@ describe('ds 견본 화면 (AC3)', () => {
     });
   }
 
-  it('⭐토큰: 색 28종 · 글자 8단 가운데 7 · 모서리 4 · 밀도 6 · 그림자 2 이름이 코드의 이름 그대로 보인다', () => {
+  it('⭐토큰: 색 30종 · 글자 8단 가운데 7 · 모서리 7 · 밀도 10 · 그림자 2 이름이 코드의 이름 그대로 보인다(story 5048 T0 ①: 키트 규칙 값)', () => {
     const text = frame('light').textContent ?? '';
-    for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim']) expect(text, c).toContain(c);
-    for (const d of ['control-sm 28', 'compact 32', 'control 36', 'touch 44', 'control-xl 48', 'row 56']) expect(text, d).toContain(d);
-    for (const r of ['tag 2', 'control 4', 'panel 8', 'pill 12']) expect(text, r).toContain(r);
+    for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim', 'pin', 'on-pin']) expect(text, c).toContain(c);
+    for (const d of ['control-sm 40', 'compact 40', 'control 40', 'touch 44', 'control-xl 48', 'row 56', 'tag 28', 'bar 64', 'head 80', 'chat-row 88']) expect(text, d).toContain(d);
+    for (const r of ['tag 8', 'control 8', 'panel 8', 'pill 16', 'bubble 16', 'tail 4']) expect(text, r).toContain(r);
     for (const s of ['popup', 'overlay']) expect(text, s).toContain(s);
+    // story 5048 T0 ①: 글자 눈금 값 · 원 · 그림자 «없음» 문구도 코드의 값 그대로(견본이 옛 값을 말하면 빨개진다)
+    for (const t of ['24 / 36 · 600 · -1%', '20 / 30 · 500', '16 / 24 · 500', '16 / 24 · 400', '14 / 21']) expect(text, t).toContain(t);
+    expect(text).toContain('circle 원');
+    expect(text).toContain('없음(그림자 0 · 1px 선)');
     expect(text).toContain('fast 100ms');
     expect(text).toContain('enter 300ms');
   });

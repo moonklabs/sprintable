@@ -155,7 +155,7 @@ for (const scheme of ['light', 'dark'] as const) {
       // ① the list head is ONE line, and the first room starts right under it (nothing above the rooms)
       const lh = (await box(page, '[data-testid="chat-list-head"]'))!;
       const firstRoom = (await box(page, '[data-testid="chat-list-rooms"] button'))!;
-      expect(lh.h, `the list head is ${lh.h}px`).toBeLessThanOrEqual(48); // reverted (the strips + filter + tabs above the rooms) → far taller
+      expect(lh.h, `the list head is ${lh.h}px`).toBeLessThanOrEqual(52); // story 5048 T0 ①: one line of 40 px controls + 4 + 4 + the rule (was 48 with 28 px ones) — reverted (the strips + filter + tabs above the rooms) → far taller
       expect(firstRoom.y - (lh.y + lh.h), 'the first room starts under the head').toBeLessThanOrEqual(12);
       expect(await page.locator('[data-testid="chat-list-head"]').textContent(), 'the head reads «대화 N» and carries its two buttons').toContain('대화');
       expect(await page.locator('#rail select, #rail [role="tab"]').count(), 'no filter select and no tabs above the rooms').toBe(0);

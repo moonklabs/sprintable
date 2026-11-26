@@ -122,7 +122,7 @@ test.describe('on a touch phone (390 × 844)', () => {
 test.describe('with a mouse (desktop size)', () => {
   test.use({ hasTouch: false, isMobile: false });
 
-  test('[SID:4891] the selects keep the compact 36 px height (the 44 px floor is for a touch pointer only) and the chevron stays inside the select, centred', async ({ page }) => {
+  test('[SID:4891] the selects keep the one control height, 40 px (story 5048 T0 ①; was 36) (the 44 px floor is for a touch pointer only) and the chevron stays inside the select, centred', async ({ page }) => {
     await open(page);
     const boxes = await page.evaluate(() => [...document.querySelectorAll('select')].map((s) => {
       const sr = s.getBoundingClientRect();
@@ -130,7 +130,7 @@ test.describe('with a mouse (desktop size)', () => {
       return { h: Math.round(sr.height), iconInside: icon.right <= sr.right + 0.5 && icon.left >= sr.left, iconCentre: Math.abs((icon.top + icon.height / 2) - (sr.top + sr.height / 2)) <= 1.5 };
     }));
     expect(boxes.length).toBe(2);
-    for (const b of boxes) { expect(b.h).toBe(36); expect(b.iconInside).toBe(true); expect(b.iconCentre).toBe(true); }
+    for (const b of boxes) { expect(b.h).toBe(40); expect(b.iconInside).toBe(true); expect(b.iconCentre).toBe(true); }
   });
 });
 

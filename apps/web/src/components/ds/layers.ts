@@ -12,7 +12,7 @@
  *   입력칸         ds-surface-sunk        내용 칸 → 입력칸    −0.064 / −0.073                ≥ 0.05 (+ line-control 경계)
  *                                          바탕 → 입력칸 (4916)  −0.034 / −0.036                ≥ 0.03 — 채팅 입력칸은 바탕 위에 서고, 경계(line-control 3:1)가 함께 가르므로 면차는 «바탕 → 내용 칸»과 같은 0.03
  *   그림 우물      ds-surface-highest     글 줄/카드 면 → 우물  +0.044 / +0.044 (더 어둡게)   ≥ 0.03 — 카드 안 썸네일 칸(산출물 · 스토리지 격자, 4910)
- *   떠 있는 것     ds-surface-raised      면 차이로 가르지 않는다 — 그림자(shadow-ds-popup / overlay) + line-control 경계로 가른다
+ *   떠 있는 것     ds-surface-raised      (story 5048 T0 ①: 그림자 없음) 면 차이 + 1px 선으로 가른다 — 바탕 → 떠 있는 면 ≥ 0.03
  * 라이트는 «내용 칸이 바탕보다 밝고 글 줄 · 입력칸이 어둡게 들어가는» 꼴, 다크는 «글 줄이 올라오고 입력칸이 들어가는» 꼴이다 — 부호가 달라도 차이의 크기가 선을 지킨다.
  * Tailwind가 클래스를 알아보게 문자열을 통째로 둔다.
  */
@@ -56,6 +56,10 @@ export const LAYER_MIN_STEP = {
   /** 열린 카드(4908): 내용 칸과의 밝기차, 그리고 같은 줄 층(남의 글 줄)과의 채도차 — 밝기는 거의 같아 채도 + 왼쪽 막대로 갈린다. */
   rowSelectedOnPanel: 0.03,
   rowSelectedVsOthersChroma: 0.01,
+  /** story 5048 T0 ①(키트 결: 무채색 면): 두 면이 «둘 다 무채색»(OKLab C < neutralChroma)이면 채도차 조항은 성립할 수 없다 — 그 쌍은 색조가 아니라 밝기로만 갈리므로, 채도차 대신 밝기차(OKLab L)를 지킨다.
+   *  (채도차 조항이 막던 사고 «연보라 ↔ 연회색»은 색조가 있는 쌍에서만 생긴다.) 열린 카드 ↔ 글 줄은 0.02 · 내 글 ↔ 남의 글은 위 mineVsOthersLightness(0.05)가 그대로 지킨다. */
+  neutralChroma: 0.02,
+  rowSelectedVsOthersLightnessNeutral: 0.02,
   /** 카드 면(`rowOthers`) → 썸네일 우물(`well`). */
   wellOnRow: 0.03,
 } as const;

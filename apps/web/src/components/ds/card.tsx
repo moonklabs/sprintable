@@ -3,7 +3,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 /**
- * UI-3(a9d56577) Card — doc §4 #9. 한 단계 올린 면(`surface`) + 헤어라인 + 모서리 4 · 그림자 0.
+ * UI-3(a9d56577) Card — doc §4 #9. 한 단계 올린 면(`surface`) + 헤어라인 + 모서리 8 · 그림자 0(story 5048 T0 ①: 모서리 4 → 8).
  * `needs-hand` = 왼쪽 4px 막대(손 필요) · `selected` = action 2px 윤곽. `CardInset`은 카드 안 데이터 칸(한 단계 내린 면).
  */
 export const cardVariants = cva('rounded-ds-control border border-ds-line bg-ds-surface text-ds-ink', {

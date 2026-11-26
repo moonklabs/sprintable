@@ -62,14 +62,14 @@ const PHONE: Env = { pointer: 'coarse', hover: 'none' }; // 보통 폰 · 태블
 const TABLET_PEN: Env = { pointer: 'coarse', hover: 'hover' }; // coarse만 참인 꼴
 const APP_ANDROID: Env = { pointer: 'fine', hover: 'hover', shell: 'android' }; // 스타일러스 폰이 앱 안에서 마우스로 읽히는 꼴 — 앱 셸 표지가 건다
 const APP_IOS: Env = { pointer: 'fine', hover: 'hover', shell: 'ios' };
-const APP_MAC: Env = { pointer: 'fine', hover: 'hover', shell: 'macos' }; // 맥 데스크톱 앱 = 마우스 → 36
+const APP_MAC: Env = { pointer: 'fine', hover: 'hover', shell: 'macos' }; // 맥 데스크톱 앱 = 마우스 → 40(키트 규칙 · story 5048 T0 ①: 조작 높이 40 하나)
 
 describe('touch: 변형 — 44 바닥', () => {
-  it('⭐데스크톱(fine + hover)은 그대로: Button 28/36 · Input 36 · NativeSelect 36', () => {
-    expect(pressHeight(parts['Button(md)']!, index, DESKTOP)).toBe(28);
-    expect(pressHeight(parts['Button(lg)']!, index, DESKTOP)).toBe(36);
-    expect(pressHeight(parts.Input!, index, DESKTOP)).toBe(36);
-    expect(pressHeight(parts.NativeSelect!, index, DESKTOP)).toBe(36);
+  it('⭐데스크톱(fine + hover)은 조작 높이 40 하나(키트 규칙 · 5048 T0 ①): Button 40/40 · Input 40 · NativeSelect 40', () => {
+    expect(pressHeight(parts['Button(md)']!, index, DESKTOP)).toBe(40);
+    expect(pressHeight(parts['Button(lg)']!, index, DESKTOP)).toBe(40);
+    expect(pressHeight(parts.Input!, index, DESKTOP)).toBe(40);
+    expect(pressHeight(parts.NativeSelect!, index, DESKTOP)).toBe(40);
   });
 
   it('⭐에뮬 꼴(fine + hover none)에서도 44 — pointer-coarse만 쓰던 때 빠지던 자리', () => {
@@ -80,11 +80,11 @@ describe('touch: 변형 — 44 바닥', () => {
     for (const env of [PHONE, TABLET_PEN]) for (const [name, cls] of Object.entries(parts)) expect(pressHeight(cls, index, env), name).toBe(44);
   });
 
-  it('⭐앱 셸 안(ios · android)은 기기 분류가 «마우스»여도 44, 맥 앱(macos)은 36 그대로', () => {
+  it('⭐앱 셸 안(ios · android)은 기기 분류가 «마우스»여도 44, 맥 앱(macos)은 40 그대로', () => {
     for (const env of [APP_ANDROID, APP_IOS]) for (const [name, cls] of Object.entries(parts)) expect(pressHeight(cls, index, env), name).toBe(44);
-    expect(pressHeight(parts.Input!, index, APP_MAC)).toBe(36);
-    expect(pressHeight(parts.NativeSelect!, index, APP_MAC)).toBe(36);
-    expect(pressHeight(parts['Button(md)']!, index, APP_MAC)).toBe(28);
+    expect(pressHeight(parts.Input!, index, APP_MAC)).toBe(40);
+    expect(pressHeight(parts.NativeSelect!, index, APP_MAC)).toBe(40);
+    expect(pressHeight(parts['Button(md)']!, index, APP_MAC)).toBe(40);
   });
 
   it('⭐누르는 부품(Button · IconButton)은 가로도 44 — 에뮬 · 앱 셸 꼴에서도, 데스크톱은 44 아래', () => {
@@ -94,7 +94,7 @@ describe('touch: 변형 — 44 바닥', () => {
       expect(pressWidth(cls, index, DESKTOP), name).toBeLessThan(44);
       expect(pressWidth(cls, index, APP_MAC), name).toBeLessThan(44);
     }
-    expect(pressHeight(parts.IconButton!, index, DESKTOP)).toBe(28);
+    expect(pressHeight(parts.IconButton!, index, DESKTOP)).toBe(40);
   });
 
   it('ds 부품은 pointer-coarse:를 더 쓰지 않는다(쓰면 에뮬 꼴에서 44가 빠진다)', () => {

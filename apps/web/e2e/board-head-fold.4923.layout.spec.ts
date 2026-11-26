@@ -110,10 +110,10 @@ const measure = (page: Page) => page.evaluate(() => {
 
 // the window sizes of the story: Mac app minimum 1100×420 (head 748), 1280×520 (head 928), 1440×900 (head 1088), and 1100×800 (head 748 — a tall window)
 const CASES: Array<{ viewport: [number, number]; headWidth: number; folded: boolean; maxH: number }> = [
-  { viewport: [1100, 420], headWidth: 748, folded: true, maxH: 40 },
-  { viewport: [1280, 520], headWidth: 928, folded: true, maxH: 40 },
-  { viewport: [1440, 900], headWidth: 1088, folded: false, maxH: 52 },
-  { viewport: [1100, 800], headWidth: 748, folded: true, maxH: 52 },
+  { viewport: [1100, 420], headWidth: 748, folded: true, maxH: 46 }, // story 5048 T0 ①: ONE row of 40 px controls (+ 2 + 2 + the rule) — was 40 with 28–32 px ones
+  { viewport: [1280, 520], headWidth: 928, folded: true, maxH: 46 },
+  { viewport: [1440, 900], headWidth: 1088, folded: false, maxH: 56 },
+  { viewport: [1100, 800], headWidth: 748, folded: true, maxH: 56 },
 ];
 for (const c of CASES) {
   test(`[SID:4923] head ${c.headWidth}px · window ${c.viewport.join('×')}: ${c.folded ? 'the filters fold into one button' : 'stays unfolded'} and the head is ONE row ≤ ${c.maxH}px · no horizontal scroll`, async ({ page }) => {

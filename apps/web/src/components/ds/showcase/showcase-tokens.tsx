@@ -32,39 +32,48 @@ const COLORS: Array<{ name: string; swatch: string }> = [
   { name: 'info', swatch: 'bg-ds-info' },
   { name: 'info-soft', swatch: 'bg-ds-info-soft' },
   { name: 'scrim', swatch: 'bg-ds-scrim' },
+  { name: 'pin', swatch: 'bg-ds-pin' },
+  { name: 'on-pin', swatch: 'bg-ds-on-pin' },
 ];
 
 const TYPE_SCALE: Array<{ name: string; cls: string; spec: string }> = [
-  { name: 'title', cls: 'text-ds-title font-semibold', spec: '18 / 24' },
-  { name: 'card-title', cls: 'text-ds-card-title font-semibold', spec: '14 / 20' },
-  { name: 'body', cls: 'text-ds-body', spec: '13 / 20' },
-  { name: 'small', cls: 'text-ds-small', spec: '12 / 16' },
-  { name: 'mono-lg', cls: 'font-mono text-ds-mono-lg', spec: '13 / 18' },
-  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '11 / 16' },
-  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '11 / 14' },
+  { name: 'title', cls: 'text-ds-title', spec: '24 / 36 · 600 · -1%' },
+  { name: 'card-title', cls: 'text-ds-card-title', spec: '20 / 30 · 500' },
+  { name: 'body', cls: 'text-ds-body', spec: '16 / 24 · 500' },
+  { name: 'small', cls: 'text-ds-small', spec: '16 / 24 · 400' },
+  { name: 'mono-lg', cls: 'font-mono text-ds-mono-lg', spec: '16 / 24' },
+  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '14 / 21' },
+  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '14 / 21' },
 ];
 
 const RADII: Array<{ name: string; cls: string; px: string }> = [
-  { name: 'tag', cls: 'rounded-ds-tag', px: '2' },
-  { name: 'control', cls: 'rounded-ds-control', px: '4' },
+  { name: 'tag', cls: 'rounded-ds-tag', px: '8' },
+  { name: 'control', cls: 'rounded-ds-control', px: '8' },
   { name: 'panel', cls: 'rounded-ds-panel', px: '8' },
-  { name: 'pill', cls: 'rounded-ds-pill', px: '12' },
+  { name: 'pill', cls: 'rounded-ds-pill', px: '16' },
+  { name: 'bubble', cls: 'rounded-ds-bubble', px: '16' },
+  { name: 'tail', cls: 'rounded-ds-tail', px: '4' },
+  { name: 'circle', cls: 'rounded-ds-circle', px: '원' },
 ];
 
 const DENSITY: Array<{ name: string; cls: string; px: string; use: string }> = [
-  { name: 'control-sm', cls: 'h-ds-control-sm', px: '28', use: '작은 단추' },
-  { name: 'compact', cls: 'h-ds-compact', px: '32', use: '탭 · 메뉴 항목 · 달력 칸' },
-  { name: 'control', cls: 'h-ds-control', px: '36', use: '큰 단추 · 입력칸' },
+  { name: 'control-sm', cls: 'h-ds-control-sm', px: '40', use: '단추 · 아이콘 단추 — 조작 높이는 40 하나' },
+  { name: 'compact', cls: 'h-ds-compact', px: '40', use: '탭 · 메뉴 항목 · 달력 칸' },
+  { name: 'control', cls: 'h-ds-control', px: '40', use: '단추 · 입력칸' },
   { name: 'touch', cls: 'h-ds-touch', px: '44', use: '폰 바닥' },
   { name: 'control-xl', cls: 'h-ds-control-xl', px: '48', use: '큰 아이콘 단추' },
   { name: 'row', cls: 'h-ds-row', px: '56', use: '목록 줄' },
+  { name: 'tag', cls: 'h-ds-tag', px: '28', use: '태그' },
+  { name: 'bar', cls: 'h-ds-bar', px: '64', use: '상단 막대' },
+  { name: 'head', cls: 'h-ds-head', px: '80', use: '대화 머리' },
+  { name: 'chat-row', cls: 'h-ds-chat-row', px: '88', use: '대화 목록 줄' },
 ];
 
 /** 토큰 한눈에 — 색(밝음/어둠은 바깥 틀이 가른다) · 글자 · 모서리 · 밀도 · 그림자 · 움직임. 이름 = 코드의 이름. */
 export function ShowcaseTokens() {
   return (
     <>
-      <Block title="색 — 뜻 이름 28종 (--ds-*)">
+      <Block title="색 — 뜻 이름 30종 (--ds-*)">
         <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
           {COLORS.map((c) => (
             <div key={c.name} className="flex items-center gap-2 rounded-ds-control border border-ds-line bg-ds-surface p-1.5">
@@ -110,11 +119,11 @@ export function ShowcaseTokens() {
         <Row>
           <div className="flex flex-col items-center gap-1">
             <span aria-hidden="true" className="size-ds-row w-32 rounded-ds-panel border border-ds-line bg-ds-surface-raised shadow-ds-popup" />
-            <span className="font-mono text-ds-mono-md text-ds-ink-2">popup — 토스트 · 달력 팝업</span>
+            <span className="font-mono text-ds-mono-md text-ds-ink-2">popup — 없음(그림자 0 · 1px 선) · 토스트 · 달력 팝업</span>
           </div>
           <div className="flex flex-col items-center gap-1">
             <span aria-hidden="true" className="size-ds-row w-32 rounded-ds-panel border border-ds-line bg-ds-surface-raised shadow-ds-overlay" />
-            <span className="font-mono text-ds-mono-md text-ds-ink-2">overlay — 대화창 · 패널 · 메뉴</span>
+            <span className="font-mono text-ds-mono-md text-ds-ink-2">overlay — 없음(그림자 0 · 1px 선) · 대화창 · 패널 · 메뉴</span>
           </div>
         </Row>
       </Block>

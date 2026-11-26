@@ -46,7 +46,8 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
   const folded = short && Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
-    <header data-testid="room-head" className="flex-shrink-0 border-b border-ds-line px-4 pb-2 pt-3 max-lg:hidden">
+    // story 5048 T0 ①: the controls are 40 px now — in the short window (folded) the head gives its padding back so it stays under 72 px
+    <header data-testid="room-head" className={`flex-shrink-0 border-b border-ds-line px-4 max-lg:hidden ${folded ? 'pb-1 pt-1' : 'pb-1.5 pt-2'}`}>
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
@@ -56,7 +57,7 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
         ) : null}
         {trailing ? <div className="ml-auto flex flex-shrink-0 items-center gap-1">{trailing}</div> : null}
       </div>
-      {subline ? <p className="mt-0.5 truncate font-mono text-ds-mono-md text-ds-ink-3" data-testid="room-head-subline">{subline}</p> : null}
+      {subline ? <p className={`truncate font-mono text-ds-mono-md text-ds-ink-3 ${folded ? 'mt-0' : 'mt-0.5'}`} data-testid="room-head-subline">{subline}</p> : null}
       {folded ? null : (
       <ul className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="room-head-chips">
         {chips.map((c) => (
@@ -66,7 +67,7 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
           </li>
         ))}
         {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
-        {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" /></li> : null}
+        {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" className="size-ds-tag" /></li> : null}
       </ul>
       )}
     </header>

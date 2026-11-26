@@ -8,8 +8,8 @@ const CSS = readGlobalsCss(path.resolve(__dirname, '../src/app/globals.css'));
 describe('story #4315 — 브랜드 글자 토큰 대비', () => {
   it('⭐양 테마 --brand-text가 배경 · 카드 · 칩 틴트에서 4.5:1 이상(기대값 pin)', () => {
     const [light, dark] = computeBrandTextContrasts(CSS);
-    expect(light!.onBackground).toBeCloseTo(6.99, 1); // story 4930 — --brand-text는 ds action-text #4a3bc8의 별칭이다(옛 7.05 = 옛 파랑 brand-strong)
-    expect(dark!.onBackground).toBeCloseTo(10.86, 1); // story 4930 — 다크 --brand-text = ds action-text #c7bfff on ds-background #0f141a (옛 9.93 = 옛 파랑 brand-soft)
+    expect(light!.onBackground).toBeCloseTo(19.09, 1); // story 5048 T0 ① — --brand-text는 ds action-text #000000(라이트 검정)의 별칭이다 · #f4f4f4 위(옛 6.99 = 보라 #4a3bc8 · 더 옛 7.05 = 옛 파랑 brand-strong)
+    expect(dark!.onBackground).toBeCloseTo(16.67, 1); // story 5048 T0 ① — 다크 --brand-text = ds action-text #ffffff on ds-background #1e1e1e (옛 10.86 = 보라 #c7bfff on #0f141a · 더 옛 9.93 = 옛 파랑 brand-soft)
     for (const c of [light!, dark!]) {
       expect(c.onBackground).toBeGreaterThanOrEqual(4.5);
       expect(c.onCard).toBeGreaterThanOrEqual(4.5);
@@ -18,11 +18,11 @@ describe('story #4315 — 브랜드 글자 토큰 대비', () => {
     }
   });
 
-  it('양성대조 — 밝은 테마 글자가 brand-soft(옅은 틴트)였다면 1.06으로 FAIL(예전 모양: 옛 파랑일 때 1.25)', () => {
+  it('양성대조 — 밝은 테마 글자가 brand-soft(옅은 틴트)였다면 1.0으로 FAIL(예전 모양: 보라일 때 1.06 · 옛 파랑일 때 1.25 — story 5048 T0 ①에서 brand-soft = action-soft #f4f4f4가 배경과 같은 값이 됐다)', () => {
     const regressed = CSS.replace('--brand-text: var(--brand-strong);', '--brand-text: var(--brand-soft);');
     expect(regressed).not.toBe(CSS);
     const [light] = computeBrandTextContrasts(regressed);
-    expect(light!.onBackground).toBeCloseTo(1.06, 1);
+    expect(light!.onBackground).toBeCloseTo(1.0, 1);
     expect(light!.onBackground).toBeLessThan(4.5);
   });
 

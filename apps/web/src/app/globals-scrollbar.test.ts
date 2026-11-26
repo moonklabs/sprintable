@@ -141,12 +141,12 @@ describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollb
 // story #3826(2026-09-13, doc 3dc24888) — v3 조정으로 #F4F2EC → #F7F6F3(Bone, 거의 동일
 // 명도라 아래 명암비 판정에 실질 영향 없음).
 // story 4919(UI-R6) — --background가 가리키는 --proof-bg가 ds-background로 이어졌다: 라이트 #f3f5f9 · 다크 #0f141a. 45%/65% 알파는 그대로, 배경만 새 값으로 재합성한 결과.
-const LIGHT_BG = [243, 245, 249] as const; // --background(light) = var(--proof-bg) = var(--ds-background) #f3f5f9
-const LIGHT_THUMB_OLD = [219, 221, 224] as const; // oklch(0 0 0 / 10%) — 원 결함(알파 10%)
-const LIGHT_THUMB = [134, 135, 137] as const; // black 45% on #f3f5f9
-const DARK_BG = [15, 20, 26] as const; // --background(dark) = var(--proof-bg) = var(--ds-background) #0f141a
-const DARK_THUMB_OLD = [34, 39, 44] as const; // oklch(1 0 0 / 8%) — 원 결함(알파 8%)
-const DARK_THUMB = [171, 173, 175] as const; // white 65% on #0f141a
+const LIGHT_BG = [244, 244, 244] as const; // --background(light) = var(--proof-bg) = var(--ds-background) #f4f4f4 (story 5048 T0 ①)
+const LIGHT_THUMB_OLD = [220, 220, 220] as const; // oklch(0 0 0 / 10%) — 원 결함(알파 10%)
+const LIGHT_THUMB = [134, 134, 134] as const; // black 45% on #f4f4f4
+const DARK_BG = [30, 30, 30] as const; // --background(dark) = var(--proof-bg) = var(--ds-background) #1e1e1e (story 5048 T0 ①)
+const DARK_THUMB_OLD = [48, 48, 48] as const; // oklch(1 0 0 / 8%) — 원 결함(알파 8%)
+const DARK_THUMB = [176, 176, 176] as const; // white 65% on #1e1e1e
 
 describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» 실은 대비 실패)', () => {
   it('양성대조 — 원래 값(10%/8% 알파)은 실측 대비 ~1.2:1로 3:1 미달이었다(원 결함 재현)', () => {
@@ -181,8 +181,8 @@ describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» �
     expect(rootBlock).toContain('--proof-bg: var(--ds-background);');
     expect(darkBlock).toContain('--proof-bg: var(--ds-background);');
     const ds = fs.readFileSync(path.resolve(__dirname, '../styles/design-system.css'), 'utf8');
-    expect(extractTopLevelBlock(ds, ':root,\n.ds-theme-light {')).toContain('--ds-background: #f3f5f9;');
-    expect(extractTopLevelBlock(ds, '.dark {')).toContain('--ds-background: #0f141a;');
+    expect(extractTopLevelBlock(ds, ':root,\n.ds-theme-light {')).toContain('--ds-background: #f4f4f4;');
+    expect(extractTopLevelBlock(ds, '.dark {')).toContain('--ds-background: #1e1e1e;');
   });
 });
 

@@ -15,9 +15,9 @@ describe('SpecPinMarker (story 7fe16274 §4 — 코멘트 핀과 같은 레이�
     expect(markup).toContain('<span');
   });
 
-  it('uses the ds action fill (same as the open comment pin), never a destructive/learning-signal red (spec §4 — 스펙은 kill/부정 신호가 아님)', () => {
+  it('uses the ds pin fill (same as the open comment pin — story 5048 T0 ①: a mid-tone token that shows on any picture), never a destructive/learning-signal red (spec §4 — 스펙은 kill/부정 신호가 아님)', () => {
     const markup = renderToStaticMarkup(<SpecPinMarker onClick={() => {}} />);
-    expect(markup).toContain('bg-ds-action');
+    expect(markup).toContain('bg-ds-pin');
     expect(markup).not.toContain('destructive');
     expect(markup).not.toMatch(/ds-failed|ds-needs-hand/);
   });

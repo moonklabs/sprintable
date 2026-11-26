@@ -145,7 +145,7 @@ export function KanbanColumn({
     <div
       ref={setNodeRef}
       data-board-column={id}
-      className={`flex h-full flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-2 ${collapsed ?'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
+      className={`flex h-full flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-1.5 ${collapsed ?'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).

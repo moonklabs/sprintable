@@ -31,7 +31,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
 
   it('밝음 · 어둠이 같은 이름 집합을 정의한다(한쪽만 있으면 한 테마가 비어 렌더된다)', () => {
     expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
-    expect(Object.keys(light).length).toBe(28);
+    expect(Object.keys(light).length).toBe(30); // 28 + ds-pin · ds-on-pin(story 5048 T0 ①: 그림 위 핀 전용 중간 톤)
   });
 
   it('⭐고정폭 글자 하한: 가장 작은 mono-sm도 11px 이상(폰 11pt 하한 · 12px 미만 글자 처방)', () => {
@@ -52,7 +52,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
     expect(sizes.sort()).toEqual(['ds-body', 'ds-card-title', 'ds-mono-lg', 'ds-mono-md', 'ds-mono-sm', 'ds-small', 'ds-title']);
     for (const n of sizes) expect(theme, n).toMatch(new RegExp(`--text-${n}--line-height:\\s*\\d+px;`));
     const radii = [...theme.matchAll(/--radius-(ds-[\w-]+):\s*\d+px;/g)].map((m) => m[1]);
-    expect(radii.sort()).toEqual(['ds-control', 'ds-panel', 'ds-pill', 'ds-tag']);
+    expect(radii.sort()).toEqual(['ds-bubble', 'ds-circle', 'ds-control', 'ds-panel', 'ds-pill', 'ds-tag', 'ds-tail']);
   });
 
   it('⭐별칭 없음 — 옛 이름(--background · --foreground · --primary · --proof-* …)을 이 파일이 정의하지 않는다', () => {
@@ -71,7 +71,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
   const TEXT_PAIRS: Array<[string, string]> = [
     ['ds-ink', 'ds-surface'], ['ds-ink', 'ds-background'], ['ds-ink', 'ds-surface-high'],
     ['ds-ink-2', 'ds-surface'], ['ds-ink-3', 'ds-surface'], ['ds-ink-3', 'ds-surface-sunk'], ['ds-ink-3', 'ds-surface-high'], ['ds-ink-3', 'ds-background'], ['ds-action-text', 'ds-background'],
-    ['ds-on-action', 'ds-action'], ['ds-action-text', 'ds-surface'], ['ds-action-text', 'ds-action-soft'],
+    ['ds-on-action', 'ds-action'], ['ds-action-text', 'ds-surface'], ['ds-action-text', 'ds-action-soft'], ['ds-on-pin', 'ds-pin'],
     ['ds-needs-hand', 'ds-surface'], ['ds-needs-hand', 'ds-needs-hand-soft'], ['ds-on-needs-hand', 'ds-needs-hand-bar'],
     ['ds-done', 'ds-surface'], ['ds-done', 'ds-done-soft'],
     ['ds-failed', 'ds-surface'], ['ds-failed', 'ds-failed-soft'],
@@ -101,7 +101,7 @@ describe('design-system.css — 밀도 · 그림자 · 움직임 이름 토큰',
     if (!m) throw new Error(`--spacing-${name} 없음`);
     return Number(m[1]) * 16;
   };
-  it('⭐밀도: 작은 단추 28 · 촘촘한 칸 32 · 큰 단추 · 입력칸 36 · 폰 바닥 44 · 큰 아이콘 단추 48 · 목록 줄 56 (px)', () => {
+  it('⭐밀도(키트 규칙 · story 5048 T0 ①): 조작 높이는 «40 하나» — 작은 단추 · 촘촘한 칸 · 큰 단추 · 입력칸이 모두 40 · 폰 바닥 44 · 큰 아이콘 단추 48 · 목록 줄 56 · 태그 28 · 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240 (px)', () => {
     expect({
       'ds-control-sm': rem('ds-control-sm'),
       'ds-compact': rem('ds-compact'),
@@ -109,15 +109,18 @@ describe('design-system.css — 밀도 · 그림자 · 움직임 이름 토큰',
       'ds-touch': rem('ds-touch'),
       'ds-control-xl': rem('ds-control-xl'),
       'ds-row': rem('ds-row'),
-    }).toEqual({ 'ds-control-sm': 28, 'ds-compact': 32, 'ds-control': 36, 'ds-touch': 44, 'ds-control-xl': 48, 'ds-row': 56 });
+      'ds-tag': rem('ds-tag'),
+      'ds-bar': rem('ds-bar'),
+      'ds-head': rem('ds-head'),
+      'ds-chat-row': rem('ds-chat-row'),
+      'ds-nav-item': rem('ds-nav-item'),
+    }).toEqual({ 'ds-control-sm': 40, 'ds-compact': 40, 'ds-control': 40, 'ds-touch': 44, 'ds-control-xl': 48, 'ds-row': 56, 'ds-tag': 28, 'ds-bar': 64, 'ds-head': 80, 'ds-chat-row': 88, 'ds-nav-item': 240 });
   });
 
-  it('⭐그림자: popup = Tailwind 기본 shadow-md 값 · overlay = 기본 shadow-xl 값 그대로(이전 부품이 쓰던 값 — 화면이 안 바뀐다)', () => {
-    const tw = readFileSync(join(__dirname, '../../node_modules/tailwindcss/theme.css'), 'utf8');
-    const twVal = (n: string) => tw.match(new RegExp(`--shadow-${n}:\\s*([^;]+);`))![1]!.trim();
+  it('⭐그림자 없음(키트 규칙): popup · overlay 이름은 남고 값은 none — 칸은 1px 선과 면 색 차이로만 가른다', () => {
     const dsVal = (n: string) => css.match(new RegExp(`--shadow-ds-${n}:\\s*([^;]+);`))![1]!.trim();
-    expect(dsVal('popup')).toBe(twVal('md'));
-    expect(dsVal('overlay')).toBe(twVal('xl'));
+    expect(dsVal('popup')).toBe('none');
+    expect(dsVal('overlay')).toBe('none');
   });
 
   it('⭐움직임: 빠름 100ms · 움직임 줄이기 0 · 숨쉬기 2초 · 숨쉬기 모양은 Tailwind pulse와 같다(50%에서 투명도 0.5)', () => {

@@ -12,11 +12,15 @@
  * 재는 두 관계(유나 정본, 양 테마) —
  *   (a) 채움(accent-color가 가리키는 --primary) vs 페이지 배경(--background)·카드 배경
  *       (--card) ≥ 3:1 — 체크되지 않은 상태에서도 컨트롤 자체가 배경과 구분돼야 한다.
- *   (b) UA가 그리는 흰 체크 표시(#FFFFFF, 브라우저 네이티브 렌더 고정값) vs 채움 ≥ 3:1 —
- *       체크된 상태에서 체크 표시가 채움 위에서 보여야 한다.
- * 현재 토큰 실측 기대값 — 라이트: (a) 6.02(bg)/? (card 별도 계산) · (b) 6.51. 다크: (a) 6.09 ·
- * (b) 3.21(다크가 더 얇은 여유 — 3:1 문턱에 가장 가까운 값). 아래 EXPECTED_RATIOS가 이 값을
- * 양성대조로 고정한다 — 값이 바뀌면(토큰 재정의) 이 pin이 먼저 깨져 알린다.
+ *   (b) 체크 표시 vs 채움 ≥ 3:1 — 체크된 상태에서 체크 표시가 채움 위에서 보여야 한다. 체크 표시 색 =
+ *       on-action(`--primary-foreground`). story 5048(T0 ①, 키트 결: 주 행동색이 라이트 검정 · 다크 흰)에서
+ *       «체크는 항상 흰색(#FFFFFF, 브라우저 고정값)»이라는 옛 가정을 바로잡았다 — 실 Chromium에서 직접 재니
+ *       브라우저는 채움 밝기에 맞춰 체크 색을 고른다(accent-color 흰 → 어두운 체크 · 검정 · 보라 #5b4be0 → 흰 체크 ·
+ *       다크의 #8e7fff → 어두운 체크). 우리 토큰에서 그 색은 on-action과 같으므로 on-action을 읽는다.
+ *       한계: iOS 앱의 WebKit(WKWebView)에서 같은지는 아직 안 쟀다 → story 5048 ④ dev 실측(폰)에서 잰다.
+ * 현재 토큰 실측 기대값 — 라이트: (a) 19.09(bg) · (b) 21.00. 다크: (a) 16.67 · (b) 21.00.
+ * 시험(verify-accent-color-contrast.test.ts)이 이 값을 양성대조로 고정한다 — 값이 바뀌면
+ * (토큰 재정의) 이 pin이 먼저 깨져 알린다.
  *
  * oklch→sRGB 변환·대비 계산은 verify-tint-foreground-contrast.ts가 이미 검증한 유틸리티
  * (parseOklchToRgba/resolveCssVarValue/extractCssVarBlock/contrastRatio)를 그대로 재사용한다
@@ -37,7 +41,7 @@ export interface AccentColorContrastResult {
   theme: 'light' | 'dark';
   fillOnBackgroundRatio: number;
   fillOnCardRatio: number;
-  whiteCheckOnFillRatio: number;
+  checkOnFillRatio: number;
 }
 
 function resolveRgb(vars: Map<string, string>, name: string): [number, number, number] {
@@ -56,13 +60,13 @@ export function computeAccentColorContrasts(css: string): AccentColorContrastRes
     const fillRgb = resolveRgb(vars, 'primary');
     const backgroundRgb = resolveRgb(vars, 'background');
     const cardRgb = resolveRgb(vars, 'card');
-    const whiteRgb: [number, number, number] = [255, 255, 255];
+    const checkRgb = resolveRgb(vars, 'primary-foreground'); // 체크 표시 색 = on-action
 
     results.push({
       theme,
       fillOnBackgroundRatio: contrastRatio(fillRgb, backgroundRgb),
       fillOnCardRatio: contrastRatio(fillRgb, cardRgb),
-      whiteCheckOnFillRatio: contrastRatio(whiteRgb, fillRgb),
+      checkOnFillRatio: contrastRatio(checkRgb, fillRgb),
     });
   }
   return results;
@@ -76,7 +80,7 @@ function main(): number {
   console.log('[story #4128] accent-color(--primary) 채움 대비 —');
   for (const r of results) {
     console.log(
-      `  ${r.theme}: 채움 vs 배경=${r.fillOnBackgroundRatio.toFixed(2)} · 채움 vs 카드=${r.fillOnCardRatio.toFixed(2)} · 흰 체크 vs 채움=${r.whiteCheckOnFillRatio.toFixed(2)}`,
+      `  ${r.theme}: 채움 vs 배경=${r.fillOnBackgroundRatio.toFixed(2)} · 채움 vs 카드=${r.fillOnCardRatio.toFixed(2)} · 체크(on-action) vs 채움=${r.checkOnFillRatio.toFixed(2)}`,
     );
     if (r.fillOnBackgroundRatio < AA_NONTEXT_THRESHOLD) {
       console.error(`FAIL: ${r.theme} 채움 vs 배경 ${r.fillOnBackgroundRatio.toFixed(2)} < ${AA_NONTEXT_THRESHOLD}:1`);
@@ -86,8 +90,8 @@ function main(): number {
       console.error(`FAIL: ${r.theme} 채움 vs 카드 ${r.fillOnCardRatio.toFixed(2)} < ${AA_NONTEXT_THRESHOLD}:1`);
       failed = true;
     }
-    if (r.whiteCheckOnFillRatio < AA_NONTEXT_THRESHOLD) {
-      console.error(`FAIL: ${r.theme} 흰 체크 vs 채움 ${r.whiteCheckOnFillRatio.toFixed(2)} < ${AA_NONTEXT_THRESHOLD}:1`);
+    if (r.checkOnFillRatio < AA_NONTEXT_THRESHOLD) {
+      console.error(`FAIL: ${r.theme} 체크(on-action) vs 채움 ${r.checkOnFillRatio.toFixed(2)} < ${AA_NONTEXT_THRESHOLD}:1`);
       failed = true;
     }
   }
