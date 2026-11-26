@@ -48,21 +48,25 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, ro
   const agentIds = agents.map((a) => a.member_id);
   const agentKey = agentIds.join(',');
   const savingRef = useRef<Set<string>>(new Set());
+  // a save counter per agent: a read that STARTED before a save is older than it, whatever order the answers come in (codex round 2) — both of its outcomes (a value, a failure) are dropped
+  const genRef = useRef<Record<string, number>>({});
 
   // read each agent's own level for this channel (one read per agent — a channel has a handful). A failed read is NOT «off»: the row stays locked and says it could not be read.
   useEffect(() => {
     if (!canEditAgents) return;
     let cancelled = false;
     for (const id of agentKey ? agentKey.split(',') : []) {
+      const startedAt = genRef.current[id] ?? 0;
+      const stale = () => cancelled || savingRef.current.has(id) || (genRef.current[id] ?? 0) !== startedAt;
       fetchWithAuth(`/api/notification-preferences?member_id=${encodeURIComponent(id)}`)
         .then((r) => { if (!r.ok) throw new Error('read failed'); return r.json(); })
         .then((json: { data?: { data?: PreferenceItem[] } | PreferenceItem[] } | null) => {
-          if (cancelled || savingRef.current.has(id)) return; // a switch being saved keeps the person's value, not the server's older one
+          if (stale()) return; // a switch being saved (or saved since this read began) keeps the person's value, not the server's older one
           const list = !json ? [] : Array.isArray(json.data) ? json.data : (json.data as { data?: PreferenceItem[] } | undefined)?.data ?? [];
           const mine = list.find((p) => p.scope_type === 'conversation' && p.scope_id === conversationId && p.channel === EDITED_CHANNEL);
           patch(id, { on: mine?.level === 'all', loading: false, unreadable: false, error: null });
         })
-        .catch(() => { if (!cancelled) patch(id, { loading: false, unreadable: true, error: t('channelSettingsLoadFailed') }); });
+        .catch(() => { if (!stale()) patch(id, { loading: false, unreadable: true, error: t('channelSettingsLoadFailed') }); });
     }
     return () => { cancelled = true; };
   }, [agentKey, canEditAgents, conversationId, patch, t]);
@@ -71,6 +75,7 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, ro
     const prev = rows[agentId]?.on ?? false;
     const next = !prev;
     savingRef.current.add(agentId);
+    genRef.current[agentId] = (genRef.current[agentId] ?? 0) + 1;
     patch(agentId, { on: next, saving: true, error: null });
     try {
       const res = await fetchWithAuth('/api/notification-preferences', {

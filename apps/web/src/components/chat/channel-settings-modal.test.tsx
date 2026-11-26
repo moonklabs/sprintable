@@ -150,3 +150,47 @@ describe('ChannelSettingsModal — codex round 1 (story 5032)', () => {
     expect(switchOf(rows()[0]!).getAttribute('aria-checked')).toBe('true');
   });
 });
+
+describe('ChannelSettingsModal — codex round 2 (story 5032): a read that began before a save never has the last word', () => {
+  it('⭐ the agents list changes (a new read of A begins), THEN the person saves A, THEN the older read lands — late value or late failure: A keeps what was saved and is not locked', async () => {
+    const pending: Array<{ id: string; resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
+    let firstRound = true;
+    fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') return Promise.resolve({ ok: true, status: 200, json: async () => ({ data: {} }) });
+      const id = new URL(url, 'http://x').searchParams.get('member_id') ?? '';
+      if (firstRound) return Promise.resolve({ ok: true, status: 200, json: async () => ({ data: [] }) });
+      return new Promise((resolve, reject) => { pending.push({ id, resolve, reject }); });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const view = (agents: ChannelAgent[]) => (
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <ChannelSettingsModal conversationId={CONV} agents={agents} canEditAgents onClose={() => {}} onOpenMyNotifications={() => {}} />
+      </NextIntlClientProvider>
+    );
+    await act(async () => { root.render(view([A])); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    firstRound = false;
+    await act(async () => { root.render(view([A, B])); }); // the list changed → A and B are read again (both pending)
+    for (let i = 0; i < 2; i++) await act(async () => { await Promise.resolve(); });
+    const aRead = pending.find((p) => p.id === 'ag-1')!;
+    expect(aRead, 'a second read of A is pending').toBeTruthy();
+    await act(async () => { switchOf(rows().find((r) => r.getAttribute('data-agent-id') === 'ag-1')!).click(); }); // save A → on
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const rowA = () => rows().find((r) => r.getAttribute('data-agent-id') === 'ag-1')!;
+    expect(switchOf(rowA()).getAttribute('aria-checked')).toBe('true');
+    aRead.resolve({ ok: true, status: 200, json: async () => ({ data: [] }) }); // the OLDER read lands late, saying «off»
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(switchOf(rowA()).getAttribute('aria-checked')).toBe('true'); // reverted (no counter) → flips back to off
+    // and a late FAILURE of an older read does not lock the saved row either
+    await act(async () => { root.render(view([A, B, { member_id: 'ag-3', name: '검수' }])); });
+    for (let i = 0; i < 2; i++) await act(async () => { await Promise.resolve(); });
+    const aRead2 = pending.filter((p) => p.id === 'ag-1').at(-1)!;
+    await act(async () => { switchOf(rowA()).click(); }); // save A → off
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    aRead2.reject(new Error('late failure'));
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(rowA().querySelector('[role="alert"]')).toBeNull();
+    const sw = switchOf(rowA());
+    expect(sw.hasAttribute('data-disabled') || sw.getAttribute('aria-disabled') === 'true' || (sw as HTMLButtonElement).disabled === true, 'A is not locked').toBe(false);
+  });
+});
