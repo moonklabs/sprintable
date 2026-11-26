@@ -165,7 +165,7 @@ function pageRoutes(dir: string, out: string[] = []): string[] {
 const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
   // 로그인 전 · 계정 · 온보딩 · 공개 · 앱 연결 흐름 — 메뉴가 아니라 흐름의 한 단계
   '/': '랜딩', '/login': '로그인 흐름', '/register': '로그인 흐름', '/forgot-password': '로그인 흐름', '/reset-password': '로그인 흐름', '/set-password/confirm': '로그인 흐름',
-  '/verify-email': '로그인 흐름', '/mfa': '로그인 흐름', '/auth/reset-required': '로그인 흐름', '/invite': '초대 흐름', '/invite/accept': '초대 흐름', '/unsubscribe': '메일 수신 거부 링크',
+  '/verify-email': '로그인 흐름', '/invite': '초대 흐름', '/invite/accept': '초대 흐름', '/unsubscribe': '메일 수신 거부 링크',
   '/terms': '공개 약관(바닥글)', '/privacy': '공개 약관(바닥글)', '/refund-policy': '공개 약관(바닥글)', '/native/continue': '앱 로그인 흐름', '/native/oauth-return': '앱 로그인 흐름',
   '/session-unconfirmed': '세션 확인 실패 때 프록시가 rewrite로 보여 주는 공개 «다시 시도» 화면(주소로 바로 와도 공개 · 메뉴 입구 없음이 맞음)',
   '/phone-landing': '폰 연결 흐름', '/phone-start': '폰 연결 흐름', '/phone-files': '폰 연결 흐름', '/onboarding': '온보딩 흐름', '/onboarding/first-instruction': '온보딩 흐름', '/share/[token]': '공유 링크',
@@ -174,18 +174,19 @@ const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
   '/[ws]/[proj]/docs/[slug]': '«문서» 목록의 상세', '/[ws]/[proj]/docs/[slug]/view': '문서 보기', '/[ws]/[proj]/goals/[id]': '«목표» 목록의 상세', '/[ws]/[proj]/loops/[id]': '«실행» 목록의 상세',
   '/[ws]/[proj]/retro/[id]': '«회고» 상세', '/[ws]/[proj]/artifacts/[id]': '«산출물» 목록의 상세', '/content/[draftId]': '«콘텐츠» 목록의 상세', '/content/channel-posts/[draftId]': '«채널 포스트» 목록의 상세',
   '/content/channel-posts/calendar': '«채널 포스트»의 캘린더 보기', '/content/channel-posts/engagement': '«채널 포스트»의 성과 보기', '/campaigns/[campaignId]': '«콘텐츠»의 캠페인 상세',
-  '/organization/connectors': '«에이전트» 설정 안의 커넥터 안내(agent-setup-section)', '/settings/integrations': '«설정» 안의 통합 화면',
-  '/dashboard': '초대 수락 뒤 착지 · 옛 대시보드 셸', '/dashboard/settings': '업그레이드 안내에서 여는 설정',
-  '/desktop/pair': '폰 연결 흐름', '/desktop/setup': '맥 앱 셋업 흐름', '/desktop/remote': '채팅 에이전트 줄의 원격 제어 링크', '/desktop/remote-on': '원격 제어 흐름',
+  '/settings/integrations': '«설정» 안의 통합 화면',
+  // 옛 주소를 지우지 않고 새 화면으로 보내기만 하는 쪽(story 5031 · 코드로 확인: 각 page.tsx가 redirect()만 한다)
+  '/organization/connectors': '리다이렉트만(채널 연결 화면으로) — 이 주소로 거는 링크는 주석뿐', '/dashboard': '리다이렉트만(대화 /chats로) — 옛 대시보드 주소', '/dashboard/settings': '리다이렉트만(/settings로) — 옛 주소',
+  '/desktop/pair': '폰 연결 흐름', '/desktop/setup': '맥 앱 셋업 흐름', '/desktop/remote': '맥 앱이 `#code`를 달아 직접 여는 원격 제어 흐름(채팅 에이전트 줄의 링크는 /desktop#앵커로 감)', '/desktop/remote-on': '원격 제어 흐름',
   '/internal-dogfood': '내부 도그푸딩(프록시 전용)',
   // 켜지지 않은 시안 — 정본은 지금 서 있는 화면이고 v3 쪽은 켜지도 떼지도 않는다(PO 결정 11-10)
-  '/today': 'v3 «오늘» 시안(플래그 꺼짐 — 정본은 /org-briefing)', '/chat': 'v3 «대화» 시안(플래그 꺼짐 — 정본은 /chats)', '/connect-rules': 'v3 «연결·규칙» 시안(플래그 꺼짐)',
+  '/today': 'v3 «오늘» 시안(플래그 꺼짐 — 정본은 /org-briefing · 라우트와 플래그 그대로)', '/chat': 'v3 «대화» 시안(플래그 꺼짐 — 정본은 /chats · 라우트와 플래그 그대로)', '/connect-rules': 'v3 «연결·규칙» 시안(플래그 꺼짐 — 정본은 설정의 채널 연결 · 콘텐츠 규칙 · 라우트와 플래그 그대로)',
   // 입구를 일부러 만들지 않는 화면
+  // 로그인이 TOTP를 화면 안에서 처리하고 이 두 주소로 보내는 코드는 제품 안에 0 — 스캐폴드(지우는 판단은 이 장 밖, story 5031)
+  '/mfa': '아무도 이 주소로 보내지 않음(스캐폴드)', '/auth/reset-required': '아무도 이 주소로 보내지 않음(스캐폴드)',
   '/organization/memory': '«아직 준비 중인 화면이에요» 뿐이라 story #4183(유나 확認)이 일부러 메뉴에서 걷음',
   '/docs/design-tokens': '개발자용 참고 쪽(영어 고정 제목 · 로딩 경계 없음) — 사용자 메뉴에 올리지 않음',
   '/design-system': '팀 안에서 ds 부품 · 토큰을 보는 내부 견본 화면(story 4886 AC3) — 주소로만 닿고 사용자 메뉴에 올리지 않음',
-  // 아직 입구가 없는 화면 — 후속 칸의 몫(숨기지 않고 적는다)
-  '/loop-queue': '«오늘»의 주의 큐로 합쳐질 화면 — «오늘» 화면 주인(UI-5)의 칸. 지금은 주소로만 닿는다(제품 코드 안에 이 주소로 가는 링크 0 — 시험 · 예약 세그먼트 표 제외)',
 };
 
 describe('⭐모든 화면이 한 입구 이상(orphan 0) — 의도된 예외는 이유와 함께 한 표에', () => {

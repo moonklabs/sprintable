@@ -248,7 +248,11 @@
     "descWorkforceApiKeys": "에이전트가 쓰는 연결 키",
     "descRewards": "포상 · 벌금 · 리더보드",
     "channelChat": "채널 채팅",
-    "descChannelChat": "채널에 바로 말 걸기"
+    "descChannelChat": "채널에 바로 말 걸기",
+    "depth1Chat": "채팅",
+    "allScreens": "모든 화면",
+    "loopQueue": "지금 개입할 것",
+    "descLoopQueue": "사람이 한 번 봐야 하는 일을 모아 둔 큐"
   },
   "storage": {
     "title": "스토리지",

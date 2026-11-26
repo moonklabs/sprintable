@@ -70,9 +70,9 @@ describe('실 NAV_GROUPS ∪ OTHER_NAV_ITEMS — story #2684 AC3 판별자, stor
   // story #4116(2026-09-21) — org-generation-connectors 신설로 21→22(동일 축 동일 사유).
   // story #4183(2026-09-23) — org-memory 걷힘으로 22→21(동일 축 동일 사유).
   // story #4885(UI-2 AC4 PR 1) — 새 구조: NAV_GROUPS 23항목(오늘 2 · 일감 3 · 에이전트 3 · 지식 3 · 조직 11 · 설정 1) + 그 밖 2 = 25항목. 서랍이 걷혀 «그 밖» 2쪽이 «전체» 맨 아래로 간 것 외에 전부 사이드바 1단.
-  it('전 25항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  it('전 26항목(챗 center 제외 · story 5031: «지금 개입할 것» 입구 +1)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    expect(entries).toHaveLength(25);
+    expect(entries).toHaveLength(26);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 

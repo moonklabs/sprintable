@@ -174,6 +174,8 @@ export const TEAM_TABS: readonly TeamTabConfig[] = [
 export const OTHER_NAV_ITEMS: NavItemConfig[] = [
   { id: 'rewards', labelKey: 'rewards', descriptionKey: 'descRewards', icon: Trophy, kind: 'static', path: '/rewards' },
   { id: 'channel-chat', labelKey: 'channelChat', descriptionKey: 'descChannelChat', icon: MessagesSquare, kind: 'static', path: '/channel' },
+  // story 5031 (C1, PO 11-26): a real screen that nothing linked to — it gets its ⌘K door (and a row in «전체»); its place is 홈 (nav-placement.ts).
+  { id: 'loop-queue', labelKey: 'loopQueue', descriptionKey: 'descLoopQueue', icon: ListChecks, kind: 'static', path: '/loop-queue' },
 ];
 
 // 모바일 «전체»의 구역 순서(story #4885 · 폰 탭 넷): 하단 탭이 홈 · 대화 · 일감을 덮으니 탭에 없는 매일 구역 **팀 · 지식이 맨 위 두 구역**, 그 다음 **설정**, 그 뒤에 홈 · 일감 쪽에 남은 항목(결재 · 목표 · 실행) · 조직(사이드바 순서와 다르다 — 사이드바는 탭이 없어 홈 · 일감이 위).

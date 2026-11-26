@@ -158,14 +158,14 @@ function announcesStatus(loadingFile: string): boolean {
 // 판마다 따로 대조한다(까디르 검수 P2 — 합집합 하나로 대조하면 OFF/ON이 뒤바뀌어도 통과했다). 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인.
 // story #4885(UI-2 AC4 PR 1) — 새 사이드바는 플래그 없이 하나라 두 판의 차이는 탭바의 v3 목적지(/today · /chat · work-list)뿐이다(/connect-rules는 꺼진 시안으로 더는 메뉴 목적지가 아니다).
 const EXPECTED_OFF = [
-  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/loop-queue', '/more', '/org-briefing', '/organization/channels',
   '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
   '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
   '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
   'resource:loops', 'resource:storage',
 ].sort();
 const EXPECTED_ON = [
-  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/loop-queue', '/more', '/org-briefing', '/organization/channels',
   '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
   '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
   '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
@@ -201,6 +201,7 @@ const NO_CONTAINER: Record<string, string> = {
   '/organization/workforce/api-keys': '에이전트 키 관리 화면(story #4885 새 입구 — 화면 자체는 그대로)',
   '/rewards': '리워드 화면(story #4885 «그 밖» — 화면 자체는 그대로)',
   '/channel': '채널 채팅 전폭(story #4885 «그 밖» — 화면 자체는 그대로)',
+  '/loop-queue': '지금 개입할 것 큐(story 5031 «그 밖» 입구 — 화면 자체는 그대로 · 기본 PageSkeleton)',
   'resource:artifacts': '산출물 갤러리 전폭',
   'resource:docs': '문서 트리 · 편집기 전폭',
   'resource:flow': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',

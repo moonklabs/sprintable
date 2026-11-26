@@ -24,7 +24,7 @@ const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'docs', 'artifacts', 'sto
 //   manage(기본)·access는 project 무관 — 탭에 따라 갈리는 혼합 화면
 // - story #4885: 새로 입구를 얻은 org-workforce-runs · org-workforce-api-keys와 «그 밖» 2쪽(rewards · channel-chat) — 화면의 데이터 성격을 아직 감사하지 않았다.
 //   감사 전엔 project라고도 org라고도 단정하지 않는다(표식 없음 = 말을 안 함. 감사하면 이 목록에서 빼고 scope를 단다).
-const AMBIGUOUS_IDS = ['inbox', 'settings', 'org-briefing', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys', 'rewards', 'channel-chat'];
+const AMBIGUOUS_IDS = ['inbox', 'settings', 'org-briefing', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys', 'rewards', 'channel-chat', 'loop-queue'];
 
 // story #3824(UX-v3·FE 1, 2026-09-13) — 5항목 축소는 사이드바 "1급 노출" 재편일 뿐,
 // scope 분류(project/org/애매) 자체는 화면의 실제 데이터 필터 성격을 서술하는 값이라
@@ -43,9 +43,9 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙, 채널 연결의
   // 형제 화면)로 21→22.
   // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 nav에서 걷어 22→21.
-  // story #4885 — 새 구조 25(NAV_GROUPS 23 + 그 밖 2).
-  it('항목 25개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
-    expect(allItems()).toHaveLength(25);
+  // story #4885 — 새 구조 25(NAV_GROUPS 23 + 그 밖 2). story 5031(C1) — 그 밖에 «지금 개입할 것»(/loop-queue)이 더해 26(애매: 사람이 한 번 봐야 하는 큐라 project/org 어느 쪽도 아님).
+  it('항목 26개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
+    expect(allItems()).toHaveLength(26);
   });
 
   it('project 스코프 7항목이 정확히 이 집합이다(story #3845로 9→7, retro·standup 제외)', () => {
@@ -66,7 +66,7 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
     expect(orgIds).toHaveLength(10);
   });
 
-  it('애매 8항목(inbox·settings·org-briefing·org-workforce + 감사 전 새 입구 4)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {
+  it('애매 9항목(inbox·settings·org-briefing·org-workforce + 감사 전 새 입구 4)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {
     for (const id of AMBIGUOUS_IDS) {
       const item = allItems().find((i) => i.id === id);
       expect(item?.scope, `${id}.scope`).toBeUndefined();
