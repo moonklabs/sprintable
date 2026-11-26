@@ -3191,35 +3191,44 @@ async def report_message_delivery(
     if not (auth.claims.get("app_metadata") or {}).get("api_key_id"):
         raise HTTPException(status_code=403, detail="agents only")
     agent_id = uuid.UUID(auth.user_id)
+    from sqlalchemy import and_, text as _sql
+
     from app.services.project_auth import has_project_access
 
+    # ONE read decides it all: the message, its room's project, and whether THIS agent has the event for it. A message that exists but is not this agent's costs the same single query as a missing one — nothing
+    # further is looked at for a caller that is not a recipient, so the two cannot be told apart by timing either.
     found = (await db.execute(
-        select(ConversationMessage, Conversation.project_id)
+        select(Conversation.project_id)
+        .select_from(ConversationMessage)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .join(Event, and_(
+            Event.source_entity_id == ConversationMessage.id, Event.recipient_id == agent_id, Event.org_id == org_id,
+            Event.event_type == "conversation.message_created", Event.source_entity_type == "conversation_message",
+        ))
         .where(ConversationMessage.id == message_id, ConversationMessage.conversation_id == conversation_id, Conversation.org_id == org_id, ConversationMessage.deleted_at.is_(None))
-        .with_for_update(of=ConversationMessage)
+        .limit(1)
     )).first()
-    row = found[0] if found else None
     # an agent that has lost the room's project is no longer a reader of the room (story 4846 AC12): it does not write on its messages either (defence in depth — it is not sent them in the first place)
-    allowed = row is not None and (found[1] is None or await has_project_access(db, agent_id, found[1], org_id))
-    received = allowed and (await db.execute(
-        select(Event.id).where(
-            Event.org_id == org_id, Event.event_type == "conversation.message_created", Event.source_entity_type == "conversation_message",
-            Event.source_entity_id == message_id, Event.recipient_id == agent_id,
-        ).limit(1)
-    )).first() is not None
-    if row is None or not received:
+    if found is None or (found[0] is not None and not await has_project_access(db, agent_id, found[0], org_id)):
         raise HTTPException(status_code=404, detail="Message not found")
-    meta = dict(row.msg_metadata) if isinstance(row.msg_metadata, dict) else {}
-    log = dict(meta.get(DELIVERY_LOG_KEY)) if isinstance(meta.get(DELIVERY_LOG_KEY), dict) else {}
-    mine = log.get(str(agent_id))
-    if not (isinstance(mine, dict) and mine.get("via") in DELIVERY_VIA):
-        mine = {"via": body.via, "at": datetime.now(timezone.utc).isoformat()}
-        log[str(agent_id)] = mine
-        meta[DELIVERY_LOG_KEY] = log
-        row.msg_metadata = meta  # a NEW dict: the JSON column is only written when it is reassigned
-        await db.commit()
-    return {"via": mine["via"], "at": mine["at"]}
+    # ONE atomic statement: the agent's line is added only if it has none yet (the first report stays — two reports at once: the second waits for the row, re-checks, and changes nothing), and nothing else in the
+    # message's metadata is rewritten (an approval or a card written at the same moment is not lost — no whole-document read-modify-write)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    params = {"mid": message_id, "aid": str(agent_id), "via": body.via, "at": now_iso}
+    # (a message sent without any metadata holds a JSON `null`, not an SQL NULL — `jsonb_set` cannot set a path in a scalar, so anything that is not an object is read as an empty one)
+    doc = "(CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)"
+    log = "(CASE WHEN jsonb_typeof(metadata->'delivery_log') = 'object' THEN metadata->'delivery_log' ELSE '{}'::jsonb END)"
+    await db.execute(_sql(
+        f"UPDATE conversation_messages SET metadata = jsonb_set({doc}, '{{delivery_log}}', "
+        f"{log} || jsonb_build_object(CAST(:aid AS text), jsonb_build_object('via', CAST(:via AS text), 'at', CAST(:at AS text))), true) "
+        f"WHERE id = :mid AND NOT jsonb_exists({log}, CAST(:aid AS text))"
+    ), params)
+    stored = (await db.execute(_sql("SELECT metadata->'delivery_log'->CAST(:aid AS text) FROM conversation_messages WHERE id = :mid"), {"mid": message_id, "aid": str(agent_id)})).scalar_one_or_none()
+    await db.commit()
+    line = json.loads(stored) if isinstance(stored, str) else stored
+    if not (isinstance(line, dict) and line.get("via") in DELIVERY_VIA and isinstance(line.get("at"), str)):
+        raise HTTPException(status_code=404, detail="Message not found")  # (cannot happen after the statement above; never serve a line that does not fit the shape)
+    return {"via": line["via"], "at": line["at"]}
 
 
 async def send_message_core(

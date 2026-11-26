@@ -6,6 +6,7 @@ accepted · a caller of the public message route can write the server's `deliver
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -150,5 +151,58 @@ async def test_a_via_outside_the_two_words_is_refused():
         for bad in ({"via": "now"}, {"via": ""}, {}, {"via": ["turn"]}):
             r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), bad)
             assert r.status_code == 422, (bad, r.text)
+    finally:
+        await engine.dispose()
+
+
+async def test_two_reports_at_once_leave_exactly_one_line_and_both_get_the_same_answer():
+    from app.main import app
+    from tests.test_4846_org_chat_rooms_realdb import _client_for, _setup_app_agent
+
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human)
+        await _setup_app_agent(app, Session, w.g_p, w.org)
+        try:
+            async with _client_for(app) as c:
+                a, b = await asyncio.gather(c.post(_report(w.r_human, msg), json={"via": "turn"}), c.post(_report(w.r_human, msg), json={"via": "next_turn"}))
+        finally:
+            app.dependency_overrides.clear()
+        assert a.status_code == b.status_code == 200, (a.text, b.text)
+        assert (a.json().get("data") or a.json()) == (b.json().get("data") or b.json())  # one line won; the other got it back
+        assert list((await _read(Session, w, w.r_human, msg))["delivery_log"]) == [str(w.g_p)]
+    finally:
+        await engine.dispose()
+
+
+async def test_a_report_rewrites_nothing_else_in_the_messages_metadata():
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human, delivery_mode="after_turn")
+        async with Session() as s:  # keys other namespaces write (a card · an approval · the withheld count) must survive the report untouched
+            await s.execute(text("UPDATE conversation_messages SET metadata = metadata || CAST(:extra AS jsonb) WHERE id = :m"), {"m": msg, "extra": json.dumps({"approval_target": {"gate_id": "g1"}, "card": {"kind": "story", "ref": "0d6e953f-6d43-42c1-a87c-b023544497db"}})})
+            await s.commit()
+        r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "turn"})
+        assert r.status_code == 200, r.text
+        async with Session() as s:
+            meta = (await s.execute(text("SELECT metadata FROM conversation_messages WHERE id = :m"), {"m": msg})).scalar_one()
+        meta = meta if isinstance(meta, dict) else json.loads(meta)
+        assert meta["approval_target"] == {"gate_id": "g1"} and meta["card"]["kind"] == "story", meta
+        assert meta["delivery"]["mode"] == "after_turn" and list(meta["delivery_log"]) == [str(w.g_p)], meta
+    finally:
+        await engine.dispose()
+
+
+async def test_a_plain_message_with_no_metadata_at_all_can_be_reported():
+    """the common case: a message sent the old way holds a JSON null as its metadata (not an object) — the report must still make the line (found by the concurrent-reports test: `jsonb_set` cannot set a path in a scalar)"""
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human)
+        async with Session() as s:
+            kind = (await s.execute(text("SELECT jsonb_typeof(metadata) FROM conversation_messages WHERE id = :m"), {"m": msg})).scalar_one_or_none()
+        assert kind in (None, "null"), kind  # a message with no metadata of its own
+        r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "turn"})
+        assert r.status_code == 200, r.text
+        assert list((await _read(Session, w, w.r_human, msg))["delivery_log"]) == [str(w.g_p)]
     finally:
         await engine.dispose()
