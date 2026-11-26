@@ -1,5 +1,6 @@
 // story #4885(UI-2 AC4 PR 1) — 모바일 «전체» 구역을 실 nav-config로 돈다. 구역 = 사이드바와 같은 한 정의(NAV_GROUPS) 그대로 + 맨 아래 «그 밖의 화면»(OTHER_NAV_ITEMS).
-// 빼는 항목은 탭바가 실제로 그리는 탭의 목적지 · 탭에 없는 목적지는 메뉴에 반드시. (story #4278의 «연결·규칙 소묶음 합치기» · 「더보기」 소묶음은 서랍이 걷히며 사라졌다.)
+// 빼는 항목은 탭바가 실제로 그리는 탭의 목적지 · 탭에 없는 목적지는 메뉴에 반드시.
+// story 5031 (C1 4단계) — 폰 탭이 홈 · 채팅 · 에이전트 · 설정 넷이 됐다: 허브에서 빠지는 줄 = org-briefing · chats · org-workforce · settings. 일감(board)은 탭이 아니라 허브에 남는다(채팅 자리 목록 줄이기도 하다). (story #4278의 «연결·규칙 소묶음 합치기» · 「더보기」 소묶음은 서랍이 걷히며 사라졌다.)
 // 뮤테이션: ① 제외를 빼면 탭 목적지가 메뉴에 또 나온다 ② 구역 순서 목록에서 구역을 빼면 그 구역 항목이 «도달불가»가 된다 ③ 그 밖 카드를 빼면 그 밖 화면이 사라진다.
 import { describe, expect, it } from 'vitest';
 import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
@@ -22,41 +23,51 @@ function hub(flags: NavV3Flags) {
 const ids = (g: ReturnType<typeof hub>[number] | undefined) => (g?.items ?? []).map((i) => i.id);
 
 describe('buildMobileHubGroups(story #4885)', () => {
-  it('⭐구역 순서(폰 탭 넷): 탭에 없는 매일 구역 팀 · 지식이 맨 위 두 구역 → 설정 → 홈 · 일감 쪽 남은 항목 → 조직 → 맨 아래 «그 밖의 화면» 카드', () => {
+  it('⭐구역 순서(폰 탭 넷 · story 5031): 팀 · 지식 → (설정 구역은 설정 탭이 가져가 비어 사라짐) → 홈 · 일감 쪽 남은 항목 → 조직 → 맨 아래 «그 밖의 화면» 카드', () => {
     const g = hub(DEFAULT_NAV_V3_FLAGS);
-    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'settings', 'now', 'dev', 'org', MOBILE_OTHER_CARD_ID]);
+    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'now', 'dev', 'org', MOBILE_OTHER_CARD_ID]);
     // 구역 종류는 사이드바와 같은 한 정의(NAV_GROUPS) — 순서만 다르다(사이드바에는 탭이 없어 홈 · 일감이 위)
     expect([...MOBILE_HUB_GROUP_ORDER].sort()).toEqual(NAV_GROUPS.map((x) => x.id).sort());
     expect(g[g.length - 1]).toMatchObject({ id: MOBILE_OTHER_CARD_ID, labelKey: 'moreOtherScreens' });
     expect(ids(g[g.length - 1])).toEqual(OTHER_NAV_ITEMS.map((i) => i.id));
   });
 
-  it('⭐탭 목적지만 뺀다 — 홈 · 대화 · 일감(플래그와 무관): 홈 · 보드 빠짐 · «결재 탭»은 없어 결재(inbox)는 메뉴에 남는다', () => {
-    expect(tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)).toEqual(new Set(['org-briefing', 'chats', 'board']));
+  it('설정 구역: 설정 항목은 탭이 가져가 빠지고, 데스크톱 앱 항목이 켜진 곳(desktopDownloadEnabled)에서만 그 한 줄이 설정 구역으로 남는다 — 구역 순서는 지식 바로 뒤', () => {
+    const withDesktop: NavV3Flags = { ...DEFAULT_NAV_V3_FLAGS, desktopDownloadEnabled: true };
+    const g = hub(withDesktop);
+    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'settings', 'now', 'dev', 'org', MOBILE_OTHER_CARD_ID]);
+    expect(ids(g.find((x) => x.id === 'settings'))).toEqual(['desktop-app']);
+    expect(g.flatMap(ids)).not.toContain('settings');
+  });
+
+  it('⭐탭 목적지만 뺀다 — 홈 · 채팅 · 에이전트 · 설정(플래그와 무관): 그 네 줄이 허브에서 빠지고 보드(일감) · 결재(inbox)는 메뉴에 남는다', () => {
+    expect(tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)).toEqual(new Set(['org-briefing', 'chats', 'org-workforce', 'settings']));
     const g = hub(DEFAULT_NAV_V3_FLAGS);
     const all = g.flatMap(ids);
-    expect(all).not.toContain('board');
-    expect(all).not.toContain('org-briefing');
+    for (const gone of ['org-briefing', 'chats', 'org-workforce', 'settings']) expect(all, gone).not.toContain(gone);
+    // 일감 탭이 없으니 보드는 메뉴에 그대로 — 폰 탭 «일감»을 지운 뒤에도 보드로 가는 길이 남는다
+    expect(ids(g.find((x) => x.id === 'dev'))).toEqual(['board', 'goals', 'loops']);
     expect(ids(g.find((x) => x.id === 'now'))).toEqual(['inbox']);
   });
 
-  it('탭 세트는 플래그로 갈리지 않는다 — 켜져도(ON) 같은 세 목적지를 빼고 결재가 «홈» 구역 자리에 남는다', () => {
-    expect(tabDestinationNavIds(ON)).toEqual(new Set(['org-briefing', 'chats', 'board']));
+  it('탭 세트는 플래그로 갈리지 않는다 — 켜져도(ON) 같은 네 목적지를 빼고 결재가 «홈» 구역 자리에 남는다', () => {
+    expect(tabDestinationNavIds(ON)).toEqual(new Set(['org-briefing', 'chats', 'org-workforce', 'settings']));
     const g = hub(ON);
     expect(ids(g.find((x) => x.id === 'now'))).toEqual(['inbox']);
     expect(g.flatMap(ids)).not.toContain('org-briefing');
+    expect(g.flatMap(ids)).not.toContain('org-workforce');
   });
 
-  it('⭐서랍이 걷혔다 — 예전 소묶음(subgroups)도 «연결·규칙» 구역도 없다 · «팀» 한 구역에 구성원 · 에이전트 · 실행 기록 · API 키', () => {
+  it('⭐서랍이 걷혔다 — 예전 소묶음(subgroups)도 «연결·규칙» 구역도 없다 · «팀» 한 구역에 구성원 · 실행 기록 · API 키(에이전트는 탭이 가져감)', () => {
     const g = hub(DEFAULT_NAV_V3_FLAGS);
     expect(g.every((x) => !('subgroups' in x))).toBe(true);
     expect(g.map((x) => x.id)).not.toContain('connect-rules');
-    expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
+    expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-members', 'org-workforce-runs', 'org-workforce-api-keys']);
   });
 
   it('⭐MOBILE_HUB_EXCLUDE_IDS(깊이 가드가 «탭 직행 1회»로 세는 항목)는 폰 하단 탭이 실제로 덮는 목적지와 같다 — 집합이 어긋나면 가드가 탭 직행 항목을 허브 2탭으로(또는 허브 항목을 1탭으로) 세어 거짓이 된다(codex 단서 ②)', () => {
     expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual([...tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)].sort());
-    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual(['board', 'chats', 'org-briefing']);
+    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual(['chats', 'org-briefing', 'org-workforce', 'settings']);
   });
 
   it('모든 목적지는 탭이나 메뉴 어딘가에 — 플래그 둘 다(NAV_GROUPS 전부 + 그 밖 전부)', () => {
@@ -90,10 +101,12 @@ describe.each(LOCALES)('sectionHeader(story #4292) — %s', (_locale, t) => {
     expect(sectionHeader(now, t)).toEqual({ headerKey: null, name: t('approvals') });
   });
 
-  it('⭐«설정»(머리 없는 한 항목 구역) — 예전엔 항목 이름을 머리로 끌어와 «설정 › 설정», 이제 머리 없음', () => {
-    const settings = byId(ON, 'settings');
+  // story 5031 — 설정 항목은 설정 탭이 가져가 «설정» 구역엔 데스크톱 앱 한 줄만 남는다(켜진 곳에서만). 머리 없는 한 항목 구역 규칙은 그대로 그 줄에 적용된다.
+  it('⭐«설정»(머리 없는 한 항목 구역 · 데스크톱 켜진 곳) — 항목 이름을 머리로 끌어오지 않는다(«데스크톱 앱 › 데스크톱 앱» 0)', () => {
+    const settings = byId({ ...ON, desktopDownloadEnabled: true }, 'settings');
     expect(settings.labelKey).toBeUndefined();
-    expect(sectionHeader(settings, t)).toEqual({ headerKey: null, name: t('settings') });
+    expect(ids(settings)).toEqual(['desktop-app']);
+    expect(sectionHeader(settings, t)).toEqual({ headerKey: null, name: t('desktopApp') });
   });
 
   it('검색으로 한 항목만 남아 그 이름이 머리와 같아도 — 머리 없음(거른 뒤에도 같은 함수)', () => {

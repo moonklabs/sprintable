@@ -10,6 +10,8 @@ import { useTopBar } from './top-bar-context';
 import { ContextSwitcherChip } from './context-switcher-chip';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useIsTablet } from '@/hooks/use-mobile';
+import { IconButton } from '@/components/ds/icon-button';
+import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 import type { OrgSwitcherItem } from './unified-switcher';
 
 interface TopBarProps {
@@ -31,6 +33,8 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
   const { title, actions, hidden, showContextChip } = useTopBar();
   const t = useTranslations('nav');
   const isTablet = useIsTablet();
+  // story 5031 (C1 step 4, PO 11-26): with the phone tab bar at four places there is no «전체» tab — the way to every other screen is the palette (⌘K on a desktop; here the same door, drawn below lg only). No provider (a test of the bar alone) = no button.
+  const openPalette = useCommandPaletteOpener();
   return (
     <div
       data-testid="top-bar"
@@ -88,6 +92,11 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}
+        {openPalette ? (
+          <span className="contents lg:hidden">
+            <IconButton icon="search" label={t('search')} onClick={openPalette} data-testid="top-bar-search" />
+          </span>
+        ) : null}
         {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지.
             story 4890 (UI-7 · 폰 머리줄): 탭 바가 있는 폭(<lg)의 머리줄은 «칩 · 제목 · 알림» 하나로 — 팀 현황 · 새 소식은 «전체» 맨 위 두 줄로 옮겼다(손가락 폭 아이콘 셋이 한 줄에 몰리던 것). 탭 바 없는 폭(lg+)은 그대로. */}
         <span className="hidden lg:contents"><PresenceToggleButton /></span>

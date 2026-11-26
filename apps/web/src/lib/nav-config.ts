@@ -182,7 +182,8 @@ export const OTHER_NAV_ITEMS: NavItemConfig[] = [
 // 설정이 조직 뒤(맨 아래 근처)이던 때는 폰 390에서 설정 줄이 y 1819(보이는 높이 780)라 쓸기 3번이었다 — 조직이 줄 10개(약 700px)다. 설정을 지식 바로 뒤로 올려 짧게 한 번(문서는 첫 화면 그대로 — 문서보다 위로는 안 올린다).
 // 탭바가 이미 depth 1로 커버하는 목적지(홈 · 대화 · 일감)는 허브에서 뺀다(탭바가 지금 그리는 탭 기준, mobile-tab-bar.tsx) — 결재 화면은 이제 탭이 아니라 «전체» 목록(+ 홈 본문 · 알림 종)에서 열린다.
 export const MOBILE_HUB_GROUP_ORDER = ['team', 'knowledge', 'settings', 'now', 'dev', 'org'];
-export const MOBILE_HUB_EXCLUDE_IDS = new Set(['org-briefing', 'board', 'chats']);
+// story 5031 (C1 step 4): the phone tab bar is the four places now (홈 · 채팅 · 에이전트 · 설정), so the hub leaves out exactly the rows those tabs go to (one source: mobile-tab-bar.tsx tabDestinationNavIds — a test keeps them equal).
+export const MOBILE_HUB_EXCLUDE_IDS = new Set(['org-briefing', 'chats', 'org-workforce', 'settings']);
 
 // 사이드바 맨 아래 «전체» 항목(→ /more)과 챗 center. 챗은 구역 밖 1급 카드(story #2930 I2)로 «오늘» 바로 뒤에 선다 — NAV_GROUPS에는 실리지 않는다.
 // 사이드바가 flatHref로 감싸 그린다(`path` 속성 = 내비 설정 경로, flat-link 래칫의 EXEMPT와 같은 취급).

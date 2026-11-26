@@ -82,15 +82,16 @@ describe('실 NAV_GROUPS ∪ OTHER_NAV_ITEMS — story #2684 AC3 판별자, stor
     expect(events?.depth).toBe(2);
   });
 
-  // story #3824 — inbox는 이제 OTHER_NAV_ITEMS 소속이지만 MOBILE_HUB_EXCLUDE_IDS엔 여전히
-  // 있어(바텀 탭 「결재」가 이미 depth 1로 커버) 어느 배열에 살든 depth 1 그대로다. board도
-  // NAV_GROUPS 소속인 채 동일 취급 — "바텀 탭 커버 축"은 소속 배열과 무관하다는 것 자체가
-  // 이 판별자의 핵심 불변식.
-  it('⭐board·org-briefing은 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치, 소속 배열 무관) — «결재 탭»이 없어졌으니 결재(inbox)는 «전체» 목록의 depth 2(story #4885 폰 탭 넷)', () => {
+  // story #3824 — inbox는 이제 OTHER_NAV_ITEMS 소속이지만 «전체»의 depth 2다. story 5031 (C1 4단계) — «바텀 탭 커버 축» = 폰 탭 넷(홈 · 채팅 · 에이전트 · 설정)이 가는 항목:
+  // 이 스캔은 NAV_GROUPS ∪ OTHER_NAV_ITEMS만 보고 챗(CHAT_CENTER_ITEM = chats)은 시야 밖이라(위 ㉥) depth 1로 잡히는 건 org-briefing · org-workforce · settings 셋이다.
+  // 일감(board)은 탭이 아니라 «전체»의 «일감» 구역이니 depth 2로 돌아왔다. 「바텀 탭 축과 정확히 일치」 — 소속 배열과 무관.
+  it('⭐org-briefing · org-workforce · settings는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치, 소속 배열 무관) — 일감(board) · 결재(inbox)는 «전체» 목록의 depth 2(story 5031 폰 탭 넷)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const depth1Ids = entries.filter((e) => e.depth === 1).map((e) => e.id).sort();
-    expect(depth1Ids).toEqual(['board', 'org-briefing']);
-    expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 2);
+    expect(depth1Ids).toEqual(['org-briefing', 'org-workforce', 'settings']);
+    expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 3);
+    expect(entries.find((e) => e.id === 'board')?.depth).toBe(2);
+    expect(entries.find((e) => e.id === 'inbox')?.depth).toBe(2);
   });
 
   it('NAV_GROUPS의 모든 그룹 id가 MOBILE_HUB_GROUP_ORDER에 있다(도달불가 0건 실증, 실 그룹 축)', () => {

@@ -116,20 +116,22 @@ const measure = (page: Page) => page.evaluate(() => {
 test.describe('on a touch phone (390 × 844)', () => {
   test.use({ hasTouch: true, isMobile: true });
 
-  test('[SID:4890] the phone header row is «bell» alone (people · what\'s new left it), ≥44; the four tabs ≥44; the count badges are the ds one (≥ 11 px mono, inside the screen, hidden from the reader)', async ({ page }) => {
+  test('[SID:4890] the phone header row is «search · bell» (people · what\'s new left it; the search icon is the phone\'s way to ⌘K — story 5031 step 4), ≥44; the four tabs ≥44; the count badges are the ds one (≥ 11 px mono, inside the screen, hidden from the reader)', async ({ page }) => {
     await open(page, 'shell');
     await page.getByRole('button', { name: /알림/ }).first().waitFor();
     await expect(page.locator('[data-slot="ds-count-badge"]:visible').first()).toBeVisible();
     // what left the header row: not drawn at this width (display: none), the bell stays
     await expect(page.locator('button[title="팀 현황"]')).toBeHidden();
     await expect(page.getByRole('button', { name: /새 소식|릴리스|업데이트/ })).toHaveCount(0).catch(() => undefined);
+    // story 5031 (C1 step 4): the tab bar is the four places, so «all screens» is reached through the palette — the top bar's search icon (below lg) sits next to the bell; still nothing else in the row
     const header = await page.locator('[data-testid="top-bar"] button:visible').count();
-    expect(header, 'one visible control in the header row (the bell)').toBe(1);
+    expect(header, 'two visible controls in the header row (search · bell)').toBe(2);
+    await expect(page.locator('[data-testid="top-bar-search"]')).toBeVisible();
     const m = await measure(page);
     expect(m.small, `presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
     expect(m.tiny, `text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
     expect(m.overflowX).toBe(false);
-    expect(m.presses, 'the bell + four tabs').toBeGreaterThanOrEqual(5);
+    expect(m.presses, 'the search icon + the bell + four tabs').toBeGreaterThanOrEqual(6);
     expect(m.badges.length, 'bell (7) · home (5) · chat (7)').toBe(3);
     for (const b of m.badges) {
       expect(b.font, `badge «${b.text}» is the ds mono size (before: a 10 px corner badge)`).toBeGreaterThanOrEqual(11);

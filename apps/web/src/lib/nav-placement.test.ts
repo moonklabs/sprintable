@@ -159,3 +159,20 @@ describe('⭐ ④ 길 → 자리 판정(depth1ForPath) — 막대에서 «지금
     expect(placementSlotForPath('/no/such/screen/at/all')).toBeUndefined();
   });
 });
+
+describe('⭐ ⑤ 폰 입구(story 5031 · C1 4단계) — 하단 탭 넷 = 같은 넷, «전체»는 상단 막대 검색 → ⌘K', () => {
+  it('폰 하단 탭은 DEPTH1_ITEMS의 넷 · 같은 순서 · 같은 첫 화면이다', async () => {
+    const { PHONE_TABS } = await import('@/components/nav/mobile-tab-bar');
+    expect(PHONE_TABS.map((t) => t.placeId)).toEqual(DEPTH1_ITEMS.map((d) => d.id));
+    expect(PHONE_TABS.map((t) => t.path)).toEqual(DEPTH1_ITEMS.map((d) => d.path));
+    expect(PHONE_TABS.map((t) => t.labelKey)).toEqual(DEPTH1_ITEMS.map((d) => d.labelKey));
+  });
+
+  it('폰 «전체»(/more)·검색은 탭이 아니라 상단 막대 검색 단추(top-bar-search)가 팔레트를 여는 길이고, 표는 /more를 cmdk 입구로 적는다', () => {
+    const topBar = readFileSync(join(__dirname, '..', 'components', 'nav', 'top-bar.tsx'), 'utf8');
+    expect(topBar).toContain('data-testid="top-bar-search"');
+    expect(topBar).toContain('useCommandPaletteOpener');
+    expect(topBar).toMatch(/contents lg:hidden/); // lg 미만(폰 · 태블릿)에서만 — lg 이상은 막대 아래 검색 · ⌘K가 같은 입구
+    expect(ROUTE_PLACEMENT['/more']!.doors).toEqual(['cmdk']);
+  });
+});

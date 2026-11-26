@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 //
-// story #4211 — 모바일 탭바 «지금»(«일감») 탭이 bare `/flow`(세션 의존 flat 경로)를 가리켜, 누를 때마다 서버 리다이렉트
+// story #4211 — 모바일 탭바 옛 «지금»(«일감») 탭이 bare `/flow`(세션 의존 flat 경로)를 가리켜, 누를 때마다 서버 리다이렉트
 // 한 홉을 타고 4557 전 301을 캐시한 기기(웹·앱 WebView · prod는 아직 301)는 옛 프로젝트로 갔다. 이제 사이드바와 같은
 // scopedResourceHref로 /{ws}/{proj}/{resource}를 직접 가리킨다.
+// story 5031 (C1 4단계) — 탭이 홈 · 채팅 · 에이전트 · 설정(전부 flat static 목적지)으로 바뀌어 «scoped /{ws}/{proj}/flow 탭»은 없다 — 일감은 채팅 자리의 목록 줄. 이 파일은 «탭 넷 어느 것도 세션 의존 flat 경로를 안 가리킨다 · 프로젝트 조각도 안 만든다»를 고정한다.
 // AC1 전수: 플래그 조합 전부 × 탭 전부의 실제 렌더 href 첫 세그먼트가 proxy의 flat 리다이렉트 표(MIGRATED·RENAMED·
 // RETIRED)에 0 — 탭·목적지가 늘어도 이 표로 자동 검사된다(하드코딩 경로 대조가 아니다).
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -55,28 +56,35 @@ const FLAG_COMBOS: NavV3Flags[] = [false, true].flatMap((a) => [false, true].fla
   { todayV3Enabled: a, chatV3Enabled: b, connectRulesV3Enabled: c }
 ))));
 
-describe('MobileTabBar — 탭 href에 세션 의존 flat 경로 0(story #4211 AC1)', () => {
-  it.each(FLAG_COMBOS.map((f) => [JSON.stringify(f), f] as const))('플래그 %s — 전 탭', async (_n, flags) => {
+describe('MobileTabBar — 탭 href에 세션 의존 flat 경로 0(story #4211 AC1 · story 5031 탭 넷)', () => {
+  it.each(FLAG_COMBOS.map((f) => [JSON.stringify(f), f] as const))('플래그 %s — 전 탭: 홈 · 채팅(플래그가 정한 목적지) · 에이전트 · 설정', async (_n, flags) => {
     const list = await hrefs(flags);
-    expect(list).toHaveLength(4);
+    expect(list).toEqual([
+      flags.todayV3Enabled ? '/today' : '/org-briefing',
+      flags.chatV3Enabled ? '/chat' : '/chats',
+      '/organization/workforce',
+      '/settings',
+    ]);
     for (const href of list) expect(SESSION_DEPENDENT_FLAT.has(firstSegment(href))).toBe(false);
   });
 
-  it('플래그 OFF — «지금» 탭은 /acme/proj/flow(현재 작업공간·프로젝트)', async () => {
+  it('플래그 OFF — 탭 넷 어느 것도 현재 작업공간·프로젝트 경로(/acme/proj/…)가 아니다: 일감(/acme/proj/flow) 탭은 없다', async () => {
     const list = await hrefs();
-    expect(list).toContain('/acme/proj/flow');
+    expect(list).toEqual(['/org-briefing', '/chats', '/organization/workforce', '/settings']);
+    expect(list.some((h) => h.startsWith('/acme/proj'))).toBe(false);
     expect(list).not.toContain('/flow');
   });
 
-  it('v3 ON — «일감» 탭은 /acme/proj/work-list', async () => {
+  it('v3 ON — «홈» 탭은 /today · «일감»(work-list) 탭은 없다', async () => {
     const list = await hrefs({ todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
-    expect(list).toContain('/acme/proj/work-list');
+    expect(list).toContain('/today');
+    expect(list.some((h) => h.includes('work-list'))).toBe(false);
   });
 
-  it('slug를 아직 모르면(로그인 직후 찰나) bare 안전망으로 — 빈 링크·undefined 경로 0', async () => {
+  it('slug를 아직 모르면(로그인 직후 찰나)도 같은 넷 — 빈 링크·undefined 경로 0 · bare /flow 0', async () => {
     ctx.currentProjectSlug = undefined;
     const list = await hrefs();
-    expect(list).toContain('/flow');
+    expect(list).toEqual(['/org-briefing', '/chats', '/organization/workforce', '/settings']);
     for (const href of list) expect(href).not.toContain('undefined');
   });
 });
@@ -153,8 +161,9 @@ describe('MobileTabBar — 못 푼 프로젝트 경로(story #4217 유나 QA)', 
     expect(list.some((h) => h.includes('/proj/'))).toBe(false);
     expect(container.querySelectorAll('[aria-current="page"]').length).toBe(0);
   });
-  it('대조군 — 풀린 경로(/acme/proj/flow)에선 «지금» 탭이 활성', async () => {
+  it('대조군 — 풀린 경로(/acme/proj/flow = 채팅 자리의 목록)에선 «채팅» 탭 하나만 활성', async () => {
     await hrefs();
-    expect(container.querySelectorAll('[aria-current="page"]').length).toBe(1);
+    const active = [...container.querySelectorAll('[aria-current="page"]')];
+    expect(active.map((a) => a.getAttribute('href'))).toEqual(['/chats']);
   });
 });

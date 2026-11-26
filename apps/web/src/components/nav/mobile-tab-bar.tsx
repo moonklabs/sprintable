@@ -6,12 +6,12 @@ import { usePathname } from 'next/navigation';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
 import { useTranslations } from 'next-intl';
-import { MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
+import { Bot, MessageSquare, Newspaper, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CountBadge } from '@/components/ds/count-badge';
 import { useHomeModel } from '@/components/home/home-model-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
+import { DEPTH1_ITEMS, depth1ForPath, type Depth1Id } from '@/lib/nav-depth1';
 import {
   DEFAULT_NAV_V3_FLAGS,
   resolveNavV3Destinations,
@@ -82,63 +82,46 @@ const DEFAULT_DEST = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
 // 목적지(href)는 여전히 플래그가 정한다(destKey → resolveNavV3Destinations: 꺼진 v3 화면은 안 켜고 지금 서 있는 /org-briefing · /chats · /flow) — 바뀐 것은 «탭 세트가 플래그로 갈리던 것»뿐이다.
 // 이름은 사이드바와 같은 labelKey(같은 사실 = 같은 낱말): 홈(nav.zoneNow) · 대화(nav.chats) · 일감(nav.zoneDev) · 전체(mobileTabBar.more). 「일감」 탭 목적지(destKey work)가 사이드바 board 항목(labelKey zoneDev)과 이름이 같다(story #4020).
 // href 필드는 DEFAULT_NAV_V3_FLAGS(전부 OFF)로 미리 구운 값(기존 단위테스트 계약) — 실제 렌더 href는 MobileTabBar가 resolveTabHref(tab, dest, scope)로 매 렌더 다시 구한다.
-export const PHONE_TABS = [
-  { key: 'today', destKey: 'today' as const, href: destHref(DEFAULT_DEST.today, {}, keepHref), icon: Newspaper, labelKey: 'zoneNow' as const, namespace: 'nav' as const },
-  { key: 'chat', destKey: 'chats' as const, href: destHref(DEFAULT_DEST.chats, {}, keepHref), icon: MessageSquare, labelKey: 'chats' as const, namespace: 'nav' as const },
-  { key: 'work', destKey: 'work' as const, href: destHref(DEFAULT_DEST.work, {}, keepHref), icon: Workflow, labelKey: 'zoneDev' as const, namespace: 'nav' as const },
-  // "전체" = 정식 목록(/more). 기존 모바일 GNB Sheet(햄버거) 재사용은 blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다.
-  { key: 'more', destKey: 'more' as const, href: destHref(DEFAULT_DEST.more, {}, keepHref), icon: Grid2x2, labelKey: 'more' as const, namespace: 'mobileTabBar' as const },
-] as const;
-
+// story 5031 (C1 step 4) — the phone's tab bar is the SAME four places as the web's icon bar: 홈 · 채팅 · 에이전트 · 설정, read from lib/nav-depth1 (DEPTH1_ITEMS: names · first screens · order). 홈 and 채팅 keep their flag-aware destination
+// (destKey: the v3 switch only decides WHERE those two land); 에이전트 and 설정 go to their first screen. «일감» and «전체» left the bar: 일감 is the 채팅 place's row · «전체» (/more) is ⌘K's «모든 화면» — on a phone the top bar's search icon opens it.
+const TAB_KEY_OF_PLACE = { home: 'today', chat: 'chat', agents: 'agents', settings: 'settings' } as const satisfies Record<Depth1Id, string>;
+const TAB_ICON_OF_PLACE = { home: Newspaper, chat: MessageSquare, agents: Bot, settings: Settings } as const;
+const TAB_DEST_OF_PLACE = { home: 'today', chat: 'chats', agents: null, settings: null } as const;
+export const PHONE_TABS = DEPTH1_ITEMS.map((place) => {
+  const destKey = TAB_DEST_OF_PLACE[place.id];
+  return {
+    key: TAB_KEY_OF_PLACE[place.id],
+    placeId: place.id,
+    destKey,
+    path: place.path,
+    href: destKey ? destHref(DEFAULT_DEST[destKey], {}, keepHref) : destHref({ kind: 'static', path: place.path }, {}, keepHref),
+    icon: TAB_ICON_OF_PLACE[place.id],
+    labelKey: place.labelKey,
+    namespace: 'nav' as const,
+  };
+});
 export type TabConfig = typeof PHONE_TABS;
 export type TabDef = (typeof PHONE_TABS)[number];
 
 // story #4278(유나 결정 ①) — 탭 목적지(destKey) → 메뉴 항목 id. «전체» 메뉴는 «지금 그려진 탭»이 가는 곳만 뺀다(같은 출처 —
 // 예전 MOBILE_HUB_EXCLUDE_IDS는 플래그와 무관해 ON에서 결재함이 어디에도 없었다). «전체»(more)는 자기 자신이라 대응 없음.
-const TAB_DEST_NAV_ITEM_ID: Record<TabDef['destKey'], string | null> = {
-  work: 'board', chats: 'chats', today: 'org-briefing', more: null,
+const TAB_NAV_ITEM_ID: Record<TabDef['key'], string> = {
+  today: 'org-briefing', chat: 'chats', agents: 'org-workforce', settings: 'settings',
 };
 
 export function tabDestinationNavIds(_navV3Flags?: NavV3Flags): Set<string> {
-  return new Set(
-    PHONE_TABS
-      .map((tab) => TAB_DEST_NAV_ITEM_ID[tab.destKey])
-      .filter((id): id is string => id !== null),
-  );
+  return new Set(PHONE_TABS.map((tab) => TAB_NAV_ITEM_ID[tab.key]));
 }
 
-/** story #4278 — 탭바가 지금 그리는 탭(«전체» 빼고 · 탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
+/** story #4278 — 탭바가 지금 그리는 탭(탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
 export function visibleTabLabels(_navV3Flags?: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
-  return PHONE_TABS
-    .filter((tab) => tab.key !== 'more')
-    .map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));
+  return PHONE_TABS.map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));
 }
 
 export function resolveTabHref(tab: TabDef, dest: NavV3Destinations, scope: TabHrefScope, withProject: (href: string) => string): string {
-  return destHref(dest[tab.destKey], scope, withProject);
+  return tab.destKey ? destHref(dest[tab.destKey], scope, withProject) : destHref({ kind: 'static', path: tab.path }, scope, withProject);
 }
 
-// story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
-// 정확일치/그 직계 하위 경로만 인식해, gate/doc/story 상세(canonical 라우트가 탭 href 트리
-// 밖에 있음)나 프로젝트/org 영역(board/goals/loops/organization/... 등, #1965 "전체" 스텁
-// 목록 그대로) 전부 활성 탭이 없어 하단바가 회색이 됐다. #1951 매니페스트가 이미 확定해둔
-// 상세→parentTab 매핑(useSyntheticParentTabHistory 호출부와 동일 SSOT)을 여기서도 재사용해
-// "이 경로는 소속상 어느 탭인가"를 판정하는 단일 함수로 교체한다.
-//
-// story #2224(선생님 정정 2026-07-30) — `/flow`는 다른 ws/proj-scoped 리소스(board·goals·
-// loops 등, 아래 ④ 참고)와 달리 "지금" 탭의 목적지 그 자체다 — `/{ws}/{proj}/flow`(3번째
-// 세그먼트)뿐 아니라 TABS의 `now.href` 자체가 «bare» `/flow`라 그 형태도 인식해야 한다
-// (선생님 실측 2026-07-30 — 탭을 누른 그 순간의 pathname은 bare, proxy.ts 301이 실 slug로
-// 착지시키기 «전»의 찰나에 하이라이트가 꺼졌다). `/glance`(옛 라우트)의 bare 인식과 대칭.
-// story #4016 — 'flow'가 더 이상 유일한 값이 아니다(v3 ON이면 dest.work.path='work-list')라
-// 판정 대상 조각을 인자로 받는다(하드코딩 제거, AC1 "활성 판정도 같은 목적지 값 기준").
-function isResourcePath(pathname: string, resourceFragment: string): boolean {
-  if (pathname === `/${resourceFragment}` || pathname.startsWith(`/${resourceFragment}/`)) return true;
-  const segments = pathname.split('/').filter(Boolean);
-  return segments[2] === resourceFragment;
-}
-
-// static kind 목적지의 쿼리 부분을 뗀다 — usePathname()은 쿼리스트링을 안 싣는다.
 function staticPathOnly(staticPath: string): string {
   return staticPath.split('?')[0]!;
 }
@@ -178,21 +161,18 @@ function isStaticPathExact(pathname: string, staticPath: string): boolean {
 // story #4278(민 기기 점검 4번) — 「일감」 위 줄(WorkspaceFrameTabs: 목록 · 보드 · 스프린트 · 에픽 · 회고 · 가설)의 나머지 다섯
 // 화면에서 탭바가 «전체»를 켰다(보드만 «일감»). 사이드바는 #3844에서 같은 결함을 WORKSPACE_FRAME_TAB_PATHS(SSOT)로 고쳤는데
 // 탭바는 dest.work.path 한 조각만 봤다 — 같은 목록을 읽어 두 곳이 한 판정을 쓴다(탭을 늘리면 둘 다 자동으로 따라감).
-function isWorkPath(pathname: string, workPath: string): boolean {
-  return [workPath, ...WORKSPACE_FRAME_TAB_PATHS].some((p) => isResourcePath(pathname, p));
-}
-
 export function getActiveTabKey(
   pathname: string,
   navV3Flags: NavV3Flags = DEFAULT_NAV_V3_FLAGS,
-): TabDef['key'] {
+): TabDef['key'] | null {
   // story #4885 (폰 탭 넷) — 탭 세트는 플래그로 갈리지 않는다(목적지만 플래그가 정한다). 「홈」은 자기 목적지뿐 아니라 옛 「결재」 경로(/gates/* · /inbox?tab=gates)까지 품는다(결재 탭 폐지 · 결재는 홈 입구 안).
   const dest = resolveNavV3Destinations(navV3Flags);
   if (isStaticPathOrChild(pathname, dest.today.path)) return 'today';
   if (isStaticPathExact(pathname, dest.approvals.path) || pathname.startsWith('/gates/')) return 'today';
   if (isStaticPathOrChild(pathname, dest.chats.path)) return 'chat';
-  if (isWorkPath(pathname, dest.work.path) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'work';
-  return 'more';
+  // story 5031 (C1 step 4) — everything else: the place the path belongs to (nav-placement.json), the same function the web's icon bar lights from; a screen outside the four lights no tab
+  const place = depth1ForPath(pathname);
+  return place ? TAB_KEY_OF_PLACE[place] : null;
 }
 
 export function MobileTabBar({
