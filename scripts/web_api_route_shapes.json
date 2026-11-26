@@ -815,6 +815,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/conversations/{}/messages/{}/delivery",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/conversations/{}/messages/{}/replies",
 "kind": "envelope"
