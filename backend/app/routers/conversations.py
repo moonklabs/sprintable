@@ -680,7 +680,7 @@ def _msg_payload(
     payload.update(_activation_payload(msg))
     # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
     # (an approval's resolution note, an event's payload…) that the tombstone (`content = ""`) did not clear. The keys stay, empty (the shape is the same).
-    _cards = (_approval_payload, _event_payload, _server_command_payload)
+    _cards = (_approval_payload, _event_payload, _server_command_payload, _card_payload)
     for _card in _cards:
         _fields = _card(msg)
         payload.update({k: None for k in _fields} if msg.deleted_at is not None else _fields)
@@ -716,6 +716,14 @@ def _event_meta(req: "SendMessageRequest") -> dict | None:
     return {"event": req.event_context} if isinstance(req.event_context, dict) else None
 
 
+def _card_meta(req: "SendMessageRequest") -> dict | None:
+    """story 5034 (C4): req.card({kind, ref}) → msg_metadata['card']. Re-normalised on the way in (the request model already did; this is the one place that writes it). None when absent."""
+    from app.services.chat_card import normalize_card
+
+    card = normalize_card(req.card)
+    return {"card": card} if card else None
+
+
 def _work_item_meta(req: "SendMessageRequest") -> dict | None:
     """story #3828(UX-v3·대화·BE 1) — req.work_item({type, id}) → msg_metadata['work_item'].
     approval_target(approval_delivery.py)과 같은 namespace 패턴이지만 그쪽은 send_message()를
@@ -743,6 +751,9 @@ def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
     wi = _work_item_meta(req)
     if wi:
         merged.update(wi)
+    cd = _card_meta(req)
+    if cd:
+        merged.update(cd)
     return merged or None
 
 
@@ -818,6 +829,15 @@ def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
     card = _event_payload(msg).get("event") or {}
     # story #4903 — the message's id rides on the card (an id, never words): a delete finds ITS notification rows by it (the row has no other link to the message). Written last, like the name.
     return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
+
+
+def _card_payload(msg: "ConversationMessage") -> dict:
+    """story 5034 (C4): msg_metadata['card'] → payload top-level `card` ({kind, ref} or None). Read back through the same `normalize_card` as the write (a stored value that does not fit is served as no card);
+    additive · `__dict__`-only read like the other card payloads (no lazy load inside the sync serializer)."""
+    from app.services.chat_card import normalize_card
+
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    return {"card": normalize_card(meta.get("card")) if isinstance(meta, dict) else None}
 
 
 def _server_command_payload(msg: "ConversationMessage") -> dict:
@@ -1551,6 +1571,9 @@ class SendMessageRequest(BaseModel):
     # 전달 계통 금지)를 지키면서 publish_registry_event가 이 필드로 "이 메시지가 이벤트
     # 발행분임"을 msg_metadata에 실을 수 있게 한다. 공개 REST 문서에는 안 실을 내부 필드.
     event_context: dict | None = None
+    # story 5034 (C4): the card of a message the SERVER chose to draw as a part of the web's catalogue — `{kind, ref}` only (services/chat_card.py). Server-only like `event_context`: the public route's body
+    # model (HttpSendMessageRequest) refuses any value with 422; the server's own in-process callers (the «show it» tool, step 4) set it. An unknown kind or a reference that is not a UUID is refused at once.
+    card: dict | None = None
     # story #3828(UX-v3·대화·BE 1) — 이 메시지가 어느 work_item(story·doc 등) 얘기인지
     # 선택 태그. Pydantic 하위모델 자체가 형식 검증(type 누락·id가 UUID 아님 → 422) —
     # 없으면 완전 무변(approval_target과는 별도 namespace, _work_item_meta 참고).
@@ -1563,6 +1586,18 @@ class SendMessageRequest(BaseModel):
             raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
         return v
 
+    @field_validator("card", mode="before")
+    @classmethod
+    def _card_is_a_known_kind_and_a_uuid(cls, v: object) -> dict | None:
+        if v is None:
+            return None
+        from app.services.chat_card import normalize_card
+
+        card = normalize_card(v)
+        if card is None:
+            raise ValueError("card must be {kind, ref}: a kind of the closed list and a UUID reference")
+        return card
+
 
 class HttpSendMessageRequest(SendMessageRequest):
     """story 4894 — the body of the PUBLIC `POST /conversations/{id}/messages`.
@@ -1574,6 +1609,14 @@ class HttpSendMessageRequest(SendMessageRequest):
     input), so nothing the server publishes changes."""
 
     event_context: None = Field(default=None, description="Set by the server only (the card of an event the server published). Sending a value is refused with 422.")
+    card: None = Field(default=None, description="Set by the server only (the chat card a message is drawn as). Sending a value is refused with 422.")
+
+    @field_validator("card", mode="before")
+    @classmethod
+    def _card_is_server_only(cls, v: object) -> None:
+        if v is not None:
+            raise ValueError("card is set by the server only (it is the chat card the server drew this message as); it cannot be sent to this endpoint")
+        return None
 
     @field_validator("event_context", mode="before")
     @classmethod
