@@ -22,6 +22,7 @@ vi.mock('@/lib/clipboard', () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { FirstScreen } = await import('./first-screen');
+const { publicHostOf } = await import('@/lib/embedded-api-origin');
 
 let container: HTMLDivElement;
 let root: Root;
@@ -35,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); delete (navigator as { userAgent?: string }).userAgent; vi.unstubAllGlobals(); });
 
-const render = async (props: { serverHostOrigin?: string | null; locale?: 'ko' | 'en'; onFinish?: () => void } = {}) => {
+const render = async (props: { serverHostOrigin?: string | null; serverHostPending?: boolean; locale?: 'ko' | 'en'; onFinish?: () => void } = {}) => {
   const { locale = 'ko', onFinish = vi.fn(), ...rest } = props;
   await act(async () => {
     root.render(
@@ -53,7 +54,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
     await render({ serverHostOrigin: 'https://team.example.com' });
     expect(has('onboarding-first-server-host')).toBe(true);
     expect(container.textContent).toContain('이 서버에 에이전트 연결하기');
-    expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host pair --folder ~/work --server https://team.example.com');
+    expect(text('onboarding-first-server-host-card-command')).toBe('mkdir -p ~/work && sprintable-host pair --folder ~/work --server https://team.example.com');
     expect(has('onboarding-first-server-host-card-copy')).toBe(true);
     // the person reading this is a teammate who never saw the server's install guide: where the Linux download is listed is on the card (a literal line) — not «the guide you followed»
     expect(text('onboarding-first-server-host-card-install-list')).toBe('https://storage.googleapis.com/sprintable-desktop-releases/linux-server-host/latest/manifest.json');
@@ -71,7 +72,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
 
   it('the address in the command is the one given (a port stays) — never read from the browser\'s own location', async () => {
     await render({ serverHostOrigin: 'https://team.example.com:8443' });
-    expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host pair --folder ~/work --server https://team.example.com:8443');
+    expect(text('onboarding-first-server-host-card-command')).toBe('mkdir -p ~/work && sprintable-host pair --folder ~/work --server https://team.example.com:8443');
     expect(window.location.origin).not.toContain('team.example.com');
   });
 
@@ -79,7 +80,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
     await render({ serverHostOrigin: 'https://team.example.com' });
     const press = () => act(async () => { (container.querySelector('[data-testid="onboarding-first-server-host-card-copy"]') as HTMLButtonElement).click(); });
     await press();
-    expect(copied).toEqual(['sprintable-host pair --folder ~/work --server https://team.example.com']);
+    expect(copied).toEqual(['mkdir -p ~/work && sprintable-host pair --folder ~/work --server https://team.example.com']);
     expect(container.querySelector('[data-testid="onboarding-first-server-host-card-copy"]')?.textContent).toBe('복사됨');
     copyOk = false;
     await press();
@@ -97,7 +98,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
   it('English reads the same story (title · the command is the same literal)', async () => {
     await render({ serverHostOrigin: 'https://team.example.com', locale: 'en' });
     expect(container.textContent).toContain('Attach an agent to this server');
-    expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host pair --folder ~/work --server https://team.example.com');
+    expect(text('onboarding-first-server-host-card-command')).toBe('mkdir -p ~/work && sprintable-host pair --folder ~/work --server https://team.example.com');
   });
 
   it('no server host (null · absent): exactly the Mac screen it was', async () => {
@@ -111,10 +112,75 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
   });
 });
 
+describe('[SID:5024 F1] FirstScreen on a server host that has no public address yet', () => {
+  it('says «set the public address first» with the one command that sets it — not the Mac app, and not a pair command (there is no address to give it)', async () => {
+    await render({ serverHostOrigin: null, serverHostPending: true } as never);
+    expect(has('onboarding-first-server-host')).toBe(true);
+    expect(container.textContent).toContain('먼저 이 서버의 공개 주소를 정해 주세요');
+    expect(text('onboarding-first-server-host-card-command')).toBe('sprintable-host server set-public-origin https://YOUR-SERVER-DOMAIN --restart');
+    expect(container.textContent).not.toContain('sprintable-host pair');
+    expect(text('onboarding-first-server-host-card-pending-note')).toContain('대문자로 쓴 자리를');
+    // the host prints its refusal in English, so the note describes it in words and never quotes a Korean sentence that is not on any screen
+    expect(text('onboarding-first-server-host-card-pending-note')).toContain('이름에 점이 있어야 한다는 안내');
+    expect(text('onboarding-first-server-host-card-pending-note')).not.toContain('점이 있는 이름이 필요해요');
+    expect(has('onboarding-first-server-host-card-pending-note')).toBe(true);
+    expect(has('onboarding-first-server-host-card-pending-after')).toBe(true);
+    expect(has('onboarding-first-server-host-card-install-list')).toBe(false);
+    expect(has('onboarding-first-mac')).toBe(false);
+    expect(has('onboarding-first-not-mac')).toBe(false);
+    expect(container.textContent).not.toContain('에이전트는 내 Mac에서 돌아가요');
+    expect(container.textContent).not.toContain('지금은 받을 수 없어요');
+    expect(has('onboarding-first-org')).toBe(true);
+    expect(has('onboarding-first-finish')).toBe(true);
+  });
+
+  it('the command is a literal on its own line (no sentence around it), it copies whole, and English says the same', async () => {
+    await render({ serverHostOrigin: null, serverHostPending: true, locale: 'en' } as never);
+    expect(container.textContent).toContain('First set this server');
+    const press = () => act(async () => { (container.querySelector('[data-testid="onboarding-first-server-host-card-copy"]') as HTMLButtonElement).click(); });
+    await press();
+    expect(copied).toEqual(['sprintable-host server set-public-origin https://YOUR-SERVER-DOMAIN --restart']);
+    expect(text('onboarding-first-server-host-card-pending-note')).toContain('upper-case part');
+  });
+
+  // a person copies this line and runs it as it is: it must NOT be a command that works. A believable example name would restart the server on that name and fill the next card's pair command with it.
+  it('what is copied has no believable domain in it and is a plain word with no shell meaning, which the web\'s copy of the host\'s address rule refuses (both languages; the host\'s own refusal — before it writes or restarts anything — is checked by hand and in the VM lap, not here)', async () => {
+    for (const locale of ['ko', 'en'] as const) {
+      copied.length = 0;
+      await render({ serverHostOrigin: null, serverHostPending: true, locale } as never);
+      await act(async () => { (container.querySelector('[data-testid="onboarding-first-server-host-card-copy"]') as HTMLButtonElement).click(); });
+      const line = copied[0] ?? '';
+      expect(line, locale).toContain('sprintable-host server set-public-origin https://YOUR');
+      expect(line, locale).not.toMatch(/example\.(com|org|net)|team\.|\.(com|org|net|io|dev|app|kr)\b/);
+      // a plain word, with nothing in it any shell gives a meaning to (so no shell reads a file, runs a command or expands a variable) …
+      expect(line, locale).toMatch(/^[A-Za-z0-9 :/._=-]+$/);
+      // … that the host refuses BEFORE it writes or restarts anything: the host's own rule («a DNS name with at least one dot, https only», `parsePublicOrigin` → exit 2; the same rule as `publicHostOf`, which a test holds
+      // equal to the host's) — checked here with the web's copy of the rule, and by hand against the host's own `parsePublicOrigin` (the PR says so)
+      const address = /https:\/\/\S+/.exec(line)?.[0] ?? '';
+      expect(publicHostOf({ SPRINTABLE_PUBLIC_ORIGIN: address } as unknown as NodeJS.ProcessEnv), `${locale}: ${address}`).toBeNull();
+      expect(publicHostOf({ SPRINTABLE_PUBLIC_ORIGIN: address.toLowerCase() } as unknown as NodeJS.ProcessEnv)).toBeNull();
+      expect(publicHostOf({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' } as unknown as NodeJS.ProcessEnv)).toBe('team.example.com'); // (the rule itself still accepts a real name)
+    }
+  });
+
+  it('once an address is given the card is the pair command again (an address wins over pending)', async () => {
+    await render({ serverHostOrigin: 'https://team.example.com', serverHostPending: true } as never);
+    expect(text('onboarding-first-server-host-card-command')).toBe('mkdir -p ~/work && sprintable-host pair --folder ~/work --server https://team.example.com');
+    expect(has('onboarding-first-server-host-card-pending-note')).toBe(false);
+  });
+
+  it('pending false and no address: exactly the Mac screen it was', async () => {
+    await render({ serverHostOrigin: null, serverHostPending: false } as never);
+    expect(has('onboarding-first-mac')).toBe(true);
+    expect(has('onboarding-first-server-host')).toBe(false);
+  });
+});
+
 describe('[SID:5024 AC4] the form carries the address to the first screen', () => {
   it('onboarding-form.tsx hands `serverHostOrigin` to <FirstScreen> (the form\'s own test would need the whole sign-up path: the pass-through is pinned in the source)', () => {
     const src = readFileSync(join(__dirname, 'onboarding-form.tsx'), 'utf8');
     const first = /<FirstScreen\b[^>]*>/.exec(src)?.[0] ?? '';
     expect(first).toContain('serverHostOrigin={serverHostOrigin}');
+    expect(first).toContain('serverHostPending={serverHostPending}'); // story 5024 F1
   });
 });

@@ -6,7 +6,7 @@ import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destina
 import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import { afterOrgDeleted } from '@/lib/auth/org-deleted-landing';
-import { serverHostOrigin } from '@/lib/embedded-api-origin';
+import { serverHostMode } from '@/lib/server-host-mode';
 
 interface OnboardingPageProps {
   searchParams: Promise<{ step?: string; orgId?: string; next?: string; after?: string }>;
@@ -31,6 +31,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   const chatsHref = resolveChatsHref(flags);
   const todayHref = resolveNavV3Destinations(flags).today.path;
 
+  const serverHost = await serverHostMode(); // story 5024 F1: a server host is known by its own backend's answer, not only by a public address (which an owner sets AFTER signing up)
   const form = (
     <OnboardingForm
       initialStep={initialStep}
@@ -39,7 +40,8 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
       todayHref={todayHref}
       chatsHref={chatsHref}
       macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
-      serverHostOrigin={serverHostOrigin()}
+      serverHostOrigin={serverHost.host ? serverHost.origin : null}
+      serverHostPending={serverHost.host && serverHost.origin === null}
       afterOrgDelete={afterOrgDeleted(params.after) && !initialStep}
     />
   );

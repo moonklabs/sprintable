@@ -49,6 +49,9 @@ ALLOWED = {
     "apps/web/src/app/(authenticated)/desktop/page.4829.test.tsx",
     "apps/web/src/app/(authenticated)/desktop/page.4889.test.tsx",  # story 4889: the «이 컴퓨터» page shape in local and in hosted mode (same reason)
     "apps/web/src/app/(authenticated)/desktop/pair/page.4829.test.tsx",
+    # story 5024 (F1): tests that must SET the switch to show how a page and `serverHostMode` tell a server host from the desktop app's own server and from a hosted deployment (the code itself asks `isEmbeddedServer()` and names nothing)
+    "apps/web/src/lib/server-host-mode.test.ts",
+    "apps/web/src/app/onboarding/page.5024.f1.test.tsx",
 }
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
 

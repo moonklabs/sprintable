@@ -35,7 +35,7 @@ async function pageWith(embedded: string | undefined): Promise<El> {
   vi.resetModules();
   const { default: DesktopPage } = await import('./page');
   // 4913: the page is <DesktopScreenTitle/> + <PageFrame width="wide"> — the composition below is the frame's
-  const [, frame] = (DesktopPage() as unknown as { props: { children: unknown[] } }).props.children;
+  const [, frame] = ((await DesktopPage()) as unknown as { props: { children: unknown[] } }).props.children;
   return frame as El;
 }
 
@@ -45,7 +45,7 @@ describe('[SID:4913] /desktop — the title is the top bar\'s (not the body\'s)'
     const { default: DesktopPage } = await import('./page');
     const { DesktopScreenTitle } = await import('@/components/desktop/desktop-screen-title');
     const { PageFrame } = await import('@/components/ds/page-frame');
-    const [title, frame] = (DesktopPage() as unknown as { props: { children: El[] } }).props.children;
+    const [title, frame] = ((await DesktopPage()) as unknown as { props: { children: El[] } }).props.children;
     expect(title.type).toBe(DesktopScreenTitle);
     expect(frame.type).toBe(PageFrame);
     const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');

@@ -7414,6 +7414,10 @@
       "copied": "Copied",
       "copyFailed": "Could not copy — select the command above and copy it by hand.",
       "folderNote": "~/work is the folder the agent works in. Change it to any folder you like.",
+      "pendingLead": "First set this server's public address. Other computers can attach an agent to this server only once it has one.",
+      "pendingCommandLabel": "Command to run in a terminal on this server",
+      "pendingNote": "Replace the upper-case part of the command with the domain name people reach this server at, then run it. Run as it is, it says a name with a dot is needed and changes nothing. The install guide's «public address» step has the same command.",
+      "pendingAfter": "Once the address is set and the server has restarted, open this screen again. The command that attaches an agent is then filled in with this server's address.",
       "afterLead": "The command prints an address in the terminal. Open it in a browser signed in to this account and confirm — the agent is then attached to this server.",
       "installNote": "If the agent host is not on that computer yet (Linux), find the download address in the list at the address below, then download and unpack it. The install guide inside tells you the install and pairing order.",
       "installListLabel": "Where to get the Linux download"
