@@ -136,7 +136,7 @@ class TestRefusedFor:
 
     def test_the_tool_kinds_are_the_entity_kinds_and_the_board(self):
         from app.services.chat_card import TOOL_KINDS, resolver_kind
-        assert set(TOOL_KINDS) == {"story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban"}
+        assert set(TOOL_KINDS) == {"story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban", "deploy"}  # the entity kinds, the board, and the agent project-membership card
         assert set(TOOL_KINDS) <= set(CARD_KINDS)
         assert resolver_kind("kanban") == "sprint" and resolver_kind("story") == "story"
 

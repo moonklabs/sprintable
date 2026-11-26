@@ -16,8 +16,9 @@ from typing import Any
 CARD_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "gate", "kanban", "deploy")
 
 
-# What an agent may ask to be shown with the `show card` tool (the kinds with a project we can check an agent's access against; `kanban` is the board of a sprint — its reference is the sprint's id).
-TOOL_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban")
+# What an agent may ask to be shown with the `show card` tool: the kinds with a project we can check an agent's access against (`kanban` is the board of a sprint — its reference is the sprint's id), and `deploy`
+# (the «project membership» card of ONE agent — its reference is that agent's member id; the project is the ROOM's, see `deploy_card_visible`).
+TOOL_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban", "deploy")
 
 
 # The line of text a card message carries (the web draws the CARD, not this line — it is what an agent that reads the room through MCP, or a notification, sees). In words a first-time reader understands, never the
@@ -28,6 +29,25 @@ def card_text(kind: str, *, refused: bool, locale: str) -> str:
 
     word = t(f"chat_card.kind.{kind}", locale)
     return t("chat_card.text_refused" if refused else "chat_card.text_shown", locale, kind=word)
+
+
+async def deploy_card_visible(db: Any, org_id: uuid.UUID, agent_id: uuid.UUID, conversation_id: uuid.UUID, target_member_id: uuid.UUID) -> bool:
+    """May THIS agent put the project-membership card of `target_member_id` in THIS room? Yes only when (1) the room belongs to a project, (2) the asking agent can see that project, and (3) the target is a live
+    AGENT member of the same organization. Anything else — no project on the room, no access, the target is a person / does not exist / is of another organization — is the same `False`: the caller answers all of them
+    with the one 404 and the same refused card, so «who is in which project» is told to no one by this road (the card itself is drawn by each viewer's own rights, and its buttons need the viewer's own permission)."""
+    from sqlalchemy import select
+
+    from app.models.conversation import Conversation
+    from app.models.member import Member
+    from app.services.project_auth import has_project_access
+
+    project_id = (await db.execute(select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id))).scalar_one_or_none()
+    if project_id is None:
+        return False
+    target = (await db.execute(select(Member.id).where(Member.id == target_member_id, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None)))).scalar_one_or_none()
+    if target is None:
+        return False
+    return bool(await has_project_access(db, agent_id, project_id, org_id))
 
 
 def resolver_kind(kind: str) -> str:

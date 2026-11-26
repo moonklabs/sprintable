@@ -16,13 +16,13 @@ from .chat import ConversationScopedInput
 
 
 class ShowInChatInput(ConversationScopedInput):
-    kind: Literal["story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban"]
-    ref: str = Field(description="The object's id (a UUID). For kind `kanban` it is the SPRINT's id (the card is that sprint's board).")
+    kind: Literal["story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban", "deploy"]
+    ref: str = Field(description="The object's id (a UUID). For kind `kanban` it is the SPRINT's id (the card is that sprint's board). For kind `deploy` it is an AGENT's member id (the card shows whether that agent is in THIS room's project and lets a person with the right put it in / take it out).")
     note: str | None = Field(default=None, max_length=200, description="One short sentence to go with the card (optional).")
 
 
 async def show_in_chat(args: ShowInChatInput) -> list[TextContent]:
-    """Show a story · epic · task · sprint · doc · artifact · hypothesis · evidence (or a sprint's board, kind `kanban`) in this conversation as a card the people in the room can open."""
+    """Show a story · epic · task · sprint · doc · artifact · hypothesis · evidence (or a sprint's board, kind `kanban`, or one agent's project membership, kind `deploy`) in this conversation as a card the people in the room can open."""
     payload: dict = {"kind": args.kind, "ref": args.ref}
     if args.note:
         payload["note"] = args.note

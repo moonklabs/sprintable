@@ -999,8 +999,8 @@ _TOOL_DEFS: list[tuple] = [
      " 텍스트는 본문으로 나온다. 크기가 크거나 읽을 수 없는 첨부는 메타(이름·형식·크기·이유)만. 첨부를 읽을 때는 이 도구를 쓴다.",
      GetChatAttachmentInput, get_chat_attachment),
     ("sprintable_show_in_chat",
-     "[조직] 이 대화방에 장 · 문서 · 스프린트 보드 같은 «카드»를 꽂기(story 5034). conversation_id + kind(story · epic · task · sprint · doc · artifact · hypothesis · evidence · kanban) + ref(그 객체의 id ·"
-     " kanban은 스프린트 id)만 말한다 — 카드의 모양 · 제목은 서버와 보는 사람 몫. 내가 그 객체를 볼 수 있을 때만 내 메시지로 올라가고, 볼 수 없거나 없는 객체는 둘 다 같은 404 «Target not found»(누가 볼 수 있다는 힌트 없음).",
+     "[조직] 이 대화방에 장 · 문서 · 스프린트 보드 같은 «카드»를 꽂기(story 5034). conversation_id + kind(story · epic · task · sprint · doc · artifact · hypothesis · evidence · kanban · deploy) + ref(그 객체의 id ·"
+     " kanban은 스프린트 id · deploy는 에이전트 멤버 id — 그 방 프로젝트에 이 에이전트가 들어 있는지 보여 주고 권한 있는 사람이 넣고 뺄 수 있는 카드)만 말한다 — 카드의 모양 · 제목은 서버와 보는 사람 몫. 내가 그 객체를 볼 수 있을 때만(deploy는 내가 그 방의 프로젝트를 볼 수 있고 대상이 조직 안 에이전트일 때만) 내 메시지로 올라가고, 볼 수 없거나 없는 객체는 둘 다 같은 404 «Target not found»(누가 볼 수 있다는 힌트 없음).",
      ShowInChatInput, show_in_chat),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"

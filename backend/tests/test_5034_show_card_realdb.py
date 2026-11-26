@@ -123,7 +123,6 @@ async def test_an_agent_that_is_not_in_the_room_cannot_post_there_whatever_it_as
 
 @pytest.mark.parametrize("body", [
     {"kind": "gate", "ref": "0d6e953f-6d43-42c1-a87c-b023544497db"},
-    {"kind": "deploy", "ref": "0d6e953f-6d43-42c1-a87c-b023544497db"},
     {"kind": "timeline", "ref": "0d6e953f-6d43-42c1-a87c-b023544497db"},
     {"kind": "story", "ref": "not-a-uuid"},
     {"kind": "story", "ref": "0d6e953f-6d43-42c1-a87c-b023544497db", "refused_for": "0d6e953f-6d43-42c1-a87c-b023544497db"},
@@ -157,5 +156,99 @@ async def test_a_board_is_its_sprints_object_a_sprint_of_another_project_is_refu
         assert no.status_code == 404, no.text
         kinds = [c for _s, c in await _cards(Session, w.r_human)]
         assert kinds == [{"kind": "kanban", "ref": str(mine_id)}, {"kind": "kanban", "ref": str(theirs_id), "refused_for": str(w.g_p)}], kinds
+    finally:
+        await engine.dispose()
+
+
+# ───────── the project-membership («deploy») card: ref = an AGENT's member id; the project is the ROOM's ─────────
+
+async def _make_room(Session, w, project, members):
+    from tests.test_4846_org_chat_rooms_realdb import _make_conversation
+
+    async with Session() as s:
+        return await _make_conversation(s, w.org, project, members, w.h_a, "group")
+
+
+async def test_deploy_an_agent_that_sees_the_rooms_project_shows_an_agent_of_the_organization_and_it_is_posted_as_its_card():
+    engine, Session, w = await _world()
+    try:
+        r = await _as(Session, w, "agent_participant", "POST", _url(w.r_human), {"kind": "deploy", "ref": str(w.g_2)})
+        assert r.status_code == 201, r.text
+        assert await _cards(Session, w.r_human) == [(w.g_p, {"kind": "deploy", "ref": str(w.g_2)})]  # two words only, no refused_for
+        text_ = (await _texts(Session, w.r_human))[0]
+        assert "배치" not in text_ and str(w.g_2) not in text_ and len(text_.split()) >= 2, text_  # plain words (the screen word is not «배치»), no id
+    finally:
+        await engine.dispose()
+
+
+async def test_deploy_every_way_of_not_being_allowed_gets_the_SAME_404_and_the_SAME_refused_card():
+    """not an agent (a person) · does not exist · a room with no project — three reasons, one answer, one card shape, one text. (A room of a project the asking agent cannot see is not here: such an agent is not
+    a participant of it and cannot post there at all — the existing 403, for ANY kind, before the target is looked at.)"""
+    engine, Session, w = await _world()
+    try:
+        cases = [(w.r_human, w.h_b), (w.r_human, uuid.uuid4()), (w.n_human, w.g_2)]
+        answers = []
+        for room, ref in cases:
+            r = await _as(Session, w, "agent_participant", "POST", _url(room), {"kind": "deploy", "ref": str(ref)})
+            answers.append((r.status_code, r.text))
+        assert all(a[0] == 404 for a in answers) and len({a[1] for a in answers}) == 1, answers  # byte-identical
+        assert "refused" not in answers[0][1] and "agent" not in answers[0][1].lower()
+        shapes, texts = set(), set()
+        for room in {c[0] for c in cases}:  # (two of the cases share a room)
+            cards, lines = await _cards(Session, room), await _texts(Session, room)
+            assert len(cards) == len([1 for c in cases if c[0] == room]) == len(lines), (cards, lines)
+            for (_sender, card), line in zip(cards, lines):
+                assert card["kind"] == "deploy" and card["refused_for"] == str(w.g_p) and card["ref"] in {str(c[1]) for c in cases}, card
+                shapes.add(tuple(sorted(card)))
+                texts.add(line)
+        assert len(shapes) == 1 and len(texts) == 1, (shapes, texts)  # the same shape and the same line, whatever the reason
+        assert all(str(x) not in next(iter(texts)) for x in (w.h_b, w.g_2, w.g_p, w.p1, w.p2))
+    finally:
+        await engine.dispose()
+
+
+async def test_deploy_in_a_room_of_a_project_the_agent_cannot_see_is_the_ordinary_refusal_to_post_and_nothing_is_posted():
+    engine, Session, w = await _world()
+    try:
+        p2_room = await _make_room(Session, w, w.p2, [w.h_a, w.g_p])
+        for ref in (w.g_2, uuid.uuid4()):
+            r = await _as(Session, w, "agent_participant", "POST", _url(p2_room), {"kind": "deploy", "ref": str(ref)})
+            assert r.status_code == 403, r.text  # the same answer whether the target exists or not — no target oracle
+        assert await _cards(Session, p2_room) == []
+    finally:
+        await engine.dispose()
+
+
+async def test_deploy_an_agent_of_another_organization_is_not_found_like_a_missing_one():
+    engine, Session, w = await _world()
+    try:
+        from tests.test_4846_org_chat_rooms_realdb import _make_agent_member, _make_org, _make_project
+
+        async with Session() as s:
+            other_org = await _make_org(s)
+            other_project = await _make_project(s, other_org.id, "OP")
+            foreign_agent = await _make_agent_member(s, other_org.id, other_project.id)
+        foreign_agent = foreign_agent if isinstance(foreign_agent, uuid.UUID) else getattr(foreign_agent, "id", foreign_agent)
+        a = await _as(Session, w, "agent_participant", "POST", _url(w.r_human), {"kind": "deploy", "ref": str(foreign_agent)})
+        b = await _as(Session, w, "agent_participant", "POST", _url(w.r_human), {"kind": "deploy", "ref": str(uuid.uuid4())})
+        assert (a.status_code, a.text) == (b.status_code, b.text) and a.status_code == 404
+    finally:
+        await engine.dispose()
+
+
+async def test_deploy_visible_judges_each_of_its_three_conditions_on_its_own():
+    """the route's own gate (an agent must be a participant of the room, which needs the room's project) already stops two of these before the helper runs — so the helper is judged directly: each condition alone makes it False"""
+    from app.services.chat_card import deploy_card_visible
+
+    engine, Session, w = await _world()
+    try:
+        p2_room = await _make_room(Session, w, w.p2, [w.h_a, w.g_p])
+        async with Session() as s:
+            assert await deploy_card_visible(s, w.org, w.g_p, w.r_human, w.g_2) is True          # all three hold
+            assert await deploy_card_visible(s, w.org, w.g_p, w.n_human, w.g_2) is False         # the room has no project
+            assert await deploy_card_visible(s, w.org, w.g_p, p2_room, w.g_2) is False           # the asking agent cannot see the room's project (P2)
+            assert await deploy_card_visible(s, w.org, w.g_p, w.r_human, w.h_b) is False         # the target is a person
+            assert await deploy_card_visible(s, w.org, w.g_p, w.r_human, uuid.uuid4()) is False  # the target does not exist
+            assert await deploy_card_visible(s, uuid.uuid4(), w.g_p, w.r_human, w.g_2) is False  # another organization
     finally:
         await engine.dispose()
