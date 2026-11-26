@@ -191,3 +191,138 @@ async def test_cancel_waits_on_concurrent_flip_then_409_row_untouched(flip_to):
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+async def _hypothesis_for(Session, seeded, sprint_id):
+    """activate 게이트(생존 가설 ≥1)를 통과시키는 가설 링크 — 활성화 쪽이 «잠금 대기»까지 가려면 필요."""
+    from datetime import datetime, timedelta, timezone
+    from app.models.hypothesis import Hypothesis, HypothesisSprintLink
+    async with Session() as s:
+        hyp = Hypothesis(
+            id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_a_id"], owner_member_id=uuid.uuid4(),
+            statement="s", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},
+            measure_after=datetime.now(timezone.utc) + timedelta(days=14), status="proposed",
+            human_accounting={}, gate_contract={},
+        )
+        s.add(hyp)
+        await s.flush()
+        s.add(HypothesisSprintLink(id=uuid.uuid4(), hypothesis_id=hyp.id, sprint_id=sprint_id, link_type="declared"))
+        await s.commit()
+
+
+@pytest.mark.anyio
+async def test_activate_that_read_planning_before_cancel_commits_is_refused_and_row_stays_closed():
+    """codex R2 HIGH 회귀 — A: planning 행을 FOR UPDATE 로 쥐고 접기(closed·velocity 0)를 아직 커밋하지 않음. 그 사이
+    B 의 /activate 는 이미 planning 을 읽었고(라우트 앞단 비잠금 읽기) 잠금에서 기다린다. A commit 뒤 B 는 «신선한» closed 를 보고
+    불법 전이로 거절돼야 한다(잠금 · 재검증이 없으면 id 만으로 UPDATE 해 closed 를 active 로 덮는다)."""
+    import asyncio
+
+    from sqlalchemy import select
+    from app.main import app
+    from app.models.pm import Sprint
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_a = await _seed_sprint(s, seeded["org_id"], seeded["project_a_id"], "planning", velocity=None)
+        await _hypothesis_for(Session, seeded, sprint_a)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+
+        holder = Session()
+        try:
+            locked = (await holder.execute(
+                select(Sprint).where(Sprint.id == sprint_a).with_for_update()
+            )).scalar_one()
+            assert locked.status == "planning"
+
+            client = _client_for(app)
+            try:
+                activate_task = asyncio.create_task(client.post(f"/api/v2/sprints/{sprint_a}/activate"))
+                done, _ = await asyncio.wait({activate_task}, timeout=1.5)
+                assert not done, "activate 가 행 잠금을 기다리지 않고 끝남(transition_sprint 가 잠금 없이 읽음)"
+
+                # A: 접기(planning→closed · velocity 0)를 커밋 → 잠금 해제.
+                locked.status = "closed"
+                locked.velocity = 0
+                await holder.commit()
+
+                resp = await asyncio.wait_for(activate_task, timeout=15)
+            finally:
+                await client.aclose()
+        finally:
+            await holder.close()
+
+        assert 400 <= resp.status_code < 500, resp.text
+        reloaded = await _reload(Session, sprint_a)
+        assert reloaded.status == "closed", "접힌 스프린트가 동시 활성화로 active 로 덮이면 안 됨"
+        assert reloaded.velocity == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cancel_http_vs_activate_http_concurrent_one_wins_never_both():
+    """실제 두 HTTP 요청이 겹쳐도 끝 상태는 «접힘(closed·0)» 또는 «활성(active)» 중 하나이고, 응답 성공은 정확히 그 승자 하나."""
+    import asyncio
+
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_a = await _seed_sprint(s, seeded["org_id"], seeded["project_a_id"], "planning", velocity=None)
+        await _hypothesis_for(Session, seeded, sprint_a)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+
+        client = _client_for(app)
+        try:
+            r_cancel, r_act = await asyncio.gather(
+                client.post(f"/api/v2/sprints/{sprint_a}/cancel"),
+                client.post(f"/api/v2/sprints/{sprint_a}/activate"),
+            )
+        finally:
+            await client.aclose()
+
+        reloaded = await _reload(Session, sprint_a)
+        oks = [r.status_code == 200 for r in (r_cancel, r_act)]
+        assert sum(oks) == 1, (r_cancel.text, r_act.text)
+        if r_cancel.status_code == 200:
+            assert reloaded.status == "closed" and reloaded.velocity == 0
+        else:
+            assert reloaded.status == "active"
+            assert r_cancel.status_code == 409
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cancel_after_activate_is_409_row_stays_active():
+    """반대 순서 — 활성화가 먼저 끝났으면 cancel 은 409 이고 행은 active 그대로."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_a = await _seed_sprint(s, seeded["org_id"], seeded["project_a_id"], "planning", velocity=None)
+        await _hypothesis_for(Session, seeded, sprint_a)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+
+        client = _client_for(app)
+        try:
+            r_act = await client.post(f"/api/v2/sprints/{sprint_a}/activate")
+            assert r_act.status_code == 200, r_act.text
+            r_cancel = await client.post(f"/api/v2/sprints/{sprint_a}/cancel")
+            assert r_cancel.status_code == 409, r_cancel.text
+        finally:
+            await client.aclose()
+
+        reloaded = await _reload(Session, sprint_a)
+        assert reloaded.status == "active"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

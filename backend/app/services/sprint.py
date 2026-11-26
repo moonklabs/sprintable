@@ -44,7 +44,11 @@ async def transition_sprint(
     """sprint status 전이(단일 SSOT). 시작/마감 overlay(advisory)·human-only. apply 는 기존 repo.activate
     (1-active 제약)/repo.close(velocity)에 위임. review/archived 는 inline. via_gate=True 면 overlay skip."""
     repo = SprintRepository(session, org_id)
-    sprint = await repo.get(sprint_id)
+    # story 5040(codex R2 HIGH): 행 잠금 + 신선한 읽기 — 모든 전이(activate/close/cancel/PATCH/transition)가 같은 행을 FOR UPDATE 로
+    # 읽고 그 행에서 FSM 을 검증한다. 안 그러면 먼저 planning 을 읽은 활성화가 cancel(planning→closed) commit 뒤에 id 만으로
+    # UPDATE 해 closed 를 active 로 덮는다. 잠금은 호출자의 commit 까지 유지(아래 repo.activate/close/update 는 같은 세션 ·
+    # 같은 identity-map 객체를 다시 읽으므로 이 신선한 상태를 그대로 본다).
+    sprint = await repo.get_for_update(sprint_id)
     if sprint is None:
         raise SprintTransitionError("SPRINT_NOT_FOUND", "스프린트를 찾을 수 없습니다.")
     if to_status not in SPRINT_STATUSES:
