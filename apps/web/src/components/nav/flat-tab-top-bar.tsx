@@ -18,10 +18,9 @@ export function MoreTopBarTitle() {
   return <h1 className="text-sm font-medium">{tNav('moreMenuTitle')}</h1>;
 }
 
-/** «대화»(/chats) 상단바 제목 — 화면(chats/page)과 폴백(chats/loading)이 같이 쓴다. */
+/** «대화»(/chats) 상단바 제목 — 화면(chats/page)과 폴백(chats/loading)이 같이 쓴다. story 5032 (C2 · PO 11-26): the list's own head already says «대화 N» right under the bar, so the bar carries only the project chip — the word twice was the teacher's duplicate. */
 export function ChatsTopBarTitle() {
-  const tChats = useTranslations('chats');
-  return <p className="text-sm font-medium">{tChats('title')}</p>;
+  return null;
 }
 
 export type InboxTabKey = 'attention' | 'notifications' | 'gates';

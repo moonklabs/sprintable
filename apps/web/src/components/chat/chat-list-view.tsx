@@ -12,6 +12,9 @@ import { Button as DsButton } from '@/components/ds/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
+import { NewChannelDialogHost } from './new-channel-dialog';
+import { SectionHeader } from '@/components/ds/section-header';
+import { splitRooms } from './room-groups';
 import { ChatListEmptyState } from './no-peers-next-steps';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
@@ -99,6 +102,8 @@ interface ConversationItem {
   /** story 4847 — the project the room is filed under, as the organization-wide list says it (null = the room has none; absent = the project-only list of an older server) */
   project_id?: string | null;
   project_name?: string | null;
+  /** story 5032 (C2): the room is its project's channel (one per project) — the list draws it in the «채널» group under the project's name; absent/false = a one-to-one or group room */
+  is_project_channel?: boolean | null;
 }
 
 interface ChatListViewProps {
@@ -178,15 +183,12 @@ function ConversationRow({
   isAgentConv,
   domainLabels,
   eventDefinitionName,
-  projectLabel,
   onClick,
   onContextMenu,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
-  /** story 4847 (AC1) — which project the room is in, drawn under its name (absent = nothing to say, e.g. the project-only list) */
-  projectLabel?: string;
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
   // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
   domainLabels: OrgDomainLabels;
@@ -208,7 +210,8 @@ function ConversationRow({
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
-  const displayName = conv.title ??
+  const isChannel = conv.is_project_channel === true; // story 5032 (C2): the project's channel is named by the project (one channel per project)
+  const displayName = (isChannel ? conv.project_name?.trim() || null : null) ?? conv.title ??
     (conv.participants && conv.participants.length > 0
       ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t, tc)
       : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
@@ -322,7 +325,7 @@ function ConversationRow({
         />
       ) : (
         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
-          <Icon name={conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
+          <Icon name={isChannel ? 'tag' : conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
         </div>
       )}
 
@@ -343,7 +346,6 @@ function ConversationRow({
             )}
           </span>
         </div>
-        {projectLabel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
         <p className="truncate text-ds-small text-muted-foreground">{preview}</p>
       </div>
@@ -546,6 +548,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
+  const [channelDialogOpen, setChannelDialogOpen] = useState(false); // story 5032 (C2): «+ 새 채널» (the host is mounted only while it is open)
+  const grouped = splitRooms(conversations);
+  const closeChannelDialog = useCallback(() => setChannelDialogOpen(false), []);
 
   // story #3178(S3b) AC2 — 「지금」 스트립 vs pulse 카드 합산 불변식(최대 1 expand). 단일
   // 값이라 구조적으로 둘이 동시에 펼쳐질 수 없다(하나를 펼치면 다른 값으로 덮어써 자동 접힘).
@@ -943,17 +948,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     void fetchConversations(0, false);
   };
 
-  // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
-  const projectLabelOf = (c: ConversationItem): string | undefined => {
-    if (c.project_id === undefined) return undefined;
-    if (c.project_id === null) return t('roomNoProject'); // a room without a project is the odd one: it always says so
-    // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
-    // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
-    // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
-    if (!dashboardCtx.projectMembershipsFailed && projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined; // (a failed read can leave ONE project synthesized from /me — the person may have more: then the name stays)
-    return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
-  };
-
+  // story 5032 (C2 · PO 11-26): a row carries NO project line — to a person a project is a channel (the first group, named by the project) and a room's own project is said once, as the chip in the room's head. (story 4847's per-row project name moved there.)
 
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
@@ -1008,6 +1003,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     loadError, agentLoadError, retryActiveList,
   ]);
 
+  // story 5032 (C2): the «채널» head with «+ 새 채널» — drawn with the groups and, when there is no room at all, above the empty state (a person with nothing yet can still start the first channel)
+  const channelsHeader = (
+    <SectionHeader
+      level={3}
+      title={<span id="chat-list-channels-h">{t('channelsSection')}</span>}
+      count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-channels-count">{grouped.channels.length}</span>}
+      trailing={canStartRoom ? <IconButton icon="add" label={t('newChannel')} data-testid="chat-list-new-channel" onClick={() => setChannelDialogOpen(true)} /> : undefined}
+    />
+  );
+
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
       <p className="text-sm text-muted-foreground">{tc('loading')}</p>
@@ -1040,17 +1045,32 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>}
       </div>
     ) : (
-      <div className="flex h-full items-center justify-center">
-        <ChatListEmptyState />
+      <div className="flex h-full flex-col">
+        <section aria-labelledby="chat-list-channels-h" data-testid="chat-list-channels">{channelsHeader}</section>
+        <div className="flex flex-1 items-center justify-center">
+          <ChatListEmptyState />
+        </div>
       </div>
     )
   ) : (
     <div className="space-y-1" onKeyDown={moveBetweenRooms}>
-      {/* story 4887 (UI-4 screen PR · the approved layout) — ONE list: the «DM» / «그룹» sub-heads are gone (the room's own glyph says which it is), in the order the server gave them */}
-      {conversations.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
-      ))}
-      {conversations.length < myTotal && (
+      {/* story 5032 (C2) — TWO groups: the projects' channels (named by the project · «+ 새 채널» = a new project), then the one-to-one / group rooms. The server marks a channel `is_project_channel`; a room it does not mark (an older server too) stays in the second group in the server's order. */}
+      <section aria-labelledby="chat-list-channels-h" data-testid="chat-list-channels">
+        {channelsHeader}
+        {grouped.channels.length === 0 ? <p className="px-4 py-2 text-ds-small text-ds-ink-3" data-testid="chat-list-channels-empty">{t('channelsEmpty')}</p> : grouped.channels.map((conv) => (
+          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        ))}
+      </section>
+      <section aria-labelledby="chat-list-rooms-h" data-testid="chat-list-room-group">
+        <SectionHeader
+          level={3}
+          title={<span id="chat-list-rooms-h">{t('roomsSection')}</span>}
+          count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-rooms-count">{grouped.rooms.length}</span>}
+        />
+        {grouped.rooms.map((conv) => (
+          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        ))}
+      </section>      {conversations.length < myTotal && (
         <Button
           type="button"
           variant="ghost"
@@ -1276,6 +1296,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onCreated={handleCreated}
         />
       )}
+      {channelDialogOpen ? <NewChannelDialogHost onClose={closeChannelDialog} /> : null}
     </div>
   );
 }

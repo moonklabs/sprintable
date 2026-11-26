@@ -126,56 +126,19 @@ describe('ChatListView — 조직 안 모든 방 한 목록(story 4847 AC1)', ()
     for (const title of ['에이 방', '비 방', '프로젝트 없는 방']) expect(container.textContent).toContain(title);
   });
 
-  it('⭐방마다 프로젝트 이름이 붙고, 프로젝트 없는 방은 «프로젝트 없음»이다', async () => {
-    stubOrgServer();
+  // story 5032 (C2 · PO 11-26) — the row carries NO project line any more (story 4847 put the project name under every row; 4887 spared it for a person with one project): to a person a project is a channel, and a room's
+  // own project is said once, as the chip in the room's head (page.5032-channel-head.test.tsx). So whatever the person's project list is — and for a project-less room — no row says a project, and no row says «프로젝트 없음».
+  it.each([
+    ['two projects', { projectMemberships: [A, B], role: 'member', projectId: undefined }],
+    ['ONE project', { projectMemberships: [A], role: 'member', projectId: undefined }],
+    ['an empty (not yet known) list', { projectMemberships: [], role: 'member', projectId: undefined }],
+    ['a failed read that left one', { projectMemberships: [A], role: 'member', projectId: undefined, projectMembershipsFailed: true }],
+  ])('⭐no row carries a project line or «프로젝트 없음» — %s', async (_name, ctx) => {
+    useDashboardContextMock.mockReturnValue(ctx);
+    stubOrgServer([A1, B1, N1]);
     await mount();
-    const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
-    expect(labels).toHaveLength(3);
-    expect(labels).toEqual(expect.arrayContaining([A.projectName, B.projectName, koMessages.chats.roomNoProject]));
-  });
-
-  // story 4887 (UI-4 P2-a) — with ONE known project every row of that project would say the same name; the line (the row's fourth) is spared there. Everything else keeps the name: it is information.
-  it('4887 ⭐ a person with ONE project gets no project line on a room of that project — the project-less room still says «프로젝트 없음»', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
-    stubOrgServer([N1, A1]);
-    await mount();
-    const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
-    expect(labels).toEqual([koMessages.chats.roomNoProject]);
-    expect(container.textContent).toContain('에이 방');
-  });
-
-  it('4887 ⭐ a room of ANOTHER project than the person\'s only one keeps its name (a person who lost access can still read it)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
-    stubOrgServer([A1, B1]);
-    await mount();
-    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([B.projectName]);
-  });
-
-  it('4887 ⭐ an EMPTY (not yet known) membership list keeps the name — «unknown» is not «one project»', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
-    stubOrgServer([A1, B1]);
-    await mount();
-    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent).sort()).toEqual([A.projectName, B.projectName].sort());
-  });
-
-  it('4887 ⭐ with TWO projects the name shows on a room that has a project (the line is the way to tell the rooms apart)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined });
-    stubOrgServer([A1]);
-    await mount();
-    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]);
-  });
-
-  it('4887 ⭐ a FAILED project read that left ONE project (synthesized from /me) keeps the name on that project\'s rooms — the person may have more', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined, projectMembershipsFailed: true });
-    stubOrgServer([A1]);
-    await mount();
-    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]); // reverted → hidden
-  });
-
-  it('줄이 이름을 안 주면(project_name 없음) 내 프로젝트 목록에서 이름을 찾아 붙인다', async () => {
-    stubOrgServer([{ ...B1, project_name: null }]);
-    await mount();
-    expect(container.querySelector('[data-testid="room-project"]')?.textContent).toBe(B.projectName);
+    expect(container.querySelectorAll('[data-testid="room-project"]')).toHaveLength(0); // reverted → a project name under each row
+    for (const title of ['에이 방', '비 방', '프로젝트 없는 방']) expect(container.textContent).toContain(title); // the rooms are all still there
   });
 
   it('⭐다른 프로젝트의 방을 눌러도 프로젝트를 바꾸는 이동이 아니다 — /chats/{id} 하나뿐(?p=전환 · from · pn 없음)', async () => {
