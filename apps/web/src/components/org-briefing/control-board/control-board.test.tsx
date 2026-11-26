@@ -9,7 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 import type { AgentStateRow } from '@/lib/agent-state-list';
-import { BENCH_ID, ControlBoardView, channelDropId, resolveDrop, type ControlBoardViewProps } from './control-board';
+import { BENCH_ID, ControlBoardView, buildDragAnnouncements, channelDropId, dropPlaceName, resolveDrop, type ControlBoardViewProps } from './control-board';
 import { deriveControlBoard, grantKey, type BoardProject } from './derive-control-board';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -187,3 +187,42 @@ describe('what a drop means (one gesture)', () => {
     expect(resolveDrop({ agentId: 'a', projectId: 'p1' }, 'something-else')).toBeNull();
   });
 });
+
+describe('what a screen reader hears while a face is dragged (names, never ids — found on dev, story 5033 follow-up)', () => {
+  const liveText = () => (document.querySelector('[id^="DndLiveRegion"]') as HTMLElement | null)?.textContent ?? '';
+  const instructions = () => (document.querySelector('[id^="DndDescribedBy"]') as HTMLElement | null)?.textContent ?? '';
+
+  it('⭐the hidden instructions are the page\'s own words (Korean here), not dnd-kit\'s English default', async () => {
+    await mount({ grants: GRANTS, agents: AGENTS });
+    expect(instructions()).toBe(koMessages.orgBriefing.dragInstructions);
+    expect(instructions()).not.toMatch(/space bar|draggable item/i);
+  });
+  it('⭐picking a face up with the keyboard is announced by the agent\'s NAME — no id in the sentence', async () => {
+    await mount({ grants: GRANTS, agents: AGENTS });
+    const handle = q('[data-testid="control-channel"] [data-testid="control-face-handle"]')!;
+    await act(async () => { handle.focus(); handle.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true, cancelable: true })); });
+    expect(liveText()).toBe('Ann · 끌기를 시작했어요.');
+    expect(liveText()).not.toMatch(/::|channel:|bench|id-Ann|p1/);
+  });
+  it('⭐a drop place is named by the lane\'s title or the project\'s NAME — an unknown place says nothing, never its id', () => {
+    const byId = new Map([['p2', { id: 'p2', name: 'Beta' }]]);
+    expect(dropPlaceName(channelDropId('p2'), byId, '빠진 에이전트')).toBe('Beta');
+    expect(dropPlaceName(BENCH_ID, byId, '빠진 에이전트')).toBe('빠진 에이전트');
+    expect(dropPlaceName(channelDropId('gone'), byId, '빠진 에이전트')).toBe('');
+  });
+  it('⭐every sentence names the agent and the PLACE by name; the ids never reach a sentence (the builder, all four moments)', () => {
+    const say = buildDragAnnouncements({
+      t: (key, v) => `${key}|${v.name}|${v.target ?? ''}`,
+      agentName: (id) => ({ 'id-Ann': 'Ann' }[id] ?? ''),
+      placeName: (dropId) => (dropId === BENCH_ID ? '빠진 에이전트' : dropId === channelDropId('p2') ? 'Beta' : ''),
+    });
+    const active = { id: 'p1::id-Ann' } as never;
+    expect(say.onDragStart!({ active })).toBe('dragStartAnnounce|Ann|');
+    expect(say.onDragOver!({ active, over: { id: channelDropId('p2') } } as never)).toBe('dragOverAnnounce|Ann|Beta');
+    expect(say.onDragOver!({ active, over: null } as never)).toBeUndefined();
+    expect(say.onDragEnd!({ active, over: { id: BENCH_ID } } as never)).toBe('dragEndAnnounce|Ann|빠진 에이전트');
+    expect(say.onDragEnd!({ active, over: null } as never)).toBe('dragEndNowhereAnnounce|Ann|');
+    expect(say.onDragCancel!({ active } as never)).toBe('dragCancelAnnounce|Ann|');
+  });
+});
+
