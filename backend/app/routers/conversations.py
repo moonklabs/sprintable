@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -703,6 +703,8 @@ def _msg_payload(
     payload.update(_activation_payload(msg))
     # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
     # (an approval's resolution note, an event's payload…) that the tombstone (`content = ""`) did not clear. The keys stay, empty (the shape is the same).
+    if msg.deleted_at is None:
+        payload.update(_delivery_timing_payload(msg))
     _cards = (_approval_payload, _event_payload, _server_command_payload, _card_payload)
     for _card in _cards:
         _fields = _card(msg)
@@ -755,6 +757,11 @@ async def _delivery_decision_of(
         "humans_delivered": len(delivered - agent_ids),
     }
 
+# story 5046 (C13) — the server's record of how a message went into a working agent's turn: the metadata key (server-written only, by the agent's own host report) and the closed «via» words.
+# `turn` = steered into the turn that was running · `next_turn` = held and sent as the next turn (after the running one ended).
+DELIVERY_LOG_KEY = "delivery_log"
+DELIVERY_VIA = frozenset({"turn", "next_turn"})
+
 
 def _activation_meta(req: "SendMessageRequest") -> dict | None:
     """E-ACTIVATION S1: typed-activation 필드 → msg_metadata['activation']. 없으면 None(완전 additive).
@@ -789,7 +796,12 @@ def _card_meta(req: "SendMessageRequest") -> dict | None:
 def _delivery_meta(req: "SendMessageRequest") -> dict | None:
     """story 5030 — req.delivery_member_ids → msg_metadata['delivery']['member_ids'] (strings). Read by channel_router only; no client payload carries it."""
     ids = getattr(req, "delivery_member_ids", None)
-    return {"delivery": {"member_ids": [str(i) for i in ids]}} if ids else None
+    out: dict = {}
+    if ids:
+        out["member_ids"] = [str(i) for i in ids]
+    if getattr(req, "delivery_mode", None) == "after_turn":  # story 5046: `now` is the default — never stored
+        out["mode"] = "after_turn"
+    return {"delivery": out} if out else None
 
 
 def _work_item_meta(req: "SendMessageRequest") -> dict | None:
@@ -900,6 +912,29 @@ def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
     card = _event_payload(msg).get("event") or {}
     # story #4903 — the message's id rides on the card (an id, never words): a delete finds ITS notification rows by it (the row has no other link to the message). Written last, like the name.
     return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
+
+
+def _delivery_timing_payload(msg: "ConversationMessage") -> dict:
+    """story 5046 (C13): the sender's choice of WHEN a working agent gets this message, and the server's record of when it did. Additive and sparse — a message sent the old way (`now`, nothing reported) carries NO new key:
+    `delivery_mode: "after_turn"` only when the sender chose it · `delivery_log: {agent_member_id: {via, at}}` once an agent's host has reported how the message went into its turn (`report_message_delivery`).
+    `__dict__`-only read like the other metadata payloads (no lazy load inside the sync serializer)."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    if not isinstance(meta, dict):
+        return {}
+    out: dict = {}
+    delivery = meta.get("delivery")
+    if isinstance(delivery, dict) and delivery.get("mode") == "after_turn":
+        out["delivery_mode"] = "after_turn"
+    log = meta.get(DELIVERY_LOG_KEY)
+    if isinstance(log, dict):
+        clean = {
+            str(k): {"via": v["via"], "at": v["at"]}
+            for k, v in log.items()
+            if isinstance(v, dict) and v.get("via") in DELIVERY_VIA and isinstance(v.get("at"), str)
+        }
+        if clean:
+            out["delivery_log"] = clean
+    return out
 
 
 def _card_payload(msg: "ConversationMessage") -> dict:
@@ -1665,6 +1700,9 @@ class SendMessageRequest(BaseModel):
     # (channel_router); a notice is not a call — calling its agents by `mentioned_ids` would add a second event (the mention) and a bell line for each, so the publisher names its
     # addressees here instead: stored in `msg_metadata['delivery']` (never sent to a client) and read by the router as «addressed». Server only — see HttpSendMessageRequest.
     delivery_member_ids: list[uuid.UUID] | None = None
+    # story 5046 (C13) — WHEN the sender wants a working agent to get this: `now` (the meaning today and the default — an absent value is `now`: the host steers a working agent at once where its runtime can) or `after_turn`
+    # (hold it until the agent's current turn ends). A person's / an agent's own choice, so the public route takes it; only `after_turn` is stored (`msg_metadata['delivery']['mode']`) and travels in the message payload.
+    delivery_mode: Literal["now", "after_turn"] | None = None
     # story #3828(UX-v3·대화·BE 1) — 이 메시지가 어느 work_item(story·doc 등) 얘기인지
     # 선택 태그. Pydantic 하위모델 자체가 형식 검증(type 누락·id가 UUID 아님 → 422) —
     # 없으면 완전 무변(approval_target과는 별도 namespace, _work_item_meta 참고).
@@ -3126,6 +3164,62 @@ async def show_card(
         await _run_background_tasks_quietly(background_tasks)
         raise HTTPException(status_code=404, detail=_SHOW_CARD_NOT_FOUND)
     return out
+
+
+class DeliveryReportRequest(BaseModel):
+    """story 5046 (C13): what an agent's host tells the server about HOW a chat message went into the agent — only the closed word; the TIME is the server's own clock (a host cannot back- or forward-date it)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    via: Literal["turn", "next_turn"]
+
+
+@router.post("/{conversation_id}/messages/{message_id}/delivery", status_code=200)
+async def report_message_delivery(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    body: DeliveryReportRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> dict:
+    """POST /api/v2/conversations/{id}/messages/{mid}/delivery — an AGENT's host records how a chat message went into the agent's turn (story 5046, C13).
+
+    Only the recipient itself may write its own line: the caller must be an agent key, and that agent must be a recipient of THIS message (it has the `conversation.message_created` event for it) — anything else
+    (a person, another agent, a message of another room or organization, a missing message) is the same 404. The time is the server's clock; the first report of an agent for a message wins (a repeat answers with the
+    stored line and changes nothing), so a host retry is safe and a later report cannot rewrite history. Stored at `msg_metadata['delivery_log'][agent_member_id]`; served on the message as `delivery_log`."""
+    if not (auth.claims.get("app_metadata") or {}).get("api_key_id"):
+        raise HTTPException(status_code=403, detail="agents only")
+    agent_id = uuid.UUID(auth.user_id)
+    from app.services.project_auth import has_project_access
+
+    found = (await db.execute(
+        select(ConversationMessage, Conversation.project_id)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(ConversationMessage.id == message_id, ConversationMessage.conversation_id == conversation_id, Conversation.org_id == org_id, ConversationMessage.deleted_at.is_(None))
+        .with_for_update(of=ConversationMessage)
+    )).first()
+    row = found[0] if found else None
+    # an agent that has lost the room's project is no longer a reader of the room (story 4846 AC12): it does not write on its messages either (defence in depth — it is not sent them in the first place)
+    allowed = row is not None and (found[1] is None or await has_project_access(db, agent_id, found[1], org_id))
+    received = allowed and (await db.execute(
+        select(Event.id).where(
+            Event.org_id == org_id, Event.event_type == "conversation.message_created", Event.source_entity_type == "conversation_message",
+            Event.source_entity_id == message_id, Event.recipient_id == agent_id,
+        ).limit(1)
+    )).first() is not None
+    if row is None or not received:
+        raise HTTPException(status_code=404, detail="Message not found")
+    meta = dict(row.msg_metadata) if isinstance(row.msg_metadata, dict) else {}
+    log = dict(meta.get(DELIVERY_LOG_KEY)) if isinstance(meta.get(DELIVERY_LOG_KEY), dict) else {}
+    mine = log.get(str(agent_id))
+    if not (isinstance(mine, dict) and mine.get("via") in DELIVERY_VIA):
+        mine = {"via": body.via, "at": datetime.now(timezone.utc).isoformat()}
+        log[str(agent_id)] = mine
+        meta[DELIVERY_LOG_KEY] = log
+        row.msg_metadata = meta  # a NEW dict: the JSON column is only written when it is reassigned
+        await db.commit()
+    return {"via": mine["via"], "at": mine["at"]}
 
 
 async def send_message_core(
