@@ -32,7 +32,7 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
     return [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
   }
 
-  it('⭐static 항목(결재 /inbox?tab=gates · /settings · /organization/…)은 `?p=` — 홈(/org-briefing)은 하단 탭이 덮어 «전체»에는 없다(폰 탭 넷)', async () => {
+  it('⭐static 항목(결재 /inbox?tab=gates · /organization/…)은 `?p=` — 홈(/org-briefing) · 설정(/settings) · 에이전트는 하단 탭이 덮어 «전체»에는 없다(story 5031 폰 탭 넷)', async () => {
     const { default: MorePage } = await import('./page');
     const { TopBarProvider } = await import('@/components/nav/top-bar-context');
     await act(async () => {
@@ -40,7 +40,8 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
     });
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
     expect(hrefs).toContain('/inbox?tab=gates&p=P'); // 기존 쿼리 보존
-    expect(hrefs).toContain('/settings?p=P');
+    expect(hrefs.filter((h) => h.startsWith('/settings'))).toEqual([]);
+    expect(hrefs).not.toContain('/organization/workforce?p=P');
     expect(hrefs.filter((h) => h.startsWith('/organization/')).every((h) => h.endsWith('p=P'))).toBe(true);
     expect(hrefs.some((h) => h === '/inbox?tab=gates' || h === '/settings')).toBe(false);
   });

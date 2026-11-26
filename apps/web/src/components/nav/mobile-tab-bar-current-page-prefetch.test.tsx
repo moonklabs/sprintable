@@ -3,13 +3,14 @@
 // story #4226 — 모바일 탭바가 지금 보는 바로 그 페이지를 프리패치하지 않는다(로컬 prod 빌드 실측: 착지 ≈1.4초 뒤 현재 페이지
 // RSC 데이터 프리패치 1건). «활성 탭»이 아니라 «href 경로 = 현재 pathname»으로만 끈다 — 대화 상세(/chats/{id})에서 채팅 탭의
 // /chats 프리패치는 목록 복귀를 빠르게 하므로 유지.
+// story 5031 (C1 4단계) — 탭은 홈 · 채팅 · 에이전트 · 설정(전부 flat 링크)이라 옛 «일감 scoped 탭(/acme/proj/flow)»은 없다: «현재 페이지 탭» 사례는 에이전트(/organization/workforce) · 설정(/settings)으로.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const nav = { pathname: '/acme/proj/flow' };
+const nav = { pathname: '/organization/workforce' };
 vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
 
 const linkProps: { href: string; prefetch: unknown }[] = [];
@@ -56,12 +57,19 @@ async function renderAt(pathname: string): Promise<Map<string, unknown>> {
 }
 
 describe('MobileTabBar — 현재 페이지 탭은 프리패치하지 않는다(story #4226)', () => {
-  it('⭐/acme/proj/flow에서 일감 탭(/acme/proj/flow)은 prefetch=false · 나머지 탭은 기본값(undefined)', async () => {
-    const byHref = await renderAt('/acme/proj/flow');
-    expect(byHref.get('/acme/proj/flow')).toBe(false);
-    const others = [...byHref.entries()].filter(([href]) => href !== '/acme/proj/flow');
-    expect(others.length).toBeGreaterThanOrEqual(3);
+  it('⭐/organization/workforce에서 에이전트 탭은 prefetch=false · 나머지 세 탭은 기본값(undefined)', async () => {
+    const byHref = await renderAt('/organization/workforce');
+    expect(byHref.get('/organization/workforce')).toBe(false);
+    const others = [...byHref.entries()].filter(([href]) => href !== '/organization/workforce');
+    expect(others.map(([href]) => href)).toEqual(['/org-briefing', '/chats', '/settings']);
     for (const [href, prefetch] of others) expect(prefetch, href).toBeUndefined();
+  });
+
+  it('설정 탭(/settings)도 현재 페이지면 prefetch=false — 하위 화면(/settings/integrations)에선 활성이어도 기본값(설정 첫 화면으로 가는 길이 빠르게)', async () => {
+    const onSettings = await renderAt('/settings');
+    expect(onSettings.get('/settings')).toBe(false);
+    const onSub = await renderAt('/settings/integrations');
+    expect(onSub.get('/settings')).toBeUndefined();
   });
 
   it('활성이지만 다른 페이지 — 대화 상세(/chats/c-1)에서 채팅 탭(활성 · href /chats)의 프리패치는 기본값 그대로(목록 복귀가 빠르게)', async () => {
@@ -78,15 +86,16 @@ describe('MobileTabBar — 현재 페이지 탭은 프리패치하지 않는다(
 });
 
 describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝트}`(story #4226)', () => {
-  it('⭐flat 탭(홈·채팅·전체)은 `?p=proj-1`을 싣고 · scoped 탭(/acme/proj/flow)은 경로가 프로젝트라 안 싣는다', async () => {
+  it('⭐탭 넷 전부 flat — 전부 `?p=proj-1`을 싣고 · 경로 자체가 프로젝트인 scoped 탭(/acme/proj/…)은 없다', async () => {
     ctx.projectId = 'proj-1';
     const hrefs = [...(await renderAt('/acme/proj/flow')).keys()];
-    const scoped = hrefs.filter((h) => h.startsWith('/acme/proj/'));
-    const flat = hrefs.filter((h) => !h.startsWith('/acme/proj/'));
-    expect(scoped).toEqual(['/acme/proj/flow']);
-    expect(flat.length).toBeGreaterThanOrEqual(3);
-    for (const h of flat) expect(new URLSearchParams(h.split('?')[1] ?? '').get('p'), h).toBe('proj-1');
-    expect(hrefs).toContain('/org-briefing?p=proj-1');
+    expect(hrefs.filter((h) => h.startsWith('/acme/proj/'))).toEqual([]);
+    expect(hrefs).toEqual([
+      '/org-briefing?p=proj-1',
+      '/chats?p=proj-1',
+      '/organization/workforce?p=proj-1',
+      '/settings?p=proj-1',
+    ]);
   });
 
   it('⭐전환 대기 중엔 목표 프로젝트를 싣는다(커밋 전 컨텍스트는 아직 옛 프로젝트 — 까디르 QA [P2])', async () => {

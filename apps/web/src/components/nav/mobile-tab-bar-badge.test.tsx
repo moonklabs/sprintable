@@ -11,7 +11,7 @@ import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/flow',
+  usePathname: () => '/qa-org/qa-proj/flow',
 }));
 // story #4885 — 「홈」 탭 배지는 홈 모델(useHomeModel) 하나를 읽는다(웹 막대 「홈」 배지와 같은 수). 모델 값만 시험이 정한다.
 const { homeState } = vi.hoisted(() => ({ homeState: { badge: 0, partial: false } }));
@@ -53,6 +53,7 @@ async function mount(homeBadge: number, chatUnreadTotal: number, locale: 'ko' | 
 const countText = (el: Element | null) => { if (!el) return null; const c = el.cloneNode(true) as Element; c.querySelectorAll('.sr-only').forEach((n) => n.remove()); return (c.textContent ?? '').trim(); };
 const BADGE = '[data-slot="ds-count-badge"]';
 
+// story 5031 (C1 4단계) — 폰 탭은 홈 · 채팅 · 에이전트 · 설정(웹 아이콘 막대와 같은 넷). 채팅 탭 이름은 nav.depth1Chat(ko 「채팅」 · en 「Chat」)이다(옛 nav.chats 「대화」 · 「Chats」 아님). 배지는 홈 · 채팅 둘뿐이다.
 describe('MobileTabBar — 홈(내 손이 필요한 일)/채팅 카운트 배지(story #3431 · #4885 홈 모델 · 4890 UI-7: ds CountBadge 한 정의)', () => {
   it('두 배지 모두 0건이면 배지 자체가 안 뜬다', async () => {
     await mount(0, 0);
@@ -121,12 +122,29 @@ function approxAccessibleName(el: Element): string {
   return collectVisibleText(el).replace(/\s+/g, ' ').trim();
 }
 
+describe('MobileTabBar — 탭 넷의 모양과 이름(story 5031 C1 4단계)', () => {
+  it('⭐탭은 정확히 넷: 홈 · 채팅 · 에이전트 · 설정(이 순서) — 일감 · 전체 탭 없음, 에이전트 · 설정엔 배지 없음', async () => {
+    await mount(5, 3);
+    const links = [...container.querySelectorAll('[data-testid="mobile-tab-bar"] a')];
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/org-briefing', '/chats', '/organization/workforce', '/settings']);
+    expect(links.map((a) => approxAccessibleName(a).split(' ')[0])).toEqual(['홈', '채팅', '에이전트', '설정']);
+    expect(links.map((a) => a.querySelector(BADGE) !== null)).toEqual([true, true, false, false]);
+    expect(links.some((a) => a.getAttribute('href') === '/more')).toBe(false);
+  });
+
+  it('[en] 이름: Home · Chat · Agents · Settings', async () => {
+    await mount(0, 0, 'en');
+    const links = [...container.querySelectorAll('[data-testid="mobile-tab-bar"] a')];
+    expect(links.map((a) => approxAccessibleName(a))).toEqual(['Home', 'Chat', 'Agents', 'Settings']);
+  });
+});
+
 describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)', () => {
   it('배지 0건 — sr-only 텍스트가 안 붙는다(접근성 이름=보이는 라벨 그대로)', async () => {
     await mount(0, 0);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    // story #3824 CHANGES② — chat 탭 라벨이 nav.chats 공유로 "채팅"→"대화"(허브·바텀탭 통일).
-    expect(approxAccessibleName(chatLink)).toBe('대화');
+    // story 5031 (C1 4단계) — chat 탭 라벨은 nav.depth1Chat(웹 아이콘 막대와 같은 「채팅」) — 옛 nav.chats 「대화」가 아니다.
+    expect(approxAccessibleName(chatLink)).toBe('채팅');
     expect(chatLink.getAttribute('aria-label')).toBeNull(); // 접근성 이름을 통째로 안 갈아치운다(WCAG 2.5.3).
   });
 
@@ -140,7 +158,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 3건 — 접근성 이름이 «보이는 라벨+수»', async () => {
     await mount(0, 3);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 3건');
+    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 3건');
   });
 
   it('홈 150건(시각 99+ 표기) — 접근성 이름엔 «99건 이상»(캡을 말로 반영)', async () => {
@@ -158,7 +176,7 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('채팅 unread 150건(시각 99+ 표기) — 접근성 이름엔 "99건 이상"', async () => {
     await mount(0, 150);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 99건 이상');
+    expect(approxAccessibleName(chatLink)).toBe('채팅 안읽음 99건 이상');
     const badge = container.querySelector(BADGE);
     expect(countText(badge)).toBe('99+');
     expect(badge?.getAttribute('data-kind')).toBe('unread');
@@ -181,8 +199,8 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   it('[en] 채팅 unread 1건 — "1 unread"(형태 안 갈림, count=1 경계값 확인)', async () => {
     await mount(0, 1, 'en');
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
-    // story #3824 CHANGES② — chat 탭 라벨이 nav.chats 공유로 "Chat"→"Chats".
-    expect(approxAccessibleName(chatLink)).toBe('Chats 1 unread');
+    // story 5031 (C1 4단계) — chat 탭 라벨은 nav.depth1Chat("Chat") — 옛 nav.chats("Chats")가 아니다.
+    expect(approxAccessibleName(chatLink)).toBe('Chat 1 unread');
   });
 
   // 폰 탭 넷(story #4885) — 탭 세트는 플래그로 갈리지 않는다: v3 «오늘» 화면이 켜져 있으면 «홈» 탭이 /today에 착지하고 배지 · 접근 이름은 그대로다(codex 권고).

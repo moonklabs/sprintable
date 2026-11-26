@@ -179,3 +179,44 @@ describe('TopBar — 쪽 바탕 층(4913)', () => {
     expect(cls).not.toContain('bg-background');
   });
 });
+
+// story 5031 (C1 step 4): the phone tab bar is the four places, so «모든 화면» (/more) is reached through the palette — the top bar's search icon opens the same ⌘K palette the desktop's search under the bar opens (one door). Drawn below lg only; no provider = no button.
+describe('TopBar — 폰 검색 입구(story 5031 · C1 4단계)', () => {
+  async function mountWithPalette(withProvider: boolean) {
+    stubViewport(390);
+    const { TopBar } = await import('./top-bar');
+    const { TopBarProvider } = await import('./top-bar-context');
+    const { SidebarProvider } = await import('@/components/ui/sidebar');
+    const { CommandPaletteProvider, useCommandPalette } = await import('@/components/command-palette/command-palette-context');
+    function OpenState() { return <span data-testid="palette-open">{String(useCommandPalette().open)}</span>; }
+    const bar = (
+      <TopBarProvider><SidebarProvider><TopBar /><OpenState /></SidebarProvider></TopBarProvider>
+    );
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          {withProvider ? <CommandPaletteProvider>{bar}</CommandPaletteProvider> : bar}
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐검색 단추가 있고(이름 «검색…») 누르면 팔레트가 열린다 — lg 이상에선 가려진다(막대 아래 검색이 같은 입구)', async () => {
+    vi.resetModules();
+    await mountWithPalette(true);
+    const btn = container.querySelector('[data-testid="top-bar-search"]') as HTMLButtonElement | null;
+    expect(btn).not.toBeNull();
+    expect(btn!.getAttribute('aria-label')).toBe('검색…');
+    expect(btn!.parentElement!.className).toContain('lg:hidden');
+    expect(container.querySelector('[data-testid="palette-open"]')!.textContent).toBe('false');
+    await act(async () => { btn!.click(); });
+    expect(container.querySelector('[data-testid="palette-open"]')!.textContent).toBe('true');
+  });
+
+  it('팔레트 공급자가 없으면(막대만 따로 그리는 시험) 단추도 없다', async () => {
+    vi.resetModules();
+    await mountWithPalette(false);
+    expect(container.querySelector('[data-testid="top-bar-search"]')).toBeNull();
+  });
+});
