@@ -40,26 +40,19 @@ describe('the project\'s channel', () => {
   });
 });
 
-describe('a project with many rooms: the channel is looked for through the pages, not guessed from the first (codex 5036)', () => {
-  const dms = (n: number, from = 0) => Array.from({ length: n }, (_x, i) => ({ id: `dm-${from + i}`, is_project_channel: false }));
-  it('not on the first page of 50 → found on the second', async () => {
-    const seen: string[] = [];
-    routes.set('GET /api/conversations', () => { const url = calls.at(-1)!.url; seen.push(url); return url.includes('offset=0') ? { ok: true, body: { data: dms(50) } } : { ok: true, body: { data: [...dms(3, 50), { id: 'chan-late', is_project_channel: true }] } }; });
-    expect(await findProjectChannelId('proj-1')).toBe('chan-late'); // reverted (only the first page is read) → null
-    expect(seen.length).toBe(2);
-    expect(seen[1]).toContain('offset=50');
+describe('the channel is read ONCE, from the project\'s own rooms (PO 11-26 — no page walk)', () => {
+  it('one request: the project\'s id and nothing else in the query', async () => {
+    routes.set('GET /api/conversations', rooms([{ id: 'chan-1', is_project_channel: true }]));
+    expect(await findProjectChannelId('proj-1')).toBe('chan-1');
+    const reads = calls.filter((c) => c.url.startsWith('/api/conversations'));
+    expect(reads.length).toBe(1);
+    expect(reads[0]!.url).toBe('/api/conversations?project_id=proj-1'); // reverted (a page walk / extra filters) → another URL or more reads
   });
 
-  it('a short page is the last: no more pages are read', async () => {
-    let reads = 0;
-    routes.set('GET /api/conversations', () => { reads += 1; return { ok: true, body: { data: dms(7) } }; });
+  it('no channel in the answer → none, and no second read is made to look further', async () => {
+    routes.set('GET /api/conversations', rooms(Array.from({ length: 50 }, (_x, i) => ({ id: `dm-${i}`, is_project_channel: false }))));
     expect(await findProjectChannelId('proj-1')).toBeNull();
-    expect(reads).toBe(1);
-  });
-
-  it('a page that cannot be read ends the search as «not found» (the DM way is kept)', async () => {
-    routes.set('GET /api/conversations', () => { const url = calls.at(-1)!.url; return url.includes('offset=0') ? { ok: true, body: { data: dms(50) } } : { ok: false }; });
-    expect(await findProjectChannelId('proj-1')).toBeNull();
+    expect(calls.filter((c) => c.url.startsWith('/api/conversations')).length).toBe(1);
   });
 });
 

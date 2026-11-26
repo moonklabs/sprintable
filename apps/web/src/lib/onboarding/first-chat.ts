@@ -6,22 +6,17 @@ import { createFirstInstructionConversation } from '@/lib/onboarding/first-instr
 // the project's work will be. When the channel cannot be found (the list could not be read, an older server without channels) the way before it is kept — a DM with the
 // agent that connected (story 3201) — and when that cannot be opened either the page's own way out is the answer: never a dead end.
 
-/** a page of the project's rooms, and how many pages are read at most to find its channel (a project that has just been made has a handful; a long-lived one is read through, not guessed) */
-const READ_LIMIT = 50;
-const READ_PAGES = 10;
-
 /** the id of the project's channel room, or null (not there · could not be read) */
 export async function findProjectChannelId(projectId: string): Promise<string | null> {
-  for (let page = 0; page < READ_PAGES; page += 1) {
-    const res = await fetchWithAuth(`/api/conversations?project_id=${encodeURIComponent(projectId)}&include_agent_conversations=true&limit=${READ_LIMIT}&offset=${page * READ_LIMIT}`).catch(() => null);
-    if (!res || !res.ok) return null;
-    const body = (await res.json().catch(() => null)) as { data?: unknown } | null;
-    if (!body || !Array.isArray(body.data)) return null;
-    for (const row of body.data) {
-      const r = row as { id?: unknown; is_project_channel?: unknown } | null;
-      if (r && r.is_project_channel === true && typeof r.id === 'string' && r.id) return r.id;
-    }
-    if (body.data.length < READ_LIMIT) return null; // the last page: not there
+  // the project's own rooms, read once: the server answers `project_id=` with that project's rooms only, and its channel is the one row marked `is_project_channel` (PO 11-26, measured on dev) —
+  // no page walk and no guess from a stale mark: the project asked for is the project of step ①
+  const res = await fetchWithAuth(`/api/conversations?project_id=${encodeURIComponent(projectId)}`).catch(() => null);
+  if (!res || !res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { data?: unknown } | null;
+  if (!body || !Array.isArray(body.data)) return null;
+  for (const row of body.data) {
+    const r = row as { id?: unknown; is_project_channel?: unknown } | null;
+    if (r && r.is_project_channel === true && typeof r.id === 'string' && r.id) return r.id;
   }
   return null;
 }
