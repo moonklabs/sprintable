@@ -272,7 +272,7 @@ async def delete_project_access(
             )
         )
 
-    revoked_member_id = record.member_id
+    revoked_member_id = record.member_id or record.org_member_id   # a person's id as a member is their org_member id (0075): an old grant row may carry only that one
     await session.delete(record)
     await session.flush()
     # story #5032 (C2): whoever loses the project (a person or an agent) leaves its channel room

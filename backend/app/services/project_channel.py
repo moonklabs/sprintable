@@ -138,6 +138,26 @@ async def unseat_from_project_channel_quietly(db: AsyncSession, *, project_id: u
         return False
 
 
+async def unseat_from_project_channels_of_org_quietly(db: AsyncSession, *, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> bool:
+    """A person left the organization (their `project_access` rows are gone): take them out of EVERY project channel of the organization — the seat follows the access. Best effort and never
+    fails the caller: the read and the delivery of a channel ask for the project access NOW (`conversation_auth.channel_project_valid`), so a seat this misses reads nothing; this keeps the
+    table honest (and a seat that is opened again later starts clean)."""
+    if not member_ids:
+        return True
+    try:
+        async with db.begin_nested():
+            channel_ids = select(Conversation.id).where(Conversation.org_id == org_id, Conversation.is_project_channel.is_(True))
+            await db.execute(
+                delete(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id.in_(channel_ids), ConversationParticipant.member_id.in_(member_ids),
+                )
+            )
+            return True
+    except Exception:  # noqa: BLE001
+        logger.warning("project channel unseat of a removed member failed org_id=%s", org_id, exc_info=True)
+        return False
+
+
 async def retitle_project_channel_quietly(db: AsyncSession, *, project_id: uuid.UUID, title: str) -> bool:
     """The project was renamed: the channel's title follows (no channel = nothing to do). Never fails the caller."""
     try:

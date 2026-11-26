@@ -11,14 +11,18 @@ tell `dm` from `group` and does not know a third value — a new value would be 
 Additive in effect: every existing row is `false`, nothing is backfilled, no room is moved or deleted (old rooms stay as they are, beside the channel).
 `ADD COLUMN ... DEFAULT <constant>` rewrites no rows on PostgreSQL 11+; `conversations` is a small table either way.
 
+The index build is a plain `CREATE UNIQUE INDEX` (env.py cannot run `CONCURRENTLY` inside a migration — `autocommit_block()` dies on the incremental deploy path, see its header; the 0217 · 0384 · 0412 · 0415 · 0468
+precedent): it scans `conversations` once and blocks WRITES to the table for that scan (reads go on; sending a message waits). Both statements are `IF NOT EXISTS`, so for a large table the operator can do the two
+steps by hand in a separate psql session BEFORE the deploy and the migration then finds them and does nothing:
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_project_channel boolean NOT NULL DEFAULT false;
+    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_conversations_project_channel ON conversations (project_id) WHERE is_project_channel AND project_id IS NOT NULL;
+
 Downgrade drops the index and the column — the mark is the only thing lost (a channel room itself stays, as an ordinary group room).
 
 Revision ID: 0502
 Revises: 0501
 Create Date: 2026-11-27
 """
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0502"
@@ -28,19 +32,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "conversations",
-        sa.Column("is_project_channel", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-    )
-    op.create_index(
-        "uq_conversations_project_channel",
-        "conversations",
-        ["project_id"],
-        unique=True,
-        postgresql_where=sa.text("is_project_channel AND project_id IS NOT NULL"),
+    op.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_project_channel boolean NOT NULL DEFAULT false")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_project_channel ON conversations (project_id) "
+        "WHERE is_project_channel AND project_id IS NOT NULL"
     )
 
 
 def downgrade() -> None:
-    op.drop_index("uq_conversations_project_channel", table_name="conversations", if_exists=True)
-    op.drop_column("conversations", "is_project_channel")
+    op.execute("DROP INDEX IF EXISTS uq_conversations_project_channel")
+    op.execute("ALTER TABLE conversations DROP COLUMN IF EXISTS is_project_channel")

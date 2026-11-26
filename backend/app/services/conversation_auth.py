@@ -125,9 +125,72 @@ def conversation_readable_predicate(
     abe = _as_bool_expr(admin_bypass_eligible)
 
     return or_(
-        and_(is_participant, _as_bool_expr(agent_project_valid)),
+        and_(is_participant, _as_bool_expr(agent_project_valid), channel_project_valid(conv_id_col, caller_member_id=caller_member_id, org_id=org_id)),
         and_(~has_human_participant, abe),
     )
+
+
+def channel_project_valid(conv_id_col, *, caller_member_id: uuid.UUID, org_id: uuid.UUID) -> BoolExpr:
+    """story #5032 (C2) — the «project channel» atom of the predicate: a room that is NOT a project's channel asks nothing (true — every other room keeps the 4846 rule); a project's CHANNEL
+    is read only by someone who holds its project NOW — a person or an agent alike — and a channel whose project is gone (`project_id` NULL: the project was deleted, the FK is SET NULL) is
+    read by nobody through a participant row. The seat in the channel is kept in step with the access (grant → seat · revoke → unseat), but the read does not trust the seat alone: a seat that
+    outlived its access (a failed unseat · an old row · the project deleted · a person removed from the organization and then seated again) reads nothing. The same `_project_access_predicate`
+    as `has_project_access`; the caller's user id is the member's `user_id` (an agent has none: its member id is the id access is asked with)."""
+    from sqlalchemy import func, literal
+    from sqlalchemy.orm import aliased
+
+    from app.models.conversation import Conversation
+    from app.services.project_auth import _project_access_predicate
+
+    ch = aliased(Conversation)
+    cm = aliased(Member)
+    access_id = func.coalesce(select(cm.user_id).where(cm.id == caller_member_id).scalar_subquery(), literal(caller_member_id))
+    is_channel = select(1).where(ch.id == conv_id_col, ch.is_project_channel.is_(True)).exists()
+    holds_project = (
+        select(1)
+        .where(
+            ch.id == conv_id_col,
+            ch.is_project_channel.is_(True),
+            ch.project_id.is_not(None),
+            _project_access_predicate(ch.project_id, user_id=access_id, org_id=org_id),
+        )
+        .exists()
+    )
+    return or_(~is_channel, holds_project)
+
+
+async def members_holding_channel_project(db, *, is_project_channel: bool, project_id: uuid.UUID | None, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story #5032 (C2) — of these members (`members.id`), those that may be in / sent the words of THIS room: all of them for a room that is not a project's channel; for a channel, the ones that
+    hold its project now (a channel with no project: none). The delivery, the mention's admission, «add a participant» and the send ask this ONE question — the same one the read predicate's
+    `channel_project_valid` asks in SQL."""
+    if not member_ids:
+        return set()
+    if not is_project_channel:
+        return set(member_ids)
+    if project_id is None:
+        return set()
+    from sqlalchemy import func
+
+    from app.services.project_auth import has_project_access
+
+    rows = (await db.execute(
+        select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(member_ids), Member.org_id == org_id)
+    )).all()
+    return {mid for mid, access_id in rows if await has_project_access(db, access_id, project_id, org_id)}
+
+
+async def members_holding_rooms_channel_project(db, conversation_id: uuid.UUID, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """`members_holding_channel_project` for a room known by its id (one read of the room's two columns)."""
+    from app.models.conversation import Conversation
+
+    if not member_ids:
+        return set()
+    row = (await db.execute(
+        select(Conversation.is_project_channel, Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).first()
+    if row is None:
+        return set()
+    return await members_holding_channel_project(db, is_project_channel=bool(row[0]), project_id=row[1], org_id=org_id, member_ids=member_ids)
 
 
 async def conversation_project(db, conversation_id: uuid.UUID, org_id: uuid.UUID) -> tuple[bool, uuid.UUID | None]:
