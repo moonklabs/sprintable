@@ -735,3 +735,120 @@ async def test_16_a_prompt_line_that_finishes_after_the_access_went_is_not_writt
         assert await write(seat) == 1, "the person lost the project: nothing more of theirs was written into the channel"
     finally:
         await _close(engine, w)
+
+
+# ── the A2A read gate: ONE definition, four doors (GetTask · ListTasks · the stream · the SendMessage replay) ───────────
+
+
+async def _profile_only_agent(w, org, project):
+    """an agent placed by PROFILE alone: an active `team_members` row (the view's profile branch), no `members`-side access grant — the shape `_get_agent_member` resolves and `has_project_access` does not know."""
+    from app.models.member import AgentProjectProfile
+
+    agent = await w.add_agent(org)
+    async with w.Session() as s:
+        s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=agent, project_id=project))
+        await s.commit()
+    return agent
+
+
+async def _a2a_task(w, org, agent, *, project, seated, room=None):
+    """a finished A2A task of `agent` in a room (made here, or `room`) whose participants are `seated`; returns (task id, replay key, marker, room id)."""
+    from app.models.a2a_task import A2ATask
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    marker = f"answer-{uuid.uuid4().hex[:10]}"
+    task_id, cm = uuid.uuid4(), f"cm-{uuid.uuid4().hex[:8]}"
+    async with w.Session() as s:
+        if room is None:
+            room = uuid.uuid4()
+            s.add(Conversation(id=room, project_id=project, org_id=org, type="group", title="A2A task"))
+            await s.flush()
+            for m in seated:
+                s.add(ConversationParticipant(conversation_id=room, member_id=m))
+        s.add(A2ATask(
+            id=task_id, context_id=room, root_message_id=uuid.uuid4(), member_id=agent, state="TASK_STATE_COMPLETED", client_message_id=cm, artifacts=[],
+            history=[{"messageId": str(uuid.uuid4()), "role": "ROLE_AGENT", "parts": [{"text": marker}]}],
+        ))
+        await s.commit()
+    return task_id, cm, marker, room
+
+
+async def _four_doors(w, ot, agent, task_id, cm, marker) -> dict:
+    """does the task's marker come back through each of the four doors?"""
+    async def call(method, params):
+        r = await w.client.post(f"/api/v2/a2a/members/{agent}/rpc", headers=_H(ot), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        return r.text
+
+    send = {"message": {"messageId": cm, "role": "ROLE_USER", "parts": [{"text": "again"}]}}
+    return {
+        "get": marker in await call("GetTask", {"id": str(task_id)}),
+        "list": marker in await call("ListTasks", {}),
+        "replay": marker in await call("SendMessage", send),
+        "stream": marker in await call("SendStreamingMessage", send),
+    }
+
+
+async def _list_says(w, agent, org, room) -> bool:
+    """the SQL form asked directly: is the task of this room among what ListTasks's condition lets through?"""
+    from sqlalchemy import select
+
+    from app.models.a2a_task import A2ATask
+    from app.services.conversation_auth import member_reads_room_clause
+
+    async with w.Session() as s:
+        return bool((await s.execute(
+            select(A2ATask.id).where(A2ATask.context_id == room, member_reads_room_clause(A2ATask.context_id, org_id=org, member_id=agent, is_agent=True))
+        )).first())
+
+
+async def _python_says(w, agent, org, room) -> bool:
+    from app.services.conversation_auth import member_reads_room_now
+
+    async with w.Session() as s:
+        return await member_reads_room_now(s, conversation_id=room, org_id=org, member_id=agent, is_agent=True)
+
+
+ALL = {"get": True, "list": True, "replay": True, "stream": True}
+NONE = {"get": False, "list": False, "replay": False, "stream": False}
+
+
+async def test_17_the_a2a_gate_lets_the_agent_in_its_own_room_through_all_four_doors_and_keeps_every_other_out_of_all_four():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+
+        # (a) an agent placed by profile alone, in its own task room: read through all four doors, and listed
+        prof = await _profile_only_agent(w, org, pid)
+        t, cm, marker, room = await _a2a_task(w, org, prof, project=pid, seated=[prof])
+        assert await _four_doors(w, ot, prof, t, cm, marker) == ALL, "an agent placed by profile alone was refused its own task room"
+        assert await _python_says(w, prof, org, room) is True and await _list_says(w, prof, org, room) is True
+
+        # (b) a task whose agent is not in the room (not the one it was handed to · no seat): refused at all four, by both forms
+        other = await _profile_only_agent(w, org, pid)
+        t, cm, marker, room = await _a2a_task(w, org, prof, project=pid, seated=[other])
+        assert await _four_doors(w, ot, prof, t, cm, marker) == NONE, "a task of an agent that is no participant of its room was handed back"
+        assert await _python_says(w, prof, org, room) is False and await _list_says(w, prof, org, room) is False
+
+        # (c) a deactivated agent: the route itself turns it away at all four; and in a room WITHOUT a project (where the project term asks nothing) the gate still refuses it — in both forms
+        gone = await _profile_only_agent(w, org, pid)
+        t, cm, marker, room = await _a2a_task(w, org, gone, project=pid, seated=[gone])
+        _t2, _cm2, _m2, bare_room = await _a2a_task(w, org, gone, project=None, seated=[gone])
+        assert await _python_says(w, gone, org, bare_room) is True and await _list_says(w, gone, org, bare_room) is True, "control: while active, a room without a project is read"
+        r = await w.client.delete(f"/api/v2/team-members/{gone}", headers=_H(ot))
+        assert r.status_code == 200, r.text
+        assert await _four_doors(w, ot, gone, t, cm, marker) == NONE
+        assert await _python_says(w, gone, org, room) is False and await _list_says(w, gone, org, room) is False
+        assert await _python_says(w, gone, org, bare_room) is False and await _list_says(w, gone, org, bare_room) is False, "a deactivated agent passed in a room that has no project"
+
+        # (d) a task whose room is the project's CHANNEL: while the agent holds the project (grant + profile) it reads; with the grant gone and the profile (and the seat) left — the channel's own rule — refused at all four
+        held, _key = await _add_agent(w, org, ot, pid)
+        # (the grant route placed it with a profile too: both rows exist)
+        t, cm, marker, room = await _a2a_task(w, org, held, project=pid, seated=[], room=chan)
+        assert held in await _participants(w, chan)
+        assert await _four_doors(w, ot, held, t, cm, marker) == ALL, "control: an agent that holds the project reads the task of the channel"
+        await w.sql("DELETE FROM project_access WHERE project_id = :p AND member_id = :m", p=pid, m=held)
+        assert held in await _participants(w, chan) and await _q(w, "SELECT 1 FROM agent_project_profiles WHERE member_id = :m AND project_id = :p", m=held, p=pid)
+        assert await _four_doors(w, ot, held, t, cm, marker) == NONE, "an agent that lost the channel's project read the channel through its task"
+        assert await _python_says(w, held, org, room) is False and await _list_says(w, held, org, room) is False
+    finally:
+        await _close(engine, w)

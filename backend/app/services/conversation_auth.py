@@ -349,27 +349,45 @@ async def readable_room_clause(db, org_id: uuid.UUID, auth) -> BoolExpr:
     )
 
 
-async def member_reads_room_now(db, *, conversation_id: uuid.UUID, org_id: uuid.UUID, member_id: uuid.UUID, is_agent: bool) -> bool:
-    """story #5032 (C2) — may THIS member (not a request's caller: the agent whose seat a server road reads for) still read this room? For the roads that hand a room's words back from a stored seat (the A2A
-    task's reply). Asked the way the A2A road itself knows the agent: in the room (a participant row) · for an agent, the room's project is still one of ITS projects in the `team_members` rows `_get_agent_member`
-    resolves it from (a grant or a profile — not the `members`-only `has_project_access`: a task room is made with the project of such a row, and an agent placed by profile alone must keep reading its own task) ·
-    for a project's channel, the project is held now. Revoking the agent's project removes both rows (a grant and its profile), so a task of a project the agent lost reads nothing."""
-    from app.models.conversation import ConversationParticipant
+def member_reads_room_clause(room_id_col, *, org_id: uuid.UUID, member_id, is_agent: bool) -> BoolExpr:
+    """story #5032 (C2) — «may THIS member (not a request's caller: the agent whose seat a server road reads for) still read this room?», as ONE clause: the single definition both forms come from —
+    `member_reads_room_now` (a statement on one room id) and the A2A list (a condition on `A2ATask.context_id`) — so the two cannot disagree. For the roads that hand a room's words back from a stored seat
+    (the A2A task's reply). Asked the way the A2A road itself knows the agent:
+      · the member has a participant row in the room;
+      · an AGENT is active (no `team_members` / `members` row of it says otherwise — whether or not the room has a project) and, when the room has a project, that project is one of ITS active `team_members` rows
+        (a grant or a profile — not the `members`-only `has_project_access`: a task room is made with the project of such a row, and an agent placed by profile alone must keep reading its own task);
+      · a project's channel: its project is held NOW (`channel_project_valid`, the read predicate's own atom).
+    Revoking the agent's project removes both its rows (a grant and its profile), so a task of a project the agent lost reads nothing."""
+    from sqlalchemy import exists
+    from sqlalchemy.orm import aliased
 
-    found, conv_project_id = await conversation_project(db, conversation_id, org_id)
-    if not found:
-        return False
-    in_room = (await db.execute(
-        select(1).where(ConversationParticipant.conversation_id == conversation_id, ConversationParticipant.member_id == member_id).limit(1)
-    )).first() is not None
-    if not in_room:
-        return False
-    if is_agent and conv_project_id is not None:
-        has_project = (await db.execute(
-            select(1).where(
-                TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.project_id == conv_project_id, TeamMember.is_active.is_(True),
-            ).limit(1)
-        )).first() is not None
-        if not has_project:
-            return False
-    return member_id in await members_holding_rooms_channel_project(db, conversation_id, org_id, {member_id})
+    from app.models.conversation import Conversation
+
+    c = aliased(Conversation)
+    conditions = [
+        c.id == room_id_col,
+        c.org_id == org_id,
+        exists().where(ConversationParticipant.conversation_id == c.id, ConversationParticipant.member_id == member_id),
+        channel_project_valid(c.id, caller_member_id=member_id, org_id=org_id),
+    ]
+    if is_agent:
+        am = aliased(Member)
+        conditions += [
+            ~exists().where(TeamMember.id == member_id, TeamMember.is_active.is_(False)),
+            ~exists().where(am.id == member_id, am.is_active.is_(False)),
+            or_(
+                c.project_id.is_(None),
+                exists().where(
+                    TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.project_id == c.project_id, TeamMember.is_active.is_(True),
+                ),
+            ),
+        ]
+    return select(c.id).where(*conditions).exists()
+
+
+async def member_reads_room_now(db, *, conversation_id: uuid.UUID, org_id: uuid.UUID, member_id: uuid.UUID, is_agent: bool) -> bool:
+    """`member_reads_room_clause` asked of one room id (a room of another organization, or none, reads nothing)."""
+    from sqlalchemy import literal
+
+    clause = member_reads_room_clause(literal(conversation_id, type_=ConversationParticipant.conversation_id.type), org_id=org_id, member_id=member_id, is_agent=is_agent)
+    return bool((await db.execute(select(clause))).scalar_one())

@@ -977,24 +977,10 @@ async def _handle_list_tasks(
     if list_params.status is not None:
         conditions.append(A2ATask.state == list_params.status)
 
-    # story #5032 (C2): only tasks whose room the agent can still READ (the canonical judge, in SQL — so the page, the token and `totalSize` all count the same set)
-    from sqlalchemy import or_
+    # story #5032 (C2): only tasks whose room the agent can still READ — the SAME clause `_task_room_readable` (GetTask · replay · stream) asks, in SQL: the page, the token and `totalSize` count the same set
+    from app.services.conversation_auth import member_reads_room_clause
 
-    from app.services.conversation_auth import conversation_readable_predicate
-    from app.services.project_auth import project_access_valid_correlated
-
-    conditions.append(
-        select(Conversation.id).where(
-            Conversation.id == A2ATask.context_id, Conversation.org_id == member.org_id,
-            conversation_readable_predicate(
-                Conversation.id, caller_member_id=member.id, org_id=member.org_id, admin_bypass_eligible=False,
-                agent_project_valid=or_(
-                    Conversation.project_id.is_(None),
-                    project_access_valid_correlated(Conversation.project_id, caller_id=member.id, org_id=member.org_id),
-                ),
-            ),
-        ).exists()
-    )
+    conditions.append(member_reads_room_clause(A2ATask.context_id, org_id=member.org_id, member_id=member.id, is_agent=True))
 
     total_size = (await session.execute(
         select(func.count()).select_from(A2ATask).where(*conditions)
