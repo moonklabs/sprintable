@@ -814,6 +814,14 @@ async def _handle_send_message(
     return {"task": _task_to_dict(task)}
 
 
+async def _task_room_readable(session: AsyncSession, task: A2ATask, org_id: uuid.UUID) -> bool:
+    """story #5032 (C2): a task's reply is a line of its task room — handed back (GetTask · the stream · the list) only while the agent the task is for can still READ that room (the canonical judge:
+    in the room · its project · a channel's project now). A task whose room it can no longer read is «not found»."""
+    from app.services.conversation_auth import member_reads_room_now
+
+    return await member_reads_room_now(session, conversation_id=task.context_id, org_id=org_id, member_id=task.member_id, is_agent=True)
+
+
 async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid.UUID) -> A2ATask:
     """GetTask의 반응형 상태-전이 판정 — S-A4(story 03034d86)에서 스트리밍 폴링 루프가 재사용
     할 수 있도록 JSON-RPC 래핑에서 분리했다(GetTask도 동일 함수 호출 — 판정 규칙 이원화 방지).
@@ -928,6 +936,8 @@ async def _handle_get_task(
     if task is None:
         raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
 
+    if not await _task_room_readable(session, task, member.org_id):
+        raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
     task = await _advance_task_state(session, task, member.org_id)
     return _task_to_dict(task)
 
@@ -972,8 +982,11 @@ async def _handle_list_tasks(
         .offset(offset).limit(page_size)
     )
     tasks = result.scalars().all()
+    fetched = len(tasks)
+    # story #5032 (C2): a task whose room the agent can no longer read is not listed (its history · artifacts carry the room's words)
+    tasks = [t for t in tasks if await _task_room_readable(session, t, member.org_id)]
 
-    next_offset = offset + len(tasks)
+    next_offset = offset + fetched
     next_page_token = str(next_offset) if next_offset < total_size else ""
 
     return {
@@ -1074,6 +1087,8 @@ async def _stream_send_message(
                 if task is None:
                     return  # task 삭제 등 이상계 — 조용히 스트림 종료(방어적, 정상 경로 아님)
 
+                if not await _task_room_readable(db, task, org_id):
+                    return  # story #5032 (C2): the agent can no longer read the task's room — nothing more of it goes out
                 task = await _advance_task_state(db, task, org_id)
                 current_dict = _task_to_dict(task)
 

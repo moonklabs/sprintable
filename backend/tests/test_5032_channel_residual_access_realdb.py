@@ -296,9 +296,17 @@ async def test_05_deleting_the_project_closes_its_channel_to_everyone_in_it_and_
 
         row = (await _q(w, "SELECT project_id, is_project_channel FROM conversations WHERE id = :c", c=chan))[0]
         assert row[0] is None and row[1] is True, "the room outlives its project and is still marked as a channel (so the channel rule keeps closing it)"
-        assert await _participants(w, chan) == before, "nothing was done to its seats — the rule alone closes it"
-        # read: the person, the agent (its key still works — another project), and the owner who made it: all closed
-        for who, headers in (("person", _H(mt)), ("agent", key), ("owner", _H(ot))):
+        assert await _participants(w, chan) == set(), "the deletion emptied the room in its own transaction: its history stays, nobody is seated in it (the root)"
+        # read: the person and the agent (its key still works — another project) are closed; the organization's owner — who is nobody's seat — reads the kept history through the
+        # existing «a room with no person in it» door of an organization owner/admin (4846): the history of a deleted project is not lost to the organization
+        for who, headers in (("person", _H(mt)), ("agent", key)):
+            got = await _reads(w, headers, chan)
+            assert got == (404, 403), (who, got)
+        assert await _reads(w, _H(ot), chan) == (200, 200)
+        # …and with a seat put back by hand (a stale row some other road left) the rule still closes it: the safety net under the root
+        await w.sql("INSERT INTO conversation_participants (id, conversation_id, member_id) VALUES (gen_random_uuid(), :c, :m)", c=chan, m=seat)
+        await w.sql("INSERT INTO conversation_participants (id, conversation_id, member_id) VALUES (gen_random_uuid(), :c, :m)", c=chan, m=agent)
+        for who, headers in (("person", _H(mt)), ("agent", key)):
             got = await _reads(w, headers, chan)
             assert got == (404, 403), (who, got)
         # delivery: a line in it (put in by hand — nobody can say one through the route now) reaches nobody
@@ -308,13 +316,15 @@ async def test_05_deleting_the_project_closes_its_channel_to_everyone_in_it_and_
             m=mid, c=chan, s=seat,
         )
         reach, decided = await _delivery_side(w, chan, mid)
-        assert not reach and not decided, (reach, decided)
+        assert not reach and not decided, (reach, decided)   # (the seats put back above are still not recipients)
         from app.services.member_resolver import conversation_member_ids_in_org
 
         async with w.Session() as s:
             assert not await conversation_member_ids_in_org(s, chan, org)
-        # …and nobody can say a line in it
+        # …and nobody can say a line in it: the owner is no seat and there is no project to join through; the stale seats are refused
         r = await w.client.post(f"/api/v2/conversations/{chan}/messages", headers=_H(ot), json={"content": "anyone there"})
+        assert r.status_code == 403, r.text
+        r = await w.client.post(f"/api/v2/conversations/{chan}/messages", headers=_H(mt), json={"content": "anyone there"})
         assert r.status_code == 403, r.text
         # a project made later is free to have its own channel (the one-per-project index never saw the old room)
         again = await _project(w, ot, org, "Second life")
@@ -344,14 +354,63 @@ async def test_06_an_ordinary_room_of_a_deleted_project_keeps_the_4846_rule_its_
 # ── a seat that outlived its access (a failed unseat · an old row) ─────────────────────────────────────────────
 
 
-async def test_07_a_person_whose_unseat_failed_after_the_revoke_reads_nothing_and_is_sent_nothing():
+async def _stale_seat(w, org, ot, pid):
+    """a person with a seat in the channel and NO project access: the access row is removed behind the unseat's back (the failed-unseat · old-row · other-road state); returns (user id, seat id, tokens)."""
+    uid, seat, mt = await _add_person(w, org, ot, pid)
+    await w.sql("DELETE FROM project_access WHERE project_id = :p AND org_member_id = :s", p=pid, s=seat)
+    assert seat in await _participants(w, await _channel_of(w, pid))
+    return uid, seat, mt
+
+
+async def test_07_a_seat_that_outlived_the_access_reads_nothing_is_sent_nothing_and_changes_nothing():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        uid, seat, mt = await _stale_seat(w, org, ot, pid)
+        # read · speak · see «working»
+        assert await _reads(w, _H(mt), chan) == (404, 403), "a seat that outlived the revoke read the channel"
+        r = await w.client.post(f"/api/v2/conversations/{chan}/messages", headers=_H(mt), json={"content": "still here?"})
+        assert r.status_code in (403, 404), r.text
+        assert (await w.client.get(f"/api/v2/conversations/{chan}/working", headers=_H(mt))).status_code == 403
+        # delivery: the events, the router, the bell copy
+        secret = f"words-{uuid.uuid4().hex[:8]}"
+        mid, got, mentions = await _say(w, ot, chan, secret, mention=[seat])
+        assert seat not in got
+        reach, decided = await _delivery_side(w, chan, mid)
+        assert seat not in reach and seat not in decided
+        assert secret not in str(mentions.get(seat)), "the mention carried the words to a seat that outlived the revoke"
+        # the changes only a participant may make (every one answers 403 — and changes nothing)
+        base = f"/api/v2/conversations/{chan}"
+        for method, path, body in (
+            ("PATCH", base + "/mute", {"muted": True}),
+            ("POST", base + "/read", {}),
+            ("POST", base + "/participants", {"member_id": str(seat)}),
+            ("PATCH", base + "/status", {"status": "resolved"}),
+            ("PATCH", base, {"title": "taken over"}),
+        ):
+            r = await w.client.request(method, path, headers=_H(mt), json=body)
+            assert r.status_code in (403, 404), (method, path, r.status_code, r.text)
+        row = (await _q(w, "SELECT title, status FROM conversations WHERE id = :c", c=chan))[0]
+        assert row[0] != "taken over" and row[1] == "open"
+        # control: the SAME person in an ordinary room they sit in still reads it (the 4846 rule is untouched)
+        await w.sql("INSERT INTO conversations (id, org_id, project_id, type, status, title) VALUES (gen_random_uuid(), :o, :p, 'group', 'open', 'plain')", o=org, p=pid)
+        plain = (await _q(w, "SELECT id FROM conversations WHERE project_id = :p AND title = 'plain'", p=pid))[0][0]
+        await w.sql("INSERT INTO conversation_participants (id, conversation_id, member_id) VALUES (gen_random_uuid(), :c, :m)", c=plain, m=seat)
+        assert await _reads(w, _H(mt), plain) == (200, 200)
+        r = await w.client.patch(f"/api/v2/conversations/{plain}/mute", headers=_H(mt), json={"muted": True})
+        assert r.status_code == 200, r.text
+    finally:
+        await _close(engine, w)
+
+
+async def test_07b_a_revoke_whose_unseat_fails_fails_whole_nothing_is_half_done():
+    """the root: the unseat is in the revoke's own transaction and is not swallowed — an access that is gone with the seat left behind is the state this story closes."""
     engine, w = await _world()
     try:
         from app.services import project_channel as pc
 
         org, ot, pid, chan = await _owner_and_channel(w)
         uid, seat, mt = await _add_person(w, org, ot, pid)
-        assert await _reads(w, _H(mt), chan) == (200, 200)
         access = (await _q(w, "SELECT id FROM project_access WHERE project_id = :p AND org_member_id = :s", p=pid, s=seat))[0][0]
 
         real = pc.remove_project_channel_participant
@@ -361,26 +420,63 @@ async def test_07_a_person_whose_unseat_failed_after_the_revoke_reads_nothing_an
 
         pc.remove_project_channel_participant = boom
         try:
-            r = await w.client.delete(f"/api/v2/projects/{pid}/access/{access}", headers=_H(ot))
+            with pytest.raises(RuntimeError, match="unseat broke"):
+                await w.client.delete(f"/api/v2/projects/{pid}/access/{access}", headers=_H(ot))
         finally:
             pc.remove_project_channel_participant = real
-        assert r.status_code == 200, r.text
-        assert seat in await _participants(w, chan), "control: the unseat failed — the row is still there, the revoke was committed"
+        assert await _q(w, "SELECT 1 FROM project_access WHERE id = :a", a=access), "the revoke was kept although its unseat failed"
+        assert seat in await _participants(w, chan)
+        assert await _reads(w, _H(mt), chan) == (200, 200), "control: nothing moved — the person still has the project and the channel"
+    finally:
+        await _close(engine, w)
 
-        assert await _reads(w, _H(mt), chan) == (404, 403), "a seat that outlived the revoke read the channel"
-        mid, got, mentions = await _say(w, ot, chan, "after a failed unseat", mention=[seat])
-        assert seat not in got
-        reach, decided = await _delivery_side(w, chan, mid)
-        assert seat not in reach and seat not in decided
-        assert "after a failed unseat" not in str(mentions.get(seat)), "the mention carried the words to a seat that outlived the revoke"
-        r = await w.client.post(f"/api/v2/conversations/{chan}/messages", headers=_H(mt), json={"content": "still here?"})
-        assert r.status_code in (403, 404), r.text
-        assert (await w.client.get(f"/api/v2/conversations/{chan}/working", headers=_H(mt))).status_code == 403
-        # control: the SAME person in an ordinary room they sit in still reads it (the 4846 rule is untouched)
-        await w.sql("INSERT INTO conversations (id, org_id, project_id, type, status, title) VALUES (gen_random_uuid(), :o, :p, 'group', 'open', 'plain')", o=org, p=pid)
-        plain = (await _q(w, "SELECT id FROM conversations WHERE project_id = :p AND title = 'plain'", p=pid))[0][0]
-        await w.sql("INSERT INTO conversation_participants (id, conversation_id, member_id) VALUES (gen_random_uuid(), :c, :m)", c=plain, m=seat)
-        assert await _reads(w, _H(mt), plain) == (200, 200)
+
+async def test_07c_a_stale_seat_hears_nothing_in_the_bell_and_counts_nothing_unread_and_is_not_listed_by_work_item(monkeypatch):
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        ok_uid, ok_seat, ok_tokens = await _add_person(w, org, ot, pid)             # control: seated with the project
+        st_uid, st_seat, st_tokens = await _stale_seat(w, org, ot, pid)             # stale: seated, no project
+        # the owner says a line tagged to a work item
+        item = uuid.uuid4()
+        r = await w.client.post(
+            f"/api/v2/conversations/{chan}/messages", headers=_H(ot),
+            json={"content": "about a story", "work_item": {"type": "story", "id": str(item)}},
+        )
+        assert r.status_code == 201, r.text
+
+        async def notes(user):
+            return (await _q(w, "SELECT count(*) FROM notifications WHERE user_id = :u AND type = 'conversation.message'", u=user))[0][0]
+
+        assert await notes(ok_uid) == 1, "control: the person who holds the project is told"
+        assert await notes(st_uid) == 0, "a stale seat was told of a line of the channel (bell copy · push · personal webhook)"
+
+        # …also when the channel router's pre-check fails (a send never fails for it — the bell then falls back to the seat rows, and the room's own cut must still hold)
+        from app.services import channel_router
+
+        real_route, calls = channel_router.route_message, {"n": 0}
+
+        async def broken_once(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:   # the send's pre-check (its first ask); the later asks of the same send answer as they do
+                raise RuntimeError("router down")
+            return await real_route(*a, **k)
+
+        monkeypatch.setattr(channel_router, "route_message", broken_once)
+        r = await w.client.post(f"/api/v2/conversations/{chan}/messages", headers=_H(ot), json={"content": "second line"})
+        assert r.status_code == 201, r.text
+        assert await notes(ok_uid) == 2, "control: with the router down the person who holds the project is still told"
+        assert await notes(st_uid) == 0, "with the router down a stale seat was told of a line of the channel"
+        monkeypatch.undo()
+
+        for who, tokens, want in (("seated", ok_tokens, 2), ("stale", st_tokens, 0)):
+            r = await w.client.get("/api/v2/conversations/unread-count", headers=_H(tokens))
+            assert r.status_code == 200, r.text
+            assert r.json()["count"] == want, (who, r.json())
+            r = await w.client.get(f"/api/v2/conversations/by-work-item?work_item_type=story&work_item_id={item}", headers=_H(tokens))
+            assert r.status_code == 200, r.text
+            listed = {x["id"] for x in r.json()}
+            assert (str(chan) in listed) is bool(want), (who, listed)
     finally:
         await _close(engine, w)
 
@@ -440,5 +536,98 @@ async def test_09_a_participant_cannot_add_someone_without_the_project_to_the_ch
         r = await w.client.post(f"/api/v2/conversations/{chan}/participants", headers=_H(mt), json={"member_id": str(has_seat)})
         assert r.status_code == 201, r.text
         assert await _reads(w, _H(has_tokens), chan) == (200, 200)
+    finally:
+        await _close(engine, w)
+
+
+# ── the other doors that read a room: files · A2A tasks ───────────────────────────────────────────────────────
+
+
+async def test_10_the_files_of_a_channel_open_to_who_holds_its_project_not_to_a_stale_seat():
+    from app.services import mcp_attachment_upload
+
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        ok_uid, ok_seat, ok_tokens = await _add_person(w, org, ot, pid)
+        st_uid, st_seat, st_tokens = await _stale_seat(w, org, ot, pid)
+        path = mcp_attachment_upload.chat_attachment_path_prefix(org, pid, chan) + "f.png"
+        await w.sql(
+            "INSERT INTO conversation_messages (id, conversation_id, sender_id, content, mentioned_ids, attachments) "
+            "VALUES (gen_random_uuid(), :c, :s, 'file', '{}', CAST(:a AS jsonb))",
+            c=chan, s=ok_seat, a='[{"url": "%s", "name": "f.png", "size": 3, "content_type": "image/png"}]' % path,
+        )
+
+        async def authorize(tokens):
+            r = await w.client.get("/api/v2/attachments/authorize", headers=_H(tokens), params={"conversation_id": str(chan), "path": path})
+            return r.status_code
+
+        assert await authorize(ok_tokens) == 200, "control: who holds the project opens the file"
+        assert await authorize(st_tokens) == 403, "a seat that outlived the project access opened a file of the channel"
+    finally:
+        await _close(engine, w)
+
+
+async def test_11_an_a2a_task_is_handed_back_only_while_its_agent_can_read_the_task_room():
+    engine, w = await _world()
+    try:
+        from app.models.a2a_task import A2ATask
+        from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+        org, ot, pid, chan = await _owner_and_channel(w)
+        other = await _project(w, ot, org, "Agent's other project")
+        agent, _key = await _add_agent(w, org, ot, pid)
+        r = await w.client.post(f"/api/v2/projects/{other}/access", headers=_H(ot), json={"member_id": str(agent)})
+        assert r.status_code == 201, r.text
+        room, root = uuid.uuid4(), uuid.uuid4()
+        task_id = uuid.uuid4()
+        async with w.Session() as s:
+            s.add(Conversation(id=room, project_id=pid, org_id=org, type="group", title="A2A task"))
+            await s.flush()
+            s.add(ConversationParticipant(conversation_id=room, member_id=agent))
+            s.add(ConversationMessage(id=root, conversation_id=room, sender_id=None, content="do it", thread_id=None))
+            await s.flush()
+            s.add(ConversationMessage(id=uuid.uuid4(), conversation_id=room, sender_id=agent, content="the agent's answer", thread_id=root))
+            s.add(A2ATask(id=task_id, context_id=room, root_message_id=root, member_id=agent, state="TASK_STATE_WORKING", history=[], artifacts=[]))
+            await s.commit()
+
+        async def rpc(method, params):
+            r = await w.client.post(f"/api/v2/a2a/members/{agent}/rpc", headers=_H(ot), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        got = await rpc("GetTask", {"id": str(task_id)})
+        assert "error" not in got or got["error"] is None, got
+        assert "the agent's answer" in str(got["result"]), "control: while the agent has the room's project the task is handed back"
+        listed = await rpc("ListTasks", {})
+        assert listed["result"]["tasks"], "control: and listed"
+
+        # the agent loses the room's project (it keeps another one, so it still resolves)
+        access = (await _q(w, "SELECT id FROM project_access WHERE project_id = :p AND member_id = :m", p=pid, m=agent))[0][0]
+        r = await w.client.delete(f"/api/v2/projects/{pid}/access/{access}", headers=_H(ot))
+        assert r.status_code == 200, r.text
+
+        got = await rpc("GetTask", {"id": str(task_id)})
+        assert got["error"] and got["error"]["code"] == -32001, got
+        assert "the agent's answer" not in str(got)
+        listed = await rpc("ListTasks", {})
+        assert listed["result"]["tasks"] == [] and "the agent's answer" not in str(listed)
+    finally:
+        await _close(engine, w)
+
+
+# ── the roots: every road that ends the access takes the seat in its own transaction ───────────────────────────
+
+
+async def test_12_deleting_the_account_takes_the_persons_seats_out_of_every_channel():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        uid, seat, mt = await _add_person(w, org, ot, pid)
+        assert seat in await _participants(w, chan)
+        r = await w.delete(mt)
+        assert r.status_code == 200, r.text
+        assert seat not in await _participants(w, chan), "the deleted account's seat stayed in the project channel"
+        assert await _participants(w, chan), "control: the others are still seated"
     finally:
         await _close(engine, w)

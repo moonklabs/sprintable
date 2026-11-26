@@ -173,6 +173,9 @@ async def members_holding_channel_project(db, *, is_project_channel: bool, proje
 
     from app.services.project_auth import has_project_access
 
+    # one access question per member (a channel has a handful): `_project_access_predicate` nests its EXISTS branches two levels deep, and SQLAlchemy auto-correlates only to the
+    # immediately enclosing SELECT, so a single statement correlated on the member rows makes the inner branches cross-join `members` (measured: every member passed). A set-based
+    # version needs `_project_access_predicate` reshaped with explicit `.correlate()` — left as a follow-up.
     rows = (await db.execute(
         select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(member_ids), Member.org_id == org_id)
     )).all()
@@ -326,3 +329,23 @@ async def readable_room_clause(db, org_id: uuid.UUID, auth) -> BoolExpr:
             if is_api_key else True
         ),
     )
+
+
+async def member_reads_room_now(db, *, conversation_id: uuid.UUID, org_id: uuid.UUID, member_id: uuid.UUID, is_agent: bool) -> bool:
+    """story #5032 (C2) — may THIS member (not a request's caller: someone whose seat a server road reads for) read this room NOW? The canonical predicate with no admin bypass: in the room, an agent
+    with the room's project, and — for a project's channel — a holder of its project. For the roads that hand a room's words back from a stored seat (the A2A task's reply)."""
+    from sqlalchemy import literal
+
+    found, conv_project_id = await conversation_project(db, conversation_id, org_id)
+    if not found:
+        return False
+    predicate = conversation_readable_predicate(
+        literal(conversation_id),
+        caller_member_id=member_id,
+        org_id=org_id,
+        admin_bypass_eligible=False,
+        agent_project_valid=await agent_project_valid_for_room(
+            db, caller_is_agent=is_agent, caller_id=member_id, conv_project_id=conv_project_id, org_id=org_id,
+        ),
+    )
+    return bool((await db.execute(select(predicate))).scalar_one())

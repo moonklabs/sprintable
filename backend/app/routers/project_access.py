@@ -277,9 +277,9 @@ async def delete_project_access(
     await session.flush()
     # story #5032 (C2): whoever loses the project (a person or an agent) leaves its channel room
     if revoked_member_id is not None:
-        from app.services.project_channel import unseat_from_project_channel_quietly
+        from app.services.project_channel import unseat_from_project_channel
 
-        await unseat_from_project_channel_quietly(session, project_id=project_id, member_id=revoked_member_id)
+        await unseat_from_project_channel(session, project_id=project_id, member_id=revoked_member_id)
     await session.commit()
     return {"ok": True}
 

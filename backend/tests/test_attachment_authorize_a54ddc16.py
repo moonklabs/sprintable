@@ -95,16 +95,15 @@ async def test_authorize_400_path_with_scheme():
 @pytest.mark.anyio
 async def test_authorize_conversation_participant_and_belongs_200():
     session = AsyncMock()
-    # S7: conv project_id 조회(스코프 통일) → participant → belongs
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(True)])
+    # S7: conv project_id 조회(스코프 통일) → belongs  (who may read the room is the ONE canonical judge — story #5032: `conversations._can_read_conversation`)
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(True)])
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=True):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 200 and r.json()["authorized"] is True
     finally:
         app.dependency_overrides.clear()
-
 
 @pytest.mark.anyio
 async def test_authorize_conversation_path_not_scoped_403():
@@ -123,64 +122,56 @@ async def test_authorize_conversation_path_not_scoped_403():
 
 @pytest.mark.anyio
 async def test_authorize_conversation_not_participant_403():
-    """비참가 + 非owner/admin(member) → 403(우회 없음)."""
+    """the room's read judge says no (not in the room · an agent without the room's project · a stale seat of a project channel · no bypass) → 403, before the file is even looked for."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None)])  # conv project, 비참가
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])  # conv project only
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
-             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="member"):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=False):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
-
 @pytest.mark.anyio
 async def test_authorize_conversation_owner_agentonly_bypass_200():
-    """e6f25e53: 비참가 owner/admin + agent-only 대화 → 우회 허용(메시지 LIST 와 일관·선생님 제보)."""
+    """e6f25e53: the owner/admin bypass of an agents-only room lives in the room's read judge now (`conversation_readable_predicate`; pinned by test_chat_visibility_admin_bypass ·
+    test_e_security_sec_s8_v…) — authorize follows it: judge says yes → the file is opened (the path rules still apply)."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None), _scalar(True)])  # conv proj·비참가·belongs
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(True)])  # conv proj · belongs
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
-             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="owner"), \
-             patch("app.routers.conversations._conversation_has_human_participant", new_callable=AsyncMock, return_value=False):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=True):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 200 and r.json()["authorized"] is True
     finally:
         app.dependency_overrides.clear()
 
-
 @pytest.mark.anyio
 async def test_authorize_conversation_owner_humandm_403():
-    """비참가 owner/admin 라도 휴먼 참가 대화(사적 DM)면 → 403(프라이버시·우회 금지)."""
+    """a room with a person in it is private even to an owner/admin: the read judge says no (the privacy rule is the judge's; pinned by test_chat_visibility_admin_bypass) → 403."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None)])  # conv proj·비참가(belongs 도달 전 403)
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
-             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="owner"), \
-             patch("app.routers.conversations._conversation_has_human_participant", new_callable=AsyncMock, return_value=True):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=False):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 403
     finally:
         app.dependency_overrides.clear()
-
 
 @pytest.mark.anyio
 async def test_authorize_conversation_belong_exact_miss_403():
-    """구조 스코프 통과·참가자지만 stored 와 정확 일치 안 하면 403(substring 아님)."""
+    """구조 스코프 통과·읽을 수 있는 방이지만 stored 와 정확 일치 안 하면 403(substring 아님)."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(False)])
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(False)])
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=True):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 403
     finally:
         app.dependency_overrides.clear()
-
 
 @pytest.mark.anyio
 async def test_authorize_story_access_and_belongs_200():
@@ -246,16 +237,15 @@ STORY_PATH_S7 = f"org/{ORG_ID}/project/{PROJECT_ID}/story/{STORY_ID}/u1-abc.png"
 @pytest.mark.anyio
 async def test_authorize_conversation_s7_namespace_200():
     session = AsyncMock()
-    # conv project=PROJECT_ID → path_in_source_scope 통과(신 namespace) → participant → belongs
-    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(True)])
+    # conv project=PROJECT_ID → path_in_source_scope 통과(신 namespace) → belongs
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(True)])
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+        with patch("app.routers.conversations._can_read_conversation", new_callable=AsyncMock, return_value=True):
             r = await _get(client, f"path={CONV_PATH_S7}&conversation_id={CONV_ID}")
         assert r.status_code == 200 and r.json()["authorized"] is True
     finally:
         app.dependency_overrides.clear()
-
 
 @pytest.mark.anyio
 async def test_authorize_story_s7_namespace_200():

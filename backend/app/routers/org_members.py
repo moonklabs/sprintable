@@ -358,12 +358,12 @@ async def delete_org_member(
         {"om_id": str(id)},
     )
     # story #5032 (C2): the person's seats in the organization's project channels go with their project access (the channels' read and delivery ask for the access anyway — this keeps the rows honest)
-    from app.services.project_channel import unseat_from_project_channels_of_org_quietly
+    from app.services.project_channel import unseat_from_project_channels_of_org
 
     seat_ids = set((await session.execute(
         select(Member.id).where(Member.org_id == org_id, Member.user_id == existing.user_id)
     )).scalars().all()) | {id}
-    await unseat_from_project_channels_of_org_quietly(session, org_id=org_id, member_ids=seat_ids)
+    await unseat_from_project_channels_of_org(session, org_id=org_id, member_ids=seat_ids)
     ok = await repo.soft_delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Org member not found")

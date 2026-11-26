@@ -124,38 +124,45 @@ async def seat_in_project_channel_quietly(db: AsyncSession, *, project_id: uuid.
         return False
 
 
-async def unseat_from_project_channel_quietly(db: AsyncSession, *, project_id: uuid.UUID, member_id: uuid.UUID) -> bool:
-    """Someone lost access to the project: take them out of its channel (no channel = nothing to do). Never fails the caller."""
-    try:
-        async with db.begin_nested():
-            channel = await get_project_channel(db, project_id=project_id)
-            if channel is None:
-                return True
-            await remove_project_channel_participant(db, channel_id=channel.id, member_id=member_id)
-            return True
-    except Exception:  # noqa: BLE001
-        logger.warning("project channel unseat failed project_id=%s member_id=%s", project_id, member_id, exc_info=True)
-        return False
+async def unseat_from_project_channel(db: AsyncSession, *, project_id: uuid.UUID, member_id: uuid.UUID) -> None:
+    """Someone lost access to the project: take them out of its channel in the CALLER's transaction (no channel = nothing to do). NOT quiet: it is one DELETE, and a revoke whose unseat failed
+    must fail with it — the alternative is an access that is gone and a seat that stays (story #5032, codex round 2). The read and the delivery of a channel still ask for the access NOW,
+    so a seat that gets through some other way reads nothing; this is the root: the participant rows are kept exact."""
+    channel = await get_project_channel(db, project_id=project_id)
+    if channel is not None:
+        await remove_project_channel_participant(db, channel_id=channel.id, member_id=member_id)
 
 
-async def unseat_from_project_channels_of_org_quietly(db: AsyncSession, *, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> bool:
-    """A person left the organization (their `project_access` rows are gone): take them out of EVERY project channel of the organization — the seat follows the access. Best effort and never
-    fails the caller: the read and the delivery of a channel ask for the project access NOW (`conversation_auth.channel_project_valid`), so a seat this misses reads nothing; this keeps the
-    table honest (and a seat that is opened again later starts clean)."""
+async def unseat_from_project_channels_of_org(db: AsyncSession, *, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> None:
+    """A person left the organization (their `project_access` rows are gone): take them out of EVERY project channel of the organization, in the caller's transaction (not quiet — see above)."""
     if not member_ids:
-        return True
-    try:
-        async with db.begin_nested():
-            channel_ids = select(Conversation.id).where(Conversation.org_id == org_id, Conversation.is_project_channel.is_(True))
-            await db.execute(
-                delete(ConversationParticipant).where(
-                    ConversationParticipant.conversation_id.in_(channel_ids), ConversationParticipant.member_id.in_(member_ids),
-                )
-            )
-            return True
-    except Exception:  # noqa: BLE001
-        logger.warning("project channel unseat of a removed member failed org_id=%s", org_id, exc_info=True)
-        return False
+        return
+    channel_ids = select(Conversation.id).where(Conversation.org_id == org_id, Conversation.is_project_channel.is_(True))
+    await db.execute(
+        delete(ConversationParticipant).where(
+            ConversationParticipant.conversation_id.in_(channel_ids), ConversationParticipant.member_id.in_(member_ids),
+        )
+    )
+
+
+async def unseat_from_all_project_channels(db: AsyncSession, *, member_ids_sql, params: dict) -> None:
+    """(account deletion) take the members the given SQL names out of every project channel of every organization — see `routers/account.py`. In the caller's transaction."""
+    from sqlalchemy import text
+
+    await db.execute(
+        text(
+            "DELETE FROM conversation_participants WHERE member_id IN (" + member_ids_sql + ")"
+            " AND conversation_id IN (SELECT id FROM conversations WHERE is_project_channel)"
+        ),
+        params,
+    )
+
+
+async def empty_project_channel(db: AsyncSession, *, project_id: uuid.UUID) -> None:
+    """The project is being deleted: take EVERY participant out of its channel, in the deleting transaction. The room itself stays (its history is kept; `project_id` goes NULL by the foreign key)
+    — a room of nobody, so no participant row is left for the «room without a project» rule to open."""
+    channel_ids = select(Conversation.id).where(Conversation.project_id == project_id, Conversation.is_project_channel.is_(True))
+    await db.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id.in_(channel_ids)))
 
 
 async def retitle_project_channel_quietly(db: AsyncSession, *, project_id: uuid.UUID, title: str) -> bool:
