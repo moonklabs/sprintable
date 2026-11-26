@@ -686,7 +686,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           </div>
         </div>
       ) : runtimeCapabilitiesError ? (
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-ds-background p-3">
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-ds-surface-sunk p-3">
           <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
           <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
           <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
@@ -745,7 +745,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
               {comingSoonRuntimes.map((rc) => (
-                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-ds-background p-2.5 text-left opacity-55">
+                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-ds-surface-sunk p-2.5 text-left opacity-55">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
                     {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                   </span>
@@ -1433,7 +1433,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {renderScopeChooser()}
 
               {equipSkip ? (
-                <div className="space-y-3 rounded-xl border border-border bg-ds-background p-3">
+                <div className="space-y-3 rounded-xl border border-border bg-ds-surface-sunk p-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentNameLabel')}</label>
                     <Input
@@ -1700,7 +1700,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   A-1(수 하드코딩 금지) — kitOrientingTitle에서 "2가지"/count를 뺐다: 축이
                   늘 때마다(예: 런타임별 단계 수가 갈리는 날) 그 수가 다시 거짓이 되는 재발
                   구조이기 때문이다. */}
-              <div className="space-y-2 rounded-xl border border-border bg-ds-background p-3">
+              <div className="space-y-2 rounded-xl border border-border bg-ds-surface-sunk p-3">
                 <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">

@@ -62,7 +62,7 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
 
   return (
     // story 4855 — a gate group is a card (header · approve / reject buttons), not text: whole-message copy takes the message's source
-    <div data-copy-source="" className="rounded-lg border border-border bg-ds-background">
+    <div data-copy-source="" className="rounded-lg border border-border bg-ds-surface-sunk">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}

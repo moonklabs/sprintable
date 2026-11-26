@@ -74,7 +74,7 @@ export function GoalOutcomeDialog({
           <DialogTitle>{t('outcomeDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="max-h-[30vh] min-h-0 shrink-0 overflow-y-auto rounded-lg border border-border bg-ds-background px-3 py-2">
+        <div className="max-h-[30vh] min-h-0 shrink-0 overflow-y-auto rounded-lg border border-border bg-ds-surface-sunk px-3 py-2">
           <p className="text-sm leading-6 text-foreground">{goalTitle}</p>
         </div>
 

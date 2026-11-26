@@ -425,7 +425,7 @@ export function SprintCloseCockpit({
       ) : synthesis ? (
         <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />
       ) : (
-        <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-ds-background p-5 text-center">
+        <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-ds-surface-sunk p-5 text-center">
           <Sparkles className="size-4 text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
           {generateError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('synthesisGenerateFailed')}</p> : null}

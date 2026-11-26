@@ -711,7 +711,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             return (
               <div
                 key={`${file.name}-${file.size}-${i}`}
-                className={`flex items-center gap-2 rounded-lg border bg-ds-background px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
+                className={`flex items-center gap-2 rounded-lg border bg-ds-surface-sunk px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
               >
                 {sending ? (
                   <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-muted-foreground" />

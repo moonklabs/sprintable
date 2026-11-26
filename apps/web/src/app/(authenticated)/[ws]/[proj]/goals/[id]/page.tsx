@@ -479,7 +479,7 @@ export default function EpicDetailPage() {
 
         {/* Dispatch */}
         {epic.project_id && (
-          <div className="rounded-xl border border-border bg-ds-background p-4">
+          <div className="rounded-xl border border-border bg-ds-surface-sunk p-4">
             <p className="mb-2 text-xs font-medium text-muted-foreground">{tBoard('dispatch')}</p>
             <EntityDispatchPanel
               entityType="epic"
@@ -493,7 +493,7 @@ export default function EpicDetailPage() {
 
         {/* Edit form */}
         {isEditing && (
-          <div className="rounded-xl border border-border bg-ds-background p-4">
+          <div className="rounded-xl border border-border bg-ds-surface-sunk p-4">
             <EpicEditInline
               epic={epic}
               onSaved={(updated) => { setEpic(updated); setIsEditing(false); }}

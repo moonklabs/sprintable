@@ -176,7 +176,7 @@ export function EventDefinerForm({
           </p>
         ) : null}
         <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{t('definerPreviewNote')}</p>
-        <div className="mt-3 rounded-xl border border-dashed border-border bg-ds-background p-3">
+        <div className="mt-3 rounded-xl border border-dashed border-border bg-ds-surface-sunk p-3">
           <p className="mb-1.5 text-xs font-semibold text-muted-foreground">{t('definerDerivedSummaryTitle')}</p>
           <DerivedRow label="payload" value={Object.keys(derived.payload_schema.properties as object).join(' · ')} />
           <DerivedRow label="routing" value={state.routing === 'assign_on_publish' ? t('definerRoutingAssignTitle') : t('definerRoutingRecordTitle')} />

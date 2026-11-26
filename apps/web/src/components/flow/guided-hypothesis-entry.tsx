@@ -58,7 +58,7 @@ export function GuidedHypothesisEntry({
   );
 
   return (
-    <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-ds-background px-6 py-10 text-center">
+    <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-ds-surface-sunk px-6 py-10 text-center">
       <span aria-hidden="true" className="text-display opacity-40">◐</span>
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-foreground">{t('earthEmptyInviteTitle')}</h3>

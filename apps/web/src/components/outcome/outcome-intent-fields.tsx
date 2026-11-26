@@ -42,7 +42,7 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
   );
   const isInternal = !md || md.source === 'internal_ops';
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-ds-background p-3">
+    <div className="space-y-3 rounded-xl border border-border bg-ds-surface-sunk p-3">
       <div className="flex items-center justify-between">
         <span className="text-micro font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('intentLabel')}</span>
         <span className="text-micro text-muted-foreground">{t('optional')}</span>

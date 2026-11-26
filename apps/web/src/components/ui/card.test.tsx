@@ -86,7 +86,7 @@ describe('SectionCard/GlassPanel — 얇은 alias 회귀가드 (story #2877)', (
 
 describe('Card 신규 프리미티브 — variant·서브컴포넌트 (story #2877)', () => {
   it('subtle/plain surface와 compact/inline radius가 정확히 매핑된다', () => {
-    expect(cardVariants({ surface: 'subtle', radius: 'compact' })).toContain('bg-ds-background');
+    expect(cardVariants({ surface: 'subtle', radius: 'compact' })).toContain('bg-ds-surface-sunk');
     expect(cardVariants({ surface: 'subtle', radius: 'compact' })).toContain('rounded-xl');
     expect(cardVariants({ surface: 'plain', radius: 'inline' })).toContain('rounded-lg');
     expect(cardVariants({ surface: 'plain', radius: 'inline' })).not.toContain('shadow-sm');

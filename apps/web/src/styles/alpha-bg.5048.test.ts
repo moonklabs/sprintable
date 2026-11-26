@@ -1,6 +1,6 @@
 // story 5048 ③b-2 — 배경 색에 «알파»(`bg-muted/40` · `bg-primary/10` · `bg-info/10` …)를 새로 쓰지 않는다. 키트: 면은 불투명 역할 색(면 차이로 층이 갈린다).
 // 걷은 규칙(새 토큰 0 — ds 부품이 이미 쓰는 면 재사용):
-//  · muted/secondary 깔림(N≤60) → 테두리 있는 자리 `bg-ds-background` · 테두리 없는 자리 `bg-ds-surface-sunk`(흰 면 · 페이지 바탕 어디서든 갈림) · N≥70 → `bg-muted`
+//  · muted/secondary 깔림(N≤60) → 테두리 있는 칩 · 작은 조각 `bg-ds-background` · 테두리 없는 자리와 «테두리 있는 둥근 큰 상자(rounded-lg+ · 카드 subtle 포함)» `bg-ds-surface-sunk`(흰 면 · 페이지 바탕 어디서든 갈림 — 페이지 바탕(ds-background)과 같으면 «배경 위 무표면 상자» 가드(e2e/card-surface-guard)가 잡는다) · N≥70 → `bg-muted`
 //  · muted 호버 → `hover:bg-ds-surface-high`
 //  · primary/brand 옅은 틴트(N≤20) → `bg-ds-action-soft` · 호버 N≥80 → `hover:bg-ds-ink-2` · 실색 N≥50 → `bg-ds-action`
 //  · 상태색(info · success · warning · destructive) 틴트 N≤40 → `bg-{상태}-tint`(옛 가드가 알아보는 이름 그대로) · input → `bg-ds-surface-sunk` · 점 · 구분선 → `ds-line` · `ds-line-strong`

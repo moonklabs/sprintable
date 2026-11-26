@@ -548,7 +548,7 @@ export function ApprovalsQueue() {
       <>
         {perm.offLine}
         {goneLine}
-        <div className="rounded-xl border border-dashed border-border bg-ds-background px-4 py-5 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-ds-surface-sunk px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
         </div>
       </>

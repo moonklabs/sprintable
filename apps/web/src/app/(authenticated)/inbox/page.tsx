@@ -123,7 +123,7 @@ function AgentJoinedDetailPanel({
       </div>
 
       {notification.body ? (
-        <div className="rounded-xl border border-overlay-line-1 bg-ds-background p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+        <div className="rounded-xl border border-overlay-line-1 bg-ds-surface-sunk p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
           {notification.body}
         </div>
       ) : null}
@@ -854,7 +854,7 @@ export default function InboxPage() {
               </div>
 
               {selectedDisplay?.body ? (
-                <div className="rounded-xl border border-overlay-line-1 bg-ds-background p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+                <div className="rounded-xl border border-overlay-line-1 bg-ds-surface-sunk p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
                   {selectedDisplay.body}
                 </div>
               ) : null}

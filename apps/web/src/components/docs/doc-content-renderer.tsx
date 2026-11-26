@@ -232,7 +232,7 @@ function DocAssetImage({ assetId, alt, errorLabel }: { assetId: string; alt: str
 
   if (state === 'error') {
     return (
-      <span className="not-prose my-2 flex items-center gap-2 rounded-xl border border-border bg-ds-background px-4 py-3 text-xs text-muted-foreground">
+      <span className="not-prose my-2 flex items-center gap-2 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-xs text-muted-foreground">
         <ImageOff className="size-3.5 flex-shrink-0" aria-hidden />
         <span className="truncate">{errorLabel}</span>
       </span>
@@ -554,7 +554,7 @@ export function DocContentRenderer({
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         // story #4316(유나 결정) — 날 URL 한 줄 · 새 탭 외부 링크라 «누르는 것» 단서로 brand 글자색을 명시(밑줄은 없음 · 뿌리 본문 링크 규칙 밖이라 선언이 닿는다).
-        // story #4331 — 면은 첨부 카드 · 문서 임베드 카드와 같은 공용 subtle 카드(4684 결정 · 예전 손코딩 `rounded-xl border border-border bg-ds-background`).
+        // story #4331 — 면은 첨부 카드 · 문서 임베드 카드와 같은 공용 subtle 카드(4684 결정 · 예전 손코딩 `rounded-xl border border-border bg-ds-surface-sunk`).
         a.className = cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-ds-surface-high no-underline');
         a.textContent = url;
         block.appendChild(a);
@@ -633,7 +633,7 @@ export function DocContentRenderer({
         const alt = img.getAttribute('alt')?.trim();
         const placeholder = document.createElement('div');
         placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
-        placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-ds-background px-4 py-3 text-xs text-muted-foreground';
+        placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-xs text-muted-foreground';
         placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(alt || publicImageLabel)}</span>`;
         img.replaceWith(placeholder);
       });
@@ -657,7 +657,7 @@ export function DocContentRenderer({
         const showError = () => {
           const placeholder = document.createElement('div');
           placeholder.setAttribute('data-doc-part', 'image-placeholder'); // story #4316
-          placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-ds-background px-4 py-3 text-xs text-muted-foreground';
+          placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-xs text-muted-foreground';
           placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(altText || assetImageErrorLabel)}</span>`;
           img.replaceWith(placeholder);
         };

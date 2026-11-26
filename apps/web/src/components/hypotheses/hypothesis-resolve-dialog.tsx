@@ -94,7 +94,7 @@ export function HypothesisResolveDialog({
               긴 가설이 다이얼로그 전체를 밀어 입력/버튼을 화면 밖으로 내보내지 않도록, 문장
               영역 자체에 상한(max-h-[40vh])+자체 스크롤을 둬 폼의 나머지(입력·근거·버튼)는
               항상 고정 위치에 남는다 — "서명 못 하는 상태"가 되지 않는다. */}
-          <div className="max-h-[40vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-ds-background px-3 py-2">
+          <div className="max-h-[40vh] min-h-0 overflow-y-auto rounded-lg border border-border bg-ds-surface-sunk px-3 py-2">
             <p className="text-sm leading-6 text-foreground">{hypothesis.statement}</p>
           </div>
 

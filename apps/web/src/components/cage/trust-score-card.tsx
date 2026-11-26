@@ -54,7 +54,7 @@ function TrustScoreEmpty({ compact }: { compact?: boolean }) {
     );
   }
   return (
-    <div className="rounded-xl border border-dashed border-border bg-ds-background px-4 py-5 text-center">
+    <div className="rounded-xl border border-dashed border-border bg-ds-surface-sunk px-4 py-5 text-center">
       <p className="text-sm font-medium text-muted-foreground">{t('trustScoreNoData')}</p>
       <p className="mt-1 text-xs text-muted-foreground">{t('trustScoreNoDataHint')}</p>
     </div>
@@ -128,7 +128,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
       </div>
 
       {/* 2급 delivery signal — clean_pass 격하(납품 신호). 큰 위계 X·muted. */}
-      <div className="rounded-lg border border-border bg-ds-background p-2.5">
+      <div className="rounded-lg border border-border bg-ds-surface-sunk p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             {t('deliverySignalLabel')}

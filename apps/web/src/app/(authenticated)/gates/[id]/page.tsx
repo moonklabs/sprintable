@@ -486,7 +486,7 @@ export default function GateDetailPage() {
                     물었고 무슨 전제였는지»는 감사 가치가 있다 — GateActivityHistory와 같은
                     원칙, 위 §2975 AC4 주석 참조). */}
                 {decisionFacts ? (
-                  <div className="space-y-2 rounded-lg border border-border bg-ds-background p-3">
+                  <div className="space-y-2 rounded-lg border border-border bg-ds-surface-sunk p-3">
                     <p className="text-sm whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
                     {decisionFacts.assumption ? (
                       <p className="text-xs whitespace-pre-wrap text-muted-foreground">

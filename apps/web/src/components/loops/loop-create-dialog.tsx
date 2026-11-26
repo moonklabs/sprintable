@@ -349,7 +349,7 @@ export function LoopCreateDialog({
                 ))}
               </select>
               {selectedRecipe ? (
-                <div className="space-y-1 rounded-lg border border-dashed border-border bg-ds-background p-2 text-xs text-muted-foreground">
+                <div className="space-y-1 rounded-lg border border-dashed border-border bg-ds-surface-sunk p-2 text-xs text-muted-foreground">
                   {presetDescription(selectedRecipe, tPreset) ? <p>{presetDescription(selectedRecipe, tPreset)}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
                     {cyclicStages(selectedRecipe).map((stage) => {
@@ -367,7 +367,7 @@ export function LoopCreateDialog({
             </div>
           ) : null}
 
-          <div className="space-y-2.5 rounded-xl border border-border bg-ds-background p-3">
+          <div className="space-y-2.5 rounded-xl border border-border bg-ds-surface-sunk p-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-foreground">
                 {t('createLoopGoalLabel')} <span className="text-destructive">*</span>
@@ -422,7 +422,7 @@ export function LoopCreateDialog({
                     )}
                   />
                   {drafted ? (
-                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-ds-background px-2 py-1.5 text-xs text-muted-foreground">
+                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-ds-surface-sunk px-2 py-1.5 text-xs text-muted-foreground">
                       <span>✦</span>
                       <span>
                         <b className="text-foreground">{t('createLoopDraftNoteTitle')}</b> {t('createLoopDraftNoteBody')}{' '}

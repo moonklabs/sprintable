@@ -506,7 +506,7 @@ function CanvasViewport({
         data-artifact-canvas-viewport
         // 4910 — 키(0 · 1)로 닿게 초점을 받는다(편집 모드는 안 받음). 이름 = 산출물 제목, 단축키는 aria-keyshortcuts로 알림.
         {...(mode === 'edit' ? {} : { role: 'group', tabIndex: 0, 'aria-label': title, 'aria-keyshortcuts': '0 1', onKeyDown: handleKeyDown })}
-        className="relative min-h-0 w-full flex-1 touch-none select-none overflow-hidden rounded-lg border border-border bg-ds-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="relative min-h-0 w-full flex-1 touch-none select-none overflow-hidden rounded-lg border border-border bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
         onDoubleClick={handleDoubleClick}
         onPointerDown={handlePointerDown}

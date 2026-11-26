@@ -51,7 +51,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
 
   return (
     <NodeViewWrapper as="div" className="my-4 not-prose">
-      <div className="rounded-xl border border-border bg-ds-background">
+      <div className="rounded-xl border border-border bg-ds-surface-sunk">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
           <span className="text-editorial-meta font-medium text-muted-foreground">math</span>

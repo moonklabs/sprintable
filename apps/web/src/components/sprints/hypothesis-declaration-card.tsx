@@ -282,7 +282,7 @@ export function HypothesisDeclarationCard({
           ) : precedentsFailed ? (
             <p className="text-micro text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
-            <div className="space-y-1.5 rounded-lg border border-border bg-ds-background p-2">
+            <div className="space-y-1.5 rounded-lg border border-border bg-ds-surface-sunk p-2">
               <p className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
                 <Sparkles className="size-3 text-info" aria-hidden />
                 {t('declareL1Title')}

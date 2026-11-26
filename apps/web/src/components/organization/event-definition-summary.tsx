@@ -152,7 +152,7 @@ export function EventDefinitionSummary({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-border bg-ds-background p-3">
+      <div className="rounded-xl border border-border bg-ds-surface-sunk p-3">
         <SummaryLine
           label={t('eventSummaryFormatLabel')}
           value={format ? t(`definerFormat_${format}`) : t('eventSummaryFormatUnclassified')}

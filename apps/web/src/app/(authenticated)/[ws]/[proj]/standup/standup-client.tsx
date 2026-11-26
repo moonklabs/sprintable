@@ -796,7 +796,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                               </div>
                             </div>
 
-                            <div className="space-y-3 rounded-xl border border-border bg-ds-background p-3">
+                            <div className="space-y-3 rounded-xl border border-border bg-ds-surface-sunk p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
                                 <div className="flex items-center gap-2">
@@ -944,7 +944,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                     <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
                     <Badge variant="outline">{t('memberCount', { count: missingMembers.length })}</Badge>
                   </div>
-                  <div className="rounded-xl border border-dashed border-border bg-ds-background p-4">
+                  <div className="rounded-xl border border-dashed border-border bg-ds-surface-sunk p-4">
                     <div className="flex flex-wrap gap-1.5">
                       {missingMembers.map((m) => (
                         <Badge key={m.id} variant="outline">{missingRowLabels.get(m.id)}</Badge>

@@ -138,7 +138,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
                 href={safeHttpUrl(url) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-border bg-ds-background px-4 py-3 text-sm transition-colors hover:bg-ds-surface-high"
+                className="flex items-center gap-3 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-sm transition-colors hover:bg-ds-surface-high"
               >
                 <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate text-ds-ink-2">{url}</span>

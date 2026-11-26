@@ -51,7 +51,7 @@ export default function IntegrationsPage() {
           <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-foreground hover:text-foreground"><X className="size-3.5" /></button>
         </div>
       ) : banner === 'error' ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-ds-background p-2.5 text-xs">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-ds-surface-sunk p-2.5 text-xs">
           <AlertTriangle className="size-4 shrink-0 text-muted-foreground" />
           <span className="flex-1 text-foreground">{t('ghBannerError')}</span>
           <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>

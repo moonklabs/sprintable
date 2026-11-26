@@ -222,7 +222,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
             </h1>
           </div>
 
-          <div className="rounded-lg border border-border bg-ds-background px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
+          <div className="rounded-lg border border-border bg-ds-surface-sunk px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 {preview.inviter_name ? (

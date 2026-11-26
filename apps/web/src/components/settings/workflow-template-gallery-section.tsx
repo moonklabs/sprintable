@@ -298,7 +298,7 @@ export function WorkflowTemplateGallerySection({
         )}
 
         {selected && !loadingBindings && (
-          <div className="mt-6 rounded-lg border border-border bg-ds-background p-4 space-y-4">
+          <div className="mt-6 rounded-lg border border-border bg-ds-surface-sunk p-4 space-y-4">
             <div>
               <h3 className="font-semibold text-sm text-foreground">{presetName(selected, tPreset)} {_t('workflowGalleryRoleMappingSuffix')}</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
