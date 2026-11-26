@@ -237,6 +237,7 @@ HELPERS: dict[str, str] = {
     "lib/agent-changes.ts::loadChanges": "exempt",                 # story #4951 ①c — takes a path builder (deps.paths); the answers are the BFF's plain objects ({ command_id } · { state, files, … }), read by closed words, never as a { data } envelope
     "lib/agent-usage.ts::loadUsage": "exempt",                     # story #4981 (PR 4) — takes a fetcher (deps.fetch: agent id → Response); the answer is the BFF's plain object ({ remote_control, connected, usage:[…] }), kept only as far as parseUsage's CLOSED shape (a row that does not fit is left out) and read by closed words, never a `.data` envelope
     "components/chat/cards/refused-card.tsx::dataOf": "envelope",    # story 5034 — reads `{ data }` and nothing else (null when not ok / any other shape)
+    "components/org-briefing/control-board/use-control-board.ts::readJson": "raw",  # story 5033 — returns { status, json } with the body AS IS (null json when not ok); its call sites read `.data` where they use it
     "components/home/home-model-provider.tsx::readJson": "raw",    # story #4888 — returns the body as is (null when not ok); its call sites read `.data` where they use it
 }
 _FN_DEF = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)|(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::[^=]+)?=>")
