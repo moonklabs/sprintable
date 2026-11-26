@@ -7,9 +7,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useAgentStates } from '@/hooks/use-agent-states';
-import { restSentence, sessionStateLabel, shownState } from '@/components/chat/agent-session-strip';
-import { limitHeld, limitLine, limitLooksAgain, limitTime } from '@/lib/agent-session-limit';
-import { AGENT_STATE_FIRST_SHOWN, sortAgentStates, stateRank, type AgentStateRow } from '@/lib/agent-state-list';
+import { restSentence, sessionStateLabel } from '@/components/chat/agent-session-strip';
+import { limitLine, limitTime } from '@/lib/agent-session-limit';
+import { AGENT_STATE_FIRST_SHOWN, type AgentStateRow } from '@/lib/agent-state-list';
 import { withProjectParam } from '@/lib/with-project-param';
 
 /**
@@ -18,18 +18,8 @@ import { withProjectParam } from '@/lib/with-project-param';
  * no button on a row (a stop · an instruction · a restart stay where they are — the DM header, the Mac app); the name is a link to the conversation
  * with that agent when the person has one. The order is a pure function (`sortAgentStates`); the server promises none.
  */
-interface Shown { row: AgentStateRow; rank: number; word: ReturnType<typeof shownState> | null }
-
-export function toShown(rows: AgentStateRow[]): Shown[] {
-  // story 4950 (the Mac app's home · PO 11-14): EVERY agent of the org gets a line. Until now an agent that was on no computer at all (made on the web and never run · no session · not bound) was left out and the strip
-  // read «연결된 에이전트가 아직 없어요» beside an agent that exists — a person who just added one saw nothing. It is listed last (rank 7, «never ran») and its state is «연결 안 됨» (the agents screen's own word).
-  return sortAgentStates(rows.map((row) => {
-    if (row.state === null) return { row, rank: stateRank(null, false, false), word: null };
-    const word = shownState(row);
-    const limitShown = limitHeld(word, row.limit) || limitLooksAgain(word, row.limit) || (word === 'waiting_input' && !!row.limit?.self_resume);
-    return { row, rank: stateRank(word, limitShown, !!row.first_screen?.ask && (word === 'starting' || word === 'working' || word === 'idle')), word };
-  }));
-}
+export { toShown, type Shown } from './agent-state-shown';
+import { toShown, type Shown } from './agent-state-shown';
 
 function Row({ item, now }: { item: Shown; now: number }) {
   const tState = useTranslations('chats.agentSession');

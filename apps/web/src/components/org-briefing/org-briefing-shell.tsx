@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -17,7 +17,7 @@ import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authentic
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import { HomeScreen } from '@/components/home/home-screen';
 import { useHomeModel } from '@/components/home/home-model-provider';
-import { AgentStateSection } from './agent-state-section';
+import { ControlBoard } from './control-board/control-board';
 import { InstructionStrip } from './instruction-strip';
 import { TodayPairCard } from './today-pair-card';
 
@@ -56,6 +56,12 @@ export function OrgBriefingShell() {
   // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
   const { model, sources, loadError, partial, retry } = useHomeModel();
   const th = useTranslations('home');
+  // story 5033 — the board's per-channel «확인 필요» count = the rows of «내 손이 필요해요» that belong to a project (the same rows the list below draws; no second count)
+  const needsHandByProject = useMemo(() => {
+    const byProject: Record<string, number> = {};
+    for (const row of model?.needsHand ?? []) if (row.ref.projectId) byProject[row.ref.projectId] = (byProject[row.ref.projectId] ?? 0) + 1;
+    return byProject;
+  }, [model]);
 
   // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — `?focus=compose` 딥링크(컴패니언
   // 단축키, story #3832)는 소비 뒤 URL에서 지운다(뒤로가기·새로고침마다 재포커스되면
@@ -132,8 +138,10 @@ export function OrgBriefingShell() {
               <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
             </div>
           ) : null}
+          {/* story 5033 (C3) — the home opens on the control board: one line per project (progress · the faces placed in it · what needs you), the «열외» lane, one filter; «내 손이 필요해요» (the list + its detail) stays right under it.
+              The old «에이전트 상태» line list is replaced by the faces (the same state words); every agent's full state sentence stays on the face's tooltip and in the agents place. Keyed by the organization: switching organizations drops everything the board held (codex 5958). */}
+          <ControlBoard key={dashboard.orgId ?? 'no-org'} needsHandByProject={needsHandByProject} />
           <HomeScreen model={model} sources={sources} partial={partial || loadError} />
-          <AgentStateSection />
           <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>
       )}

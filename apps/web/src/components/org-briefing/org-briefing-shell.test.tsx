@@ -752,3 +752,21 @@ describe('OrgBriefingShell — story #4762 AC3 지원 버튼이 [보내기]를 �
     expect(form.className).not.toMatch(/flex-wrap/);
   });
 });
+
+describe('OrgBriefingShell — story 5033 관제판', () => {
+  it('⭐홈은 관제판으로 열린다: 관제판(또는 그 불러오는 자리 · 오류)이 «내 손이 필요해요» 목록보다 위에 선다', async () => {
+    stubToday(EMPTY_TODAY);
+    await mount();
+    const board = container.querySelector('[data-testid="control-board"], [data-testid="control-board-loading"], [data-testid="control-board-error"]');
+    const list = container.querySelector('[data-testid="home-screen"]');
+    expect(board, '관제판 자리가 홈에 있다').not.toBeNull();
+    expect(list).not.toBeNull();
+    expect(board!.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING, '관제판이 목록보다 앞에 온다').toBeTruthy();
+  });
+  it('옛 «에이전트 상태» 줄 목록은 홈에 더 그려지지 않는다(얼굴이 같은 낱말로 말한다)', async () => {
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.querySelector('[data-testid="agent-state-section"]')).toBeNull();
+  });
+});
+
