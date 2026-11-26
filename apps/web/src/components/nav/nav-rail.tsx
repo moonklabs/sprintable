@@ -17,6 +17,7 @@ import type { DashboardProjectOption } from '@/app/dashboard/dashboard-shell';
 
 // story 5031 (C1 step 2a) — the icon bar of the new shell: exactly the four places 홈 · 채팅 · 에이전트 · 설정 (nav-depth1 / nav-placement.json), nothing else on top; at the bottom the list-column toggle · account · search.
 // Where everything else went: the list column (app-sidebar.tsx) draws the rows of the place you are in, ⌘K reaches every screen, cards and panels open the rest — nav-placement.json is the table, nav-placement.test.ts keeps it «빠짐 0».
+// The keys ⌘1–⌘4 are not drawn here until they do something (desktop step 3 · a shortcut hint must be a real one).
 // This file only draws: what the four are and which one is lit come from lib/nav-depth1 (the same four the desktop window and the phone tab bar read). Colours · corners · type scale are ds tokens only; sizes are the scale classes (size-10 = 40, size-5 = 20).
 export interface NavRailProps {
   /** kept for the shell's call site; the bar no longer builds resource links (the list column does) */
@@ -73,7 +74,7 @@ export function NavRail({ account, listColumn, todayCount = 0, todayCountAtLeast
             key={item.id}
             href={flatHref(item.path)}
             aria-label={item.badge ? ariaName(name, count, tone) : name}
-            title={`${name} ${'⌘'}${item.shortcut}`}
+            title={name}
             aria-current={lit ? 'page' : undefined}
             className={RAIL_LINK}
             data-rail-item={`depth1-${item.id}`}

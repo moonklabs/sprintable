@@ -53,21 +53,21 @@ describe('NavRail — 1뎁스 넷(story 5031)', () => {
     expect(rail().querySelector('[data-rail-item="all-screens"]')).toBeNull();
   });
 
-  it('네 링크는 각 자리의 첫 화면이다(홈 /org-briefing · 채팅 /chats · 에이전트 /organization/workforce · 설정 /settings) · 제목에 ⌘1~⌘4', async () => {
+  it('네 링크는 각 자리의 첫 화면이다(홈 /org-briefing · 채팅 /chats · 에이전트 /organization/workforce · 설정 /settings) · 제목은 이름뿐(⌘1~⌘4는 키가 서기 전엔 그리지 않는다)', async () => {
     await mount();
     const href = (id: string) => rail().querySelector(`[data-rail-item="depth1-${id}"]`)?.getAttribute('href');
     expect(href('home')).toBe('/org-briefing');
     expect(href('chat')).toBe('/chats');
     expect(href('agents')).toBe('/organization/workforce');
     expect(href('settings')).toBe('/settings');
-    expect(four().map((el) => el.getAttribute('title'))).toEqual(['홈 ⌘1', '채팅 ⌘2', '에이전트 ⌘3', '설정 ⌘4']);
+    expect(four().map((el) => el.getAttribute('title'))).toEqual(['홈', '채팅', '에이전트', '설정']);
   });
 
   it('맨 아래: (목록 칸 단추) · 계정 · 검색 — 검색은 팔레트를 연다', async () => {
     const onOpenPalette = vi.fn();
     const onToggle = vi.fn();
-    await mount({ onOpenPalette, listColumn: { open: true, onToggle } });
-    expect(items().map((el) => el.getAttribute('data-rail-item'))).toEqual(['depth1-home', 'depth1-chat', 'depth1-agents', 'depth1-settings', 'list-column-toggle', 'search']);
+    await mount({ onOpenPalette, listColumn: { open: true, onToggle }, account: { orgMemberships: [], projectMemberships: [], userName: 'Q' } });
+    expect(items().map((el) => el.getAttribute('data-rail-item'))).toEqual(['depth1-home', 'depth1-chat', 'depth1-agents', 'depth1-settings', 'list-column-toggle', 'account', 'search']);
     await act(async () => { (rail().querySelector('[data-rail-item="search"]') as HTMLButtonElement).click(); });
     expect(onOpenPalette).toHaveBeenCalledTimes(1);
     await act(async () => { (rail().querySelector('[data-rail-item="list-column-toggle"]') as HTMLButtonElement).click(); });
