@@ -194,3 +194,24 @@ for (const colWidth of [238, 390, 500, 1440]) {
     await page.screenshot({ path: path.join(SHOTS, `board-card-${colWidth}.png`), fullPage: true });
   });
 }
+
+// every KIND of card in the showcase, long text, at the phone width and the desktop width: nothing runs past the stage, no horizontal scroll (pictures for the PO)
+for (const [width, wide] of [[390, false], [1440, true]] as const) {
+  test(`[SID:5034] the showcase draws every kind of card inside its stage (${width})`, async ({ page }) => {
+    mkdirSync(SHOTS, { recursive: true });
+    await open(page, width, false, 'showcase');
+    if (wide) await page.getByRole('button', { name: '1440 폭' }).click();
+    for (const [label, kind] of [['객체', 'entity'], ['칸반', 'kanban'], ['프로젝트 소속', 'deploy'], ['거절', 'refused']] as const) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      for (const state of ['긴 글', '기본', '볼 수 없음']) {
+        await page.getByRole('button', { name: state, exact: true }).click();
+        const stage = page.locator('[data-testid="chat-card-states-stage"]');
+        await expect(stage).toHaveAttribute('data-card-kind', kind);
+        const m = await outside(page, '[data-testid="chat-card-states-stage"]');
+        expect(m.out, `${kind} ${state} running past the stage: ${m.out.join(' | ')}`).toEqual([]);
+        expect(m.scroll[0], `${kind} ${state}: no horizontal overflow`).toBeLessThanOrEqual(m.scroll[1]);
+        if (state === '긴 글') await page.screenshot({ path: path.join(SHOTS, `showcase-${kind}-${width}.png`), fullPage: true });
+      }
+    }
+  });
+}
