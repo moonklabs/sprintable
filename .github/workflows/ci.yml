@@ -1652,7 +1652,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          shard_count=6   # the only place the number of shards is written: the matrix of backend-test-work is built from it
+          shard_count=8   # the only place the number of shards is written: the matrix of backend-test-work is built from it (6 → 8, 11-27: see the measurement at `backend-test-work`)
           uv run python scripts/shard_nondestructive_tests.py --plan-out /tmp/shard_plan.json --shard-count "$shard_count" | tee /tmp/shard_split.log
           { echo "## Backend pytest shard plan (story #4731)"; echo '```'; cat /tmp/shard_split.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "shards=$(python3 -c 'import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))' "$shard_count")" >> "$GITHUB_OUTPUT"
@@ -1677,7 +1677,13 @@ jobs:
     # differs between runners cannot drop or double a test). `backend-test` (the required check) reads this job's aggregated result — any leg failed /
     # cancelled / skipped (and the plan job failing, which skips this job) makes it red, as before. The ceiling is per shard (measured: see story 4731).
     needs: [detect-changed-scope, backend-test-shard-plan]
-    timeout-minutes: 15
+    # 11-27 — the ceiling was 15 minutes per shard and a shard on a loaded develop run went over it: shard 3 was cut at 15.3 and 15.2 minutes (develop runs b1201a8 · d4e776c) → the run's result «cancelled» → the dev promotion
+    # stopped («CI cancelled») twice in one day. MEASURED (14 recent runs, job minutes per shard of 6): shard 0 · 1 · 2 · 3 · 4 · 5 = mean 6.2 · 7.7 · 10.4 · 11.9 · 8.9 · 6.2, worst 8.6 · 9.7 · 13.2 · 15.3 (cut) · 11.4 · 7.8. The split
+    # by test COUNT is even (every shard ≈ 2690 tests) but the TIME is not: in one run the pytest wall time per shard was 292 · 538 · 694 · 642 · 367 · 420 s (4.9 → 11.6 min, 2.4×) — a few real-DB files take most of it (the
+    # gateway backlog file ≈ 106 s in its 20 slowest tests, the agent-creator-seat file ≈ 69 s), and they happen to share a shard. The whole suite is ≈ 49 minutes of pytest + ≈ 0.8 min set-up a shard.
+    # So: 8 shards (the same greedy split by count, the same tests, 2 more runners: ideal ≈ 6.2 min a shard, and the 2.4× skew scales down with it — expected worst ≈ 9.5 min, ≈ 12 on a loaded run) and the ceiling at 20 minutes
+    # (≈ 1.5 × that worst: a hung shard is still cut early, a loaded one is not). A split by measured file time (a weights file like the destructive shards') is the next step if the worst shard drifts back up.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
