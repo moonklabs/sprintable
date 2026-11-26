@@ -127,7 +127,8 @@ function DropZone({ id, canWrite, className, children, testId }: { id: string; c
 /** the NAME of a drop place for a sentence: the lane's own title, or the project's name — an unknown place says nothing (never its id) */
 export function dropPlaceName(dropId: string, projectsById: ReadonlyMap<string, BoardProject>, benchTitle: string): string {
   if (dropId === BENCH_ID) return benchTitle;
-  return projectsById.get(dropId.replace(/^channel:/, ''))?.name ?? '';
+  if (!dropId.startsWith('channel:')) return ''; // only a «channel:<id>» is a project — any other string is not a place
+  return projectsById.get(dropId.slice('channel:'.length))?.name ?? '';
 }
 
 /**
@@ -135,16 +136,33 @@ export function dropPlaceName(dropId: string, projectsById: ReadonlyMap<string, 
  * Here every sentence names the AGENT and the PLACE by their names, in the page's language. A drag id is `<where>::<agentId>` and a drop id is `bench` / `channel:<projectId>` — the ids never reach a sentence.
  */
 export function buildDragAnnouncements(o: {
-  t: (key: 'dragStartAnnounce' | 'dragOverAnnounce' | 'dragEndAnnounce' | 'dragEndNowhereAnnounce' | 'dragCancelAnnounce', values: { name: string; target?: string }) => string;
+  t: (key: 'dragStartAnnounce' | 'dragOverAnnounce' | 'dragOverNowhereAnnounce' | 'dragEndAnnounce' | 'dragEndNowhereAnnounce' | 'dragCancelAnnounce', values: { name: string; target?: string }) => string;
+  /** the agent's name; '' = the agent is not on the board any more (the builder then says the generic word) */
   agentName: (agentId: string) => string;
+  /** the place's name; '' = not a place of this board */
   placeName: (dropId: string) => string;
+  /** «the agent» — said when the dragged face left the board mid-drag */
+  agentFallback: string;
 }): Announcements {
-  const who = (activeId: string | number) => o.agentName(String(activeId).split('::')[1] ?? '');
+  const parts = (activeId: string | number) => {
+    const [where = '', agentId = ''] = String(activeId).split('::');
+    return { name: o.agentName(agentId) || o.agentFallback, from: { agentId, projectId: where === BENCH_ID ? null : where } };
+  };
   return {
-    onDragStart: ({ active }) => o.t('dragStartAnnounce', { name: who(active.id) }),
-    onDragOver: ({ active, over }) => (over ? o.t('dragOverAnnounce', { name: who(active.id), target: o.placeName(String(over.id)) }) : undefined),
-    onDragEnd: ({ active, over }) => (over ? o.t('dragEndAnnounce', { name: who(active.id), target: o.placeName(String(over.id)) }) : o.t('dragEndNowhereAnnounce', { name: who(active.id) })),
-    onDragCancel: ({ active }) => o.t('dragCancelAnnounce', { name: who(active.id) }),
+    onDragStart: ({ active }) => o.t('dragStartAnnounce', { name: parts(active.id).name }),
+    // «over» nothing (or over something that is not a place) CLEARS the earlier «over Alpha» — dnd-kit keeps the last sentence when a callback returns nothing
+    onDragOver: ({ active, over }) => {
+      const { name } = parts(active.id);
+      const place = over ? o.placeName(String(over.id)) : '';
+      return place ? o.t('dragOverAnnounce', { name, target: place }) : o.t('dragOverNowhereAnnounce', { name });
+    },
+    // «dropped» only when the drop CHANGES something (the very rule the drop uses: `resolveDrop`) — dropped where it already is / nowhere = «nothing changed»
+    onDragEnd: ({ active, over }) => {
+      const { name, from } = parts(active.id);
+      const place = over ? o.placeName(String(over.id)) : '';
+      return place && resolveDrop(from, String(over!.id)) ? o.t('dragEndAnnounce', { name, target: place }) : o.t('dragEndNowhereAnnounce', { name });
+    },
+    onDragCancel: ({ active }) => o.t('dragCancelAnnounce', { name: parts(active.id).name }),
   };
 }
 
@@ -169,12 +187,14 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
       t: (key, values) => ({
         dragStartAnnounce: () => t('dragStartAnnounce', values),
         dragOverAnnounce: () => t('dragOverAnnounce', values),
+        dragOverNowhereAnnounce: () => t('dragOverNowhereAnnounce', values),
         dragEndAnnounce: () => t('dragEndAnnounce', values),
         dragEndNowhereAnnounce: () => t('dragEndNowhereAnnounce', values),
         dragCancelAnnounce: () => t('dragCancelAnnounce', values),
       })[key](),
       agentName: (id) => agentNames.get(id) ?? '',
       placeName: (dropId) => dropPlaceName(dropId, byId, t('benchTitle')),
+      agentFallback: t('dragAgentFallback'),
     }),
     screenReaderInstructions: { draggable: t('dragInstructions') },
   }), [t, agentNames, byId]);

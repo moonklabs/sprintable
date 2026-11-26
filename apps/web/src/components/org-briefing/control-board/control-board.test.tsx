@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
+import enMessages from '../../../../messages/en.json';
 import type { AgentStateRow } from '@/lib/agent-state-list';
 import { BENCH_ID, ControlBoardView, buildDragAnnouncements, channelDropId, dropPlaceName, resolveDrop, type ControlBoardViewProps } from './control-board';
 import { deriveControlBoard, grantKey, type BoardProject } from './derive-control-board';
@@ -204,25 +205,56 @@ describe('what a screen reader hears while a face is dragged (names, never ids �
     expect(liveText()).toBe('Ann · 끌기를 시작했어요.');
     expect(liveText()).not.toMatch(/::|channel:|bench|id-Ann|p1/);
   });
-  it('⭐a drop place is named by the lane\'s title or the project\'s NAME — an unknown place says nothing, never its id', () => {
+  it('⭐a drop place is named by the lane\'s title or the project\'s NAME — an unknown place, or a bare string that is not «channel:<id>», says nothing (never its id)', () => {
     const byId = new Map([['p2', { id: 'p2', name: 'Beta' }]]);
     expect(dropPlaceName(channelDropId('p2'), byId, '빠진 에이전트')).toBe('Beta');
     expect(dropPlaceName(BENCH_ID, byId, '빠진 에이전트')).toBe('빠진 에이전트');
     expect(dropPlaceName(channelDropId('gone'), byId, '빠진 에이전트')).toBe('');
+    expect(dropPlaceName('p2', byId, '빠진 에이전트'), 'an unprefixed id is not a place').toBe('');
   });
-  it('⭐every sentence names the agent and the PLACE by name; the ids never reach a sentence (the builder, all four moments)', () => {
-    const say = buildDragAnnouncements({
-      t: (key, v) => `${key}|${v.name}|${v.target ?? ''}`,
-      agentName: (id) => ({ 'id-Ann': 'Ann' }[id] ?? ''),
-      placeName: (dropId) => (dropId === BENCH_ID ? '빠진 에이전트' : dropId === channelDropId('p2') ? 'Beta' : ''),
-    });
-    const active = { id: 'p1::id-Ann' } as never;
-    expect(say.onDragStart!({ active })).toBe('dragStartAnnounce|Ann|');
-    expect(say.onDragOver!({ active, over: { id: channelDropId('p2') } } as never)).toBe('dragOverAnnounce|Ann|Beta');
-    expect(say.onDragOver!({ active, over: null } as never)).toBeUndefined();
-    expect(say.onDragEnd!({ active, over: { id: BENCH_ID } } as never)).toBe('dragEndAnnounce|Ann|빠진 에이전트');
-    expect(say.onDragEnd!({ active, over: null } as never)).toBe('dragEndNowhereAnnounce|Ann|');
-    expect(say.onDragCancel!({ active } as never)).toBe('dragCancelAnnounce|Ann|');
+
+  const say = buildDragAnnouncements({
+    t: (key, v) => `${key}|${v.name}|${v.target ?? ''}`,
+    agentName: (id) => ({ 'id-Ann': 'Ann' }[id] ?? ''),
+    placeName: (dropId) => dropPlaceName(dropId, new Map([['p1', P1], ['p2', P2]]), '빠진 에이전트'),
+    agentFallback: 'AGENT',
+  });
+  const fromP1 = { id: 'p1::id-Ann' } as never;
+  it('⭐every sentence names the agent and the PLACE by name; the ids never reach a sentence (all moments)', () => {
+    expect(say.onDragStart!({ active: fromP1 })).toBe('dragStartAnnounce|Ann|');
+    expect(say.onDragOver!({ active: fromP1, over: { id: channelDropId('p2') } } as never)).toBe('dragOverAnnounce|Ann|Beta');
+    expect(say.onDragEnd!({ active: fromP1, over: { id: channelDropId('p2') } } as never)).toBe('dragEndAnnounce|Ann|Beta');
+    expect(say.onDragEnd!({ active: fromP1, over: { id: BENCH_ID } } as never)).toBe('dragEndAnnounce|Ann|빠진 에이전트');
+    expect(say.onDragCancel!({ active: fromP1 } as never)).toBe('dragCancelAnnounce|Ann|');
+  });
+  it('⭐over nothing (or over something that is not a place) is SAID — it clears the earlier «over Alpha» instead of leaving it', () => {
+    expect(say.onDragOver!({ active: fromP1, over: null } as never)).toBe('dragOverNowhereAnnounce|Ann|');
+    expect(say.onDragOver!({ active: fromP1, over: { id: 'channel:gone' } } as never)).toBe('dragOverNowhereAnnounce|Ann|');
+  });
+  it('⭐«dropped» only when the drop changes something: dropped where it already is, nowhere, or on a stale place = «nothing changed»', () => {
+    expect(say.onDragEnd!({ active: fromP1, over: { id: channelDropId('p1') } } as never)).toBe('dragEndNowhereAnnounce|Ann|');
+    expect(say.onDragEnd!({ active: fromP1, over: null } as never)).toBe('dragEndNowhereAnnounce|Ann|');
+    expect(say.onDragEnd!({ active: fromP1, over: { id: 'channel:gone' } } as never)).toBe('dragEndNowhereAnnounce|Ann|');
+    expect(say.onDragEnd!({ active: { id: 'bench::id-Ann' } as never, over: { id: BENCH_ID } } as never), 'lane → lane changes nothing').toBe('dragEndNowhereAnnounce|Ann|');
+  });
+  it('⭐a face that left the board mid-drag is the generic word, never an empty name', () => {
+    expect(say.onDragCancel!({ active: { id: 'p1::id-Gone' } } as never)).toBe('dragCancelAnnounce|AGENT|');
+    expect(say.onDragStart!({ active: { id: 'garbage' } } as never)).toBe('dragStartAnnounce|AGENT|');
+  });
+  it('the English sentences read as sentences (same builder, the en words)', async () => {
+    const en = enMessages.orgBriefing as Record<string, string>;
+    const fill = (tpl: string, v: Record<string, string | undefined>) => tpl.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
+    const sayEn = buildDragAnnouncements({ t: (key, v) => fill(en[key]!, v), agentName: () => 'Ann', placeName: () => 'Beta', agentFallback: en.dragAgentFallback! });
+    expect(sayEn.onDragEnd!({ active: fromP1, over: { id: channelDropId('p2') } } as never)).toBe('Ann · dropped on Beta.');
+    expect(sayEn.onDragOver!({ active: fromP1, over: null } as never)).toBe('Ann · outside any place.');
+    expect(en.dragInstructions).not.toMatch(/draggable item/);
+  });
+  it('⭐a keyboard pick-up then Escape is announced as cancelled, by name', async () => {
+    await mount({ grants: GRANTS, agents: AGENTS });
+    const handle = q('[data-testid="control-channel"] [data-testid="control-face-handle"]')!;
+    await act(async () => { handle.focus(); handle.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true, cancelable: true })); });
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(liveText()).toBe('Ann · 끌기를 취소했어요.');
+    expect(onDrop).not.toHaveBeenCalled();
   });
 });
-
