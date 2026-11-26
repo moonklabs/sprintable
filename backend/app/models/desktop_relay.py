@@ -6,7 +6,7 @@ two together (one changed alone → RED)."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,8 +21,9 @@ from app.services.agent_runtime import DESKTOP_RUNTIME_IDS
 # story 4983 (0488 · P5): `file_list` — a person's SEALED request to list a folder of a project on their own computer; payload exactly {project_id, envelope} (no session, no path — the computer maps the project to a folder of its own)
 # story 4983 (0491 · P6): `file_read` — the same road to OPEN one file of a project (text or a small picture); payload exactly the same {project_id, envelope}: the folder and the file's name are inside the sealed request
 # story 4988 (0492 · P8): `file_download` — the same road to DOWNLOAD one file (up to 8 MiB, as sealed chunks); payload exactly the same {project_id, envelope}
+# story 5025 (0500 · C1): `capability_set` — the SERVER's own signed set of what each pinned phone may do on this computer; payload exactly {envelope} (the host checks the signature; the server never reads it back)
 # story 4993 (0495 · P2 same-network direct): `direct_open` — a paired phone's SEALED ask for a short-lived door on its own computer; payload exactly {envelope} (no session, no address: the computer answers with a sealed `direct_offer`)
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download", "direct_open")
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes", "file_list", "file_read", "file_download", "direct_open", "capability_set")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -344,6 +345,24 @@ class DesktopDirectCount(Base):
     commands: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     doors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class DesktopCapabilityRejection(Base):
+    """story 5025 (0500 · C1 · contract v1.2 §6): HOW MANY times a computer refused a phone for lack of a capability (or a card answer for a phone that was not a receiver) — counts of its own refusals, nothing else: one of three words,
+    the server's own phone and agent ids, a count and the last time. No content, no text, no path. One row per (computer, word, phone, agent); a report adds to it."""
+
+    __tablename__ = "desktop_capability_rejections"
+    __table_args__ = (
+        CheckConstraint("code IN ('no_capability', 'capability_expired', 'not_in_seal_to')", name="ck_desktop_capability_rejections_code"),
+        CheckConstraint("count >= 1", name="ck_desktop_capability_rejections_count"),
+    )
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True)
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    phone_key_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    agent_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class DesktopFileChunk(Base):

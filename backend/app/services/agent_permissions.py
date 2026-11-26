@@ -362,6 +362,12 @@ async def list_phones(db: AsyncSession, *, member_id: uuid.UUID | None, org_id: 
     return [_device_view(p, by_phone.get(p.id, [])) for p in phones]
 
 
+async def _tell_capabilities(db: AsyncSession, setup_ids) -> None:
+    from app.services import capability_set
+
+    await capability_set.tell(db, setup_ids)
+
+
 async def remove_pair(
     db: AsyncSession, *, phone_id: uuid.UUID, setup_id: uuid.UUID, actor_member_id: uuid.UUID | None, actor_is_admin: bool, org_id: uuid.UUID,
 ) -> bool:
@@ -387,6 +393,7 @@ async def remove_pair(
 
     await desktop_record_handoff.forget_pairs(db, [(setup_id, phone_id)])  # story 4978: a removed phone takes no record key — what travels on this pair goes with it
     _wake_device_after_commit(db, setup_id)
+    await _tell_capabilities(db, [setup_id])  # story 5025 (C1): the computer is told what its phones may do now
     return True
 
 
@@ -427,6 +434,7 @@ async def remove_computer_pairs(
     from app.services import desktop_record_handoff
 
     await desktop_record_handoff.forget_pairs(db, [(p.setup_id, phone_id) for p in pairs])  # story 4978: nor a record-key handoff on any of those pairs
+    await _tell_capabilities(db, [p.setup_id for p in pairs])  # story 5025 (C1)
     return removed
 
 
@@ -562,6 +570,7 @@ async def remove_phone(
     session = await _end_phone_session(db, phone, now)
     for setup_id in {p.setup_id for p in pairs}:
         _wake_device_after_commit(db, setup_id)
+    await _tell_capabilities(db, [p.setup_id for p in pairs])  # story 5025 (C1): each computer it was pinned on hears what its phones may do now
     return True, session
 
 
@@ -635,6 +644,7 @@ async def replace_pairings(db: AsyncSession, setup: DesktopSetup, snapshot: Pair
         from app.services import desktop_record_handoff
 
         await desktop_record_handoff.forget_pairs(db, [(setup.id, phone_id) for phone_id in dropped_phones])  # story 4978: a pair the device dropped takes what travelled on it (a re-added pair must not serve an old envelope)
+    await _tell_capabilities(db, [setup.id])  # story 5025 (C1): a new pin · a dropped pin changes what the computer's phones may do — it is told in the same transaction (the set is only pushed when it changed)
     return {"pairings": len(listed), "unregistered": len(snapshot.pairings) - len(listed)}
 
 

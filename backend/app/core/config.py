@@ -124,6 +124,15 @@ class Settings(BaseSettings):
     # route exists only when it is on. The value is never logged or printed.
     local_bootstrap_secret: str = ""
 
+    # story 5025 (C1 · contract v1.2 §3 · §5) — the key the server SIGNS a computer's phone capabilities with (Ed25519). `capability_signing_key` is a 32-byte seed, base64url (never logged); `capability_signing_key_file` is a
+    # file that holds the same (a self-run server: the data folder, mode 0600). Neither set → the capability road is OFF on this server (no `attest_keys`, no pull, no push: a host sees an older server). NEVER the JWT secret,
+    # the local-bootstrap secret or the repository-signing secret. `capability_retired_keys` = comma-separated seeds of keys that were replaced: kept only to sign the ROTATION DOOR (a retired key says «the new key is mine
+    # to hand on»). `capability_epoch` rises only with a key swap or a recovery (a host's high-water mark is the pair (epoch, serial)).
+    capability_signing_key: str = ""
+    capability_signing_key_file: str = ""
+    capability_retired_keys: str = ""
+    capability_epoch: int = 1
+
     # story 5023 (B2-2 a) — a WORKSPACE SERVER (the headless Linux host) asks for the first-owner rule: with no owner a sign-up needs the setup code, once an owner exists sign-up is closed to everybody but an invited e-mail
     # (`app/services/server_owner_setup.py`). Off by default and only ever on an embedded install (`is_embedded`): the desktop app and a hosted deployment keep their sign-up exactly as it is.
     server_owner_setup: bool = False

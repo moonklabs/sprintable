@@ -64,6 +64,11 @@ class DesktopSetup(Base):
     # story 5025 (0499 · B1): the server's now() of the first pin report of this setup that said `seal_to_v1` (the host asks which phones may read a card BEFORE it seals one) — one way (a trigger), never cleared: a setup with it has every sealed card
     # checked (`to` ⊆ the receiver's phones) even when an older build of the host later joins it without the word
     seal_to_v1_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # alembic 0500 (story 5025 · C1): the last `capability_set` serial handed out for this computer (`serial = max(previous + 1, unix_ms)`: a database restored to an older state never hands out a serial at or below
+    # one a host has seen, because the clock is ahead), a hash of the set last pushed (a push only when the set changed or its half-life is over) and when it was pushed. No secret in any of the three.
+    capability_serial: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    capability_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    capability_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story 4976 (0489 · A5): the server's now() of the first time this computer's app said `sealed_prompt` (it opens a sealed instruction) — one way (a trigger), never cleared: a computer with it (or a sibling setup of the same Mac: org_id + machine_key) takes no PLAINTEXT instruction into a turn (422 `sealed_required`)
     sealed_prompts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

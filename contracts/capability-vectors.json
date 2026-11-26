@@ -1,0 +1,188 @@
+{
+  "about": "story 5025 (C1 · contract v1.2 §9): the vectors the SERVER (which signs) and the HOST (which checks) share — one file. A host pins `keys` (kid → public key, base64url of the 32 raw bytes); an envelope is {v,kid,p,sig}; the signature is Ed25519 over `domain ‖ the exact bytes of p` (never re-serialised); `now` is the host's trusted time (local + skew); `expect` is the verdict a correct host gives. Order: epoch then serial (never the clock) — see `order`.",
+  "domain": "sprintable/capability_set/v1",
+  "rotate_domain": "sprintable/attest_rotate/v1",
+  "setup_id": "00000000-0000-4000-8000-000000000001",
+  "keys": {
+    "ak1-34750f98bd59fcfc": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "unknown_key_seed_note": "the case «signed by a key the host never pinned» is signed by a second fixed key that is NOT in `keys`",
+  "seeds": {
+    "pinned": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "other": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+  },
+  "cases": [
+    {
+      "name": "valid",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "FEWqaE_k872s2rcOjfiBIjd7XgGq1kKJBzLtzgLJUG98464gzdozCH_DxHQwjW0HqLdmBPp-4EePbxPW1AR_Aw"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "valid"
+    },
+    {
+      "name": "valid one millisecond before exp (slack 0)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "FEWqaE_k872s2rcOjfiBIjd7XgGq1kKJBzLtzgLJUG98464gzdozCH_DxHQwjW0HqLdmBPp-4EePbxPW1AR_Aw"
+      },
+      "now": "2026-11-26T00:09:59.999Z",
+      "expect": "valid"
+    },
+    {
+      "name": "expired exactly at exp",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "FEWqaE_k872s2rcOjfiBIjd7XgGq1kKJBzLtzgLJUG98464gzdozCH_DxHQwjW0HqLdmBPp-4EePbxPW1AR_Aw"
+      },
+      "now": "2026-11-26T00:10:00.000Z",
+      "expect": "expired"
+    },
+    {
+      "name": "not yet issued (iat in the future by more than the slack)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "FEWqaE_k872s2rcOjfiBIjd7XgGq1kKJBzLtzgLJUG98464gzdozCH_DxHQwjW0HqLdmBPp-4EePbxPW1AR_Aw"
+      },
+      "now": "2026-11-25T23:58:00.000Z",
+      "expect": "not_yet_valid"
+    },
+    {
+      "name": "signed for another purpose (the rotation domain)",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "4ZUsr5ZFoHFE3coZiR1SL-NApeDpZcEPdrM0ZyjoECFJMiPrwivkycVb4FvIpfQ3tEEp0IdtVX70rwV-jOxWDg"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "signed by a key the host never pinned",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-6a3803d5f059902a",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "fqOOVCs3FQACVDeLQsqNJfkfaz0kiyLppYvv9zIQRLBxZlwaUfndUioFgZHmGuO5HJA1XJn8WkvlykKS6xlRCA"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "unknown_kid"
+    },
+    {
+      "name": "a pinned kid name on a signature of another key",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "fqOOVCs3FQACVDeLQsqNJfkfaz0kiyLppYvv9zIQRLBxZlwaUfndUioFgZHmGuO5HJA1XJn8WkvlykKS6xlRCA"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "one byte of the payload changed after signing",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjksImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "FEWqaE_k872s2rcOjfiBIjd7XgGq1kKJBzLtzgLJUG98464gzdozCH_DxHQwjW0HqLdmBPp-4EePbxPW1AR_Aw"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_signature"
+    },
+    {
+      "name": "a set of another computer",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJjYXBhYmlsaXR5X3NldCIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJ2IjoxfQ",
+        "sig": "LIGqu5FO15SonUmXXJIEnYmpn1KA-NCZv-PpM7gKqIDe0gqcAW-GldR7UGK7WaOs-HY9hSWAg7xAybduIopKBg"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "wrong_setup"
+    },
+    {
+      "name": "a set of another kind",
+      "envelope": {
+        "v": 1,
+        "kid": "ak1-34750f98bd59fcfc",
+        "p": "eyJjYXBzIjpbeyJhY3Rpb25zIjpbImNvbnRyb2wiLCJyZWFkIl0sImFnZW50X21lbWJlcl9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMSIsInBob25lX2tleV9pZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9XSwiZXBvY2giOjEsImV4cCI6IjIwMjYtMTEtMjZUMDA6MTA6MDAuMDAwWiIsImlhdCI6IjIwMjYtMTEtMjZUMDA6MDA6MDAuMDAwWiIsImtpbmQiOiJzb21ldGhpbmdfZWxzZSIsInNlcmlhbCI6MTAwMCwic2V0dXBfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJ2IjoxfQ",
+        "sig": "SsD4VV5Cr8JByVgOz1lUlOAlItZXz8c3g2fFrfpWtP5hgIT2vEzMKrMDQ-jOf1_RvJ33bwaFBEtgXURFHQfCCQ"
+      },
+      "now": "2026-11-26T00:05:00.000Z",
+      "expect": "bad_kind"
+    }
+  ],
+  "order": [
+    {
+      "name": "same epoch, higher serial wins",
+      "high_water": [
+        1,
+        1000
+      ],
+      "incoming": [
+        1,
+        1001
+      ],
+      "expect": "accept"
+    },
+    {
+      "name": "same epoch, same serial is a replay",
+      "high_water": [
+        1,
+        1000
+      ],
+      "incoming": [
+        1,
+        1000
+      ],
+      "expect": "reject"
+    },
+    {
+      "name": "same epoch, lower serial is a replay",
+      "high_water": [
+        1,
+        1000
+      ],
+      "incoming": [
+        1,
+        999
+      ],
+      "expect": "reject"
+    },
+    {
+      "name": "a higher epoch beats any serial",
+      "high_water": [
+        1,
+        5000000
+      ],
+      "incoming": [
+        2,
+        1
+      ],
+      "expect": "accept"
+    },
+    {
+      "name": "a lower epoch loses to any serial",
+      "high_water": [
+        2,
+        1
+      ],
+      "incoming": [
+        1,
+        5000000
+      ],
+      "expect": "reject"
+    }
+  ]
+}
