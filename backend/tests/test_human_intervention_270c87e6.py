@@ -67,7 +67,7 @@ def _session(*results):
 
 async def test_send_agent_nonparticipant_keeps_403():
     """에이전트 비참여자는 auto-join 안 됨 — 인가 불변(403 유지)."""
-    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group")
+    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group", is_project_channel=False)
     s = _session(_result(conv), _result(None))  # conv 조회 → participant None
     client, app = await _client(s)
     try:
@@ -82,7 +82,7 @@ async def test_send_agent_nonparticipant_keeps_403():
 
 async def test_send_human_nonparticipant_dm_keeps_403():
     """타인 간 1:1 DM은 비참여 휴먼도 auto-join 예외 — 403 유지(비공개 보호)."""
-    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="dm")
+    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="dm", is_project_channel=False)
     s = _session(_result(conv), _result(None))
     client, app = await _client(s)
     try:
@@ -98,7 +98,7 @@ async def test_send_human_nonparticipant_dm_keeps_403():
 # ── ② mute 토글 ───────────────────────────────────────────────────────────────
 
 async def test_mute_sets_muted_at():
-    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group")
+    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group", is_project_channel=False)
     participant = SimpleNamespace(id=uuid.uuid4(), muted_at=None)
     s = _session(_result(conv), _result(participant))
     client, app = await _client(s)
@@ -115,7 +115,7 @@ async def test_mute_sets_muted_at():
 
 async def test_unmute_clears_muted_at():
     from datetime import datetime, timezone
-    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group")
+    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group", is_project_channel=False)
     participant = SimpleNamespace(id=uuid.uuid4(), muted_at=datetime.now(timezone.utc))
     s = _session(_result(conv), _result(participant))
     client, app = await _client(s)
@@ -130,7 +130,7 @@ async def test_unmute_clears_muted_at():
 
 
 async def test_mute_nonparticipant_403():
-    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group")
+    conv = SimpleNamespace(id=CONV, org_id=ORG, project_id=uuid.uuid4(), type="group", is_project_channel=False)
     s = _session(_result(conv), _result(None))  # participant 없음
     client, app = await _client(s)
     try:

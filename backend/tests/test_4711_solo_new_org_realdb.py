@@ -53,7 +53,8 @@ async def _made(who) -> dict:
 
 
 NOTHING = {"memberships": 0, "orgs": 0, "projects": 0, "agents": 0, "rooms": 0, "confirmed": 0}
-ONE_OF_EACH = {"memberships": 1, "orgs": 1, "projects": 1, "agents": 1, "rooms": 1, "confirmed": 1}
+# "rooms": 2 — the agent's DM and the project's channel (story #5032: every project owns one channel room, set up with the project)
+ONE_OF_EACH = {"memberships": 1, "orgs": 1, "projects": 1, "agents": 1, "rooms": 2, "confirmed": 1}
 
 
 @pytest.mark.anyio
@@ -74,6 +75,9 @@ async def test_a_new_customers_first_round_makes_one_organization_one_project_on
         assert got["members"][0]["name"] == "Claude Code"
         # the room is the person's way in: a DM in the folder's project
         assert (await _sql(fetch="SELECT type, project_id::text FROM conversations WHERE id=:c", params={"c": got["conversation_id"]}))[0] == ("dm", got["project_id"])
+        # …and the project's ONE channel (a group room marked as the channel; not the DM)
+        chan = await _sql(fetch="SELECT type, id::text FROM conversations WHERE project_id=:p AND is_project_channel", params={"p": got["project_id"]})
+        assert len(chan) == 1 and chan[0][0] == "group" and chan[0][1] != got["conversation_id"], chan
         # the same person pressing again: what the code made, nothing twice
         again = await _confirm(c, code, who, org_name="다른 이름")
         assert (again.status_code, again.json()["org_id"], again.json()["conversation_id"]) == (200, got["org_id"], got["conversation_id"])

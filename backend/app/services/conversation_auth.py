@@ -151,7 +151,7 @@ def channel_project_valid(conv_id_col, *, caller_member_id: uuid.UUID, org_id: u
     access_id = func.coalesce(
         select(cm.user_id).where(cm.id == caller_member_id).scalar_subquery(),
         select(om.user_id).where(om.id == caller_member_id, om.deleted_at.is_(None)).scalar_subquery(),
-        literal(caller_member_id),
+        literal(caller_member_id, type_=cm.id.type),
     )
     is_channel = select(1).where(ch.id == conv_id_col, ch.is_project_channel.is_(True)).exists()
     holds_project = (
@@ -350,20 +350,26 @@ async def readable_room_clause(db, org_id: uuid.UUID, auth) -> BoolExpr:
 
 
 async def member_reads_room_now(db, *, conversation_id: uuid.UUID, org_id: uuid.UUID, member_id: uuid.UUID, is_agent: bool) -> bool:
-    """story #5032 (C2) — may THIS member (not a request's caller: someone whose seat a server road reads for) read this room NOW? The canonical predicate with no admin bypass: in the room, an agent
-    with the room's project, and — for a project's channel — a holder of its project. For the roads that hand a room's words back from a stored seat (the A2A task's reply)."""
-    from sqlalchemy import literal
+    """story #5032 (C2) — may THIS member (not a request's caller: the agent whose seat a server road reads for) still read this room? For the roads that hand a room's words back from a stored seat (the A2A
+    task's reply). Asked the way the A2A road itself knows the agent: in the room (a participant row) · for an agent, the room's project is still one of ITS projects in the `team_members` rows `_get_agent_member`
+    resolves it from (a grant or a profile — not the `members`-only `has_project_access`: a task room is made with the project of such a row, and an agent placed by profile alone must keep reading its own task) ·
+    for a project's channel, the project is held now. Revoking the agent's project removes both rows (a grant and its profile), so a task of a project the agent lost reads nothing."""
+    from app.models.conversation import ConversationParticipant
 
     found, conv_project_id = await conversation_project(db, conversation_id, org_id)
     if not found:
         return False
-    predicate = conversation_readable_predicate(
-        literal(conversation_id),
-        caller_member_id=member_id,
-        org_id=org_id,
-        admin_bypass_eligible=False,
-        agent_project_valid=await agent_project_valid_for_room(
-            db, caller_is_agent=is_agent, caller_id=member_id, conv_project_id=conv_project_id, org_id=org_id,
-        ),
-    )
-    return bool((await db.execute(select(predicate))).scalar_one())
+    in_room = (await db.execute(
+        select(1).where(ConversationParticipant.conversation_id == conversation_id, ConversationParticipant.member_id == member_id).limit(1)
+    )).first() is not None
+    if not in_room:
+        return False
+    if is_agent and conv_project_id is not None:
+        has_project = (await db.execute(
+            select(1).where(
+                TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.project_id == conv_project_id, TeamMember.is_active.is_(True),
+            ).limit(1)
+        )).first() is not None
+        if not has_project:
+            return False
+    return member_id in await members_holding_rooms_channel_project(db, conversation_id, org_id, {member_id})

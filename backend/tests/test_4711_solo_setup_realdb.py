@@ -95,12 +95,15 @@ async def test_a_solo_start_makes_one_agent_a_project_for_the_folder_and_the_roo
         (member,) = body["members"]
         assert (member["kind"], member["name"]) == ("agent", "Claude Code") and "stage" not in member
         after = await _state()
-        # one agent · one project (the folder's) · one room — no story, no recipe binding
-        assert after == {**before, "agents": before["agents"] + 1, "projects": before["projects"] + 1, "rooms": before["rooms"] + 1}
+        # one agent · one project (the folder's) · two rooms: the agent's DM and the project's channel — no story, no recipe binding
+        assert after == {**before, "agents": before["agents"] + 1, "projects": before["projects"] + 1, "rooms": before["rooms"] + 2}   # the agent's DM + the new project's channel (story #5032)
         proj = (await _sql(fetch=f"SELECT name FROM projects WHERE id='{body['project_id']}'"))[0][0]
         assert proj == "my-app"
         runtime = (await _sql(fetch=f"SELECT runtime_type FROM members WHERE id='{member['member_id']}'"))[0][0]
         assert runtime == "claude-code"  # the product's own spelling of the desktop runtime «claude»
+        # the project's ONE channel (a group room marked as the channel — not the DM below)
+        chan = await _sql(fetch=f"SELECT type, id::text FROM conversations WHERE project_id='{body['project_id']}' AND is_project_channel")
+        assert len(chan) == 1 and chan[0][0] == "group" and chan[0][1] != body["conversation_id"], chan
         # the room: a DM of exactly the person and the new agent, in the project
         room = (await _sql(fetch=(
             f"SELECT c.type, c.project_id::text, (SELECT array_agg(p.member_id::text ORDER BY p.member_id::text) FROM conversation_participants p "
