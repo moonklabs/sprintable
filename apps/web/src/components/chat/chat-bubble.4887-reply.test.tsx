@@ -129,8 +129,8 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
   it('⭐ the room the mouse reply button takes is set ONLY where the button is drawn: the column cap (--reply-cap 128 px) and the hover-time offset (--reply-room 36 px); inside a thread (no onOpenThread) neither is set, so a thread bubble keeps its 72% and its 8 px', async () => {
     await render();
     const col = container.querySelector('[data-chat-content]') as HTMLElement; const meta = container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement;
-    expect(col.className).toContain('max-w-[72%]');
-    expect(col.className).toContain(`${MOUSE}:max-w-[min(72%,calc(100%_-_var(--reply-cap,0px)))]`);
+    expect(col.className).toContain('max-w-[min(72%,var(--container-ds-bubble))]'); // story 5048 ②c: 72% and at most 480
+    expect(col.className).toContain(`${MOUSE}:max-w-[min(72%,var(--container-ds-bubble),calc(100%_-_var(--reply-cap,0px)))]`);
     expect(col.style.getPropertyValue('--reply-cap')).toBe('128px'); // reverted (no variable) → '' and the cap never applies
     expect(meta.style.getPropertyValue('--reply-room')).toBe('36px');
     await render({ onOpenThread: null });

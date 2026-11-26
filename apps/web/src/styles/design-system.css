@@ -110,6 +110,8 @@
   --spacing-ds-nav: 16rem;
   --spacing-ds-chat-list: 25rem;
   --spacing-ds-side: 16rem;
+  /* story 5048 T0 ②c(키트): 말풍선 최대 폭 480 — `max-w-[min(72%,var(--container-ds-bubble))]` */
+  --container-ds-bubble: 30rem;
   /* 간격 단계: 4 · 8 · 12 · 16 · 24 · 32 — 키트의 실측 값이 모두 이 안에 든다(`p-ds-4` · `gap-ds-2` · `mt-ds-6`처럼 쓴다) */
   --spacing-ds-1: 0.25rem;
   --spacing-ds-2: 0.5rem;

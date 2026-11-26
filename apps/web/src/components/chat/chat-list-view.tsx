@@ -301,7 +301,7 @@ function ConversationRow({
       onClick={onClick}
       // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
       // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
-      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
+      className="h-auto min-h-ds-chat-row w-full items-center justify-start gap-3 rounded-ds-control px-3 py-3 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16" /* story 5048 T0 ②c(키트): 대화 목록 줄 88 · 아바타 40(64 · 좌우 16은 C1의 400 칸 뒤) · 이름 20 Medium · 미리보기 16 */
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
@@ -317,12 +317,12 @@ function ConversationRow({
           label={oneOnOneParticipant.name?.trim() || (isAgentConv ? t('agent') : 'DM')}
           avatarUrl={oneOnOneParticipant.avatar_url ?? null}
           actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
-          size={36}
+          size={40} /* story 5048 T0 ②c: the kit's 64 (and its 16 px row padding) needs the kit's 400 px list column (C1 · 민) — at today's ~248–280 px column a 64 px avatar cuts the computer name of the DM line (measured: 11 of 36 px read; 48 → 27 of 36); 40 is the kit's smallest avatar */
           runtimeType={(isAgentConv || oneOnOneParticipant.type === 'agent') ? (oneOnOneParticipant.runtime_type ?? null) : null}
         />
       ) : (
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
-          <Icon name={conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
+        <div className="flex size-10 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
+          <Icon name={conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={20} />
         </div>
       )}
 
@@ -332,7 +332,7 @@ function ConversationRow({
           {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
-          <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
+          <span className="truncate text-ds-card-title text-foreground">{displayName}</span>
           {/* story 4887 (UI-4 P2-b) — the time and the unread count share the title line (B3 row); the preview below keeps the whole width */}
           <span className="flex flex-shrink-0 items-center gap-1.5">
             <span className="text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
@@ -345,7 +345,7 @@ function ConversationRow({
         </div>
         {projectLabel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
-        <p className="truncate text-xs text-muted-foreground">{preview}</p>
+        <p className="truncate text-ds-small text-muted-foreground">{preview}</p>
       </div>
     </Button>
     </div>

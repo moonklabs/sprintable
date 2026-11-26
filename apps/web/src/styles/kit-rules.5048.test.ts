@@ -74,6 +74,7 @@ describe('키트 규칙 ① 크기 · 여백 — 간격 단계 · 조작 높이 
 
   it('⭐부품 규격의 큰 높이: 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240', () => {
     expect([rem('ds-bar'), rem('ds-head'), rem('ds-chat-row'), rem('ds-nav-item')]).toEqual([64, 80, 88, 240]);
+    expect(px(/--container-ds-bubble:\s*([\d.]+)rem;/, themeStatic) * 16).toBe(480); // story 5048 ②c: 말풍선 최대 폭(--container-ds-bubble)
   });
 
   it('⭐칸 폭 이름(셸 · 채팅이 읽는다): 왼쪽 탐색 256 · 대화 목록 400 · 옆 프로필 패널 256', () => {

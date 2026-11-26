@@ -767,7 +767,7 @@ export function ChatBubble({
             the row → page. With it, the column respects max-w and the inner content contains
             itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
         {/* story 4887 (UI-4 P6-a) — where a mouse can hover, the reply button (28 px + 4 px gap) and the continuation's hover time (≈ 47 px, 56 px with room for font and locale) sit OUTSIDE this column on its outer side, beside the 36 px avatar gutter: so — where that button is drawn (`--reply-cap`, not inside a thread) — the column may take at most the row's width minus 128 px (36 gutter + 36 button + 56 time), or the usual 72%, whichever is smaller. From a ~490 px window up the 72% still wins (nothing changes); in a narrower window the bubble gives way so the time stays on screen at any width. Touch has no hover time and its reply button sits in the time line below, so it keeps the plain 72%; so does a bubble inside a thread (no reply button there). */}
-        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] [@media(pointer:fine)_and_(hover:hover)]:max-w-[min(72%,calc(100%_-_var(--reply-cap,0px)))] flex-col gap-0.5 ${isMine && !plainRow ? 'items-end' : 'items-start'}${plainRow ? ' !max-w-full' : ''}`}
+        <div data-chat-content="" className={`relative flex min-w-0 max-w-[min(72%,var(--container-ds-bubble))] [@media(pointer:fine)_and_(hover:hover)]:max-w-[min(72%,var(--container-ds-bubble),calc(100%_-_var(--reply-cap,0px)))] flex-col gap-0.5 ${isMine && !plainRow ? 'items-end' : 'items-start'}${plainRow ? ' !max-w-full' : ''}`}
           style={onOpenThread ? ({ '--reply-cap': '128px' } as CSSProperties) : undefined}>
           {/* story 4887 (UI-4 P6-a · AC3 «답글 아이콘 상시»): the first reply used to sit behind a right-click / «⋯» menu (two hands). ONE reply control opens the thread at once, in the place each kind of device can use:
               · a MOUSE (this button — hover-capable, fine pointer): beside the bubble on its outer side, transparent until the row is hovered or holds keyboard focus (WCAG 1.4.13; the repo's HOVER_REVEAL shape — lib/hover-reveal.ts), still in the tab order (opacity, never display:none, on a mouse device);
@@ -817,16 +817,16 @@ export function ChatBubble({
           {isDeleted ? (
             // story #2319 — tombstone placeholder. 색/경고 없이 무채색(story #2299 AC⑤와 같은
             // 규율 — 「끊어짐」은 사실 표시일 뿐 에러가 아니다).
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-ds-ink-2 ${
-              isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
+            <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+              isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
             }`}>
               {t('deletedMessagePlaceholder')}
             </div>
           ) : isBlockedSender && !blockedMessageRevealed ? (
             // story #2349 — tombstone과 다르다: 서버는 내용을 그대로 내려준다. 여기서 클라가
             // 가리고, "보기"로 펼칠 수 있어야 한다(PO 규격 — 되돌릴 수 없는 tombstone과 구분).
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-ds-ink-2 ${
-              isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
+            <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+              isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
             }`}>
               {t('blockedSenderMessagePlaceholder')}{' '}
               <button
@@ -904,8 +904,8 @@ export function ChatBubble({
             hasAttachments ? null : (
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
               // 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
-              <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-ds-ink-2 ${
-                isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
+              <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+                isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
               }`} data-testid="chat-bubble-empty-placeholder">
                 {t('emptyMessagePlaceholder')}
               </div>
@@ -920,10 +920,10 @@ export function ChatBubble({
               plainRow
                 ? `rounded-lg ${isMine ? LAYER.rowMine : LAYER.rowOthers} px-3 py-2`
                 : isMine
-                  ? `rounded-xl rounded-tr-sm ${LAYER.rowMine} px-3.5 py-2`
+                  ? `rounded-ds-bubble rounded-tr-ds-tail ${LAYER.rowMine} px-4 py-3`
                   : isAgent
-                    ? `rounded-lg rounded-tl-sm ${LAYER.rowOthers} px-3.5 py-2`
-                    : `rounded-xl rounded-tl-sm ${LAYER.rowOthers} px-3.5 py-2`
+                    ? `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-4 py-3`
+                    : `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-4 py-3`
             }`} data-bubble={plainRow ? 'plain' : 'filled'}>
               {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는

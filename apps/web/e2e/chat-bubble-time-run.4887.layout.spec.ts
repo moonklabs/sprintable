@@ -22,7 +22,7 @@ function classesFromSource() {
   if (!cont) throw new Error('the continuation time line classes not found');
   return {
     row: pick(/className=\{`(group\/bubble flex scroll-mt-4 gap-2 transition-shadow )\$\{isMine/, 'the row'),
-    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
+    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[min\(72%,var\(--container-ds-bubble\)\)\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
     // story 4887 (UI-4 P4-b): the fill · rounding · padding are per-sender variants now — measure a person's bubble (mine / another's), the geometry the time rules were written against
     textMine: variants.mine,
