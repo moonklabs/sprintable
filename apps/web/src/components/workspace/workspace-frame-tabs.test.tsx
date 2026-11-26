@@ -163,14 +163,14 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     // 서버·첫 렌더와 하이드레이션 뒤 클래스가 같아 390에서 탭 높이가 30→37px로 바뀌던 흔들림 0.
     // story #4888 — 탭 한 칸의 모양은 ds TabNav가 쥔다(정의 하나): 폰은 누름 영역 44(min-h-11) · 밑줄 3px, 그 밖은 32 · 2px. 크기 분기는 CSS(touch:)라
     // 서버·첫 렌더와 하이드레이션 뒤 클래스가 같다(story #4222 — 390에서 30→37px 흔들림 0).
-    it('폰 누름 영역 44 · 밑줄 3px는 CSS(touch:)로 — 뷰포트 판정과 무관하게 같은 클래스(서버 = 최종)', async () => {
+    it('폰 누름 영역 44는 CSS(touch:)로(story 5048 ②b: 밑줄이 없어져 3px 밑줄 클래스도 없다) — 뷰포트 판정과 무관하게 같은 클래스(서버 = 최종)', async () => {
       const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
       const seen: string[] = [];
       for (const mobile of [true, false]) {
         isMobileMock = mobile;
         await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
         const cls = ([...container.querySelectorAll('[data-slot="ds-tab-nav-link"]')].find((t) => t.textContent === '보드')?.className ?? '');
-        for (const c of ['touch:min-h-ds-touch', 'touch:border-b-3', 'min-h-ds-compact']) expect(cls.split(/\s+/), `${mobile} ${c}`).toContain(c);
+        for (const c of ['touch:min-h-ds-touch', 'min-h-ds-control']) expect(cls.split(/\s+/), `${mobile} ${c}`).toContain(c);
         seen.push(cls);
       }
       expect(seen[0]).toBe(seen[1]);
