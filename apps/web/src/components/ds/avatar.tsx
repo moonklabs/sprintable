@@ -9,6 +9,9 @@ import { initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 import { Icon } from './icon';
 
+/** story 5048 T0 ②b(키트 결): 아바타 크기 눈금 — 모양(사람 둥근 사각 · 에이전트 원)은 그대로(D2). 대화 목록 줄(ListRow chat)은 `lg`(64). */
+export const avatarSizes = { sm: 40, md: 48, lg: 64, xl: 128 } as const;
+
 export interface AvatarProps {
   /** 이니셜 «재료». null/빈 값이면 아이콘 단계로 떨어진다(없는 글자를 지어내지 않는다 — shared/avatar와 같은 계약, story #3791). */
   name: string | null;
@@ -16,7 +19,7 @@ export interface AvatarProps {
   label?: string;
   avatarUrl?: string | null;
   actorType: 'human' | 'agent';
-  /** px 정사각. 기본 32. */
+  /** px 정사각. 기본 32. 키트 눈금은 `avatarSizes`(40 · 48 · 64 · 128). */
   size?: number;
   /** agent 전용 — 연결 축 점(우하단). 사람은 항상 미표시. */
   presenceStatus?: PresenceStatus | null;

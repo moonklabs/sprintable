@@ -18,7 +18,7 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
 }
 
 describe('TabsTrigger — 시트론 언더라인 + shadow 제거(story #2969 PR-3)', () => {
-  it('언더라인 의사요소(after)가 proof-citron이다', async () => {
+  it('언더라인 의사요소(after)가 ds-action이다(story 5048 ②b: 시트론 → 주 행동색)', async () => {
     const { el } = await mount(
       <Tabs defaultValue="a">
         <TabsList variant="line">
@@ -27,7 +27,7 @@ describe('TabsTrigger — 시트론 언더라인 + shadow 제거(story #2969 PR-
       </Tabs>,
     );
     const trigger = el.querySelector('[data-slot="tabs-trigger"]');
-    expect(trigger?.className).toContain('after:bg-proof-citron');
+    expect(trigger?.className).toContain('after:bg-ds-action');
     expect(trigger?.className).not.toContain('after:bg-foreground');
   });
 

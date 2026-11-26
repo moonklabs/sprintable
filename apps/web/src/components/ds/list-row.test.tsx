@@ -105,7 +105,17 @@ describe('ds ListRow', () => {
     expect(container.querySelector('[data-slot="ds-list-row"]')).toBeNull();
   });
 
-  it('⭐density=compact: 높이 36 · 폰 누름 44 이상 · 기본은 56', async () => {
+  it('⭐density=chat: 키트 대화 목록 줄 — 높이 88 · 이름 20 · 미리보기 16 · 폰 누름 44 이상(story 5048 T0 ②b)', async () => {
+    await act(async () => { root.render(<ListRow title="이름" subtitle="미리보기" density="chat" />); });
+    expect(row().getAttribute('data-density')).toBe('chat');
+    expect(row().className).toContain('min-h-ds-chat-row');
+    expect(row().className).toContain('touch:min-h-ds-touch');
+    expect(row().className).not.toContain('min-h-ds-row');
+    expect(container.querySelector('.truncate')!.className).toContain('text-ds-card-title');
+    expect(container.querySelector('[data-slot="ds-list-row-subtitle"]')!.className).toContain('text-ds-small');
+  });
+
+  it('⭐density=compact: 높이 40 · 폰 누름 44 이상 · 기본은 56', async () => {
     await act(async () => { root.render(<ListRow title="줄" />); });
     expect(row().className).toContain('min-h-ds-row');
     expect(row().getAttribute('data-density')).toBe('default');
