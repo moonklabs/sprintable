@@ -140,7 +140,7 @@ describe('HypothesisGateBadge — 4909 ds Chip + 글 줄 면 + ds Button', () =>
     await mount(<HypothesisGateBadge hypothesis={HYP()} gate={GATE('pending')} resolverId="me-1" />);
     const approve = btn(T.gateApprove); const reject = btn(T.gateReject);
     expect([approve, reject].every((b) => b.getAttribute('data-slot') === 'ds-button')).toBe(true);
-    expect(tokens(approve)).toContain('border-ds-line-control'); // secondary
+    expect(tokens(approve)).toContain('bg-ds-surface-sunk'); // secondary
     expect(tokens(reject)).toContain('text-ds-failed'); // danger
     await act(async () => { reject.click(); });
     expect(q('input').getAttribute('data-slot')).toBe('ds-input');

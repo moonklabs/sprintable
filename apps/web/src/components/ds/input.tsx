@@ -9,7 +9,7 @@ import { FIELD_FOCUS } from './field-focus';
 // 글자 크기: 폰(기본)은 16px(text-base) — iOS Safari는 16px 미만 입력칸을 누르면 화면을 확대한다(story #4410, 현행 `ui/input`과 같은 규칙). lg 이상은 본문 13(ds-body).
 // `color-scheme`: 브라우저 기본 날짜 · 시간 칸의 달력 아이콘이 어두운 화면에서도 보이게 한다(앱 테마는 `.dark` 클래스라 브라우저에 따로 알려야 한다).
 const FIELD =
-  '[color-scheme:light] dark:[color-scheme:dark] w-full min-w-0 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-3 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body ' +
+  '[color-scheme:light] dark:[color-scheme:dark] w-full min-w-0 rounded-ds-control border border-ds-line-control bg-ds-surface px-4 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body ' +
   `placeholder:text-ds-ink-3 ${FIELD_FOCUS} ` +
   `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_INPUT_FACE} ` +
   'aria-invalid:border-ds-failed';
@@ -18,7 +18,7 @@ const FIELD =
 export type InputProps = Omit<ComponentProps<typeof InputPrimitive>, 'className'> & { className?: string };
 
 /**
- * UI-3(a9d56577) Input — doc §4 #3. 높이 40(폰 = coarse 포인터는 44 — 누름 영역 · story 5048 T0 ①: 조작 높이 40 하나) · `surface-sunk` 바탕 · `line-control` 경계(3:1) · 초점 = `action` 경계 + 링 · 오류(`aria-invalid`) = `failed` 경계.
+ * UI-3(a9d56577) Input — doc §4 #3. 높이 40(폰 = coarse 포인터는 44 — 누름 영역 · story 5048 T0 ①: 조작 높이 40 하나) · `surface`(흰 칸) 바탕 · `line-control` 경계(3:1 — 키트 «흰 칸 + 선», 회색 채움은 걷음 · story 5048 T0 ②a) · 초점 = `action` 경계 + 링 · 오류(`aria-invalid`) = `failed` 경계.
  * 오류는 색만으로 말하지 않는다 — 보이는 글과 아이콘은 `Field`가 칸 아래에 붙인다(Input 혼자 쓰면 호출부가 오류 글을 준다).
  */
 export function Input({ className, ...props }: InputProps) {

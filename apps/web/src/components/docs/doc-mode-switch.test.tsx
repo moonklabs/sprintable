@@ -30,11 +30,11 @@ describe('DocModeSwitch', () => {
   it('⭐the current side carries aria-current="page" and the secondary look; the other is quiet with no aria-current', async () => {
     await mount('read');
     expect(links().map((a) => a.getAttribute('aria-current'))).toEqual(['page', null]);
-    expect(links()[0]!.className.split(/\s+/)).toContain('border-ds-line-control');
-    expect(links()[1]!.className.split(/\s+/)).toContain('border-transparent');
+    expect(links()[0]!.className.split(/\s+/)).toContain('bg-ds-surface-sunk');
+    expect(links()[1]!.className.split(/\s+/)).toContain('bg-transparent');
     await mount('edit');
     expect(links().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page']);
-    expect(links()[1]!.className.split(/\s+/)).toContain('border-ds-line-control');
+    expect(links()[1]!.className.split(/\s+/)).toContain('bg-ds-surface-sunk');
   });
 
   it('both sides are ds buttons', async () => {

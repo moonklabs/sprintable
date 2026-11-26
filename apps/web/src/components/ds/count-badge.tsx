@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
  * 한 방에 둘 다 있으면 호출부가 배지를 둘 그린다(호박 먼저). 99를 넘으면 «99+».
  */
 export const countBadgeVariants = cva(
-  'inline-grid h-4 min-w-4.5 shrink-0 place-items-center rounded-ds-tag px-1 font-mono text-ds-mono-sm font-semibold',
+  'inline-grid h-4 min-w-4.5 shrink-0 place-items-center rounded-ds-tag px-1 font-mono text-ds-mono-sm font-medium', // story 5048 T0 ②a(키트): 글자 Medium — 칸 크기는 그대로(숫자 배지가 내비게이션 레일의 아이콘을 덮지 않는 크기 · 레일 배치는 C1)
   {
     variants: {
       kind: {

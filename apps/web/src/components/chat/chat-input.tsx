@@ -1077,7 +1077,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         <DsButton
           type="button"
           variant={(steerMode ? canSteerSend : canSend) ? 'primary' : 'quiet'}
-          className="flex-shrink-0 disabled:border-transparent max-sm:ms-auto @max-2xs:ms-auto"
+          className="flex-shrink-0 px-3 disabled:border-transparent max-sm:ms-auto @max-2xs:ms-auto"
           onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
           disabled={steerMode ? !canSteerSend : !canSend}
           aria-label={t('sendAction')}

@@ -71,10 +71,10 @@ describe('목표 화면(4909) — 틀 = 바탕, 카드 = 내용 칸', () => {
     expect(HYPOTHESES_FACE).toBe(LAYER.panel);
     expect(GOALS_FRAME_FACE).not.toBe(HYPOTHESES_FACE);
   });
-  it.each(themes)('⭐%s: 가설 카드 → 결재 띠 면(글 줄 층) ≥ 0.05 · 카드 → 양식 입력칸(입력칸 층) ≥ 0.05', (_name, t) => {
+  it.each(themes)('⭐%s: 가설 카드 → 결재 띠 면(글 줄 층) ≥ 0.05 · 양식 입력칸(입력칸 층 = 내용 칸 면)은 경계 line-control 3:1 이상', (_name, t) => {
     expect(HYPOTHESIS_BAND_FACE).toBe(LAYER.rowOthers);
     expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
-    expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
+    expect(contrast(t['line-control']!, t[LAYER_TOKEN.field]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldBoundary);
   });
   it.each(themes)('⭐%s: 바탕 → 가설 카드 면 ≥ 0.03 (라이트 +.030 · 다크 +.036 — 옛 카드는 −.018 / −.004라 갈리지 않았다)', (_name, t) => {
     expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
@@ -82,11 +82,11 @@ describe('목표 화면(4909) — 틀 = 바탕, 카드 = 내용 칸', () => {
 });
 
 describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
-  it.each(themes)('⭐%s: 바탕 → 내용 칸 ≥ 0.03 · 내용 칸 → 남의 글 ≥ 0.05 · 내 글 ≥ 0.09 · 입력칸 ≥ 0.05', (_name, t) => {
+  it.each(themes)('⭐%s: 바탕 → 내용 칸 ≥ 0.03 · 내용 칸 → 남의 글 ≥ 0.05 · 내 글 ≥ 0.09 · 입력칸은 경계 3:1(면은 내용 칸과 같다)', (_name, t) => {
     expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
     expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
     expect(step(t, 'panel', 'rowMine')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowMineOnPanel);
-    expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
+    expect(contrast(t['line-control']!, t[LAYER_TOKEN.field]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldBoundary);
   });
 
   it.each(themes)('⭐%s: 카드 상세(4908) — 서랍(panel) → 속성 칸(rowOthers) 밝기차 ≥ 0.05, 그 칸 안 흐린 글(ink-3)은 4.5:1 이상', (_name, t) => {
@@ -98,8 +98,9 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(step(t, 'rowOthers', 'panel'), '속성 칸 → 입력칸 면').toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 
-  it('⭐옛 문제 재현 가드(4908): 속성 칸 위에 LAYER.field(sunk)를 얹으면 라이트에서 면이 안 갈린다(0.012) — 그래서 입력칸 면은 panel이다', () => {
-    expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.rowOthersOnPanel);
+  it.each(themes)('⭐%s: 입력칸 면(LAYER.field)은 내용 칸 면(panel)과 같고 — 그래서 속성 칸(rowOthers) 위에서도 면이 갈린다(옛 문제 4908: 회색 입력칸 sunk는 라이트에서 0.012라 안 갈렸다)', (_name, t) => {
+    expect(LAYER_TOKEN.field).toBe(LAYER_TOKEN.panel);
+    expect(step(t, 'rowOthers', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 
   it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(무채색 쌍은 밝기차 ≥ 0.02 · 왼쪽 막대와 함께 가른다)', (_name, t) => {
@@ -130,7 +131,8 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   });
 
   it('층마다 토큰이 서로 다르다(같은 토큰을 두 층에 쓰지 않는다) · 클래스 이름이 토큰 이름을 가리킨다', () => {
-    const tokens = Object.values(LAYER_TOKEN);
+    // story 5048 T0 ②a: 입력칸(field)은 일부러 내용 칸(panel)과 «같은 면»(키트: 흰 칸 + 선) — 나머지 층끼리는 서로 달라야 한다
+    const tokens = Object.entries(LAYER_TOKEN).filter(([k]) => k !== 'field').map(([, v]) => v);
     expect(new Set(tokens).size).toBe(tokens.length);
     for (const key of Object.keys(LAYER) as Array<keyof typeof LAYER>) expect(LAYER[key]).toBe(`bg-ds-${LAYER_TOKEN[key]}`);
   });
@@ -237,11 +239,12 @@ describe('화면 층 규칙 — 바탕(page) 위 말풍선 · 입력칸 (4916)',
   it.each(themes)('⭐%s: 바탕 → 남의 글 ≥ 0.05 · 내 글 ≥ 0.09 · 입력칸 ≥ 0.03(경계가 함께 가른다) — 방 안에 따로 까는 판이 없어도 말풍선이 보인다', (_name, t) => {
     expect(step(t, 'page', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPage);
     expect(step(t, 'page', 'rowMine')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowMineOnPage);
-    expect(step(t, 'page', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPage);
+    expect(step(t, 'page', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
   });
 
   it.each(themes)('⭐%s: 값을 옮긴 뒤에도 옛 선은 그대로 — 내용 칸 → 입력칸 ≥ 0.05 · 카드 면 → 우물 ≥ 0.03 · 열린 카드 ↔ 글 줄 채도차 ≥ 0.01(무채색 쌍은 밝기차 ≥ 0.02)', (_name, t) => {
-    expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
+    expect(contrast(t['line-control']!, t[LAYER_TOKEN.field]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldBoundary);
+    expect(contrast(t['line-control']!, t[LAYER_TOKEN.page]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldBoundary);
     expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
     selectedVsOthers(t);
   });
@@ -310,8 +313,8 @@ describe('루프 상세(4911) — 바탕 → 카드 → 후보 타일 → 우물
     expect(contrast(tk['ink-3']!, tk[LAYER_TOKEN.well]!)).toBeLessThan(4.5);
   });
 
-  it('⭐옛 문제 재현 가드: 타일 면(rowOthers) 위에 입력칸 면(sunk)을 얹으면 라이트에서 면이 안 갈린다 — 그래서 이유 칸은 panel이다', () => {
-    expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.fieldOnPanel);
+  it.each(themes)('⭐%s: 타일 면(rowOthers) 위의 이유 칸(입력칸 = panel 면)은 면이 갈린다(옛 문제: 회색 입력칸 sunk는 라이트에서 안 갈렸다)', (_name, t) => {
+    expect(step(t, 'rowOthers', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 });
 

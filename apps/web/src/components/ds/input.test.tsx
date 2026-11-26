@@ -24,11 +24,12 @@ const input = () => container.querySelector('[data-slot="ds-input"]') as HTMLInp
 const area = () => container.querySelector('[data-slot="ds-textarea"]') as HTMLTextAreaElement;
 
 describe('ds Input', () => {
-  it('높이 36 · sunk 바탕 · line-control 경계 · 초점 action', async () => {
+  it('높이 40 · 흰 바탕 · line-control 경계(3:1) · 초점 중립', async () => {
     await render(<Input aria-label="이름" />);
     const cls = input().className;
     expect(cls).toContain('h-ds-control');
-    expect(cls).toContain('bg-ds-surface-sunk');
+    expect(cls).toContain('bg-ds-surface'); // story 5048 ②a(D4): 흰 칸 + #818181 3:1 경계
+    expect(cls).not.toContain('bg-ds-surface-sunk');
     expect(cls).toMatch(/(^|\s)border-ds-line-control(\s|$)/);
     // 4906 · 글 칸의 초점 = 중립 테두리 한 단계 짙어짐 — 파란 틀(action 테두리 · 고리) 0
     expect(cls).toContain('focus-visible:border-ds-ink-2');
@@ -79,7 +80,7 @@ describe('ds Textarea', () => {
     const cls = area().className;
     expect(cls).toContain('min-h-16');
     expect(cls).toContain('resize-y');
-    expect(cls).toContain('bg-ds-surface-sunk');
+    expect(cls).toContain('bg-ds-surface');
     expect(cls).toContain('aria-invalid:border-ds-failed');
     expect(cls).toMatch(/(^|\s)text-base(\s|$)/);
   });

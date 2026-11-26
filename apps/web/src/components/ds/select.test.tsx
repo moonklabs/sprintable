@@ -30,11 +30,12 @@ describe('ds NativeSelect', () => {
     expect(sel().getAttribute('aria-label')).toBe('역할');
   });
 
-  it('Input과 같은 모양: 높이 36 · sunk · line-control 경계 · 초점 action · 폰 16px / lg 13', async () => {
+  it('Input과 같은 모양: 높이 40 · 흰 바탕 · line-control 경계 · 초점 action · 폰 16px / lg 13', async () => {
     await render(<NativeSelect aria-label="역할"><option>x</option></NativeSelect>);
     const cls = sel().className;
     expect(cls).toContain('h-ds-control');
-    expect(cls).toContain('bg-ds-surface-sunk');
+    expect(cls).toContain('bg-ds-surface');
+    expect(cls).not.toContain('bg-ds-surface-sunk');
     expect(cls).toMatch(/(^|\s)border-ds-line-control(\s|$)/);
     expect(cls).toContain('focus-visible:border-ds-ink-2');
     expect(cls).not.toMatch(/focus(-visible|-within)?:(ring|border)-ds-action/);

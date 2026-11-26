@@ -65,7 +65,7 @@ describe('[SID:4891] RegisterPage on ds parts', () => {
     root.unmount(); root = createRoot(container);
     await mount(true);
     expect(submit().className).not.toContain('bg-ds-action');
-    expect(submit().className.split(/\s+/)).toContain('border-ds-line-control'); // the ds secondary look: the EXACT class token (a substring would also match every variant's «disabled:border-ds-line-control»)
+    expect(submit().className.split(/\s+/)).toContain('bg-ds-surface-sunk'); // the ds secondary look: the EXACT class token (a substring would also match every variant's «disabled:border-ds-line-control»)
   });
 
   it('⭐Google: unticked → no address, announced as unavailable (aria-disabled), the press still reaches it (pointer events back on) and says why in an alert; ticked → the address with the consent and the page to return to', async () => {

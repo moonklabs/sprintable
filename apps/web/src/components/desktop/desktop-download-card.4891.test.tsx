@@ -69,7 +69,7 @@ describe('[SID:4891] DesktopDownloadCard on ds parts', () => {
     await draw(<DesktopDownloadCard ctaVariant="outline" />);
     const secondary = q('desktop-download-button')!;
     expect(secondary.className.split(/\s+/)).not.toContain('bg-ds-action');
-    expect(secondary.className).toContain('border-ds-line-control');
+    expect(secondary.className).toContain('bg-ds-surface-sunk');
   });
 
   it('an un-notarized build: the first-open guide is a ds Banner with the title · the two steps · the old-Mac line · the notice; a notarized one has none', async () => {

@@ -84,7 +84,7 @@ for (const width of [320, 360, 390, 639]) {
 }
 
 for (const width of [640, 1100, 1440]) {
-  test(`[SID:4906] ${width}: one row as before — the label left, the select right of it (what the label leaves, up to 320) × 36`, async ({ page }) => {
+  test(`[SID:4906] ${width}: one row as before — the label left, the select right of it (what the label leaves, up to 320) × 40`, async ({ page }) => {
     await open(page, width);
     const g = await geometry(page);
     expect(g.sel.x, 'the select is right of the label').toBeGreaterThanOrEqual(g.label.r - 1);
@@ -93,6 +93,6 @@ for (const width of [640, 1100, 1440]) {
     // the label keeps its one 310 px line (`sm:flex-shrink-0`), the select takes what is left up to `max-w-xs` (320): 289 at 640 (as before — the row was always one line), 320 from ~ 666 up
     const left = Math.round(width - 32 - g.label.w - 8);
     expect(Math.abs(Math.round(g.sel.w) - Math.min(320, left)), `the select is ${g.sel.w} wide: what the label leaves (${left}) up to 320`).toBeLessThanOrEqual(1);
-    expect(Math.round(g.sel.h), 'and 36 high (h-9)').toBe(36);
+    expect(Math.round(g.sel.h), 'and 40 high (the one control height — story 5048 T0 ②a: the ui select follows the kit, it was h-9)').toBe(40);
   });
 }

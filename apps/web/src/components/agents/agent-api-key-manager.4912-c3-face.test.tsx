@@ -54,7 +54,7 @@ describe('AgentApiKeyManager — 4912 C3: the ds face', () => {
 
   it('⭐단추: 새로고침 = secondary · 키 바꾸기 = primary · 키 줄의 무효화 = danger (옛 ui 단추 변형이 아니다)', async () => {
     await mount(false);
-    expect(btn(S.agentApiKeyRefresh).className).toContain('border-ds-line-control');
+    expect(btn(S.agentApiKeyRefresh).className).toContain('bg-ds-surface-sunk');
     expect(btn(S.agentApiKeyReplaceCta).className).toContain('bg-ds-action');
     expect(btn(S.agentApiKeySingleRevokeConfirmCta).className).toContain('border-ds-failed');
   });

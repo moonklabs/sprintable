@@ -44,7 +44,7 @@ describe('[SID:4891] EmailVerifyGateCard on ds parts', () => {
     const g = gateOf();
     await draw(g);
     expect(btn(T.resend).getAttribute('data-slot')).toBe('ds-button');
-    expect(btn(T.resend).className.split(/\s+/)).toContain('border-ds-line-control'); // the ds secondary look: the EXACT class token (a substring would also match every variant's «disabled:border-ds-line-control»)
+    expect(btn(T.resend).className.split(/\s+/)).toContain('bg-ds-surface-sunk'); // the ds secondary look: the EXACT class token (a substring would also match every variant's «disabled:border-ds-line-control»)
     await act(async () => { btn(T.resend).click(); });
     expect(g.sendAgain).toHaveBeenCalledTimes(1);
     expect(btn(T.otherAddress).getAttribute('data-slot')).toBe('ds-button');

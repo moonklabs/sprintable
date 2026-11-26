@@ -349,7 +349,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const withVersion = (r: DesktopRuntime) => query.versions?.[r];
   return (
     <div className="flex flex-col gap-3">
-      <Card className="break-keep flex flex-col gap-5 overflow-clip p-6" data-testid="quick-card">
+      <Card className="break-keep flex flex-col gap-4 overflow-clip p-6" data-testid="quick-card">{/* story 5048 T0 ②a: gap-5 → gap-4 — the name · role fields are 40 high now (ui Input follows the kit, they were 36); the 4 px per gap brings the role field back above the stuck row on a 539 px window */}
         {/* story 4710 (Yuna 4710-copy-1016 · the correction's «{name} 에이전트 시작하기»): from a hire the card is about THAT agent */}
         <h1 className="text-lg font-semibold">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
 
