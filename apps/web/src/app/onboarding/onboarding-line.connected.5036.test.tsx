@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
+import { readLineProject, writeLineProject } from '@/lib/onboarding/line-project';
 
 // the stand-in: shows the project it was given and tells the page that agent-9 connected when pressed
 vi.mock('./advanced-connect', () => ({
@@ -27,8 +28,10 @@ let root: Root;
 let hrefs: string[];
 const originalLocation = window.location;
 
+let channel = false; // the project already has its channel room (story 5032 · C2): step ③ opens THAT
 let reentry = false; // the organization already has an agent that connected through the key way before this page was opened
 beforeEach(() => {
+  channel = false;
   reentry = false;
   hrefs = [];
   calls = [];
@@ -49,6 +52,7 @@ beforeEach(() => {
     if (path === '/api/current-project' || path === '/api/onboarding/events') return ok({});
     if (path === '/api/activation/checklist') return ok({ data: { steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: false, first_roundtrip: false }, completed: 3, total: 5, all_complete: false, first_instruction_conversation_id: null } });
     if (path === '/api/conversations' && method === 'POST') return ok({ id: 'conv-9' });
+    if (channel && path === '/api/conversations' && method === 'GET') return ok({ data: [{ id: 'dm-0', is_project_channel: false }, { id: 'chan-9', is_project_channel: true }] });
     if (reentry && path === '/api/team-members' && method === 'GET') return ok({ data: [{ id: 'agent-7', name: '내 에이전트' }] });
     if (reentry && path === '/api/agents/agent-7/verification-status') return ok({ data: { verified: true, rail: [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'done' }, { state: 'mcp_reachable', status: 'done' }, { state: 'verified', status: 'done' }] } });
     return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
@@ -58,6 +62,7 @@ beforeEach(() => {
   root = createRoot(container);
 });
 afterEach(async () => {
+  sessionStorage.clear();
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
@@ -93,6 +98,48 @@ describe('[SID:5036] ③ after the key way — the form moves on and opens the c
     // the agent is known, so the project's agent list is not read to guess one
     expect(calls.filter((c) => c.url.startsWith('/api/team-members')).length).toBe(listReadsAtThree);
     expect(hrefs.at(-1)).toBe('/chats/conv-9?p=proj-1');
+  });
+
+  it('K3 every way out of step ③ uses the first-run line\'s mark up — the way out, and a room that could not be opened (codex 5036)', async () => {
+    const mount3 = async () => {
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><OnboardingForm todayHref="/today" chatsHref="/chats" /></NextIntlClientProvider>); });
+      await flush();
+      await press(q('stub-key-way'));
+    };
+    writeLineProject({ orgId: 'org-1', projectId: 'proj-1' });
+    await mount3();
+    await press(q('onboarding-first-chat-finish'));
+    expect(readLineProject()).toBeNull(); // reverted (the mark is only used when a room opens) → still there
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    writeLineProject({ orgId: 'org-1', projectId: 'proj-1' });
+    channel = false; // no channel and the DM cannot be made either
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/conversations' && (init?.method ?? 'GET').toUpperCase() === 'POST') return { ok: false, status: 500, headers: new Headers(), json: async () => ({}) };
+      return (realFetch as typeof fetch)(input, init);
+    }));
+    await mount3();
+    await press(q('onboarding-first-chat-start'));
+    expect(readLineProject()).toBeNull();
+  });
+
+  it('K2 the project has its channel → [첫 지시 보내기] opens THE CHANNEL of that project (PO 11-26 (나)), and no DM is made', async () => {
+    channel = true;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <OnboardingForm todayHref="/today" chatsHref="/chats" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    await press(q('stub-key-way'));
+    await press(q('onboarding-first-chat-start'));
+    expect(calls.some((c) => c.method === 'GET' && c.url.startsWith('/api/conversations?') && c.url.includes('project_id=proj-1'))).toBe(true);
+    // reverted (the DM is made as before) → a POST here and conv-9 below
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/conversations')).toEqual([]);
+    expect(hrefs.at(-1)).toBe('/chats/chan-9?p=proj-1');
   });
 
   it('R1 coming back after the key way connected (a reload): step ② draws the line over the three ways · [첫 대화로] → step ③ with THAT agent, and the first instruction goes to it', async () => {

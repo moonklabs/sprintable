@@ -23,6 +23,7 @@ import { SetupProgressView } from './desktop-setup-progress';
 import { parseSetupFragment } from '@/lib/desktop-setup';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { __resetOrgRemoteControlForTest } from '@/lib/org-remote-control';
+import { readLineProject, writeLineProject } from '@/lib/onboarding/line-project';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1222,3 +1223,114 @@ describe('[SID:4934] the free plan\'s one project is asked at the folder pick, a
     expect(container.querySelector('[data-testid=quick-folder]')!.parentElement!.querySelector('a')!.className).toContain('scroll-mb-32');
   });
 });
+
+describe('[SID:5036 · C6] the first-run line in the Mac app: the project step ① made is the one the agent is seated in (PO 11-26 (가) — no second project)', () => {
+  const FOLDER = '&fshown=~/code/my-app&fname=my-app';
+  const LINE = '22222222-2222-4222-8222-222222222222';
+  const orgs = { projectId: LINE, projects: [{ projectId: LINE, projectName: '내 프로젝트', orgId: 'o-1' }] };
+  const solos = () => calls.filter((c) => c.url.endsWith('/confirm-solo'));
+  const start = async () => { await act(async () => { buttonOf('만들기')!.click(); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('the line\'s mark → the card says the agent goes into THAT project, and the one confirm-solo carries its id and NO project name (no second project is made)', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: LINE });
+    await mount(frag(FOLDER), orgs);
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).toContain('내 프로젝트');
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).not.toContain('my-app');
+    await start();
+    expect(solos().length).toBe(1);
+    // reverted (the card makes a project by the folder's name) → `project_name: 'my-app'` and no `project_id` here
+    expect(solos()[0]!.body).toEqual({ code: CODE, runtime: 'claude', project_id: LINE, agent_name: 'Claude Code', folder_name: 'my-app' });
+    expect(calls.filter((c) => c.url.startsWith('/api/projects') && c.method === 'POST')).toEqual([]);
+  });
+
+  it('without the mark the card is exactly what it was: a project by the folder\'s name', async () => {
+    await mount(frag(FOLDER), orgs);
+    await start();
+    expect(solos()[0]!.body).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app', agent_name: 'Claude Code', folder_name: 'my-app' });
+  });
+
+  it('a mark of ANOTHER organization is not used', async () => {
+    writeLineProject({ orgId: 'o-other', projectId: LINE });
+    await mount(frag(FOLDER), orgs);
+    await start();
+    expect(solos()[0]!.body).toMatchObject({ project_name: 'my-app' });
+  });
+
+  it('a marked project this organization does not have is not used (the mark is checked against what the organization really has)', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: '33333333-3333-4333-8333-333333333333' });
+    await mount(frag(FOLDER), orgs);
+    await start();
+    expect(solos()[0]!.body).toMatchObject({ project_name: 'my-app' });
+  });
+
+  it('a folder the app already knows a project for keeps THAT project (the app\'s own record wins over the mark)', async () => {
+    const KNOWN = '44444444-4444-4444-8444-444444444444';
+    writeLineProject({ orgId: 'o-1', projectId: LINE });
+    await mount(frag(`${FOLDER}&fproject=${KNOWN}`), { projectId: LINE, projects: [{ projectId: LINE, projectName: '내 프로젝트', orgId: 'o-1' }, { projectId: KNOWN, projectName: 'Known', orgId: 'o-1' }] });
+    await start();
+    expect(solos()[0]!.body).toMatchObject({ project_id: KNOWN });
+    // the agent did NOT go into the line's project, so the mark is used up: the progress screen must not open that project's channel (codex 5036)
+    expect(readLineProject()).toBeNull();
+  });
+
+  it('seated in the line\'s project → the mark stays for the progress screen\'s step ③ (the server\'s answer names that project)', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: LINE });
+    confirmNow = () => new Response(JSON.stringify({ project_id: LINE, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag(FOLDER), orgs);
+    await start();
+    expect(solos()[0]!.body).toMatchObject({ project_id: LINE });
+    expect(readLineProject()).toEqual({ orgId: 'o-1', projectId: LINE });
+  });
+});
+
+describe('[SID:5036 · C6] the solo start\'s end for the person on the first-run line: the project\'s channel is the first conversation (step ③)', () => {
+  const status = (room: string | null) => ({
+    setup_id: 's-1', device_name: 'Mac', state: 'handed_over', recipe_name: null, recipe: null, work_item_id: null, setup_kind: 'solo', conversation_id: room,
+    members: [{ stage: null, role: null, member_id: 'm-1', kind: 'agent', runtime: 'claude', name: 'Claude Code' }],
+    signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null },
+  });
+  async function progress(rows: Response | null) {
+    ctx.mockReturnValue({ projectId: PROJ, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/conversations?')) return rows ?? new Response('{}', { status: 404 });
+      return new Response(JSON.stringify(status('c-1')), { status: 200 });
+    }));
+    const assign = vi.fn();
+    const real = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, pathname: real.pathname, search: real.search, hash: real.hash, assign } });
+    try {
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SetupProgressView setupId="s-1" recipeName="" /></NextIntlClientProvider>); });
+      for (let i = 0; i < 14; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    } finally { Object.defineProperty(window, 'location', { configurable: true, value: real }); }
+    return assign;
+  }
+  const channelRows = () => new Response(JSON.stringify({ data: [{ id: 'dm-1', is_project_channel: false }, { id: 'chan-1', is_project_channel: true }] }), { status: 200 });
+
+  it('the mark → the room that opens by itself is the project\'s channel (not the start\'s own conversation), once, and the mark is used up', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: PROJ });
+    const assign = await progress(channelRows());
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(String(assign.mock.calls[0][0])).toContain('/chats/chan-1'); // reverted (the conversation of the start) → /chats/c-1
+  });
+
+  it('the mark but no channel found → the start\'s own conversation, as before (never stranded)', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: PROJ });
+    const assign = await progress(null);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(String(assign.mock.calls[0][0])).toContain('/chats/c-1');
+  });
+
+  it('a mark of a project the tab is NOT on (stale) → the start\'s own conversation, never that project\'s channel (codex 5036)', async () => {
+    writeLineProject({ orgId: 'o-1', projectId: '55555555-5555-4555-8555-555555555555' }); // the tab is on PROJ
+    const assign = await progress(channelRows());
+    expect(String(assign.mock.calls[0][0])).toContain('/chats/c-1');
+  });
+
+  it('no mark → the start\'s own conversation, and the project\'s rooms are not even read (nothing is awaited for someone who did not come through the line)', async () => {
+    const assign = await progress(channelRows());
+    expect(String(assign.mock.calls[0][0])).toContain('/chats/c-1');
+    expect((globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((c) => String(c[0]).startsWith('/api/conversations?'))).toBe(false);
+  });
+});
+

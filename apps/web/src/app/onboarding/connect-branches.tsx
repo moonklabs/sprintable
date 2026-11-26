@@ -29,13 +29,15 @@ interface ConnectBranchesProps {
   projectId: string;
   /** false: a computer that is not a Mac — the two app ways say why they are not offered */
   isMac: boolean;
+  /** story 5036: this page runs inside the Mac app — the two app ways are done HERE (their press hands the app's start screen over, which the shell takes as its own link), so «데스크톱 앱에서 해요» · the download · the phone's card are not drawn */
+  inApp?: boolean;
   /** the key way's agent connected (its first call was seen) */
   onConnected: (agentId: string) => void;
   /** the key way is making things: the page's other way out waits */
   onWorking: (working: boolean) => void;
 }
 
-export function ConnectBranches({ orgId, projectId, isMac, onConnected, onWorking }: ConnectBranchesProps) {
+export function ConnectBranches({ orgId, projectId, isMac, inApp = false, onConnected, onWorking }: ConnectBranchesProps) {
   const t = useTranslations('onboarding.line');
   const tFirst = useTranslations('onboarding.first');
   const tDownload = useTranslations('onboarding.download');
@@ -46,13 +48,13 @@ export function ConnectBranches({ orgId, projectId, isMac, onConnected, onWorkin
     <Card key={id} className="space-y-3 p-4" data-testid={`connect-branch-${id}`}>
       <div className="flex items-start justify-between gap-2">
         <h2 className="break-keep text-ds-card-title font-semibold text-ds-ink">{t(id === 'new' ? 'branchNewTitle' : 'branchMoveTitle')}</h2>
-        <Chip>{t('inApp')}</Chip>
+        {inApp ? null : <Chip>{t('inApp')}</Chip>}
       </div>
       <p className="break-keep text-ds-body text-ds-ink-2">{t(id === 'new' ? 'branchNewBody' : 'branchMoveBody')}</p>
       {isMac ? (
         <Button asChild variant="secondary" size="lg" className="w-full">
           <a href={id === 'new' ? appSetupLink(null) : appSetupLink(null, 'move')} data-testid={`connect-branch-${id}-open`}>
-            {t(id === 'new' ? 'openAppNew' : 'openAppMove')}
+            {inApp ? t(id === 'new' ? 'startNew' : 'startMove') : t(id === 'new' ? 'openAppNew' : 'openAppMove')}
           </a>
         </Button>
       ) : (
@@ -74,7 +76,7 @@ export function ConnectBranches({ orgId, projectId, isMac, onConnected, onWorkin
         <AdvancedConnect orgId={orgId} projectId={projectId} onConnected={onConnected} onWorking={onWorking} />
       </Card>
 
-      {isMac ? (
+      {inApp ? null : isMac ? (
         <div className="space-y-2" data-testid="connect-branches-download">
           <p className="break-keep text-ds-small text-ds-ink-3">{t('noAppYet')}</p>
           {/* the 3983 funnel's «went the desktop way» signal — sent on the download press, as the first screen always did */}

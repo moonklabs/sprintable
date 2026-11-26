@@ -51,10 +51,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const render = async (strict = false) => {
+const render = async (strict = false, extra: { appLine?: boolean } = {}) => {
   const screen = (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} />
+      <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} {...extra} />
     </NextIntlClientProvider>
   );
   await act(async () => { root.render(strict ? <StrictMode>{screen}</StrictMode> : screen); });
@@ -62,6 +62,23 @@ const render = async (strict = false) => {
 const has = (id: string) => !!container.querySelector(`[data-testid="${id}"]`);
 
 describe('FirstScreen inside the Mac app (story 4763 AC14)', () => {
+  it('[SID:5036] a Mac app person ON THE FIRST-RUN LINE (a new account — the form says appLine) is not sent away: the three ways are the screen, in their in-app shape', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    await render(false, { appLine: true });
+    expect(replace).not.toHaveBeenCalled(); // reverted (every Mac app person is sent to the start screen) → called here
+    expect(has('connect-branches')).toBe(true);
+    expect(has('connect-branch-new-open')).toBe(true);
+    expect(has('connect-branches-download')).toBe(false); // already in the app: no download card
+    expect(container.textContent).not.toContain('데스크톱 앱에서 해요');
+  });
+
+  it('[SID:5036] the project id alone does not make it the line — only the form\'s appLine does (anyone else in the app goes to the start screen as before)', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    await render(false, {});
+    expect(replace).toHaveBeenCalledWith('/desktop/setup');
+    expect(has('connect-branches')).toBe(false);
+  });
+
   it('goes to the app\'s setup page once, and draws no download card', async () => {
     (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
     await render();

@@ -1891,6 +1891,8 @@
       "stateUpcoming": "다음 단계",
       "defaultProjectName": "내 프로젝트",
       "projectCheckFailed": "프로젝트를 확인하지 못했어요 — 확인한 뒤에 만들어요",
+      "startNew": "새로 만들기 시작",
+      "startMove": "옮기기 시작",
       "connectedBefore": "이미 연결된 에이전트가 있어요",
       "connectedGo": "첫 대화로",
       "connectTitle": "에이전트를 연결해요",
