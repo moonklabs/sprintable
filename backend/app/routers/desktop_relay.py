@@ -453,7 +453,10 @@ async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSess
     retry = hit_person_limits("desktop-capabilities", str(setup.id), capability_set.PULL_LIMIT)
     if retry is not None:
         raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
-    out = await capability_set.pull(db, setup)
+    try:
+        out = await capability_set.pull(db, setup)
+    except relay.DesktopRelayError as exc:  # the computer was cut off between the token check and the lock: 409 device_disconnected, like every other relay answer
+        return _error(exc)
     if out is None:
         raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
     await db.commit()

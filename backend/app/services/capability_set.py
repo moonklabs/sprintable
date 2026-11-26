@@ -163,8 +163,10 @@ async def compute_caps(db: AsyncSession, setup: DesktopSetup) -> list[dict]:
     )).scalars().all()}
     people: dict[uuid.UUID, tuple[uuid.UUID | None, str | None]] = {}
     for member_id in {r.member_id for r in phones}:
-        user_id = (await db.execute(select(Member.user_id).where(Member.id == member_id, Member.org_id == setup.org_id, Member.deleted_at.is_(None)))).scalar_one_or_none()
-        people[member_id] = (user_id, await org_role(db, setup.org_id, user_id) if user_id is not None else None)
+        row = (await db.execute(select(Member.user_id, Member.is_active).where(Member.id == member_id, Member.org_id == setup.org_id, Member.deleted_at.is_(None)))).first()
+        user_id = row.user_id if row is not None and row.is_active else None  # (codex: a person who was removed from the organization — deactivated or deleted — keeps their paired keys; they name nothing)
+        role = await org_role(db, setup.org_id, user_id) if user_id is not None else None
+        people[member_id] = (user_id if role is not None else None, role)  # …and a person with no live seat in the organization is no one either (`org_role` reads only a live seat)
     caps: list[dict] = []
     for phone in sorted(phones, key=lambda r: str(r.id)):
         user_id, role = people.get(phone.member_id, (None, None))

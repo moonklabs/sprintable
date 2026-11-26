@@ -439,6 +439,44 @@ async def test_a_pairing_change_that_rolls_back_pushes_nothing(world, key):
             await s.rollback()
         assert await _commands(setup_id) == []
 
+
+async def test_a_person_who_left_the_organization_names_nothing_even_with_a_key_still_pinned(world, key):
+    """codex round 4: removing a person from the organization deactivates their member row / their seat but leaves their paired keys; the agent's owner would still be `can_command`"""
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import capability_set
+
+    async def named():
+        async with async_session_factory() as s:
+            setup = await s.get(DesktopSetup, setup_id)
+            return {e["phone_key_id"] for e in await capability_set.compute_caps(s, setup)}
+
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m7")
+        phone, pid = await _phone(c)
+        await _pin(c, token, phone)
+        assert pid in await named()
+        await _sql(f"UPDATE members SET is_active = false WHERE org_id = '{ORG}' AND user_id = '{OWNER}' AND type = 'human'")
+        assert pid not in await named()  # deactivated: nothing
+        await _sql(f"UPDATE members SET is_active = true WHERE org_id = '{ORG}' AND user_id = '{OWNER}' AND type = 'human'")
+        assert pid in await named()
+        await _sql(f"UPDATE org_members SET deleted_at = now() WHERE org_id = '{ORG}' AND user_id = '{OWNER}'")
+        assert pid not in await named()  # no live seat: nothing
+
+
+async def test_a_pull_racing_a_cut_off_is_answered_409_device_disconnected_not_a_server_error(world, key, monkeypatch):
+    from app.services import capability_set
+    from app.services.desktop_relay import DISCONNECTED_CODE, DesktopRelayError
+
+    async def cut_off(db, setup, caps=None):
+        raise DesktopRelayError(409, DISCONNECTED_CODE, "that computer has been disconnected")
+
+    async with _client() as c:
+        device, token, *_ = await _computer(c, "d4424 mac 5025c1m8")
+        monkeypatch.setattr(capability_set, "build_envelope", cut_off)
+        r = await _pull(c, token)
+        assert r.status_code == 409 and DISCONNECTED_CODE in r.text
+
 # ── pull · push ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def test_a_pull_is_one_in_ten_seconds_per_computer_and_the_answer_says_to_wait_not_that_there_is_nothing(world, key):
