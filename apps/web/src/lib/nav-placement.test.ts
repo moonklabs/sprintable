@@ -3,8 +3,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { GUARD_ANCHOR_ITEMS } from '@/components/command-palette/command-palette';
-import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
+import { deriveNavigateItems } from '@/components/command-palette/command-palette';
 import koMessages from '../../messages/ko.json';
 import enMessages from '../../messages/en.json';
 import { allNavItems, ALL_SCREENS_ITEM } from './nav-config';
@@ -28,15 +27,12 @@ const pages = pageRoutes(APP_DIR);
 const routes = pages.map((p) => p.route);
 const rows = Object.entries(ROUTE_PLACEMENT);
 
-// the catalog doors, computed the way the shell computes them
+// the doors, computed the way the shell computes them: the palette rows come from the palette's own derivation (not from the catalog list), the list-column rows from the catalog
 const catalogRoute = (item: { kind: string; path: string }) => (item.kind === 'resource' ? `/[ws]/[proj]/${item.path.split('?')[0]}` : item.path.split('?')[0]!);
 const catalog = allNavItems();
-const paletteRoutes = new Set<string>([
-  ...catalog.map(catalogRoute),
-  ...WORKSPACE_FRAME_TAB_PATHS.map((p) => `/[ws]/[proj]/${p}`),
-  ...GUARD_ANCHOR_ITEMS.map((a) => `/[ws]/[proj]/${a.href.replace(/^\//, '')}`),
-  ALL_SCREENS_ITEM.path,
-]);
+const paletteRoutes = new Set<string>(
+  deriveNavigateItems((resource) => `/[ws]/[proj]/${resource}`).map((row) => row.href.split('?')[0]!),
+);
 const catalogRoutes = new Set(catalog.map(catalogRoute));
 
 describe('⭐ ① 모든 화면이 한 줄씩(빠짐 0 · 남는 줄 0)', () => {
@@ -109,7 +105,6 @@ describe('⭐ ③ 줄이 말한 입구는 실제로 있다', () => {
 
   it('거꾸로: ⌘K에 실리는 경로는 표가 cmdk로 적고, 목록 칸 줄이 될 카탈로그 항목은 표가 depth1로 적는다(표와 화면이 같은 말)', () => {
     for (const route of paletteRoutes) {
-      if (route === '/desktop') continue; // 서버 호스트 · 데스크톱 받기 플래그가 켜진 곳에서만 실림 — 표는 cmdk로 적는다
       expect(ROUTE_PLACEMENT[route]?.doors, `${route} 표에 cmdk 없음`).toContain('cmdk');
     }
     const paletteOnly = new Set(['/loop-queue']);

@@ -358,10 +358,9 @@
   "/desktop": {
    "slot": "settings",
    "doors": [
-    "depth1",
-    "cmdk"
+    "depth1"
    ],
-   "why": "데스크톱 앱 · 연결된 기기 — 설정 «이 컴퓨터 · 폰»(켜진 곳에서만)"
+   "why": "데스크톱 앱 · 연결된 기기 — 설정 «이 컴퓨터 · 폰»(켜진 곳에서만 목록 칸에 줄이 섬 · ⌘K는 이 줄을 싣지 않음)"
   },
   "/desktop/pair": {
    "slot": "settings",
