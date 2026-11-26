@@ -5494,7 +5494,7 @@
     "roomTagProject": "Project room",
     "roomHeadPeople": "{count, plural, one {# person} other {# people}}",
     "roomTagChannel": "Channel",
-    "roomHeadChannelFacts": "{people} people · {agents} agents you can call",
+    "roomHeadChannelFacts": "{people, plural, one {# person} other {# people}} · {agents, plural, one {# agent you can call} other {# agents you can call}}",
     "roomChannelSettings": "Channel settings",
     "roomPeopleOpen": "Show participants",
     "roomMoreActions": "Room menu",

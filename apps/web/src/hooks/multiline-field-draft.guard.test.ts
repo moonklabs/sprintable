@@ -32,7 +32,8 @@ const CONFIRM_LIKE = /confirm|evidence|\back|consent/iu;
 /** 초안을 다른 파일(훅)에서 받는 파일 → 그 출처(src 기준 경로). */
 const VIA: Record<string, { source: string; why: string }> = {
   'components/nav/context-switcher-chip.tsx': { source: 'hooks/use-unified-switcher.ts', why: '새 프로젝트 폼 초안은 useUnifiedSwitcher가 가진다' },
-  'components/nav/unified-switcher.tsx': { source: 'hooks/use-unified-switcher.ts', why: '새 프로젝트 폼 초안은 useUnifiedSwitcher가 가진다' },
+  // story 5032 (C2): the «new project» dialog (and so its multi-line description field) moved out of unified-switcher.tsx into create-project-dialog.tsx — the draft is still the hook's
+  'components/nav/create-project-dialog.tsx': { source: 'hooks/use-unified-switcher.ts', why: '새 프로젝트 폼 초안은 useUnifiedSwitcher가 가진다 — 창은 create-project-dialog가 그리고 상태는 훅이 든다(5032)' },
 };
 
 /** 초안 대상이 아닌 여러 줄 칸 파일 → 사유. */
