@@ -1,6 +1,6 @@
 /**
  * story 4913 (shell follow-up) — the icon rail on a SHORT window, measured in Chromium on the REAL NavRail (bundled with esbuild, not copied): with the real account icon, the real Button borders and unread / count badges.
- * Before: the rail is pinned to the window height (h-svh) and its eleven icons (40 px cells + 4 px gaps ≈ 494 px) overflowed a 420 px window by 74 px, so the whole document scrolled (dev 1100×420).
+ * Before: the rail is pinned to the window height (h-svh) and its eleven icons (40 px cells + 4 px gaps ≈ 494 px; since story 5031 the bar has seven: the four places + list column + account + search) overflowed a 420 px window by 74 px, so the whole document scrolled (dev 1100×420).
  * Rules: the document does not scroll · every rail icon is inside the window · a count badge never covers its own icon · on a tall window nothing changed (40 px cells).
  */
 import path from 'node:path';
@@ -75,10 +75,10 @@ for (const [width, height] of [[1100, 420], [1280, 480], [1440, 520], [1440, 900
         return { top: br.top, overlap };
       });
       const sorted = items.map((i) => i.r).sort((a, b) => a.top - b.top);
-      const gaps = sorted.slice(1).map((r, i) => Math.round(r.top - sorted[i]!.bottom)).filter((g) => g > 0 && g < 10); // neighbours only (0 = an item inside another · the wider gap is the mt-auto push between the two groups)
+      const gaps = sorted.slice(1).map((r, i) => Math.round(r.top - sorted[i]!.bottom)).filter((g) => g > 0 && g < 12); // neighbours only (0 = an item inside another · the wider gap is the mt-auto push between the two groups)
       return { gaps, cellWs: [...new Set(cells.map((c) => `${Math.round(c.width)}x${Math.round(c.height)}`))], docOver: document.documentElement.scrollHeight - window.innerHeight, lastBottom: Math.max(...items.map((i) => i.r.bottom)), firstTop: Math.min(...items.map((i) => i.r.top)), count: items.length, cellW: Math.round(cells[0]!.width), badges };
     });
-    expect(m.count, 'the whole rail is there: 4 daily groups + chat + org + list column + account + search + settings + all screens').toBeGreaterThanOrEqual(11);
+    expect(m.count, 'the whole rail is there: the four places (story 5031) + list column + account + search').toBeGreaterThanOrEqual(7);
     expect(m.docOver, 'the document does not scroll').toBeLessThanOrEqual(0);
     expect(m.lastBottom, 'the last icon is inside the window').toBeLessThanOrEqual(height);
     expect(m.badges.length, 'the count badges are drawn (today + chat)').toBeGreaterThanOrEqual(2);
@@ -89,7 +89,7 @@ for (const [width, height] of [[1100, 420], [1280, 480], [1440, 520], [1440, 900
     // EVERY icon cell (the account icon and the three Button-based ones included), not just the first
     expect(m.cellWs, height <= 520 ? 'short window: every cell is 32 px' : 'tall window: every cell keeps the full 40 px').toEqual([height <= 520 ? '32x32' : '40x40']);
     // the gap between neighbours (top group and bottom group both)
-    expect(Math.min(...m.gaps), height <= 520 ? 'short window: 2 px gaps between icons' : 'tall window: 4 px gaps between icons').toBe(height <= 520 ? 2 : 4);
-    expect(Math.max(...m.gaps.filter((g) => g < 8)), 'no icon pair is spaced wider than the rule').toBeLessThanOrEqual(height <= 520 ? 2 : 4);
+    expect(Math.min(...m.gaps), height <= 520 ? 'short window: 2 px gaps between icons' : 'tall window: 8 px gaps between icons (story 5031: a place\'s count badge must not read as the next one\'s)').toBe(height <= 520 ? 2 : 8);
+    expect(Math.max(...m.gaps.filter((g) => g < 12)), 'no icon pair is spaced wider than the rule').toBeLessThanOrEqual(height <= 520 ? 2 : 8);
   });
 }

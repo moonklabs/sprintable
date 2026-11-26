@@ -9,10 +9,11 @@ const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8');
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 describe('강조 자리에 옛 파랑(info · proof-blue)이 없다 — 4930 AC3', () => {
-  it('사이드바 «대화» 줄은 ds action 글자(text-ds-action-text)이고 text-proof-blue · text-info · bg-info가 없다', () => {
-    const code = strip(read('components/nav/app-sidebar.tsx'));
-    expect(code).toContain('text-ds-action-text');
-    expect(code).not.toMatch(/text-proof-blue|text-info\b|bg-info\b|border-info\b|bg-proof-blue\b|border-proof-blue\b/);
+  it('사이드바 · 아이콘 막대에 옛 파랑이 없고, 켜진 자리는 ds action 글자(text-ds-action-text)다 — story 5031: «대화 카드»는 목록 칸의 보통 줄이 되었다', () => {
+    const sidebar = strip(read('components/nav/app-sidebar.tsx'));
+    const rail = strip(read('components/nav/nav-rail.tsx'));
+    expect(rail).toContain('text-ds-action-text');
+    for (const code of [sidebar, rail]) expect(code).not.toMatch(/text-proof-blue|text-info\b|bg-info\b|border-info\b|bg-proof-blue\b|border-proof-blue\b/);
   });
 
   it('받은함: 안 읽음 막대 둘 · 묶음 개수 알약은 ds action(안 읽음 = CountBadge unread의 action) — bg-info · border-info가 없다', () => {

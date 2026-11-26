@@ -33,6 +33,11 @@ export const RAIL_ICON_BY_ITEM_ID: Record<string, IconName> = {
   rewards: 'emoji_events',
   'channel-chat': 'forum',
   'loop-queue': 'checklist',
+  // story 5031 (C1) — the four places of the new shell (home has no glyph of its own yet: «newsmode» until the design system adds one)
+  'depth1-home': 'newsmode',
+  'depth1-chat': 'chat_bubble',
+  'depth1-agents': 'smart_toy',
+  'depth1-settings': 'settings',
   // 막대에만 있는 단추(항목이 아니다)
   org: 'domain',
   search: 'search',

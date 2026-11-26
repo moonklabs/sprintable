@@ -86,7 +86,7 @@ async function mountBarAndHome() {
   await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); });
 }
 
-const railBadge = () => container.querySelector('[data-rail-item="org-briefing"] [data-testid="rail-badge"]')?.textContent ?? null;
+const railBadge = () => container.querySelector('[data-rail-item="depth1-home"] [data-testid="rail-badge"]')?.textContent ?? null;
 const headerBadge = () => container.querySelector('[data-testid="needs-me-header-badge"]')?.textContent ?? null;
 const headerLineN = () => /손 필요 (\d+)/.exec(container.querySelector('[data-testid="home-header-line"]')?.textContent ?? '')?.[1] ?? null;
 const bodyRows = () => container.querySelectorAll('[data-testid="home-section-needs-hand"] [data-row-key]').length;
@@ -175,7 +175,7 @@ describe('홈 이음새 — 막대 «홈» 배지 = 홈 본문의 수 (story #48
     }));
     await mountBarAndHome();
     expect(railBadge()).toContain('1+');
-    expect(container.querySelector('[data-rail-item="org-briefing"]')?.getAttribute('aria-label')).toMatch(/1\+$/);
+    expect(container.querySelector('[data-rail-item="depth1-home"]')?.getAttribute('aria-label')).toMatch(/1\+$/);
   });
 });
 
