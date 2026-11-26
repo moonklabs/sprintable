@@ -193,7 +193,7 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(face.sendW, `«⏎ 보내기» is a words button at 1100 (${face.sendW}px), not a bare icon`).toBeGreaterThanOrEqual(70);
       // the REAL hint ChatView passes at desktop widths (this scene once used the short phone hint, and the long one wrapped and was cut off in the real 480 px room column): it must fit on ONE line, whole
       const hint = await page.evaluate(() => { const ta = document.querySelector('#room textarea') as HTMLTextAreaElement; const cs = getComputedStyle(ta); const c = document.createElement('canvas').getContext('2d')!; c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`; const avail = ta.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); const plc = getComputedStyle(ta, '::placeholder'); return { text: ta.placeholder, need: Math.ceil(c.measureText(ta.placeholder).width), avail: Math.round(avail), nowrap: plc.whiteSpace }; });
-      expect(hint.text).toBe('메시지 쓰기 — / 명령 · @ 멘션 · # 엔티티');
+      expect(hint.text).toBe('/ 명령 · @ 멘션 · # 엔티티'); // story 5048 T0 ①: the “메시지 쓰기 — ” lead is gone — the 40 px clip + 16 px text left the one-line hint 11 px short on the CI font (the box itself says it is for a message)
       expect(hint.need, `the hint needs ${hint.need}px of the ${hint.avail}px the text area has`).toBeLessThanOrEqual(hint.avail); // reverted (the old long hint, ~40 characters) → wider than the box: wraps and is cut
       expect(hint.nowrap, 'and it can never wrap into a second (clipped) line').toBe('nowrap');
       expect(await page.locator('#room [data-testid="chat-send"]').textContent()).toContain('보내기');

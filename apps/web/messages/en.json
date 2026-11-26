@@ -5792,7 +5792,7 @@
     "intentSuggestionDismiss": "Dismiss",
     "intentSuggestionFailed": "Failed",
     "inputPlaceholderMobile": "Write a message — / for a command, @ to mention",
-    "inputPlaceholderFull": "Write a message — / command · @ mention · # entity",
+    "inputPlaceholderFull": "/ command · @ mention · # entity",
     "composeMovedNotice": "Your line from Home is waiting in your most recent room, “{room}” — it was not sent because there is no single agent to send it to. Send it if this is the right room, or pick another room.",
     "isTyping": "{name} is typing",
     "othersTyping": "{name} and {count, plural, one {# other} other {# others}} are typing",

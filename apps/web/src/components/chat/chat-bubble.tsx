@@ -159,7 +159,7 @@ function hasSelectedText(): boolean {
 /** how long a plain click on an inline code span waits before it copies (a second click or a selection in that time ends it) */
 export const INLINE_CODE_COPY_DELAY_MS = 400;
 
-function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
+function CopyableCode({ raw, inline, className, onMine = false }: { raw: string; inline: boolean; className: string; onMine?: boolean }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const [copied, setCopied] = useState(false);
@@ -220,7 +220,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
             실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
             이미 선택 가능한 원문이라 여기선 문구만). */}
         {copyFailed && (
-          <span role="alert" data-copy-ui="" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+          <span role="alert" data-copy-ui="" className={`ml-1 text-xs ${onMine ? 'text-ds-on-mine' : 'text-destructive'}`}>{tc('copyFailedSelectManually')}</span>
         )}
       </>
     );
@@ -336,6 +336,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
         <CopyableCode
           raw={raw}
           inline={inline}
+          onMine={isMine}
           className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
         />
       );
@@ -408,7 +409,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
       if (kind === 'mail') return <a href={href} draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
       return <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
+  }), [isMine, text, muted, codeBg, border, mentionText, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (

@@ -978,7 +978,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             disabled={disabled || atMaxAttachments}
             onClick={() => fileInputRef.current?.click()}
             // the ds IconButton paints its own ink colour, so the split's «open» tint (the container's text-info) must be passed on to it, or only the ▾ turns blue
-            className={`size-ds-tag rounded-l-md rounded-r-none ${attachMenuOpen || pickerOpen ? 'text-info hover:text-info' : ''}`} // story 5048 T0 ①: the clip stays a 28 px square inside the composer — a 40 px one took 12 px from the text area (the hint no longer fit on one line)
+            className={`rounded-l-md rounded-r-none ${attachMenuOpen || pickerOpen ? 'text-info hover:text-info' : ''}`}
           />
           <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
             <DropdownMenuTrigger
@@ -987,7 +987,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               data-testid="chat-attach-more"
               disabled={disabled}
               aria-label={t('attachMenuLabel')}
-              className="inline-flex items-center justify-center rounded-r-md px-1 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
+              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </DropdownMenuTrigger>
