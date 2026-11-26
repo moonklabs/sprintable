@@ -225,19 +225,20 @@ async def _get_or_create_conversation(
         return conv.id
 
 
-async def _broadcast(room_key: str, payload: str, *, conversation_id: uuid.UUID, skip_agent_key_sockets: bool = False) -> None:
+async def _broadcast(room_key: str, payload: str, *, conversation_id: uuid.UUID, skip_own_sockets: bool = False) -> None:
     """Send `payload` — a line of conversation `conversation_id` — to the sockets of room `room_key` whose owner may read that conversation.
 
-    story 5030: `skip_agent_key_sockets` — the room is the agent's, but its sockets are the agent's own (an agent key) AND the people who may read the conversation. A line that does
-    not call the agent (a group room delivers an agent only the words that call it) must not reach the AGENT's socket; the people in the room still read it.
+    story 5030: `skip_own_sockets` — the room is the agent's (`room_key` = its member id), but its sockets are the agent's own AND the people who may read the conversation. A line that
+    does not call the agent (a group room delivers an agent only the words that call it) must not reach a socket OWNED BY THE AGENT; the people in the room still read it. «Owned by the
+    agent» is the socket owner's member id == the room's — not «connected with an agent key»: an agent may connect with a login (no key) and a person may connect with an `sk_live_` key.
 
     story #4775: the room is per agent, but a line belongs to ONE conversation: before, every socket of the room got every line of every
     DM the agent is in (REST refused the same people with 404/403 — only the socket leaked). One judgment per distinct owner in the room (REST's
     own rule — `socket_can_read_conversation`), then the send; a socket nobody vouched for, or an owner who cannot be judged, gets nothing.
     """
     sockets = list(_rooms.get(room_key, ()))
-    if skip_agent_key_sockets:
-        sockets = [ws for ws in sockets if not (ws in _idents and _idents[ws].via_agent_key)]
+    if skip_own_sockets:
+        sockets = [ws for ws in sockets if not (ws in _idents and str(_idents[ws].member_id) == room_key)]
     if not sockets:
         return
     idents = {_idents[ws] for ws in sockets if ws in _idents}

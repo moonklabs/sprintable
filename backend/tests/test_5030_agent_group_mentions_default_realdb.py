@@ -354,8 +354,8 @@ async def test_an_agent_holding_a_websocket_room_hears_only_what_the_router_deli
 
         sent: list[str] = []
 
-        async def _fake_broadcast(aid, payload, conversation_id=None, skip_agent_key_sockets=False):
-            if not skip_agent_key_sockets:  # the agent's own socket gets the line; the people in its room read it either way (test_4775)
+        async def _fake_broadcast(aid, payload, *, conversation_id=None, skip_own_sockets=False):
+            if not skip_own_sockets:  # the agent's own socket gets the line; the people in its room read it either way (test_4775)
                 sent.append(aid)
 
         rooms = {str(w["m"][n].id): object() for n in "ABC"}
