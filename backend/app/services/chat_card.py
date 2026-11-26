@@ -20,20 +20,14 @@ CARD_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifa
 TOOL_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban")
 
 
-# The line of text a card message carries (the web draws the CARD, not this line — it is what an agent that reads the room through MCP, or a notification, sees). In words a first-time reader understands, never the bare kind
-# word; the refused line is the SAME for «does not exist» and «not yours» (it names the kind only — never the object, never who can see it).
-_KIND_WORD: dict[str, dict[str, str]] = {
-    "ko": {"story": "장", "epic": "에픽", "task": "태스크", "sprint": "스프린트", "doc": "문서", "artifact": "산출물", "hypothesis": "가설", "evidence": "증거", "kanban": "스프린트 칸반"},
-    "en": {"story": "story", "epic": "epic", "task": "task", "sprint": "sprint", "doc": "doc", "artifact": "artifact", "hypothesis": "hypothesis", "evidence": "evidence", "kanban": "sprint board"},
-}
-
-
+# The line of text a card message carries (the web draws the CARD, not this line — it is what an agent that reads the room through MCP, or a notification, sees). In words a first-time reader understands, never the
+# bare kind word; the words live in the server's message catalogue (`app/services/i18n_catalog.py`, `chat_card.*`). The refused line is the SAME for «does not exist» and «not yours» (it names the kind only — never
+# the object, never who can see it).
 def card_text(kind: str, *, refused: bool, locale: str) -> str:
-    words = _KIND_WORD.get(locale) or _KIND_WORD["ko"]
-    word = words.get(kind, kind)
-    if locale == "en":
-        return f"A {word} card that could not be shown" if refused else f"A {word} card"
-    return f"볼 수 없는 {word} 카드" if refused else f"{word} 카드"
+    from app.services.i18n_catalog import t
+
+    word = t(f"chat_card.kind.{kind}", locale)
+    return t("chat_card.text_refused" if refused else "chat_card.text_shown", locale, kind=word)
 
 
 def resolver_kind(kind: str) -> str:

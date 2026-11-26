@@ -33,3 +33,12 @@ def test_an_unknown_language_reads_as_korean():
 def test_the_line_takes_no_object_and_no_agent():
     import inspect
     assert list(inspect.signature(card_text).parameters) == ["kind", "refused", "locale"]  # nothing of the object or of who asked can reach the text
+
+
+def test_every_tool_kind_has_a_word_in_the_server_catalogue_both_languages():
+    from app.services.i18n_catalog import MessageCatalog
+
+    for kind in TOOL_KINDS:
+        key = f"chat_card.kind.{kind}"
+        assert key in MessageCatalog.keys(), key
+        assert MessageCatalog.locales_for(key) == frozenset({"ko", "en"}), key
