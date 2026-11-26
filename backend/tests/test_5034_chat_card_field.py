@@ -114,3 +114,28 @@ class TestThePayload:
         for m, want in ((live, {"kind": "gate", "ref": ID}), (none, None), (gone, None)):
             out = _msg_payload(m, None)
             assert "card" in out and out["card"] == want
+
+
+class TestRefusedFor:
+    WHO = "1b1b1b1b-2c2c-4d4d-8e8e-3f3f3f3f3f3f"
+
+    def test_a_refused_card_carries_the_agent_it_was_refused_for(self):
+        assert normalize_card({"kind": "doc", "ref": ID, "refused_for": self.WHO.upper()}) == {"kind": "doc", "ref": ID, "refused_for": self.WHO}
+
+    @pytest.mark.parametrize("bad", ["nope", 7, [], "{1b1b1b1b-2c2c-4d4d-8e8e-3f3f3f3f3f3f}", "1b1b1b1b2c2c4d4d8e8e3f3f3f3f3f3f"])
+    def test_a_refused_for_that_is_not_a_plain_uuid_makes_it_not_a_card(self, bad):
+        assert normalize_card({"kind": "doc", "ref": ID, "refused_for": bad}) is None
+
+    def test_no_refused_for_is_a_plain_card_and_a_null_one_is_too(self):
+        assert normalize_card({"kind": "doc", "ref": ID}) == {"kind": "doc", "ref": ID}
+        assert normalize_card({"kind": "doc", "ref": ID, "refused_for": None}) == {"kind": "doc", "ref": ID}
+
+    def test_the_public_route_still_refuses_a_card_with_refused_for(self):
+        with pytest.raises(ValidationError):
+            HttpSendMessageRequest(content="x", card={"kind": "doc", "ref": ID, "refused_for": self.WHO})
+
+    def test_the_tool_kinds_are_the_entity_kinds_and_the_board(self):
+        from app.services.chat_card import TOOL_KINDS, resolver_kind
+        assert set(TOOL_KINDS) == {"story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban"}
+        assert set(TOOL_KINDS) <= set(CARD_KINDS)
+        assert resolver_kind("kanban") == "sprint" and resolver_kind("story") == "story"

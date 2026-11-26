@@ -92,5 +92,5 @@ def test_tool_names_and_param_models_untouched():
     감시) — 129→132. story #4581: 채널 · 사이트 글 11종 — 132→143. story 4615: sprintable_get_story 1종 신설([일감] 축 —
     스토리를 id로 전문 읽기) — 143→144. story 5040: sprintable_cancel_planning_sprint 1종 신설([일감] 축 — 시작 안 한
     스프린트 접기, 비파괴) — 145→146."""
-    assert len(_TOOL_DEFS) == 146  # story 5040: sprintable_cancel_planning_sprint 145→146 · story 4646: sprintable_get_chat_attachment 144→145
+    assert len(_TOOL_DEFS) == 147  # story 5034: sprintable_show_in_chat 146→147 · story 5040: sprintable_cancel_planning_sprint 145→146 · story 4646: sprintable_get_chat_attachment 144→145
     assert all(name.startswith("sprintable_") for name in _TOOLS)
