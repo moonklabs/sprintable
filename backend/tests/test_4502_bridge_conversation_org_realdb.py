@@ -58,7 +58,7 @@ async def _world():
             await s.flush()
             conv = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=project.id, type="group")
             s.add(conv)
-            ids[key] = (org.id, conv.id)
+            ids[key] = (org.id, conv.id, project.id)
         await s.commit()
     return engine, Session, ids
 
@@ -81,17 +81,17 @@ async def test_a_mapping_pointing_at_another_orgs_conversation_posts_nothing_the
 
     engine, Session, ids = await _world()
     try:
-        org_a, conv_a = ids["a"]
-        _org_b, conv_b = ids["b"]
+        org_a, conv_a, project_a = ids["a"]
+        _org_b, conv_b, _project_b = ids["b"]
         author = uuid.uuid4()  # the mapping's org-A author (found by the mapping's org)
         async with Session() as s:
-            result = await _inbound_to_conversation(s, conv_b, author, "안녕", None, message_ts="1.0", org_id=org_a)
+            result = await _inbound_to_conversation(s, conv_b, author, "안녕", None, message_ts="1.0", org_id=org_a, mapping_project_id=project_a)
             await s.commit()
         assert result == {"action": "error", "detail": "conversation_not_in_org"}
         assert await _rows(Session, conv_b, author) == (0, 0)  # no message, the author did not join
         # control: the mapping's own org's conversation is posted to as before
         async with Session() as s:
-            result = await _inbound_to_conversation(s, conv_a, author, "안녕", None, message_ts="2.0", org_id=org_a)
+            result = await _inbound_to_conversation(s, conv_a, author, "안녕", None, message_ts="2.0", org_id=org_a, mapping_project_id=project_a)
             await s.commit()
         assert result["action"] == "conversation_message_created"
         assert await _rows(Session, conv_a, author) == (1, 1)
