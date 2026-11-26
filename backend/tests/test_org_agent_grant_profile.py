@@ -63,12 +63,16 @@ async def test_revoke_agent_grant_removes_profile(monkeypatch):
     session = MagicMock()
     session.execute = AsyncMock(return_value=sel_res)
     session.delete = AsyncMock()
+    session.flush = AsyncMock()
     session.commit = AsyncMock()
+    unseat = AsyncMock()   # story #5032: the revoke takes the member out of the project's channel in its own transaction (pinned by test_5032_channel_residual_access_realdb)
+    monkeypatch.setattr("app.services.project_channel.unseat_from_project_channel", unseat)
 
     out = await pa.delete_project_access(
         project_id, uuid.uuid4(), auth=MagicMock(), session=session
     )
     assert out == {"ok": True}
+    unseat.assert_awaited_once_with(session, project_id=project_id, member_id=record.member_id)
     # execute 3회: record select + story #3999 시스템 발행 예약 거부 조회 + agent_project_profiles delete
     assert session.execute.await_count == 3
     session.delete.assert_awaited_once_with(record)
@@ -90,12 +94,16 @@ async def test_revoke_human_grant_skips_profile_delete(monkeypatch):
     session = MagicMock()
     session.execute = AsyncMock(return_value=sel_res)
     session.delete = AsyncMock()
+    session.flush = AsyncMock()
     session.commit = AsyncMock()
+    unseat = AsyncMock()   # story #5032: the revoke takes the member out of the project's channel in its own transaction (pinned by test_5032_channel_residual_access_realdb)
+    monkeypatch.setattr("app.services.project_channel.unseat_from_project_channel", unseat)
 
     out = await pa.delete_project_access(
         project_id, uuid.uuid4(), auth=MagicMock(), session=session
     )
     assert out == {"ok": True}
+    unseat.assert_awaited_once_with(session, project_id=project_id, member_id=record.member_id)
     # execute 2회: record select + story #3999 시스템 발행 예약 거부 조회(휴먼도 member_id가
     # 항상 채워져 있어(AC3-2c canonical 앵커) 이 조회는 돈다 — profile delete는 없음)
     assert session.execute.await_count == 2

@@ -1103,7 +1103,16 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|ALTER)\b|add_column|drop_column|alter_column|rename_|drop_table|create_index|drop_index", up0497), "0497's upgrade() only swaps three CHECKs"
     assert up0497.count("op.drop_constraint(") == 1 and up0497.count("op.create_check_constraint(") == 1 and "for table, name in _CHECKS" in up0497, "the one loop over the three runtime CHECKs"
     assert "_NEW" in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text() and 'raise RuntimeError(' in (_ROOT / "backend/alembic/versions/0497_desktop_runtime_names.py").read_text(), "the downgrade stops instead of deleting rows"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_"))]
+    # story 5032 (C2): 0502 is TWO `op.execute` lines of upgrade() the reading lists — the column (`ADD COLUMN IF NOT EXISTS is_project_channel boolean NOT NULL DEFAULT false`: a CONSTANT default is metadata only on this Postgres, no rewrite; a running old revision
+    # never names it, so every row it writes gets false) and the partial UNIQUE index (`CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_project_channel … WHERE is_project_channel AND project_id IS NOT NULL`: every existing row is false, so it indexes nothing and
+    # an old revision's inserts (false) never enter it; the build scans `conversations` once and blocks WRITES to it for that scan — the plain build of the repository's convention, with the by-hand `CONCURRENTLY` pre-step in the file's header for a large table).
+    # Nothing is dropped, renamed, retyped, backfilled or deleted. The downgrade() is not read.
+    channel = [h for h in hits if h.startswith("0502_")]
+    assert len(channel) == 2 and "ADD COLUMN IF NOT EXISTS is_project_channel boolean NOT NULL DEFAULT false" in channel[0] and "op.execute(" in channel[1], channel
+    up0502 = (_ROOT / "backend/alembic/versions/0502_conversations_is_project_channel.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_project_channel ON conversations (project_id)" in up0502 and "WHERE is_project_channel AND project_id IS NOT NULL" in up0502
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|DROP)\b|drop_column|alter_column|rename_|CONCURRENTLY", up0502), "0502's upgrade() adds one defaulted column and one partial unique index — nothing written, dropped or retyped"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

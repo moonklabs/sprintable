@@ -337,6 +337,7 @@ async def delete_org_member(
     # close like a disconnect, in this transaction: a removal that cannot close them fails whole (nothing half done; a retry finishes it).
     # (the refresh tokens are revoked BEFORE the seat is locked, the order this endpoint and the role change have always kept — locking the seat first would turn
     # a removal and a role change of the same member into a deadlock pair, codex 4769 r1)
+    from app.models.member import Member
     from app.models.project import OrgMember
     from app.services.desktop_setup import close_setups_of_removed_member
 
@@ -356,6 +357,13 @@ async def delete_org_member(
         text("DELETE FROM project_access WHERE org_member_id = :om_id"),
         {"om_id": str(id)},
     )
+    # story #5032 (C2): the person's seats in the organization's project channels go with their project access (the channels' read and delivery ask for the access anyway — this keeps the rows honest)
+    from app.services.project_channel import unseat_from_project_channels_of_org
+
+    seat_ids = set((await session.execute(
+        select(Member.id).where(Member.org_id == org_id, Member.user_id == existing.user_id)
+    )).scalars().all()) | {id}
+    await unseat_from_project_channels_of_org(session, org_id=org_id, member_ids=seat_ids)
     ok = await repo.soft_delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Org member not found")

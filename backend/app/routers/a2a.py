@@ -627,6 +627,8 @@ async def _handle_send_message(
         # 멱등 재생 경로 — 락 보유 중 재확인해 이미 커밋된 task를 찾았으니 Conversation/Message/
         # webhook/Event/wake_agent/새 A2ATask 그 무엇도 만들지 않고 그대로 반환한다(AC3:
         # 중복 실행 지시 0).
+        if not await _task_room_readable(session, existing_task, member_org_id):   # story #5032 (C2): a replayed answer is the task's room words too
+            raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
         return {"task": _task_to_dict(existing_task)}
 
     # E-A2A-EXT project-context(profile, opt-in): 클라가 A2A-Extensions 헤더로 이 URI를
@@ -734,6 +736,8 @@ async def _handle_send_message(
             )
         )).scalar_one_or_none()
         if winner is not None:
+            if not await _task_room_readable(session, winner, member_org_id):   # story #5032 (C2): same as the replay above
+                raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
             return {"task": _task_to_dict(winner)}
         raise
     await session.commit()
@@ -812,6 +816,14 @@ async def _handle_send_message(
     # 스펙상 bare Task/Task[] 리턴이 맞음) SendMessage만 이 래퍼가 필요 — 없으면 실 SDK 클라이언트
     # 파서가 깨진다(a2a-sdk 라이브 실측, story 52bb1975 후속).
     return {"task": _task_to_dict(task)}
+
+
+async def _task_room_readable(session: AsyncSession, task: A2ATask, org_id: uuid.UUID) -> bool:
+    """story #5032 (C2): a task's reply is a line of its task room — handed back (GetTask · the stream · the list) only while the agent the task is for can still READ that room (the canonical judge:
+    in the room · its project · a channel's project now). A task whose room it can no longer read is «not found»."""
+    from app.services.conversation_auth import member_reads_room_now
+
+    return await member_reads_room_now(session, conversation_id=task.context_id, org_id=org_id, member_id=task.member_id, is_agent=True)
 
 
 async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid.UUID) -> A2ATask:
@@ -928,6 +940,8 @@ async def _handle_get_task(
     if task is None:
         raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
 
+    if not await _task_room_readable(session, task, member.org_id):
+        raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
     task = await _advance_task_state(session, task, member.org_id)
     return _task_to_dict(task)
 
@@ -962,6 +976,11 @@ async def _handle_list_tasks(
         conditions.append(A2ATask.context_id == uuid.UUID(list_params.context_id))
     if list_params.status is not None:
         conditions.append(A2ATask.state == list_params.status)
+
+    # story #5032 (C2): only tasks whose room the agent can still READ — the SAME clause `_task_room_readable` (GetTask · replay · stream) asks, in SQL: the page, the token and `totalSize` count the same set
+    from app.services.conversation_auth import member_reads_room_clause
+
+    conditions.append(member_reads_room_clause(A2ATask.context_id, org_id=member.org_id, member_id=member.id, is_agent=True))
 
     total_size = (await session.execute(
         select(func.count()).select_from(A2ATask).where(*conditions)
@@ -1074,6 +1093,8 @@ async def _stream_send_message(
                 if task is None:
                     return  # task 삭제 등 이상계 — 조용히 스트림 종료(방어적, 정상 경로 아님)
 
+                if not await _task_room_readable(db, task, org_id):
+                    return  # story #5032 (C2): the agent can no longer read the task's room — nothing more of it goes out
                 task = await _advance_task_state(db, task, org_id)
                 current_dict = _task_to_dict(task)
 

@@ -931,6 +931,10 @@ async def conversation_member_ids_in_org(
         .where(ConversationParticipant.conversation_id == conversation_id, Conversation.org_id == org_id)
     )).scalars().all())
     recipients = await org_recipient_ids(ids, org_id, session)
+    # story #5032 (C2): a project's channel reaches only who holds its project NOW (a seat that outlived its access is not a recipient)
+    from app.services.conversation_auth import members_holding_rooms_channel_project
+
+    recipients = await members_holding_rooms_channel_project(session, conversation_id, org_id, recipients)
     if humans_only and recipients:
         from sqlalchemy import column, values
         from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -959,6 +963,10 @@ async def conversation_member_ids_of_its_org(
     if not rows:
         return set()
     recipients = await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
+    # story #5032 (C2): …and a project's channel reaches only who holds its project NOW
+    from app.services.conversation_auth import members_holding_rooms_channel_project
+
+    recipients = await members_holding_rooms_channel_project(session, conversation_id, rows[0][1], recipients)
     return await without_agents_lacking_the_rooms_project(session, conversation_id, rows[0][1], recipients)
 
 

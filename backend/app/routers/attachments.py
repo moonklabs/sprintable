@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetLink
-from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.conversation import Conversation, ConversationMessage
 from app.models.pm import Story
 from app.services import office_conversion
 from app.services.asset_registry import canonical_object_path as _canonical_object_path
@@ -135,41 +135,13 @@ async def authorize_attachment(
                 raise HTTPException(status_code=404, detail="Conversation not found")
         if not path_in_source_scope(path, "conversation_message", conv_proj, conversation_id, org_id):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
-        # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
-        member = await resolve_member(auth, org_id, db, project_id=None)
-        # story #4846 (AC12): an agent reads a room that has a project only with that project, as every other read of the room does
-        from app.services.conversation_auth import agent_project_valid_for_room
+        # 권한: the ONE read judge of a room (`conversations._can_read_conversation` → `conversation_readable_predicate`): participant ∧ the agent's project (AC12) ∧ the project channel's project NOW (story #5032),
+        # or an organization owner/admin / project admin of a room with no person in it. Before this the check was the old agent-project test + the raw participant row + an admin bypass, written out here again —
+        # so a seat that outlived a channel's project access still signed the files of the channel.
+        from app.routers.conversations import _can_read_conversation
 
-        if not await agent_project_valid_for_room(
-            db, caller_is_agent=bool(auth.claims.get("app_metadata", {}).get("api_key_id")), caller_id=member.id,
-            conv_project_id=conv_proj, org_id=org_id,
-        ):
+        if not await _can_read_conversation(conversation_id, db, auth, org_id):
             raise HTTPException(status_code=403, detail="Not a participant of this conversation")
-        is_participant = (await db.execute(
-            select(ConversationParticipant.id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.member_id == member.id,
-            )
-        )).scalar_one_or_none()
-        if is_participant is None:
-            # owner/admin 우회 — conversations.py get_conversation/list 와 **동일 SSOT**(e6f25e53·선생님 제보):
-            # agent-only 대화는 org owner/admin 열람 허용(메시지 LIST/get_conversation 은 보이는데 첨부 sign 만
-            # 403 이던 불일치 해소). 휴먼 참가 대화(사적 DM)는 참가자-only 유지(프라이버시). belongs(②)는
-            # 그대로 — 우회는 참가자 요건만 면제·임의 path 허용 아님. story 브랜치(has_project_access)는 무변경.
-            from app.routers.conversations import (
-                _conversation_has_human_participant,
-                _effective_org_role,
-            )
-            # E-SECURITY SEC-S8(story 83ea3d6a) V 자매 갭(fix-on-sight): project_id 미전달이면
-            # 에이전트는 임의 project row role을 org-wide인 척 신뢰하던 갭(conversations.py
-            # get_conversation/list_messages와 동일 SSOT) — conv_proj(이미 해소된 이 conversation의
-            # 실 project)를 넘겨 그 project 전용 effective role로 재평가.
-            role = await _effective_org_role(auth, org_id, db, member, project_id=conv_proj)
-            if not (
-                role in ("owner", "admin")
-                and not await _conversation_has_human_participant(conversation_id, db, org_id)
-            ):
-                raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.
         # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone된 메시지의 첨부가 여기서
         # 계속 "belongs"로 잡혀 서명URL이 계속 발급됐다(URL을 아는 사람은 화면 게이트와 무관하게

@@ -117,6 +117,7 @@ async def update_project(
     ):
         raise HTTPException(status_code=404, detail="Project not found")
     data = body.model_dump(exclude_unset=True)
+    existing_name = existing.name  # read before the update (the repository refreshes the same object)
 
     # story 139d2405(S-slug-infra): slug rename — 형식/org 내 유일성(자기 제외, 충돌 시 409 —
     # organizations rename과 동형) 검증 + 이력 기록(향후 S-route-project의 301 해소용).
@@ -137,6 +138,11 @@ async def update_project(
     project = await repo.update(id, **data)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if "name" in data and data["name"] != existing_name:
+        # story #5032 (C2): the project's channel room is titled with the project's name — a rename carries over (no channel = nothing to do)
+        from app.services.project_channel import retitle_project_channel_quietly
+
+        await retitle_project_channel_quietly(session, project_id=id, title=project.name)
     return ProjectResponse.model_validate(project)
 
 

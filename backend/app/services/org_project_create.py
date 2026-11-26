@@ -200,8 +200,10 @@ async def create_project_with_member(
             )
             await ensure_agent_project_profile(session, member_id=creator_agent, project_id=project.id)
             await session.flush()
+            await _set_up_project_channel(session, org_id, project, creator_agent)
             return project
     # Ensure the creating user is in org_members (S5: human type team_member 신규 생성 제거).
+    channel_creator: uuid.UUID | None = None
     if user_id:
         await session.execute(
             text(
@@ -222,7 +224,21 @@ async def create_project_with_member(
                 ),
                 {"pid": str(project.id), "omid": str(om_id), "mid": str(om_id) if member_ok else None},
             )
+            if member_ok:
+                channel_creator = om_id  # members.id of a person = their org_member id
+    await _set_up_project_channel(session, org_id, project, channel_creator)
     return project
+
+
+async def _set_up_project_channel(
+    session: AsyncSession, org_id: uuid.UUID, project: Project, creator_member_id: uuid.UUID | None,
+) -> None:
+    """story #5032 (C2): the project's «channel» room is set up with the project, in the same transaction, with the creating member as its first participant.
+    A failure here must NOT fail the project: a project without its channel is fine (the next access grant on it sets the channel up again), while a project
+    that could not be created because of a chat room is not. `ensure_project_channel_quietly` runs in a savepoint, so a failure rolls back only the channel."""
+    from app.services.project_channel import ensure_project_channel_quietly
+
+    await ensure_project_channel_quietly(session, org_id=org_id, project=project, creator_member_id=creator_member_id)
 
 
 async def _org_member_id(session: AsyncSession, org_id: uuid.UUID, user_id: str):

@@ -459,6 +459,12 @@ async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: 
     )).first() is not None
 
 
+async def _channel_holders(db: AsyncSession, conversation_id: uuid.UUID, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    from app.services.conversation_auth import members_holding_rooms_channel_project
+
+    return await members_holding_rooms_channel_project(db, conversation_id, org_id, member_ids)
+
+
 async def _sealed_prompt_mark(db: AsyncSession, setup: DesktopSetup) -> bool:
     """story 4976 (A5): has this computer said it opens a sealed instruction? — its own mark, or the mark of any setup of the same Mac in the same organization (`org_id + machine_key`, revoked ones included: a replaced setup
     keeps its mark, so a new setup_id does not open a plaintext window). A setup with no `machine_key` reads its own mark only. (Same reading as the card mark: agent_permissions._sealed_mark.)"""
@@ -507,6 +513,7 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         return existing, existing.state
     if body.kind == "send_prompt" and not (
         await _participant(db, body.conversation_id, member_id) and await _participant(db, body.conversation_id, agent_id)
+        and member_id in await _channel_holders(db, body.conversation_id, org_id, {member_id})   # story #5032 (C2): a seat in a project channel counts only while the project is held
     ):
         raise DesktopRelayError(404, "conversation_not_found", "no such conversation with this agent")
     if not await remote_control.is_enabled(db, org_id):
@@ -812,9 +819,13 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
     """«지시 · 지금 턴에 보냄» + the text, from the person who sent it (명세 B-3). Not dispatched to the agent — it already has
     the instruction in its turn; a second copy as a message would be a second instruction."""
     from app.models.conversation import ConversationMessage
+    from app.services.conversation_auth import members_holding_rooms_channel_project
     from app.services.i18n_catalog import t
     from app.services.org_locale import resolve_org_locale
 
+    # story #5032 (C2): the line is written LATER (the command finishes after the press); a person who lost a project channel's access meanwhile writes nothing into it (any other room: nothing asked)
+    if sender_id not in await members_holding_rooms_channel_project(db, conversation_id, org_id, {sender_id}):
+        return
     locale = await resolve_org_locale(db, org_id)
     db.add(ConversationMessage(
         id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id,

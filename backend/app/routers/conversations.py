@@ -42,6 +42,7 @@ from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.conversation_auth import channel_project_valid  # story #5032 (C2)
 from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
@@ -264,6 +265,19 @@ async def _is_org_owner_or_admin(auth: AuthContext, org_id: uuid.UUID, db: Async
     return role in ("owner", "admin")
 
 
+async def _refuse_stale_channel_seat(db: AsyncSession, conv: Conversation, member_id: uuid.UUID) -> None:
+    """story #5032 (C2): the participant-only changes of a room (mute · mark read · add a participant · upload a file · status · title) are refused for a seat in a project's CHANNEL that outlived its
+    project access (or whose project is gone) — the same judge as the read. Any other room: nothing asked."""
+    if conv.is_project_channel is not True:
+        return
+    from app.services.conversation_auth import members_holding_channel_project
+
+    if member_id not in await members_holding_channel_project(
+        db, is_project_channel=True, project_id=conv.project_id, org_id=conv.org_id, member_ids={member_id},
+    ):
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+
 async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession, org_id: uuid.UUID) -> bool:
     """True when the room has a participant who is not a confirmed agent of this organization (private: no admin bypass). One definition — `participant_is_agent`
     (conversation_auth), the same expression the readable predicate uses — so the single-room check, the bulk check and the predicate cannot disagree (story #4846 AC11).
@@ -367,7 +381,11 @@ def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID]
                 ConversationMessage.sender_id.is_distinct_from(member_id),
             ),
         )
-        .where(ConversationParticipant.member_id == member_id)
+        # story #5032 (C2): a project's channel counts only for who holds its project NOW (a stale seat counts nothing)
+        .where(
+            ConversationParticipant.member_id == member_id,
+            channel_project_valid(ConversationParticipant.conversation_id, caller_member_id=member_id, org_id=None),
+        )
         .group_by(ConversationParticipant.conversation_id)
     )
     if conv_id_list is not None:
@@ -1100,12 +1118,26 @@ async def _admit_mentioned_non_participants(
         select(Member.id).where(Member.id.in_(named), Member.org_id == conversation.org_id, Member.type == "agent")
     )).scalars().all()) if named else set()
     outside_agents = named_agents & set(outside)
+    # story #5032 (C2): a project's CHANNEL is for whoever holds its project now — a person or an agent. Someone named there who does not keeps the mention (the bell) and nothing of the
+    # words, whether their seat is old (they are in `current`) or they are outside: and an outsider who does not hold the project is never seated (H1: the mention must not open the channel).
+    from app.services.conversation_auth import members_holding_channel_project
+
+    channel_holders: set[uuid.UUID] | None = None
+    if conversation.is_project_channel is True:
+        channel_holders = await members_holding_channel_project(
+            db, is_project_channel=True, project_id=conversation.project_id, org_id=conversation.org_id, member_ids=set(named),
+        )
     for mid in named:
         if mid in current and mid in named_agents and not await agent_project_valid_for_room(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
         ):
             withheld.add(mid)
+        elif channel_holders is not None and mid in current and mid not in channel_holders:
+            withheld.add(mid)
     for mid in _people_first(outside, outside_agents):
+        if channel_holders is not None and mid not in channel_holders:
+            withheld.add(mid)
+            continue
         if not await _may_seat_mentioned(db, conversation, sender, current, mid, is_agent=mid in outside_agents):
             withheld.add(mid)
             continue
@@ -1477,6 +1509,8 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #5032 — true for the room a project owns as its channel (one per project); every other room false
+    is_project_channel: bool = False
     # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
     # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
     circuit_breaker: "CircuitBreakerState | None" = None
@@ -1966,6 +2000,7 @@ async def list_conversations(
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
             "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
+            "is_project_channel": bool(conv.is_project_channel),  # story #5032 — same value as the single GET
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
@@ -2004,20 +2039,28 @@ async def list_conversations_by_work_item(
     참여 술어(`ConversationParticipant.member_id == 캐폴러`)로 좁힌다. org
     전체 태그 존재 조회(참여 무관)는 다른 질문이라 이 route의 축이 아니다(필요해
     지면 별도 이름의 route로, 이 자리에서 슬쩍 겸하지 않는다)."""
+    from app.services.conversation_auth import conversation_readable_predicate
+    from app.services.project_auth import project_access_valid_correlated
+
     caller = await _resolve_member(auth, org_id, db)
+    caller_is_agent = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    readable = conversation_readable_predicate(
+        Conversation.id, caller_member_id=caller.id, org_id=org_id, admin_bypass_eligible=False,
+        agent_project_valid=(
+            or_(Conversation.project_id.is_(None), project_access_valid_correlated(Conversation.project_id, caller_id=uuid.UUID(auth.user_id), org_id=org_id))
+            if caller_is_agent else True
+        ),
+    )
     subq = (
         select(
             ConversationMessage.conversation_id,
             func.max(ConversationMessage.created_at).label("last_tagged_at"),
         )
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
-        .join(
-            ConversationParticipant,
-            ConversationParticipant.conversation_id == ConversationMessage.conversation_id,
-        )
         .where(
             Conversation.org_id == org_id,
-            ConversationParticipant.member_id == caller.id,
+            # (the caller being in the room is the predicate's own first branch — its participant test cannot sit beside a join of the same table in this statement)
+            readable,   # story #5032 (C2): the whole read predicate (the agent's project atom too), not the channel atom alone
             ConversationMessage.msg_metadata["work_item"]["type"].astext == work_item_type,
             ConversationMessage.msg_metadata["work_item"]["id"].astext == str(work_item_id),
         )
@@ -2222,6 +2265,7 @@ async def get_conversation(
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         free_response=conv.free_response,
+        is_project_channel=bool(conv.is_project_channel),
     )
     resp.muted = caller_row is not None and caller_row.muted_at is not None
     if caller_row is not None:
@@ -2677,6 +2721,10 @@ async def list_working_members(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    from app.services.conversation_auth import members_holding_rooms_channel_project   # story #5032 (C2): a seat that outlived its project access sees nothing of a channel
+
+    if sender.id not in await members_holding_rooms_channel_project(db, conversation_id, org_id, {sender.id}):
+        raise HTTPException(status_code=403, detail="Not a participant")
 
     # 본인은 제외 — 내가 typing 중인 건 내 UI에 안 띄움(memo presence.py 동형).
     items = [
@@ -2714,6 +2762,7 @@ async def set_conversation_mute(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _refuse_stale_channel_seat(db, conv, sender.id)
 
     participant.muted_at = datetime.now(timezone.utc) if body.muted else None
     await db.commit()
@@ -2744,6 +2793,7 @@ async def mark_conversation_read(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_room_member(auth, org_id, db, conversation_id)
+    await _refuse_stale_channel_seat(db, conv, sender.id)
     up_to = body.up_to or datetime.now(timezone.utc)
 
     result = await db.execute(_mark_read_update_stmt(conversation_id, sender.id, up_to))
@@ -2865,6 +2915,7 @@ async def add_participant(
     )).scalar_one_or_none()
     if is_participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _refuse_stale_channel_seat(db, conv, sender.id)
 
     # 추가 대상 멤버가 같은 org인지 확인
     # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 참가자로 추가 허용
@@ -2880,6 +2931,14 @@ async def add_participant(
         db, caller_is_agent=getattr(target, "type", None) == "agent", caller_id=body.member_id, conv_project_id=conv.project_id, org_id=org_id,
     ):
         raise HTTPException(status_code=403, detail="Agent has no access to this room's project")
+    # story #5032 (C2): a project's channel is for whoever holds the project — a person with no access to it is not put in it by a participant (an agent is asked above as in any room; here both are)
+    if conv.is_project_channel is True:
+        from app.services.conversation_auth import members_holding_channel_project
+
+        if body.member_id not in await members_holding_channel_project(
+            db, is_project_channel=True, project_id=conv.project_id, org_id=org_id, member_ids={body.member_id},
+        ):
+            raise HTTPException(status_code=403, detail="No access to this channel's project")
 
     # E-MSG-POLICY S1: 참가자 추가도 동일 정책 게이트 (back-door 차단).
     # 기존 참가자 ∪ 신규 대상으로 각 에이전트 정책 재검증 (list 모드 비허용 휴먼 추가 시 403 등).
@@ -3061,6 +3120,14 @@ async def send_message_core(
             ConversationParticipant.member_id == sender.id,
         )
     )).scalar_one_or_none()
+    # story #5032 (C2): a seat in a project's channel that outlived its project access (or whose project is gone) says nothing in it — the same rule the read asks
+    if participant is not None and conv.is_project_channel is True and not as_system_publisher:
+        from app.services.conversation_auth import members_holding_channel_project
+
+        if sender.id not in await members_holding_channel_project(
+            db, is_project_channel=True, project_id=conv.project_id, org_id=org_id, member_ids={sender.id},
+        ):
+            raise HTTPException(status_code=403, detail="Not a participant")
     if participant is None and as_system_publisher:
         # story #4764 — the server's own event publisher posting into the assigner <-> assignee DM without joining it (the DM stays the
         # two of them). Only the server path can ask: `after_commit` is never set by an HTTP endpoint, and the sender must be the org's
@@ -3783,6 +3850,11 @@ async def send_message_core(
                 - preference_excluded_ids - room_muted_ids
             )
             if candidate_targets:
+                # story #5032 (C2): a project's channel notes · pushes · personal webhooks only who holds its project NOW — the seat rows above are not the judge (a stale seat · a deleted project)
+                from app.services.conversation_auth import members_holding_rooms_channel_project
+
+                candidate_targets = await members_holding_rooms_channel_project(db, conversation_id, org_id, candidate_targets)
+            if candidate_targets:
                 # story #3629(3627 클래스) — 위 mention 블록과 동형(filter_human_member_ids).
                 message_targets = list(await filter_human_member_ids(candidate_targets, db))
                 if message_targets:
@@ -4075,6 +4147,7 @@ async def upload_conversation_attachment(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _refuse_stale_channel_seat(db, conv, sender.id)
 
     data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 
@@ -4141,6 +4214,7 @@ async def update_conversation_status(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _refuse_stale_channel_seat(db, conv, requester.id)
 
     now = datetime.now(timezone.utc)
     if body.status == "resolved":
@@ -4192,6 +4266,7 @@ async def update_conversation(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _refuse_stale_channel_seat(db, conv, requester.id)
 
     if body.title is not None:
         conv.title = body.title

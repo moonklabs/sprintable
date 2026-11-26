@@ -35,4 +35,8 @@ class ProjectRepository(BaseRepository[Project]):
             .where(Asset.org_id == self.org_id, Asset.project_id == id, chat_linked_clause())
             .values(project_id=None)
         )
+        # story #5032 (C2): the project's channel room outlives it (history kept) but with NOBODY in it — in this transaction, so a deletion that cannot empty it does not happen
+        from app.services.project_channel import empty_project_channel
+
+        await empty_project_channel(self.session, project_id=id)
         return await super().delete(id)

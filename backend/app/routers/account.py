@@ -282,6 +282,12 @@ async def delete_account(
         ),
         {"now": now, "uid": str(uid)},
     )
+    # story #5032 (C2): the person's seats in every project channel go with the account (same transaction)
+    from app.services.project_channel import unseat_from_all_project_channels
+
+    await unseat_from_all_project_channels(
+        session, member_ids_sql="SELECT id FROM members WHERE user_id = CAST(:uid AS uuid) UNION SELECT id FROM org_members WHERE user_id = CAST(:uid AS uuid)", params={"uid": str(uid)},
+    )
     # the person's phones stop receiving pushes with the deletion, in the same transaction (rows not backfilled carry `user_id` NULL, so the member side is needed too — story #4752, Kadir's K8)
     await session.execute(
         text(

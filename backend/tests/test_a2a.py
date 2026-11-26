@@ -695,6 +695,15 @@ async def test_send_message_invalid_params_returns_jsonrpc_error():
         app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _task_room_is_readable(monkeypatch):
+    """story #5032 (C2): GetTask / the stream / the list ask `_task_room_readable` (the agent can still read the task's room) before they hand a task back — a DB question these call-count mocks do not model.
+    The gate itself is pinned against the real database (test_5032_channel_residual_access_realdb: tests 11 · 13) and by the a2a realdb suites that run the whole road."""
+    from app.routers import a2a
+
+    monkeypatch.setattr(a2a, "_task_room_readable", AsyncMock(return_value=True))
+
+
 @pytest.mark.anyio
 async def test_get_task_200():
     client, session, app = await _authed_client(uuid.uuid4())

@@ -220,6 +220,7 @@ async def test_sse_stream_terminates_at_overall_ceiling_instead_of_running_forev
     with patch.object(a2a_mod, "_handle_send_message", new=AsyncMock(return_value=send_result)), \
          patch.object(a2a_mod, "async_session_factory", side_effect=lambda: _FakeDbCtx(task_row)), \
          patch.object(a2a_mod, "_advance_task_state", new=AsyncMock(return_value=task_row)), \
+         patch.object(a2a_mod, "_task_room_readable", new=AsyncMock(return_value=True)), \
          patch.object(
              a2a_mod, "_task_to_dict",
              return_value={**send_result["task"], "artifacts": []},
