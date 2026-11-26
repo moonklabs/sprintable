@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// story 5034 (C4 step 3b) — the «배치 · 열외» card, with the viewer's own reads and writes stubbed at fetch. Red when: a button is drawn for a viewer whose role may not manage access (or when the access list
+// story 5034 (C4 step 3b) — the «넣기 · 빼기» card, with the viewer's own reads and writes stubbed at fetch. Red when: a button is drawn for a viewer whose role may not manage access (or when the access list
 // was not readable) · a write is sent without a press, or twice for one press · «place» / «take out» send anything but the exact project-access call · a person's id is drawn as an agent card · «not found» and
 // «not yours» stop looking the same · taking an agent out stops asking first · a refused write (403) is shown as done · the card moves the agent org-wide.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,10 +51,10 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
 
 describe('who sees a button', () => {
-  it('an org admin sees «이 프로젝트에 배치» for an agent that is not placed — and mounting alone sends NO write', async () => {
+  it('an org admin sees «이 프로젝트에 넣기» for an agent that is not placed — and mounting alone sends NO write', async () => {
     stub(); await show();
-    expect(container.textContent).toContain('오르테가'); expect(container.textContent).toContain('이 프로젝트에 배치되지 않았어요');
-    expect(btn('이 프로젝트에 배치')).toBeTruthy();
+    expect(container.textContent).toContain('오르테가'); expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요');
+    expect(btn('이 프로젝트에 넣기')).toBeTruthy();
     expect(log.filter((c) => c.method === 'GET').map((c) => c.url).sort()).toEqual([`/api/projects/proj-1/access`, `/api/team-members/${AGENT}`].sort());
     expect(writes()).toEqual([]);
   });
@@ -63,19 +63,19 @@ describe('who sees a button', () => {
     expect(container.textContent).toContain('오르테가');
     expect(container.querySelector('button')).toBeNull();
     expect(log.some((c) => c.url.endsWith('/access'))).toBe(false);
-    expect(container.textContent).not.toContain('배치되지 않았어요'); expect(container.textContent).not.toContain('배치됨');
+    expect(container.textContent).not.toContain('들어 있지 않아요'); expect(container.textContent).not.toContain('들어 있어요');
   });
   it('an admin whose access-list read is refused by the server (403) sees the name only, no state, no button', async () => {
     stub({ access: () => json(403) }); await show();
     expect(container.textContent).toContain('오르테가'); expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).not.toContain('이 프로젝트에 배치');
+    expect(container.textContent).not.toContain('이 프로젝트에 넣기');
   });
-  it('no current project → no button; an inactive agent cannot be placed (no «배치» button) but can still be taken out when it is placed', async () => {
+  it('no current project → no button; an inactive agent cannot be placed (no «넣기» button) but can still be taken out when it is placed', async () => {
     ctx.projectId = null; stub(); await show();
     expect(container.querySelector('button')).toBeNull();
     ctx.projectId = 'proj-1';
     stub({ member: json(200, { data: { id: AGENT, type: 'agent', name: '쉬는 에이전트', is_active: false } }) }); await show();
-    expect(container.textContent).toContain('비활성 에이전트예요'); expect(btn('이 프로젝트에 배치')).toBeUndefined();
+    expect(container.textContent).toContain('비활성 에이전트예요'); expect(btn('이 프로젝트에 넣기')).toBeUndefined();
   });
 });
 
@@ -100,19 +100,19 @@ describe('what the card is a card of', () => {
 });
 
 describe('placing and taking out', () => {
-  it('«배치» sends exactly ONE project-access grant of THIS agent to THIS project, then the card shows «배치됨» and offers «빼기»', async () => {
+  it('«넣기» sends exactly ONE project-access grant of THIS agent to THIS project, then the card shows «들어 있어요» and offers «빼기»', async () => {
     stub(); await show();
-    await press('이 프로젝트에 배치');
+    await press('이 프로젝트에 넣기');
     expect(writes()).toEqual([{ method: 'POST', url: '/api/projects/proj-1/access', body: { member_id: AGENT, org_member_id: null, permission: 'granted' } }]);
-    expect(container.textContent).toContain('이 프로젝트에 배치됨');
-    expect(btn('이 프로젝트에서 빼기')).toBeTruthy(); expect(btn('이 프로젝트에 배치')).toBeUndefined();
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
+    expect(btn('이 프로젝트에서 빼기')).toBeTruthy(); expect(btn('이 프로젝트에 넣기')).toBeUndefined();
   });
-  it('«빼기» ASKS first (nothing is sent) — «취소» sends nothing — «빼기» deletes exactly THIS record of THIS project, then the card shows «배치되지 않았어요»', async () => {
+  it('«빼기» ASKS first (nothing is sent) — «취소» sends nothing — «빼기» deletes exactly THIS record of THIS project, then the card shows «들어 있지 않아요»', async () => {
     placed = true; stub(); await show();
     await act(async () => { placed = true; }); // (the stub's world: already placed)
     stub(); placed = true;
     await show();
-    expect(container.textContent).toContain('이 프로젝트에 배치됨');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
     await press('이 프로젝트에서 빼기');
     expect(container.textContent).toContain('뺄까요'); expect(writes()).toEqual([]);
     await press('취소');
@@ -120,26 +120,26 @@ describe('placing and taking out', () => {
     await press('이 프로젝트에서 빼기');
     await press('빼기');
     expect(writes()).toEqual([{ method: 'DELETE', url: `/api/projects/proj-1/access/${REC}` }]);
-    expect(container.textContent).toContain('이 프로젝트에 배치되지 않았어요');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요');
   });
   it('the card never touches the agent itself: no write goes to team-members (no org-wide deactivation from a card)', async () => {
-    stub(); await show(); await press('이 프로젝트에 배치');
+    stub(); await show(); await press('이 프로젝트에 넣기');
     expect(log.some((c) => c.method !== 'GET' && c.url.includes('team-members'))).toBe(false);
   });
   it('a refused write (403) is SAID, not shown as done — the button stays; «already placed» (409) is the picture after the next read; a fault says so', async () => {
     stub({ post: () => json(403) }); await show();
-    await press('이 프로젝트에 배치');
+    await press('이 프로젝트에 넣기');
     expect(container.querySelector('[role="alert"]')!.textContent).toContain('권한이 없어요');
-    expect(btn('이 프로젝트에 배치')).toBeTruthy(); expect(container.textContent).not.toContain('이 프로젝트에 배치됨');
+    expect(btn('이 프로젝트에 넣기')).toBeTruthy(); expect(container.textContent).not.toContain('이 프로젝트에 들어 있어요');
     stub({ post: () => json(409) }); await show();
     placed = true; // the server already has it
-    await press('이 프로젝트에 배치');
-    expect(container.textContent).toContain('이 프로젝트에 배치됨');
+    await press('이 프로젝트에 넣기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
     stub({ post: () => json(400, { error: 'not active' }) }); await show();
-    await press('이 프로젝트에 배치');
-    expect(container.querySelector('[role="alert"]')!.textContent).toContain('지금 배치할 수 없어요');
+    await press('이 프로젝트에 넣기');
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('지금 넣을 수 없어요');
     stub({ post: () => json(500) }); await show();
-    await press('이 프로젝트에 배치');
+    await press('이 프로젝트에 넣기');
     expect(container.querySelector('[role="alert"]')!.textContent).toContain('처리하지 못했어요');
   });
   it('one press is one write — a second press while the first is still in flight sends nothing more', async () => {
@@ -151,8 +151,8 @@ describe('placing and taking out', () => {
       return original(input, init);
     }));
     await show();
-    await act(async () => { btn('이 프로젝트에 배치')!.click(); });
-    await act(async () => { btn('이 프로젝트에 배치')?.click(); });
+    await act(async () => { btn('이 프로젝트에 넣기')!.click(); });
+    await act(async () => { btn('이 프로젝트에 넣기')?.click(); });
     expect(writes().length).toBe(1);
     await act(async () => { release(json(201, { data: {} })); });
   });

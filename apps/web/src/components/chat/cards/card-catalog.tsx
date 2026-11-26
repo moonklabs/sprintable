@@ -13,7 +13,7 @@ import { CARD_KINDS, isEntityCardKind, parseCardRef, type CardKind } from './car
 /**
  * story 5034 (C4) — the catalogue: for every kind of the closed vocabulary, the one part that draws it (or `null` = this build has no part for it yet). A `Record<CardKind, …>` — a kind
  * added to card-kinds.ts does not compile until it is given a part or an explicit `null`, so no kind can be «forgotten». The agent chooses a kind; it never chooses how it looks.
- * `gate` is drawn by the approval card's own road (the message's `approval_target`) · `kanban` = the board of a sprint (its reference is the sprint's id) · `deploy` = «배치 · 열외» of one agent (its reference is the agent's member id) in the current project.
+ * `gate` is drawn by the approval card's own road (the message's `approval_target`) · `kanban` = the board of a sprint (its reference is the sprint's id) · `deploy` = «넣기 · 빼기» of one agent (its reference is the agent's member id) in the current project.
  */
 type CardPart = ComponentType<{ kind: CardKind; refId: string }>;
 const EntityPart: CardPart = ({ kind, refId }) => (isEntityCardKind(kind) ? <EntityCard kind={kind} refId={refId} /> : null);

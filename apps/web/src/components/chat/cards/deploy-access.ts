@@ -2,7 +2,7 @@ import { EntitySummaryError } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
- * story 5034 (C4 step 3b) — the «배치 · 열외» card's reads and its two writes. «Place» = give THIS agent access to THIS project (`POST /projects/{id}/access`), «take out» = take that access back
+ * story 5034 (C4 step 3b) — the «넣기 · 빼기» card's reads and its two writes. «Place» = give THIS agent access to THIS project (`POST /projects/{id}/access`), «take out» = take that access back
  * (`DELETE /projects/{id}/access/{record}`) — the project's access list, nothing org-wide (an agent is never deactivated from a card). Every call goes through the viewer's own session and the
  * SERVER decides (403 unless an org owner/admin or the project's admin): what this file does before that is only to not offer a button that cannot work. Bodies are read in their one `{ data }` shape.
  */

@@ -11,7 +11,7 @@ import { fetchDeploySummary, placeAgent, takeAgentOut, type DeploySummary, type 
 import { useCardRead } from './use-card-read';
 
 /**
- * story 5034 (C4 step 3b) — «배치 · 열외» of ONE agent in the CURRENT project (the card's reference is the agent's member id): placed = the agent has access to this project; taken out = that access is
+ * story 5034 (C4 step 3b) — «넣기 · 빼기» of ONE agent in the CURRENT project (the card's reference is the agent's member id): placed = the agent has access to this project; taken out = that access is
  * taken back (project-wide only — never an org-wide deactivation). Read and written for THE VIEWER through the web's own project-access routes; a button is drawn only when the viewer's role may use it
  * (an org owner/admin — `canGrantProjectAccess`, the same judgement as the settings screens) AND the access list was readable, and the SERVER still decides every press (403 otherwise).
  * A viewer who may not manage access sees the agent's name and nothing to press.
