@@ -98,7 +98,7 @@ class _W:
         """one external message through the real entrance; returns (response, process_event mock, create_memo mock)."""
         from unittest.mock import patch
 
-        from app.dependencies.database import get_db
+        from tests.conftest import override_db_and_read
         from app.main import app
         from app.repositories.bridge_inbound import BridgeInboundRepository
         from app.services import workflow_pipeline
@@ -112,7 +112,7 @@ class _W:
                     await s.rollback()
                     raise
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)  # story #2451: get_db AND get_read_db through the one helper
         pe, memo = AsyncMock(), AsyncMock(return_value="memo-id")
         try:
             with patch.object(workflow_pipeline, "process_event", pe), patch.object(BridgeInboundRepository, "create_memo", memo):
@@ -370,15 +370,14 @@ async def test_10_the_audit_row_is_what_the_admins_audit_log_route_serves():
         await w.map_to(conv)
         await w.post("slack")
         from app.dependencies.auth import AuthContext, get_current_user
-        from app.dependencies.database import get_db, get_read_db
+        from tests.conftest import override_db_and_read
         from app.main import app
 
         async def _db():
             async with w.Session() as s:
                 yield s
 
-        app.dependency_overrides[get_db] = _db
-        app.dependency_overrides[get_read_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = lambda: AuthContext(
             user_id=str(w.author_user), email="a@test", claims={"app_metadata": {"org_id": str(w.org)}})
         try:
