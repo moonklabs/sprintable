@@ -45,8 +45,8 @@ const TYPE_SCALE: Array<{ name: string; cls: string; spec: string }> = [
   { name: 'body', cls: 'text-ds-body', spec: '16 / 24 · 500' },
   { name: 'small', cls: 'text-ds-small', spec: '16 / 24 · 400' },
   { name: 'mono-lg', cls: 'font-mono text-ds-mono-lg', spec: '16 / 24' },
-  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '14 / 21' },
-  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '14 / 21' },
+  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '16 / 24' },
+  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '16 / 24' },
 ];
 
 const RADII: Array<{ name: string; cls: string; px: string }> = [

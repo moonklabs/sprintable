@@ -131,11 +131,11 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     const col = container.querySelector('[data-chat-content]') as HTMLElement; const meta = container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement;
     expect(col.className).toContain('max-w-[min(72%,var(--container-ds-bubble))]'); // story 5048 ②c: 72% and at most 480
     expect(col.className).toContain(`${MOUSE}:max-w-[min(72%,var(--container-ds-bubble),calc(100%_-_var(--reply-cap,0px)))]`);
-    expect(col.style.getPropertyValue('--reply-cap')).toBe('128px'); // reverted (no variable) → '' and the cap never applies
+    expect(col.style.getPropertyValue('--reply-cap')).toBe('144px'); // story 5048 ②d: 128 → 144 (the hover time is 16 px) · reverted (no variable) → '' and the cap never applies
     expect(meta.style.getPropertyValue('--reply-room')).toBe('36px');
     await render({ onOpenThread: null });
     const col2 = container.querySelector('[data-chat-content]') as HTMLElement; const meta2 = container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement;
-    expect(col2.style.getPropertyValue('--reply-cap'), 'no reply button in a thread → no cap').toBe(''); // reverted (always set) → '128px'
+    expect(col2.style.getPropertyValue('--reply-cap'), 'no reply button in a thread → no cap').toBe(''); // reverted (always set) → '144px'
     expect(meta2.style.getPropertyValue('--reply-room'), 'no reply button in a thread → the old 8 px').toBe('');
   });
 

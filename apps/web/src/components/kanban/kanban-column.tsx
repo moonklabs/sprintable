@@ -183,7 +183,7 @@ export function KanbanColumn({
                   자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-[280px])에서 wip 카운트·
                   버튼을 밀어낼 수 있었다. h3에 min-w-0(flex item이 컨텐츠 크기로
                   안 밀어붙이게)+텍스트 자체에 truncate, 잘려도 title로 전체 문구 확인. */}
-              <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground">
+              <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground lg:[@media(max-height:600px)]:leading-5"> {/* story 5048 T0 ②d: 글자 16/24 — 낮은 창(≤ 600)에서는 제목 줄높이 20으로(열 칸 ≥ 90) */}
                 <span className={`size-1.5 shrink-0 rounded-full ${statusColor.dot}`} aria-hidden="true" />
                 <span className="truncate" title={label}>{label}</span>
               </h3>
@@ -203,7 +203,7 @@ export function KanbanColumn({
                 {/* 카드 수 — pill/shadow/mono 제거·tabular(정렬 유지·결 정갈). story #3865(AC1,
                     PO CHANGES 2026-09-14 11:40Z 정정) — wipExceeded일 때만 ink, 평시엔
                     muted-foreground 유지(평시 시안 변경 0). */}
-                <span className={`text-xs tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
+                <span className={`text-xs tabular-nums lg:[@media(max-height:600px)]:leading-5 ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
                 </span>
                 {/* AC5: WIP limit 편집 버튼 */}

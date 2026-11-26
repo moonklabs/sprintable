@@ -349,9 +349,9 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const withVersion = (r: DesktopRuntime) => query.versions?.[r];
   return (
     <div className="flex flex-col gap-3">
-      <Card className="break-keep flex flex-col gap-4 overflow-clip p-6" data-testid="quick-card">{/* story 5048 T0 ②a: gap-5 → gap-4 — the name · role fields are 40 high now (ui Input follows the kit, they were 36); the 4 px per gap brings the role field back above the stuck row on a 539 px window */}
+      <Card className="break-keep flex flex-col gap-3 overflow-clip p-6 lg:[@media(max-height:600px)]:gap-2 lg:[@media(max-height:600px)]:py-4" data-testid="quick-card">{/* story 5048 T0 ②a: gap-5 → gap-4 — the name · role fields are 40 high now (ui Input follows the kit, they were 36); the 4 px per gap brings the role field back above the stuck row on a 539 px window */}
         {/* story 4710 (Yuna 4710-copy-1016 · the correction's «{name} 에이전트 시작하기»): from a hire the card is about THAT agent */}
-        <h1 className="text-lg font-semibold">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
+        <h1 className="text-lg font-semibold lg:[@media(max-height:600px)]:leading-6">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
 
         <section aria-labelledby="quick-step-agent" className="flex flex-col gap-2">
           <h2 id="quick-step-agent" className="text-sm font-medium">① {agent ? t('quick.stepAgent') : t('quick.stepTool')}</h2>
@@ -391,7 +391,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
         </section>
 
         {agent || !runtime ? null : (
-        <section aria-labelledby="quick-step-name" className="flex flex-col gap-3">
+        <section aria-labelledby="quick-step-name" className="flex flex-col gap-2">
           <h2 id="quick-step-name" className="text-sm font-medium">② {t('quick.stepName')}</h2>
           <div className="flex flex-col gap-1">
             <label htmlFor="quick-agent-name" className="text-xs text-muted-foreground">{t('quick.nameLabel')}</label>

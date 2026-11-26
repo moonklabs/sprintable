@@ -231,10 +231,10 @@
   --text-ds-small--font-weight: 400;
   --text-ds-mono-lg: 16px;
   --text-ds-mono-lg--line-height: 24px;
-  --text-ds-mono-md: 14px;
-  --text-ds-mono-md--line-height: 21px;
-  --text-ds-mono-sm: 14px;
-  --text-ds-mono-sm--line-height: 21px;
+  --text-ds-mono-md: 16px;
+  --text-ds-mono-md--line-height: 24px;
+  --text-ds-mono-sm: 16px;
+  --text-ds-mono-sm--line-height: 24px;
 
   /* 모서리 단계: 8(모든 조작 · 카드 · 태그) · 16(말풍선 — 꼬리 쪽 한 귀만 4) · 원(아바타). 선은 1px 하나. */
   --radius-ds-tag: 8px;

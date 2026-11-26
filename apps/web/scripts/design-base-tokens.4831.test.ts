@@ -26,8 +26,8 @@ const dark = block(/(^|\n)\.dark\s*\{/);
 const OVERLAY = ['overlay-fill-1', 'overlay-fill-2', 'overlay-fill-3', 'overlay-line-1', 'overlay-line-2', 'scrim-1', 'scrim-2', 'scrim-3', 'on-scrim', 'on-scrim-fill-1', 'on-scrim-fill-2', 'on-scrim-line'];
 
 describe('글자 눈금의 빈 두 단(규격 v1 §1)', () => {
-  it('text-micro 10px · text-display 32px가 줄간격과 짝으로 있다', () => {
-    expect(theme).toMatch(/--text-micro:\s*10px;/);
+  it('text-micro 16px(story 5048 T0 ②d: 10 → 16) · text-display 32px가 줄간격과 짝으로 있다', () => {
+    expect(theme).toMatch(/--text-micro:\s*1rem;/);
     expect(theme).toMatch(/--text-micro--line-height:\s*[\d.]+;/);
     expect(theme).toMatch(/--text-display:\s*32px;/);
     expect(theme).toMatch(/--text-display--line-height:\s*[\d.]+;/);

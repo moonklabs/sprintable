@@ -31,7 +31,8 @@ const WRAPPER_BODY_SHARED = new Set([...SHARED_TAGS, 'Select']);
 function themeSizes(): Record<string, number> {
   const css = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css'), 'utf8');
   const out: Record<string, number> = {};
-  for (const m of css.matchAll(/^\s*--text-([a-z][a-z-]*): (\d+(?:\.\d+)?)px;/gm)) out[`text-${m[1]}`] = parseFloat(m[2]!);
+  // story 5048 T0 ②d: xs · sm · micro are `1rem` now (the kit's smallest text is 16) — read rem as 16 px per rem. The guard keeps the LEGACY 12 / 14 for text-xs · text-sm on purpose (conservative: a class that was «small» before is still reported; the self-tests use them as the small examples) — micro is read from globals (16)
+  for (const m of css.matchAll(/^\s*--text-([a-z][a-z-]*): (\d+(?:\.\d+)?)(px|rem);/gm)) { if (m[1] === 'xs' || m[1] === 'sm') continue; out[`text-${m[1]}`] = parseFloat(m[2]!) * (m[3] === 'rem' ? 16 : 1); }
   return out;
 }
 const NAMED_SIZES: Record<string, number> = { 'text-xs': 12, 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24, 'text-3xl': 30, ...themeSizes() };
