@@ -3221,9 +3221,9 @@ async def report_message_delivery(
     await db.execute(_sql(
         f"UPDATE conversation_messages SET metadata = jsonb_set({doc}, '{{delivery_log}}', "
         f"{log} || jsonb_build_object(CAST(:aid AS text), jsonb_build_object('via', CAST(:via AS text), 'at', CAST(:at AS text))), true) "
-        f"WHERE id = :mid AND NOT jsonb_exists({log}, CAST(:aid AS text))"
+        f"WHERE id = :mid AND deleted_at IS NULL AND NOT jsonb_exists({log}, CAST(:aid AS text))"  # (a message deleted since the decision query is a tombstone: nothing is written on it)
     ), params)
-    stored = (await db.execute(_sql("SELECT metadata->'delivery_log'->CAST(:aid AS text) FROM conversation_messages WHERE id = :mid"), {"mid": message_id, "aid": str(agent_id)})).scalar_one_or_none()
+    stored = (await db.execute(_sql("SELECT metadata->'delivery_log'->CAST(:aid AS text) FROM conversation_messages WHERE id = :mid AND deleted_at IS NULL"), {"mid": message_id, "aid": str(agent_id)})).scalar_one_or_none()
     await db.commit()
     line = json.loads(stored) if isinstance(stored, str) else stored
     if not (isinstance(line, dict) and line.get("via") in DELIVERY_VIA and isinstance(line.get("at"), str)):

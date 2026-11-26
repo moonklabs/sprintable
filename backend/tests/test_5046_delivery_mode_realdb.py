@@ -206,3 +206,20 @@ async def test_a_plain_message_with_no_metadata_at_all_can_be_reported():
         assert list((await _read(Session, w, w.r_human, msg))["delivery_log"]) == [str(w.g_p)]
     finally:
         await engine.dispose()
+
+
+async def test_a_deleted_message_is_not_reported_on_and_serves_no_line():
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human)
+        async with Session() as s:
+            await s.execute(text("UPDATE conversation_messages SET deleted_at = now() WHERE id = :m"), {"m": msg})
+            await s.commit()
+        r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "turn"})
+        assert r.status_code == 404, r.text
+        async with Session() as s:
+            meta = (await s.execute(text("SELECT metadata FROM conversation_messages WHERE id = :m"), {"m": msg})).scalar_one()
+        meta = meta if isinstance(meta, dict) else (json.loads(meta) if isinstance(meta, str) else meta)
+        assert not (isinstance(meta, dict) and "delivery_log" in meta), meta
+    finally:
+        await engine.dispose()
