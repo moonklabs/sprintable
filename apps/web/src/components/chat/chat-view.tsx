@@ -312,6 +312,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   useEffect(() => {
     setReadingOpen(readingPanelStack.length > 0);
   }, [readingPanelStack.length, setReadingOpen]);
+  // story 5031 (C1 2b) — the rail provider outlives this view: leaving the room (e.g. straight to /chats) must not leave «a reading panel is open» behind — with the list at 400 the list would start folded between 1280 and 1535 for no reading panel at all
+  useEffect(() => () => setReadingOpen(false), [setReadingOpen]);
 
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {

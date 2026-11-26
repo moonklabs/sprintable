@@ -150,7 +150,7 @@ async function openThread(page: Page, width: number) {
   await page.waitForTimeout(400);
 }
 
-for (const width of [300, 320]) {
+for (const width of [256, 300, 320]) { // 256 = the kit's thread slot from xl (story 5031 · C1 2b)
   test(`[SID:4887] the real thread panel at ${width} px: nothing runs past the slot, every button is inside it, and the reply box keeps at least 96 px`, async ({ page }) => {
     await openThread(page, width);
     const m = await page.evaluate(() => {

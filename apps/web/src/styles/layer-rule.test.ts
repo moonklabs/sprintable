@@ -204,7 +204,7 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden"],
   ['app/(authenticated)/channel/page.tsx', "sticky bottom-0 -mx-4 -mb-4 flex flex-col gap-2 border-t border-ds-line bg-ds-background px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6"],
   ['app/(authenticated)/chats/[conversation_id]/page.tsx', "flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background"],
-  ['app/(authenticated)/chats/layout.tsx', "fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none"],
+  ['app/(authenticated)/chats/layout.tsx', "fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] 2xl:static 2xl:z-auto 2xl:w-100 2xl:shadow-none"],
   ['components/chat/chat-input.tsx', "relative flex-shrink-0 border-t border-ds-line bg-ds-background px-2 py-3 sm:px-3"],
   ['components/chat/embed-card.tsx', "flex h-full flex-col overflow-hidden bg-ds-background"],
   ['components/chat/reading-panel.tsx', "flex h-full flex-col overflow-hidden border-l border-border bg-ds-background"],

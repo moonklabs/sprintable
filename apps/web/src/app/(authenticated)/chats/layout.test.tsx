@@ -196,6 +196,52 @@ describe('ChatsLayout — story #2921 S1(영구 스플릿뷰 shell)', () => {
   });
 });
 
+describe('ChatsLayout — story 5031 (C1 2b): the list is 400 from xl and folds while reading is open up to 1535 (2xl from 1536)', () => {
+  // the media query is read for real: `(max-width: Npx)` matches when the window is at most N wide
+  function setWidth(w: number) {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => {
+      const m = /max-width:\s*(\d+)px/.exec(query);
+      return { matches: m ? w <= Number(m[1]) : false, media: query, addEventListener: () => undefined, removeEventListener: () => undefined };
+    }) as unknown as typeof window.matchMedia;
+  }
+  const mountReading = async () => {
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await act(async () => { root.render(wrap(<ChatsLayout><ReadingOpenProbe open /></ChatsLayout>)); });
+  };
+  const rail = () => container.querySelector('[data-testid="chat-rail"]')!;
+  const toggle = () => container.querySelector('[aria-label="목록 열기"]')!;
+
+  it('⭐1535px + Reading 열림: 목록이 접히고(lg:hidden) 다시 부르는 단추가 보인다', async () => {
+    setWidth(1535);
+    await mountReading();
+    expect(rail().className).toMatch(/(^|\s)lg:hidden(\s|$)/);
+    expect(toggle().className).not.toContain('!hidden');
+  });
+
+  it('⭐1536px + Reading 열림: 목록은 접히지 않고 단추는 숨는다(2xl↑ 3-pane 그대로)', async () => {
+    setWidth(1536);
+    await mountReading();
+    expect(rail().className).not.toMatch(/(^|\s)lg:hidden(\s|$)/);
+    expect(toggle().className).toContain('!hidden');
+  });
+
+  it('1280px(옛 문턱) + Reading 열림도 이제 접힌다 — 400 목록 + 읽기 패널이면 대화 칸이 모자라서', async () => {
+    setWidth(1280);
+    await mountReading();
+    expect(rail().className).toMatch(/(^|\s)lg:hidden(\s|$)/);
+  });
+
+  it('목록 폭은 xl부터 400(w-100) · lg는 248 그대로, 항상 보이는 안전장치는 2xl:flex', async () => {
+    setWidth(1700);
+    usePathnameMock.mockReturnValue('/chats');
+    await act(async () => { root.render(wrap(<ChatsLayout><div /></ChatsLayout>)); });
+    expect(rail().className).toContain('lg:w-[248px]');
+    expect(rail().className).toContain('xl:w-100');
+    expect(rail().className).toContain('2xl:flex');
+    expect(rail().className).not.toMatch(/(^|\s)xl:flex(\s|$)/);
+  });
+});
+
 describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자동 접힘, 유나 확定)', () => {
   it('xl↑(넓은 폭)에서는 Reading이 열려도 rail이 절대 안 접힌다(①rail 절대 불변)', async () => {
     usePathnameMock.mockReturnValue('/chats/conv-123');
