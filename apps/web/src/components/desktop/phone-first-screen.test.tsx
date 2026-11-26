@@ -856,7 +856,7 @@ describe('[4714] a read that failed, and the screen outside the phone app', () =
 });
 
 describe('[4714] AC1 — the first screen inside the phone app', () => {
-  const first = <FirstScreen orgId="org-1" chatsHref="/chats" orgName="문클랩스" onFinish={() => {}} />;
+  const first = <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName="문클랩스" onFinish={() => {}} />; // story 5036: a browser's first screen is step ② and needs the project of step ① (the phone app's own screen ignores it)
   it('inside the phone app the Mac-or-not fork is not drawn: «지금은 Mac 앱만 있어요» · the web-way button · the download card are gone, the phone screen is there', async () => {
     await renderIn(first, { phone: true });
     expect(byId('onboarding-first-phone-app')).not.toBeNull();

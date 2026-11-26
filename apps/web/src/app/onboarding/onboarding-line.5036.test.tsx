@@ -31,11 +31,13 @@ const KEY = ['sk', 'live', 'abcdefghijklmnopqrstuvwxyz0123456789ABCD'].join('_')
 type ProjectRow = { id: string; created_at?: string };
 interface Opts {
   /** what GET /api/projects answers: rows · 'fail' (a 500) · 'not-a-list' (a 200 that is not a list) */
-  projects?: ProjectRow[] | 'fail' | 'not-a-list';
+  projects?: ProjectRow[] | 'fail' | 'not-a-list' | 'no-ids';
   /** POST /api/projects: ok · the plan's limit · another failure */
   createProject?: 'ok' | 'limit' | 'fail';
   /** the organization's activation: has an agent connected? */
   agentConnected?: boolean;
+  /** the first N reads of the activation fail (a 500) — then they answer */
+  activationFailsFirst?: number;
 }
 interface Call { method: string; url: string; body?: Record<string, unknown> }
 
@@ -43,6 +45,7 @@ let calls: Call[];
 let container: HTMLDivElement;
 let root: Root;
 let opts: Opts;
+let activationFails = 0;
 let hrefs: string[];
 const realUserAgent = navigator.userAgent;
 const originalLocation = window.location;
@@ -54,6 +57,7 @@ function setUserAgent(value: string) {
 function stubFetch(o: Opts = {}) {
   calls = [];
   opts = o;
+  activationFails = o.activationFailsFirst ?? 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const path = url.split('?')[0]!;
@@ -69,6 +73,7 @@ function stubFetch(o: Opts = {}) {
     if (path === '/api/projects' && method === 'GET') {
       if (opts.projects === 'fail') return bad();
       if (opts.projects === 'not-a-list') return ok({ data: { id: 'p-1' } });
+      if (opts.projects === 'no-ids') return ok({ data: [{}, { id: '' }] }); // rows that are not projects
       return ok({ data: opts.projects ?? [] });
     }
     if (path === '/api/projects' && method === 'POST') {
@@ -78,6 +83,7 @@ function stubFetch(o: Opts = {}) {
     }
     if (path === '/api/current-project') return ok({});
     if (path === '/api/activation/checklist') {
+      if (activationFails > 0) { activationFails -= 1; return bad(); }
       const c = opts.agentConnected === true;
       return ok({ data: { steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: c, first_roundtrip: false }, completed: c ? 4 : 3, total: 5, all_complete: false, first_instruction_conversation_id: null } });
     }
@@ -197,7 +203,7 @@ describe('[SID:5036] ① the first project — right after the organization, onl
     expect(posts('/api/current-project')[0]!.body).toEqual({ project_id: 'p-earliest-instant' });
   });
 
-  it.each([['a 500', 'fail'], ['a 200 that is not a list', 'not-a-list']] as const)('P4 the project list answers %s → NOT «there is none» (rule 4832): nothing is made, the line says so and [다시 확인] reads again', async (_label, kind) => {
+  it.each([['a 500', 'fail'], ['a 200 that is not a list', 'not-a-list'], ['a 200 whose rows carry no usable id (codex 5036)', 'no-ids']] as const)('P4 the project list answers %s → NOT «there is none» (rule 4832): nothing is made, the line says so and [다시 확인] reads again', async (_label, kind) => {
     stubFetch({ projects: kind });
     await mount();
     // reverted (an unreadable list folded into «no project») → the project form (and a second project later) here
@@ -324,6 +330,23 @@ describe('[SID:5036] ③ the first conversation — once an agent has connected,
     expect(calls.some((c) => c.method === 'GET' && c.url === '/api/team-members?project_id=proj-1&type=agent')).toBe(true);
     expect(posts('/api/conversations')[0]!.body).toEqual({ type: 'dm', participant_ids: ['agent-1'], project_id: 'proj-1' });
     expect(hrefs.at(-1)).toBe('/chats/conv-1?p=proj-1'); // the project goes along to the chat
+  });
+
+  it('E4 the first read of the activation fails → it is asked AGAIN (the watcher keeps its own clock; a shared cache that kept the failure would leave the person on step ② for good — codex 5036)', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch({ projects: [{ id: 'proj-1' }], agentConnected: true, activationFailsFirst: 1 });
+      await mount();
+      // reverted (the shared hook: a failed first read is kept and nothing is scheduled) → still step ② after any wait
+      expect(h1()).toBe(line.connectTitle);
+      expect(byTestId('onboarding-first-chat')).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_200); });
+      await flush();
+      expect(byTestId('onboarding-first-chat')).not.toBeNull();
+      expect(h1()).toBe(line.chatTitle);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('E3 the way out of ③ is the same landing as everywhere («대화로 가기»)', async () => {

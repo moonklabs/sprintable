@@ -49,7 +49,7 @@ describe('[SID:4776] the session is renewed through one flight — no direct ref
     expect(tree.length).toBeGreaterThan(500);
     expect(tree.some((f) => f.path === OWNER)).toBe(true);
     // the four onboarding callers renew through the flight, by name
-    for (const p of ['app/onboarding/onboarding-form.tsx', 'app/onboarding/connect-step.tsx', 'app/onboarding/advanced-connect.tsx']) {
+    for (const p of ['app/onboarding/onboarding-form.tsx', 'app/onboarding/connect-step.tsx', 'app/onboarding/first-chat-step.tsx']) { // story 5036: the key way's first-instruction press (the third renewal) moved from advanced-connect to step ③
       expect(tree.find((f) => f.path.split('/').join(sep) === p.split('/').join(sep))?.source).toMatch(/refreshSessionAfterChange|refreshSessionOnce/);
     }
   });

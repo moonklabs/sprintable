@@ -310,6 +310,26 @@ describe('AdvancedConnect — story 4766', () => {
     }
   });
 
+  it('codex 5036 — a «verified» answer that was already in flight when [키 폐기] was pressed arrives late and does NOT tell the page', async () => {
+    vi.useFakeTimers();
+    try {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => { release = r; });
+      const onConnected = await mount();
+      await act(async () => { q('advanced-make')!.click(); await vi.advanceTimersByTimeAsync(50); });
+      routes.set('GET /api/agents/agent-1/verification-status', async () => { await gate; return { ok: true, body: { data: { verified: true, first_call_at: '2026-10-23T23:24:04.418874+00:00', rail: [
+        { state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'done' }, { state: 'mcp_reachable', status: 'done' }, { state: 'verified', status: 'done' }] } } }; });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3500); }); // the poll goes out and waits for its answer
+      await act(async () => { q('advanced-revoke')!.click(); await vi.advanceTimersByTimeAsync(50); }); // [키 폐기] while it is in flight
+      expect(q('advanced-revoked')).not.toBeNull();
+      await act(async () => { release(); await vi.advanceTimersByTimeAsync(50); }); // the late answer
+      // reverted (the page is told whenever the panel says verified) → called here
+      expect(onConnected).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the stuck hint (nothing seen after the wait) is the runtime\'s own: Claude\'s names the folder question it was measured on, Codex\'s claims nothing it was not measured on', async () => {
     vi.useFakeTimers();
     try {

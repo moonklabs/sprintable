@@ -20,7 +20,6 @@ import { FirstChatStep } from './first-chat-step';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
-import { useActivationStatus } from '@/hooks/use-activation-status';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { desktopApp } from '@/lib/desktop-app';
@@ -93,24 +92,54 @@ async function readOldestProject(): Promise<string | null | 'unreadable'> {
     if (!body || !Array.isArray(body.data)) return 'unreadable';
     // by the instant (offsets differ), a missing or unreadable time last
     const at = (c?: string) => { const n = c ? Date.parse(c) : NaN; return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY; };
-    const oldest = [...body.data].sort((a, b) => at(a.created_at) - at(b.created_at))[0];
+    // a row without a usable id is not a project: a list that has rows but none with an id is a list we cannot read — never «there is none» (rule 4832: a second project would be made)
+    const usable = body.data.filter((r) => r && typeof r.id === 'string' && r.id !== '');
+    if (body.data.length > 0 && usable.length === 0) return 'unreadable';
+    const oldest = [...usable].sort((a, b) => at(a.created_at) - at(b.created_at))[0];
     return oldest?.id ?? null;
   } catch {
     return 'unreadable';
   }
 }
 
-/** story 5036 · step ② on a browser, the ways that leave the page (the app makes the agent): the organization's activation says an agent has connected — step ③. One watcher while step ② is on screen. */
-function AppConnectWatcher({ orgId, onConnected }: { orgId: string; onConnected: () => void }) {
-  // read again every 15 s while open and at once when the tab comes back in front (the person returns from the app). A checklist this browser already saw complete is not read at all (`state` stays null,
-  // `allComplete` is true) — that organization has had an agent connected, so it counts too.
-  const { state, allComplete } = useActivationStatus(undefined, { orgId, refreshWhileIncomplete: true });
-  const connected = allComplete || (state?.steps.agent_connected === true && state.scope_is_requested_org !== false);
+/** story 5036 · step ② on a browser, the ways that leave the page (the app makes the agent): the organization's activation says an agent has connected — step ③. One watcher while step ② is on screen.
+ *  It reads the checklist ITSELF (not through `useActivationStatus`): that hook keeps a failed first read for the whole session and schedules no re-read without a first answer, so a read that failed once would leave
+ *  the person on step ② for good (codex 5036). Here every read is a fresh ask: every ASK_MS while the tab is in front, and at once when the tab comes back in front (the person returns from the app). An answer that cannot
+ *  be read, or that judged another organization, is «not yet» — asked again, never «connected». */
+const ACTIVATION_ASK_MS = 5_000;
+function AppConnectWatcher({ onConnected }: { onConnected: () => void }) {
   useEffect(() => {
-    if (connected) onConnected();
-    // told once when it turns true (the page's handler is idempotent)
+    let off = false;
+    const connectedNow = async (): Promise<boolean> => {
+      try {
+        const res = await fetchWithAuth('/api/activation/checklist');
+        if (!res.ok) return false;
+        const data = ((await res.json().catch(() => null)) as { data?: { steps?: { agent_connected?: boolean }; all_complete?: boolean; scope_is_requested_org?: boolean } } | null)?.data;
+        if (!data || data.scope_is_requested_org === false) return false;
+        return data.steps?.agent_connected === true || data.all_complete === true;
+      } catch {
+        return false;
+      }
+    };
+    // the first read is made whatever the tab shows (a page opened in the background is read when it opens); the later ones only while the tab is in front
+    const ask = async (onlyInFront: boolean) => {
+      if (off || (onlyInFront && document.visibilityState !== 'visible')) return;
+      if (await connectedNow() && !off) onConnected(); // the page's handler is idempotent
+    };
+    const askInFront = () => void ask(true);
+    void ask(false);
+    const tick = setInterval(askInFront, ACTIVATION_ASK_MS);
+    window.addEventListener('focus', askInFront);
+    document.addEventListener('visibilitychange', askInFront);
+    return () => {
+      off = true;
+      clearInterval(tick);
+      window.removeEventListener('focus', askInFront);
+      document.removeEventListener('visibilitychange', askInFront);
+    };
+    // once, while the step is on screen: the page's handler never changes meaning
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected]);
+  }, []);
   return null;
 }
 
@@ -573,7 +602,7 @@ export function OnboardingForm({
               onFinish={handleFinish}
             />
             {/* story 5036: the ways that leave the page (the app makes the agent) are told by the organization's activation — only where the line runs */}
-            {lineApplies && orgId && projectId ? <AppConnectWatcher orgId={orgId} onConnected={() => handleConnected(null)} /> : null}
+            {lineApplies && orgId && projectId ? <AppConnectWatcher onConnected={() => handleConnected(null)} /> : null}
           </>
         )}
 

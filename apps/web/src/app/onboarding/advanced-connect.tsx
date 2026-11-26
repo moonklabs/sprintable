@@ -225,10 +225,11 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
   // story 5036: the page is told ONCE per agent that it connected (the panel's «연결 확인 완료»); a re-keyed agent is the same agent, so it is not told twice
   const toldConnected = useRef<string | null>(null);
   useEffect(() => {
-    if (!made || !rail.verified || toldConnected.current === made.agentId) return;
+    // a key that was revoked (or a panel not ready) cannot connect: a «verified» answer that was already in flight when [키 폐기] was pressed arrives late and must not advance the page (codex 5036)
+    if (!made || phase !== 'ready' || revoked || !rail.verified || toldConnected.current === made.agentId) return;
     toldConnected.current = made.agentId;
     onConnected?.(made.agentId);
-  }, [made, rail.verified, onConnected]);
+  }, [made, phase, revoked, rail.verified, onConnected]);
 
   const copyInstall = async (rt: ConnectRuntime) => {
     const result = await copyTextSafely(INSTALL[rt]);
