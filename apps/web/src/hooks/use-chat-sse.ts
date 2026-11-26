@@ -73,6 +73,9 @@ export interface ChatMessage {
    * story #2624 — 결재 "결과" 회신 메시지(BE #3015)도 같은 필드를 싣되 actions 없이
    * decision/resolution_note를 대신 싣는다 — ApprovalRequestCard는 이 둘을 읽지 않고
    * gate_id로 fetchGate()한 실물(gate.status/resolution_note)만 신뢰하므로 타입만 넓힌다. */
+  /** story 5034 (C4) — the SERVER wrote «a kind + a reference» on this message (`msg_metadata.card`, the closed vocabulary of components/chat/cards/card-kinds.ts; a client's own value is refused 422).
+   * Kept as it came (`unknown`): the card catalogue reads it with `parseCardRef`, and a kind this build does not know is drawn as its «cannot show it» card — never dropped here. Absent = `null`. */
+  card?: unknown;
   approval_target?: {
     work_item_type: string; work_item_id: string; gate_id: string;
     actions?: string[]; decision?: string; resolution_note?: string | null;
@@ -240,6 +243,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     delivery_withheld: parseDeliveryWithheld(raw.delivery_withheld),
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
+    // story 5034 (C4) — the server's card word pair, kept whole (approval_target's rule: absent = null).
+    card: raw.card ?? null,
     // story #2637 AC0-a — approval_target과 동일 규율.
     event: (raw.event ?? null) as ChatMessage['event'],
     // story #2985 — _activation_payload가 top-level에 싣는 message_kind 그대로.

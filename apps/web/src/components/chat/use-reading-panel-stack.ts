@@ -13,6 +13,9 @@ export interface ReadingPanelStackApi {
   open: (target: ReadingPanelTarget) => void;
   close: () => void;
   navigateTo: (index: number) => void;
+  /** story 5034 (C4): the third tier — the panel is the whole window with the chat beside it. Closing the panel always ends it. */
+  expanded: boolean;
+  toggleExpanded: () => void;
 }
 
 /**
@@ -33,6 +36,7 @@ export interface ReadingPanelStackApi {
  */
 export function useReadingPanelStack(): ReadingPanelStackApi {
   const [stack, setStack] = useState<ReadingPanelTarget[]>([]);
+  const [expanded, setExpanded] = useState(false);
   const isOpenRef = useRef(false);
 
   const open = useCallback((target: ReadingPanelTarget) => {
@@ -48,11 +52,14 @@ export function useReadingPanelStack(): ReadingPanelStackApi {
   const close = useCallback(() => {
     isOpenRef.current = false;
     setStack([]);
+    setExpanded(false); // the next panel opens at the side again, never already wide
   }, []);
 
   const navigateTo = useCallback((index: number) => {
     setStack((prev) => prev.slice(0, index + 1));
   }, []);
 
-  return { stack, isOpenRef, open, close, navigateTo };
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
+
+  return { stack, isOpenRef, open, close, navigateTo, expanded, toggleExpanded };
 }

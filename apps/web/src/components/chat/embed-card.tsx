@@ -128,6 +128,32 @@ async function fetchArtifactCrossProjectDetail(artifactId: string): Promise<Reco
   return detailJson.data ?? null;
 }
 
+/** story 5034 (C4) — a read of an entity's title and status that failed: `status` is the server's answer (404 = «not found» AND «not yours» — the same answer, by design · anything else = a try-again case) */
+export class EntitySummaryError extends Error {
+  readonly status: number;
+  constructor(status: number) { super(`entity summary ${status}`); this.name = 'EntitySummaryError'; this.status = status; }
+}
+const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+/**
+ * story 5034 (C4) — the title and status of an entity AS THE VIEWER may read it: one read through the viewer's own session (the server decides, the card never does).
+ * A kind with no read of its own here (a gate · kanban · deploy — their own parts) is «not found», never a made-up card.
+ */
+export async function fetchEntityCardSummary(kind: string, id: string): Promise<{ title: string | null; status: string | null }> {
+  if (kind === 'doc' || kind === 'artifact') {
+    const res = await fetchWithAuth(`${kind === 'doc' ? '/api/docs/preview?q=' : '/api/visual-artifacts/preview?id='}${encodeURIComponent(id)}`);
+    if (!res.ok) throw new EntitySummaryError(res.status);
+    const json = (await res.json()) as { data?: { title?: unknown } };
+    return { title: textOrNull(json.data?.title), status: null };
+  }
+  const url = ENTITY_API[kind]?.(id);
+  if (!url) throw new EntitySummaryError(404);
+  const res = await fetchWithAuth(url);
+  if (!res.ok) throw new EntitySummaryError(res.status);
+  const json = (await res.json()) as { data?: Record<string, unknown> } & Record<string, unknown>;
+  const d = (json.data ?? json) as Record<string, unknown>;
+  return { title: textOrNull(d.title) ?? textOrNull(d.name) ?? textOrNull(d.statement), status: textOrNull(d.status) };
+}
+
 // story #2614 AC2 — 멘션 합성 가능 8타입(story/doc/epic/task/sprint/artifact/hypothesis/
 // evidence) 전수표. 이 Set에 없는 타입은 "이 엔티티는 별도 미리보기가 없습니다"로 떨어진다 —
 // 그게 이 스토리가 고친 결함(만들 수는 있는데 몸통에서 아무것도 못 얻는 반쪽)이었다. sprint는

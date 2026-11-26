@@ -6,6 +6,7 @@ import { FileViewer } from '@/components/chat/file-viewer';
 import { getFileIcon } from '@/lib/file-icon';
 import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { IconButton } from '@/components/ds/icon-button';
 
 /**
  * story #2766(레인 A)·#2780(엔티티 확장)·#2781(asset 편입) — 채팅을 벗어나지 않는 우측 리딩
@@ -67,7 +68,7 @@ function ReadingPanelContent({ target, onClose }: { target: ReadingPanelTarget; 
  * X는 "전체 닫기"(스택 전부 버리기, onClose).
  */
 export function ReadingPanel({
-  stack, onNavigateTo, onClose,
+  stack, onNavigateTo, onClose, expanded = false, onToggleExpanded,
 }: {
   stack: ReadingPanelTarget[];
   /** 브레드크럼 세그먼트 클릭 — 그 인덱스까지 pop(그 항목이 새 최상단이 된다). */
@@ -75,6 +76,9 @@ export function ReadingPanel({
   /** 전체 닫기(스택 전부 버림) — 브레드크럼 X, 최상단 콘텐츠 자기 X 둘 다(콘텐츠 쪽은 "한 단계
    * 뒤로"가 되도록 호출부가 stack.length에 따라 onNavigateTo/onClose 중 골라 넘긴다). */
   onClose: () => void;
+  /** story 5034 (C4): the third tier (the whole window, chat beside). Absent = no expand button (a host that has no such mode). The button is for the wide screen only — on a phone the panel is already the whole screen. */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }) {
   const t = useTranslations('chats');
   const top = stack[stack.length - 1];
@@ -84,9 +88,9 @@ export function ReadingPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-ds-background">
-      {stack.length > 1 && (
+      {(stack.length > 1 || onToggleExpanded) && (
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5">
-          {stack.map((item, i) => {
+          {stack.length > 1 && stack.map((item, i) => {
             const isLast = i === stack.length - 1;
             return (
               <div key={i} className="flex shrink-0 items-center gap-1">
@@ -106,15 +110,26 @@ export function ReadingPanel({
               </div>
             );
           })}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('closeAll')}
-            title={t('closeAll')}
-            className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
+          {onToggleExpanded ? (
+            <IconButton
+              icon={expanded ? 'close_fullscreen' : 'open_in_full'}
+              label={expanded ? t('panelCollapse') : t('panelExpand')}
+              aria-pressed={expanded}
+              onClick={onToggleExpanded}
+              className="ml-auto max-lg:hidden"
+            />
+          ) : null}
+          {stack.length > 1 && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('closeAll')}
+              title={t('closeAll')}
+              className={`shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground ${onToggleExpanded ? '' : 'ml-auto'}`}
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
       )}
       <div
