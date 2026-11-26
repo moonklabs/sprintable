@@ -718,6 +718,8 @@ async def overview(
             continue
         epics.append({
             "epic_id": str(e.id), "title": e.title, "status": e.status,
+            # story 5033 (C3 home): the project the epic belongs to — read-only, so the home can draw one progress line per project (the org-wide list had no way to say which project an epic is in).
+            "project_id": str(e.project_id) if e.project_id else None,
             "total": total, "done": done,
             "completion_pct": round(done * 100 / total) if total else 0,
         })

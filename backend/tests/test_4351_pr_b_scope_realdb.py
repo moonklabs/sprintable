@@ -184,6 +184,11 @@ async def test_command_center_overview_narrows_project_aggregates_for_restricted
         assert member.status_code == 200 and owner.status_code == 200, (member.text[:300], owner.text[:300])
         assert "VISIBLE-A-epic" in member.text and "SECRET-B" not in member.text
         assert member.json()["scope"] == "accessible_projects"
+        # story 5033 (C3 home): every epic says which project it is in (the home draws one progress line per project from this) — and a restricted caller still sees only their own projects' epics
+        member_epics = {e["title"]: e["project_id"] for e in member.json()["project_status"]["epics"]}
+        assert member_epics == {"VISIBLE-A-epic": str(projects["a"])}, member_epics
+        owner_epics = {e["title"]: e["project_id"] for e in owner.json()["project_status"]["epics"]}
+        assert owner_epics == {"VISIBLE-A-epic": str(projects["a"]), "SECRET-B-epic": str(projects["b"])}, owner_epics
         assert member.json()["project_status"]["cost_trend"]["total_cost_usd"] == 1
         assert "SECRET-B-epic" in owner.text and owner.json()["scope"] == "org"
         assert owner.json()["project_status"]["cost_trend"]["total_cost_usd"] == 101
