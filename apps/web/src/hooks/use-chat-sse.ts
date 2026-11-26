@@ -63,6 +63,8 @@ export interface ChatMessage {
   is_blocked_sender?: boolean;
   // story #4430 — participants a block kept this message from (a count, never who) · sent by the server to the sender only
   delivery_withheld?: DeliveryWithheld;
+  // story 5032 (C2) — what the server actually decided about who gets this message (agents delivered · agents not · how many people) · to the sender only; absent = the server did not say (an older server, or its pre-check failed) — never read as «nobody»
+  delivery_decision?: DeliveryDecision;
   // story #4761 (D3) — the agents this message reaches only when someone makes them look · in the send answer to the sender only
   agent_wake?: AgentWake;
   /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
@@ -184,6 +186,28 @@ export interface DeliveryWithheld {
   conversation_type?: 'dm' | 'group';
 }
 
+/**
+ * story 5032 (C2) — the server's real delivery decision for a message, to its sender only: the agents it went to, the agents it did not (any reason: not called, muted, blocked, lost access…
+ * — the reason is not sent), and how many people it went to (a count, never who). Names are looked up by the screen from the room's participants.
+ */
+export interface DeliveryDecision {
+  agents_delivered: string[];
+  agents_not_delivered: string[];
+  humans_delivered: number;
+}
+
+/** The decision, or nothing when the wire shape is wrong or incomplete (absent must never turn into «delivered to nobody»). */
+export function parseDeliveryDecision(v: unknown): DeliveryDecision | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as { agents_delivered?: unknown; agents_not_delivered?: unknown; humans_delivered?: unknown };
+  const ids = (x: unknown): string[] | undefined => (Array.isArray(x) && x.every((i) => typeof i === 'string' && i) ? (x as string[]) : undefined);
+  const delivered = ids(o.agents_delivered);
+  const notDelivered = ids(o.agents_not_delivered);
+  const humans = o.humans_delivered;
+  if (!delivered || !notDelivered || typeof humans !== 'number' || !Number.isInteger(humans) || humans < 0) return undefined;
+  return { agents_delivered: delivered, agents_not_delivered: notDelivered, humans_delivered: humans };
+}
+
 /** A positive integer count or nothing — anything else from the wire is treated as «nothing withheld». */
 export function parseDeliveryWithheld(v: unknown): DeliveryWithheld | undefined {
   if (!v || typeof v !== 'object') return undefined;
@@ -204,9 +228,10 @@ export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage
   rememberSentHere(typeof payload.id === 'string' ? payload.id : null); // story #4440 — its echo is dropped here
   for (const listener of [...sentHereListeners]) listener(payload); // story #4442 — this tab's lists update their row
   const delivery = parseDeliveryWithheld(raw.delivery);
+  const decision = parseDeliveryDecision(raw.delivery_decision); // story 5032 (C2) — a sibling of `data` too
   const wake = parseAgentWake(raw.agent_wake); // story #4761 (D3) — a sibling of `data` too, like `delivery`
   if (wake && typeof payload.id === 'string') rememberAgentWake(payload.id, wake); // a replaced view (fork · re-read) still draws it
-  const msg = normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
+  const msg = normalizeToMessage({ ...payload, ...(delivery ? { delivery_withheld: delivery } : {}), ...(decision ? { delivery_decision: decision } : {}) });
   return wake ? { ...msg, agent_wake: wake } : msg;
 }
 
@@ -241,6 +266,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
     // story #4430 — kept, not dropped with the other unknown fields (a dropped field would be a quiet success again)
     delivery_withheld: parseDeliveryWithheld(raw.delivery_withheld),
+    // story 5032 (C2) — the server's real delivery decision, the sender's own line only (kept whole; absent stays absent)
+    delivery_decision: parseDeliveryDecision(raw.delivery_decision),
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story 5034 (C4) — the server's card word pair, kept whole (approval_target's rule: absent = null).

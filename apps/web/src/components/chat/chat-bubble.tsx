@@ -36,6 +36,7 @@ import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
+import { DeliveryDecisionLine } from './delivery-decision-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { ChatCard } from './cards/card-catalog';
@@ -59,6 +60,8 @@ interface ChatBubbleProps {
   isGrouped?: boolean;
   /** [SID:4311 PR 3] 목록이 actorRowLabels로 지은 발신자 라벨(같은 이름 둘이면 «· ID 앞 8자») — 머리글자 · 아바타는 원래 이름. */
   senderLabel?: string;
+  /** story 5032 (C2) — a room member's name by id, for the sender's «→ @○○에게만 전달» line (the room's participants; absent = no names) */
+  deliveryNameOf?: (memberId: string) => string | undefined;
   onOpenThread?: (message: ChatMessage) => void;
   /** the context menu's «답글 달기» where there is no reply button to draw — a message INSIDE a thread (its replies are flat: «reply» means «write in this thread»). Never draws a button. */
   onMenuReply?: (message: ChatMessage) => void;
@@ -492,7 +495,7 @@ export function visibleMessageText(root: HTMLElement | null, fallback: string): 
 }
 
 export function ChatBubble({
-  message, isMine, plainRow = false, isGrouped = false, senderLabel, onOpenThread, onMenuReply, onDelete, onBlockUser, presenceStatus, isWorking = false,
+  message, isMine, plainRow = false, isGrouped = false, senderLabel, deliveryNameOf, onOpenThread, onMenuReply, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
@@ -943,6 +946,8 @@ export function ChatBubble({
 
           {/* story #4430 — right under the sender's own bubble, above the suggestion/reference rows */}
           {!isDeleted && <WithheldDeliveryLine withheld={message.delivery_withheld} isMine={isMine} />}
+          {/* story 5032 (C2) — who the server really delivered it to (agents by name · people as a count) */}
+          {!isDeleted && <DeliveryDecisionLine decision={message.delivery_decision} isMine={isMine} nameOf={deliveryNameOf ?? (() => undefined)} />}
 
           {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
               "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다
