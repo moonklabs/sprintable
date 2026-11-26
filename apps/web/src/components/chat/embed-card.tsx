@@ -446,6 +446,7 @@ export function EntityPreviewModal({
   href,
   onClose,
   embedded = false,
+  bare = false,
 }: {
   entityType: string;
   entityId: string;
@@ -458,6 +459,8 @@ export function EntityPreviewModal({
    * 동일 재사용(모달 vs 패널 전환 시 별도 재구현 0) — 바뀌는 건 바깥 래퍼(Dialog vs 패널
    * 자체 크기의 plain div)뿐이다. */
   embedded?: boolean;
+  /** story 5042 (C9) — the desktop app's work panel draws the reading view alone: no close button (the panel has nothing to close) and no «전체 보기» link (a link out of the panel's one page has nowhere to go there). Only with `embedded`. */
+  bare?: boolean;
 }) {
   const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   // story #2302 — hypothesis·evidence는 fetch 자체를 안 한다(항상 고정 ③, ENTITY_API에 항목
@@ -763,14 +766,16 @@ export function EntityPreviewModal({
           <span className="ml-auto shrink-0 rounded bg-overlay-fill-3 px-1.5 py-0.5 text-xs">{resolvedStatusLabel}</span>
         ) : null}
       </div>
-      <button
-        type="button"
-        onClick={onClose}
-        className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-        aria-label={tc('close')}
-      >
-        <X className="h-4 w-4" />
-      </button>
+      {bare ? null : (
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label={tc('close')}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 
@@ -805,7 +810,7 @@ export function EntityPreviewModal({
 
   // Footer — story #2302 AC4: ㉠/㉡-b는 회색·기본커서로 "죽는 건 링크뿐"(카드 전체 안 죽음).
   // 색은 회색 하나(노랑 금지 — 위 GRAY_STATE_COLOR 주석 참고), 구별은 문구로.
-  const footer = !loading && (
+  const footer = !loading && !bare && (
     <div className="flex-shrink-0 border-t border-border px-4 py-3 sm:px-6">
       {notFound ? (
         <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('entityTargetMissing')}</span>

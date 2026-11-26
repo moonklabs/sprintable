@@ -492,6 +492,13 @@
     "detailKind": "Kind",
     "detailSheetLabel": "Details of {title}"
   },
+  "desktopPanel": {
+    "loading": "Loading…",
+    "noActive": "No work item right now",
+    "badAddress": "This address can't be opened",
+    "loadErrorTitle": "Couldn't load this",
+    "retry": "Try again"
+  },
   "orgBriefing": {
     "title": "Home",
     "projectRequiredBannerNext": "Pick a project and we'll take you back to what you were viewing.",

@@ -492,6 +492,13 @@
     "detailKind": "종류",
     "detailSheetLabel": "{title} 자세히"
   },
+  "desktopPanel": {
+    "loading": "불러오는 중…",
+    "noActive": "지금 하고 있는 일감이 없어요",
+    "badAddress": "열 수 없는 주소예요",
+    "loadErrorTitle": "불러오지 못했어요",
+    "retry": "다시 시도"
+  },
   "orgBriefing": {
     "title": "홈",
     "projectRequiredBannerNext": "프로젝트를 선택하면 원래 보려던 화면으로 이동해요.",

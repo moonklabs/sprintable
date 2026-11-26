@@ -38,6 +38,7 @@ import { useDepth1Shortcuts } from '@/hooks/use-depth1-shortcuts';
 import { useCommandPaletteShortcut } from '@/hooks/use-command-palette-shortcut';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
+import { isPanelPath } from '@/components/desktop-panel/panel-path';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { useShellBandsHeight } from '@/components/nav/shell-bands-height';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
@@ -593,11 +594,23 @@ export function DashboardShell({
   // (`(el: T | null) => void`)라 <div ref={setBottomDockBannerSlot}>로 바로 꽂는다.
   const [bottomDockBannerSlot, setBottomDockBannerSlot] = useState<HTMLDivElement | null>(null);
 
+  const ctxValue = { currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, projectMembershipsFailed, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true };
+  // story 5042 (C9): an address of the desktop app's work panel is one small view inside the app window — the providers stay, the web's own frame (sidebar · top bar · dock · launcher) is not drawn
+  if (isPanelPath(shellPathname)) {
+    return (
+      <ToastProvider>
+        <DashboardCtx.Provider value={{ ...ctxValue, inShell: false }}>
+          <RefreshProvider>{children}</RefreshProvider>
+        </DashboardCtx.Provider>
+      </ToastProvider>
+    );
+  }
+
   return (
     <ToastProvider>
     <CommandPaletteProvider>
     <EmbeddedServerProvider embedded={embedded}>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, projectMembershipsFailed, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
+    <DashboardCtx.Provider value={ctxValue}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
