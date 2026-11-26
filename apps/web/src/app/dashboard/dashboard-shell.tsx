@@ -34,6 +34,7 @@ import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
 import { useAgentAuthFailures } from '@/components/presence/use-agent-auth-failures';
 import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
+import { useDepth1Shortcuts } from '@/hooks/use-depth1-shortcuts';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
@@ -215,6 +216,7 @@ function ShellBody({
   const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const { setOpen: setPaletteOpen } = useCommandPalette();
   const { open: listColumnOpen, toggleSidebar } = useSidebar();
+  useDepth1Shortcuts(); // story 5031 (C1 step 3) — ⌘1–⌘4 open the four places (the icon bar's titles name the keys)
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
     // story #4888 — the navigation bar's «홈» badge and the home screen read ONE model (the number of rows in «내 손이 필요해요»)

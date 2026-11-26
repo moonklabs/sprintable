@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { LAYER } from '@/components/ds/layers';
 import { ComposeMovedNotice } from './compose-moved-notice';
@@ -1328,11 +1328,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           // reading-panel.tsx 안쪽 콘텐츠 wrapper가 자기 key로 별도 담당, 자연 분리).
           // exit(닫기) 애니는 의도적 무(PO 판정 — 즉시 사라짐=반응성 피드백).
           <div
-            className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
+            className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden flex-1 lg:w-(--reading-w) lg:flex-none lg:shrink-0"
             // story #2921 S6(유나 확定④) — rail이 접힌/오버레이 상태(xl 미만+reading 열림)에선
             // clamp 대신 480px 고정(Pedro 산수: main 544 보장은 reading=480 전제). xl↑나
             // reading 닫힘(=railMode 'normal')은 기존 clamp(480,40vw,720) 그대로.
-            style={panelLayout.panelStyle}
+            // story 5031 (C1, found by the BE lane · PO 11-26): `isMobileReadingView` is true whenever a panel is open, so the fixed width never applied — on a desktop the room and the panel split 50/50. A phone is full screen (`flex-1`); from lg up the panel is a fixed slot whose width is this CSS variable.
+            // C4 (5034): the whole-window tier brings its own flex style (panelLayout); the CSS variable is the fixed slot the other two tiers use — one style object carries both.
+            style={{ ...panelLayout.panelStyle, '--reading-w': railMode === 'normal' ? 'clamp(480px, 40vw, 720px)' : '480px' } as CSSProperties}
           >
             <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} expanded={readingPanelExpanded} onToggleExpanded={toggleReadingPanelExpanded} />
           </div>
