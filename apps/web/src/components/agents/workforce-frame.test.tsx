@@ -7,6 +7,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TEAM_TABS } from '@/lib/nav-config';
 
 let pathname = '/organization/workforce';
@@ -14,15 +16,18 @@ let search = '';
 let wide = true;
 let admin = true;
 const push = vi.fn();
+const replace = vi.fn();
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(search),
-  useRouter: () => ({ push, replace: vi.fn() }),
+  useRouter: () => ({ push, replace }),
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
 vi.mock('@/hooks/use-org-admin', () => ({ useOrgAdmin: () => ({ isAdmin: admin, loaded: true }) }));
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => <div data-testid="top-bar-slot-stub" /> }));
+vi.mock('@/components/nav/flat-tab-top-bar', () => ({ AgentsTopBarTitle: () => null }));
 vi.mock('@/hooks/use-list-detail-wide', () => ({ useListDetailWide: () => wide }));
 let onAdd: () => void = () => {};
 vi.mock('@/components/agents/agent-management-tab', () => ({
@@ -39,6 +44,7 @@ beforeEach(() => {
   wide = true;
   admin = true;
   push.mockClear();
+  replace.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -60,6 +66,15 @@ describe('resolveWorkforceView — 주소가 틀을 정한다', () => {
     expect(resolveWorkforceView('/organization/workforce', 'manage')).toEqual({ kind: 'split', agentId: null });
     expect(resolveWorkforceView('/organization/workforce', 'bogus')).toEqual({ kind: 'split', agentId: null });
     expect(resolveWorkforceView('/organization/workforce/abc-123', null)).toEqual({ kind: 'split', agentId: 'abc-123' });
+  });
+
+  it('⭐끝 슬래시 · 깨진 인코딩: `/runs/`는 여전히 실행 기록(에이전트 «runs»가 아니다) · 깨진 `%`는 던지지 않고 그대로 아이디로 읽는다', async () => {
+    const { resolveWorkforceView } = await import('./workforce-frame');
+    expect(resolveWorkforceView('/organization/workforce/runs/', null)).toEqual({ kind: 'all', key: 'runs' });
+    expect(resolveWorkforceView('/organization/workforce/api-keys/', null)).toEqual({ kind: 'all', key: 'keys' });
+    expect(resolveWorkforceView('/organization/workforce/', null)).toEqual({ kind: 'split', agentId: null });
+    expect(() => resolveWorkforceView('/organization/workforce/%E0%A4%A', null)).not.toThrow();
+    expect(resolveWorkforceView('/organization/workforce/%E0%A4%A', null)).toEqual({ kind: 'split', agentId: '%E0%A4%A' });
   });
 
   it('실행 기록 · 키 · 통계 · 영입 · 접근표는 «전체 보기» (옛 주소 그대로)', async () => {
@@ -141,6 +156,26 @@ describe('WorkforceFrame — 에이전트 추가', () => {
   });
 });
 
+describe('WorkforceFrame — 폰 목록 · 시트 닫기 (codex 5939)', () => {
+  it('⭐시트를 닫으면 replace로 목록에 돌아간다(push면 «뒤로»가 시트를 다시 연다) — 소스에서 못 박음(시트 닫기는 jsdom에서 누를 수 없는 Radix 패널)', () => {
+    const src = readFileSync(join(__dirname, 'workforce-frame.tsx'), 'utf8');
+    const close = src.slice(src.indexOf('onSheetOpenChange'), src.indexOf('onSheetOpenChange') + 160);
+    expect(close).toContain('router.replace(');
+    expect(close).not.toContain('router.push(');
+  });
+
+  it('⭐좁은 화면 목록은 위쪽 막대 제목을 틀이 직접 올린다(상세 칸이 안 그려져 아무도 안 올리던 결함) · 넓은 화면 · 에이전트 주소에서는 틀이 올리지 않는다(자식이 올린다)', async () => {
+    wide = false;
+    await mount();
+    expect(container.querySelector('[data-testid="top-bar-slot-stub"]')).toBeTruthy();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    wide = true;
+    await mount();
+    expect(container.querySelector('[data-testid="top-bar-slot-stub"]')).toBeNull();
+  });
+});
+
 describe('WorkforceFrame — 전체 보기', () => {
   it('실행 기록 주소: 목록 칸 없음 · 위에 전체 보기 줄(켜진 칸 하나) + 에이전트 목록으로 돌아가는 길 · 본문은 그대로', async () => {
     pathname = '/organization/workforce/runs';
@@ -163,6 +198,13 @@ describe('WorkforceFrame — 전체 보기', () => {
     await mount();
     const links = [...container.querySelectorAll('[data-testid="workforce-all-views-strip"] a[data-all-view]')].map((a) => a.getAttribute('data-all-view'));
     expect(links).toEqual(['runs', 'keys', 'stats', 'recruit']);
+  });
+
+  it('⭐비관리자가 ?tab=access로 오면 줄은 «통계»를 켠다(화면이 통계로 읽는 것과 한 소리)', async () => {
+    admin = false;
+    search = 'tab=access';
+    await mount();
+    expect(container.querySelector('[data-testid="workforce-all-views-strip"] a[aria-current="page"]')?.getAttribute('data-all-view')).toBe('stats');
   });
 
   it('?tab=stats 주소도 전체 보기(통계 칸이 켜짐)', async () => {

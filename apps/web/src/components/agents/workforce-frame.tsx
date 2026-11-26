@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
+import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { TEAM_TABS } from '@/lib/nav-config';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
 import { TabNav, TabNavLink } from '@/components/ds/tab-nav';
@@ -33,15 +35,19 @@ const RUNS_ROUTE = routeOf(pathOf('runs'));
 const KEYS_ROUTE = routeOf(pathOf('keys'));
 
 /** The address decides the frame: the list + detail («split») for the agent list and one agent's detail, the «all agents» frame for the views that read every agent. Old addresses keep their meaning (a `?tab=` we do not know reads as the list, as before). */
-export function resolveWorkforceView(pathname: string, tab: string | null): WorkforceView {
+export function resolveWorkforceView(rawPathname: string, tab: string | null): WorkforceView {
+  const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname; // a trailing slash is the same address (`/runs/` is still the run history, not an agent called «runs»)
   if (pathname === RUNS_ROUTE) return { kind: 'all', key: 'runs' };
   if (pathname === KEYS_ROUTE) return { kind: 'all', key: 'keys' };
-  if (pathname === WORKFORCE || pathname === `${WORKFORCE}/`) {
+  if (pathname === WORKFORCE) {
     return tab && ALL_TABS.has(tab) ? { kind: 'all', key: tab as AllViewKey } : { kind: 'split', agentId: null };
   }
   if (pathname.startsWith(`${WORKFORCE}/`)) {
     const rest = pathname.slice(WORKFORCE.length + 1).split('/')[0] ?? '';
-    return rest ? { kind: 'split', agentId: decodeURIComponent(rest) } : { kind: 'split', agentId: null };
+    if (!rest) return { kind: 'split', agentId: null };
+    let id = rest;
+    try { id = decodeURIComponent(rest); } catch { /* a malformed escape is kept as written — the detail page then says «not found», the frame does not throw */ }
+    return { kind: 'split', agentId: id };
   }
   return { kind: 'split', agentId: null };
 }
@@ -86,10 +92,13 @@ export function WorkforceFrame({ children }: { children: ReactNode }) {
 function AllFrame({ active, children }: { active: AllViewKey; children: ReactNode }) {
   const ta = useTranslations('agents');
   const flatHref = useFlatHref();
+  const { isAdmin, loaded } = useOrgAdmin();
+  // a non-admin who opens ?tab=access is shown the stats (agents-page-tabs does the same read) — the strip lights the same one
+  const lit: AllViewKey = active === 'access' && loaded && !isAdmin ? 'stats' : active;
   return (
     <>
       <div className="px-4 pt-3" data-testid="workforce-all-views-band">
-        <AllViewsNav active={active} testId="workforce-all-views-strip">
+        <AllViewsNav active={lit} testId="workforce-all-views-strip">
           <Link href={flatHref(WORKFORCE)} className="shrink-0 border-r border-ds-line pr-3 text-ds-small font-medium text-ds-action-text hover:underline" data-testid="workforce-back-to-list">
             {ta('allViewsBack')}
           </Link>
@@ -107,6 +116,8 @@ function SplitFrame({ agentId, children }: { agentId: string | null; children: R
   const wide = useListDetailWide();
   return (
     <div className="px-4 pt-3" data-testid="workforce-frame">
+      {/* a phone's list draws no detail pane, so none of the children mounts the top bar's title — the frame says it (wide and the sheet both have a child that does) */}
+      {!wide && agentId === null ? <TopBarSlot title={<AgentsTopBarTitle />} showContextChip /> : null}
       <ListDetailShell
         testId="workforce-split"
         columnTestId="workforce-detail-column"
@@ -125,7 +136,7 @@ function SplitFrame({ agentId, children }: { agentId: string | null; children: R
         sheetHeader={ta('detailPaneLabel')}
         sheetLabel={ta('detailSheetLabel')}
         sheetOpen={agentId !== null}
-        onSheetOpenChange={(open) => { if (!open) router.push(flatHref(WORKFORCE)); }}
+        onSheetOpenChange={(open) => { if (!open) router.replace(flatHref(WORKFORCE)); }} /* replace, not push: Back after closing must not reopen the sheet */
       />
     </div>
   );
