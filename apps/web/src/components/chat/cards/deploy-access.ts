@@ -35,7 +35,8 @@ export async function fetchDeploySummary(agentId: string, projectId: string | nu
   if (res.status === 403) return { name, active, access: 'unknown', recordId: null }; // the server says this viewer may not read it: the name only
   const rows = await dataOf(res);
   if (!Array.isArray(rows)) throw new EntitySummaryError(502);
-  const mine = rows.find((r): r is Record<string, unknown> => obj(r) && r.member_id === agentId && typeof r.id === 'string');
+  const mine = rows.find((r): r is Record<string, unknown> => obj(r) && r.member_id === agentId);
+  if (mine && !(typeof mine.id === 'string' && UUID_RE.test(mine.id))) throw new EntitySummaryError(502); // the agent's row without a usable record id: a fault worth «try again» — never «in this project» with a take-back that points nowhere
   return mine ? { name, active, access: 'granted', recordId: mine.id as string } : { name, active, access: 'none', recordId: null };
 }
 

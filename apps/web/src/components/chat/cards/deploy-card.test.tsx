@@ -136,6 +136,13 @@ describe('a press shows its own result at once (PO, dev 11-26: the text stayed u
     ctx = { ...ctx, projectId: 'proj-1' }; await act(async () => { root.render(tree()); }); await tick();
     expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); // … and a later fresh read replaces it
   });
+  it('the agent\'s row in the access list without a usable record id (blank · spaces) is a fault to retry — never «in this project» with a take-back that points nowhere', async () => {
+    for (const id of [' ', '', 'rec']) {
+      stub({ access: () => json(200, { data: [{ id, member_id: AGENT }] }) }); await show();
+      expect(frame()!.dataset.cardState, JSON.stringify(id)).toBe('error');
+      expect(btn('이 프로젝트에서 빼기'), JSON.stringify(id)).toBeUndefined();
+    }
+  });
   it('a write that answers without a usable record is not claimed: the card READS again and shows what the read says', async () => {
     stub({ post: () => json(201, { data: {} }) }); await show();
     const getsBefore = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
