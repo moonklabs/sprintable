@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (h: string) => h }));
 
 const AGENT = '0d6e953f-6d43-42c1-a87c-b023544497db';
-const REC = 'rec-1';
+const REC = '5c1f0a52-3b7e-4e0d-9a6f-1d2c3b4a5e6f';
 let container: HTMLDivElement;
 let root: Root;
 let log: { method: string; url: string; body?: unknown }[];
@@ -116,6 +116,25 @@ describe('a press shows its own result at once (PO, dev 11-26: the text stayed u
     await press('이 프로젝트에 넣기');
     expect(writes().map((c) => c.method)).toEqual(['DELETE', 'POST']);
     expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
+  });
+  it('a record id that is not a UUID (blank · spaces) is not a usable record: nothing is claimed, the card READS again', async () => {
+    for (const id of [' ', '  x ', 'rec']) {
+      stub({ post: () => json(201, { data: { id } }) }); await show();
+      const before = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+      await press('이 프로젝트에 넣기');
+      expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length, id).toBe(before + 1);
+    }
+  });
+  it('the press result lives only as long as the read it was made on: coming back to the card (another project and back) shows what a FRESH read says', async () => {
+    const tree = () => <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatCard card={{ kind: 'deploy', ref: AGENT }} /></NextIntlClientProvider>; // (a NEW element each time — the same element would be skipped by React)
+    const tick = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+    stub({ access: ROWS_NOT }); // the server's rows stay «not in» for every read
+    await act(async () => { root.render(tree()); }); await tick();
+    await press('이 프로젝트에 넣기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요'); // the press shows its own result …
+    ctx = { ...ctx, projectId: 'proj-2' }; await act(async () => { root.render(tree()); }); await tick();
+    ctx = { ...ctx, projectId: 'proj-1' }; await act(async () => { root.render(tree()); }); await tick();
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); // … and a later fresh read replaces it
   });
   it('a write that answers without a usable record is not claimed: the card READS again and shows what the read says', async () => {
     stub({ post: () => json(201, { data: {} }) }); await show();

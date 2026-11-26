@@ -52,8 +52,8 @@ export function ChatCard({ card }: { card: unknown }) {
   const ref = parseCardRef(card);
   if (!ref) return <UnknownCard />;
   // a REFUSED card (the server posted it for an agent that may not see the object): drawn for each viewer by their own rights. An object or a board is read for the viewer (RefusedCard); any OTHER kind
-  // (a project-membership card of an agent · a gate) is the plain «찾을 수 없어요» — whatever must stay hidden the server never sent, and «update the app» would be a wrong thing to say about a card this build knows
-  if (ref.refusedFor) return isEntityCardKind(ref.kind) || ref.kind === 'kanban' ? <RefusedCard kind={ref.kind} refId={ref.ref} agentId={ref.refusedFor} /> : <CardFrame state="hidden" data-testid="chat-card-refused-hidden" />;
+  // (a project-membership card of an agent · a gate) is the plain «찾을 수 없어요», drawn EXACTLY as that kind's ordinary «not found» card (same frame and test id — the DOM must not tell «refused» from «missing») — whatever must stay hidden the server never sent, and «update the app» would be a wrong thing to say about a card this build knows
+  if (ref.refusedFor) return isEntityCardKind(ref.kind) || ref.kind === 'kanban' ? <RefusedCard kind={ref.kind} refId={ref.ref} agentId={ref.refusedFor} /> : <CardFrame state="hidden" data-testid={ref.kind === 'deploy' ? 'chat-card-deploy' : undefined} />;
   const Part = CARD_PARTS[ref.kind];
   if (!Part) return <UnknownCard />;
   return <Part kind={ref.kind} refId={ref.ref} />;

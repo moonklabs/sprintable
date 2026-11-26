@@ -15,6 +15,7 @@ export interface DeploySummary {
   recordId: string | null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 async function dataOf(res: Response): Promise<unknown> {
   if (!res.ok) throw new EntitySummaryError(res.status);
@@ -52,7 +53,7 @@ export async function placeAgent(projectId: string, agentId: string): Promise<De
     // a created record names itself (`{ data: { id } }`); an answer without one is not claimed — the card re-reads instead
     let id: unknown = null;
     try { const d = ((await res.json()) as { data?: unknown }).data; id = obj(d) ? d.id : null; } catch { /* no usable body */ }
-    return { result: 'ok', applied: typeof id === 'string' && id !== '' ? { access: 'granted', recordId: id } : null };
+    return { result: 'ok', applied: typeof id === 'string' && UUID_RE.test(id) ? { access: 'granted', recordId: id } : null };
   } catch { return { result: 'fault', applied: null }; }
 }
 

@@ -22,10 +22,10 @@ export function DeployCard({ agentId }: { agentId: string }) {
   const mayRead = canGrantProjectAccess(ctx.role);
   const { read, retry } = useCardRead(`deploy:${agentId}:${projectId ?? ''}:${mayRead}`, () => fetchDeploySummary(agentId, projectId, mayRead));
   // what the last write made true (its own answer) — shown at once; a read that follows may still see the rows as they were (a press is a write the server has confirmed, not a guess)
-  const readKey = `${agentId}:${projectId ?? ''}`;
-  const [appliedFor, setApplied] = useState<{ key: string; next: Pick<DeploySummary, 'access' | 'recordId'> } | null>(null);
-  const applied = appliedFor && appliedFor.key === readKey ? appliedFor.next : null; // (another agent or project is another card)
+  const [appliedFor, setApplied] = useState<{ base: DeploySummary; next: Pick<DeploySummary, 'access' | 'recordId'> } | null>(null);
   if (read.state !== 'ready') return <CardFrame state={read.state} onRetry={retry} data-testid="chat-card-deploy" />;
+  // valid only for the very read it was made on: ANY newer read (another agent or project, a retry, coming back to this card) is fresher than a press and replaces it
+  const applied = appliedFor && appliedFor.base === read.value ? appliedFor.next : null;
   const summary: DeploySummary = applied ? { ...read.value, ...applied } : read.value;
   return (
     <DeployCardFace
@@ -34,7 +34,7 @@ export function DeployCard({ agentId }: { agentId: string }) {
       canAct={mayRead && projectId !== null}
       projectId={projectId}
       agentId={agentId}
-      onChanged={(next) => { if (next) setApplied({ key: readKey, next }); else { setApplied(null); retry(); } }}
+      onChanged={(next) => { if (next) setApplied({ base: read.value, next }); else { setApplied(null); retry(); } }}
     />
   );
 }

@@ -144,6 +144,8 @@ describe('which cards are refused cards', () => {
       expect(container.querySelector('[data-testid="chat-card-unknown"]'), kind).toBeNull(); // NOT «update the app» — this build knows the kind
       expect(container.textContent, kind).toBe('찾을 수 없어요'); expect((container.querySelector('[data-card-state]') as HTMLElement).dataset.cardState).toBe('hidden');
       expect(calls.length, kind).toBe(before); // nothing is read for it
+      if (kind === 'deploy') expect(container.querySelector('[data-testid="chat-card-deploy"]'), 'drawn as the ordinary «not found» deploy card — the DOM never says «refused»').not.toBeNull();
+      expect(container.innerHTML, kind).not.toMatch(/refused/);
     }
     for (const bad of ['nope', 7, [], `{${AGENT}}`]) { await show(refused({ refused_for: bad })); expect(container.querySelector('[data-testid="chat-card-unknown"]'), String(bad)).not.toBeNull(); }
   });
