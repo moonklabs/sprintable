@@ -166,3 +166,45 @@ test('[SID:5035] 390 «전체 보기»: the strip fits a phone (it scrolls insid
   expect(await pageOverflowX(page)).toBeLessThanOrEqual(0);
   expect(await page.locator('[data-testid="workforce-all-views-strip"] a[data-all-view]').count()).toBe(5);
 });
+
+// story 5035 follow-up (PO's Two-Pass on 390): the «전체 보기» strip used to scroll sideways and was cut at «접근» with nothing saying there was more — now the links WRAP: every link is whole and one press away.
+const linksAreWhole = (page: Page, scope: string) => page.evaluate((sel) => {
+  const nav = document.querySelector(`${sel} nav`) as HTMLElement;
+  const n = nav.getBoundingClientRect();
+  const links = Array.from(nav.querySelectorAll('a[data-all-view]')) as HTMLElement[];
+  return {
+    count: links.length,
+    clippedRight: Math.max(...links.map((l) => Math.round(l.getBoundingClientRect().right - n.right))),
+    clippedLeft: Math.max(...links.map((l) => Math.round(n.left - l.getBoundingClientRect().left))),
+    hiddenOverflow: nav.scrollWidth - nav.clientWidth,
+    maskImage: getComputedStyle(nav).maskImage,
+  };
+}, scope);
+
+test('[SID:5035] 390 list column: the five «전체 보기» links are all whole (they wrap — none is cut, nothing hides behind a side scroll)', async ({ page }) => {
+  await open(page, { viewport: [390, 800], path: '/organization/workforce' });
+  const r = await linksAreWhole(page, '[data-testid="workforce-all-views-menu"]');
+  expect(r.count).toBe(5);
+  expect(r.clippedRight, 'no link sticks out of the strip').toBeLessThanOrEqual(0);
+  expect(r.clippedLeft).toBeLessThanOrEqual(0);
+  expect(r.hiddenOverflow, 'nothing is hidden behind a sideways scroll').toBeLessThanOrEqual(0);
+  expect(r.maskImage, 'no fade that makes a whole link look cut').toBe('none');
+});
+
+test('[SID:5035] 1440 list column (360–420): the five links are all whole too', async ({ page }) => {
+  await open(page, { viewport: [1440, 900], path: '/organization/workforce' });
+  const r = await linksAreWhole(page, '[data-testid="workforce-all-views-menu"]');
+  expect(r.count).toBe(5);
+  expect(r.clippedRight).toBeLessThanOrEqual(0);
+  expect(r.hiddenOverflow).toBeLessThanOrEqual(0);
+});
+
+test('[SID:5035] 390 all-agents frame (back link + strip): the five links are all whole', async ({ page }) => {
+  await open(page, { viewport: [390, 800], path: '/organization/workforce/runs' });
+  const r = await linksAreWhole(page, '[data-testid="workforce-all-views-strip"]');
+  expect(r.count).toBe(5);
+  expect(r.clippedRight).toBeLessThanOrEqual(0);
+  expect(r.hiddenOverflow).toBeLessThanOrEqual(0);
+  expect(await pageOverflowX(page)).toBeLessThanOrEqual(0);
+});
+

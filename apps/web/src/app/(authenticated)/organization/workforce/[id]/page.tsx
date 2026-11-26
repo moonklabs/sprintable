@@ -3,7 +3,6 @@
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab';
 import { sessionStateLabel } from '@/components/chat/agent-session-strip';
@@ -25,6 +24,7 @@ import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { EmptyState } from '@/components/ds/empty-state';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
+import { ComputerSummaryValue } from '@/components/agents/computer-summary-value';
 import { IconButton } from '@/components/ds/icon-button';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { PageFrame } from '@/components/ds/page-frame';
@@ -68,14 +68,15 @@ const RUNTIME_STATUS_UI: Record<
 > = {
   supported: { labelKey: 'runtimeSupported', helpKey: 'runtimeSupportedHelp', Icon: Check },
   partial: { labelKey: 'runtimePartial', helpKey: 'runtimePartialHelp', Icon: AlertTriangle },
-  unsupported: { labelKey: 'runtimeUnsupported', helpKey: 'runtimeUnsupportedHelp', Icon: XCircle },
+  // story 5035 follow-up (PO's Two-Pass): «커맨드 미지원» is a PROPERTY of the runtime (Claude Code · Codex · Cursor are all «unsupported» and work fine) — not an error: a neutral dash icon, not the failure cross
+  unsupported: { labelKey: 'runtimeUnsupported', helpKey: 'runtimeUnsupportedHelp', Icon: MinusCircle },
   unset: { labelKey: 'runtimeUnset', helpKey: 'runtimeUnsetHelp', Icon: MinusCircle },
   unknown: { labelKey: 'runtimeUnknown', helpKey: 'runtimeUnknownHelp', Icon: XCircle },
 };
 
-/** story 4912 (C1): the status chip's tone — colour only where it MEANS something (supported = done · partial = needs a hand · unsupported/unknown = failed · unset = neutral). */
+/** story 4912 (C1): the status chip's tone — colour only where it MEANS something (supported = done · partial = needs a hand · unknown = failed · unsupported / unset = neutral: a property, not an error — story 5035 follow-up). */
 const RUNTIME_CHIP_TONE: Record<RuntimeStatus, 'neutral' | 'done' | 'needs-hand' | 'failed'> = {
-  supported: 'done', partial: 'needs-hand', unsupported: 'failed', unset: 'neutral', unknown: 'failed',
+  supported: 'done', partial: 'needs-hand', unsupported: 'neutral', unset: 'neutral', unknown: 'failed',
 };
 
 interface AgentMember {
@@ -592,16 +593,7 @@ export default function AgentDetailPage() {
     ...(computerLine ? [{
       id: 'computer',
       label: ta('detailSummaryComputer'),
-      value: (
-        <span data-testid="agent-running-on" className="flex flex-col gap-0.5">
-          <span>{computerLine}</span>
-          {canManageDevices && computerSetupId ? (
-            <Link href={flatHref(`/desktop#device=${computerSetupId}`)} className="whitespace-nowrap text-ds-small font-medium text-ds-action-text hover:underline" data-testid="agent-see-devices">
-              {ta('seeConnectedDevices')}
-            </Link>
-          ) : null}
-        </span>
-      ),
+      value: <ComputerSummaryValue line={computerLine} devicesHref={canManageDevices && computerSetupId ? flatHref(`/desktop#device=${computerSetupId}`) : null} devicesLabel={ta('seeConnectedDevices')} />,
     }] : []),
     // the key list is read for the people who may manage keys only (canEditBase); for others «no key» would be a guess
     ...(showKeysTab && keysReadOk ? [{ id: 'key', label: ta('detailSummaryKey'), value: hasActiveKey ? ta('detailSummaryKeyHas') : ta('detailSummaryKeyNone') }] : []),

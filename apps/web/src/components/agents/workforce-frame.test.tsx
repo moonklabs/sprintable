@@ -120,6 +120,14 @@ describe('WorkforceFrame — 목록 → 상세', () => {
     expect(entry!.querySelector('[data-testid="workforce-all-views-caption"]')?.textContent).toBe('allViewsCaption');
     expect(container.querySelector('[data-testid="agent-list-stub"]')?.getAttribute('data-compact')).toBe('true');
   });
+  it('⭐«전체 보기» 줄은 넘치면 옆으로 스크롤하지 않고 줄바꿈한다 — 어느 링크도 잘리지 않고 «더 있음» 흐림도 없다 (C5 Two-Pass · 390)', async () => {
+    await mount();
+    const nav = container.querySelector('[data-testid="workforce-all-views-menu"] nav') as HTMLElement;
+    expect(nav.className).toContain('flex-wrap');
+    expect(nav.className).toContain('overflow-x-visible');
+    expect(nav.className).not.toContain('overflow-x-auto');
+    expect(nav.className).toContain('[mask-image:none]');
+  });
 
   it('넓은 화면, 에이전트 상세 주소: 목록과 상세가 «같이» 보인다(목록 → 상세 칸 순서)', async () => {
     pathname = '/organization/workforce/abc-123';
