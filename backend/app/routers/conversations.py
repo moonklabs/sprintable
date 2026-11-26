@@ -2957,6 +2957,11 @@ class ShowCardRequest(BaseModel):
     kind: str
     ref: str
     note: str | None = Field(default=None, max_length=200, description="One short sentence to go with the card (optional).")
+    # The MCP client puts its own key's context on EVERY POST body (api_client: project_id · org_id · created_by). They are accepted here only so that call is not a 422 — they are never read: who the
+    # agent is, which org and which project it may look at come from its key, not from the body. Any OTHER extra word is still refused.
+    project_id: str | None = Field(default=None, exclude=True)
+    org_id: str | None = Field(default=None, exclude=True)
+    created_by: str | None = Field(default=None, exclude=True)
 
 
 _SHOW_CARD_NOT_FOUND = "Target not found"
