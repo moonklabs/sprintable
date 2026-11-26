@@ -161,7 +161,7 @@ test('[SID:4887] a person\'s DM has no participant line at all and is the shorte
 
 // story 4887 (UI-4 P6-b) — the list slot is narrower between lg and xl (read from chats/layout.tsx, not typed here): at THAT width the list must read exactly as it does at 270 — the short computer name in full, the same cut rows.
 // (Measured over ten rows on a Mac: 232 px and up cut 4 titles · 3 previews · 4 computer names · 2 agent names · 0 project names, the same as 270; 224 px newly cuts «SYJ-Mac» and a project name. The CI's wider Linux font cuts «SYJ-Mac» at 232 (32 of 41 px), which is why the slot is 248.)
-const LG_LIST_WIDTH = Number(/lg:w-\[(\d+)px\] xl:w-\[270px\]/.exec(readFileSync(path.join(WEB, 'src/app/(authenticated)/chats/layout.tsx'), 'utf8'))?.[1]);
+const LG_LIST_WIDTH = Number(/lg:w-\[(\d+)px\] xl:w-100/.exec(readFileSync(path.join(WEB, 'src/app/(authenticated)/chats/layout.tsx'), 'utf8'))?.[1]);
 
 test('[SID:4887] at the narrower lg list width the short computer name is still READ in full and no line runs past its column', async ({ page }) => {
   expect(LG_LIST_WIDTH, 'the lg list width is read from the layout source').toBeGreaterThan(200);

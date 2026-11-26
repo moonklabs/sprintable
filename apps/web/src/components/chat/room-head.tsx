@@ -38,6 +38,7 @@ export interface RoomHeadProps {
 
 /**
  * story 4887 (UI-4 screen PR · the approved layout B3) — the room head inside the room's column: the name, a tag, ONE line of facts and a row of participant chips.
+ * story 5031 (C1 step 2b, kit numbers): at least 80 high (`min-h-20`: the chip row may still make it taller) with 24 on each side (`px-6`).
  * It carries no button of its own except the «+» that ends the chip row (add a participant) and whatever the caller puts at the right end («⋯»). From lg up only — a phone gets RoomBarTitle in the shell's header row.
  */
 export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, onAdd, trailing, peopleLabel, peopleCount }: RoomHeadProps) {
@@ -46,8 +47,8 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
   const folded = short && Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
-    // story 5048 T0 ①: the controls are 40 px now — in the short window (folded) the head gives its padding back so it stays under 72 px
-    <header data-testid="room-head" className={`flex-shrink-0 border-b border-ds-line px-4 max-lg:hidden ${folded ? 'pb-1 pt-1' : 'pb-1.5 pt-2'}`}>
+    // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20). Folded (short window) the content is two rows of 40-px controls (62), so py-2 (16) lands it on exactly 80; py-3 would make it 86
+    <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'py-2' : 'py-3'}`}>
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}

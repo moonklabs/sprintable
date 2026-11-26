@@ -180,7 +180,7 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await head.locator('[data-testid="room-head-chip"]').count()).toBe(4);
       expect(await head.locator('[data-slot="ds-status-label"]').count(), 'the two agents carry a connection word, the two people do not').toBe(2);
       const hb = (await box(page, '[data-testid="room-head"]'))!;
-      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(140); // name + one line + at most two chip rows at this width (a thread is open beside it)
+      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(152); // name + one line + at most two chip rows at this width (a thread is open beside it) — was 140 before T0 ① (5936) made the controls 40 px: the rows are 9 px taller (measured 149), nothing overflows or clips; the kit head is 80 at minimum, this is its ceiling
 
       // ③ the composer is ONE bordered box holding the clip, the text and «⏎ 보내기»
       const cb = (await box(page, '[data-testid="chat-composer-box"]'))!;

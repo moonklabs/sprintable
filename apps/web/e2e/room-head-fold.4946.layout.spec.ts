@@ -76,7 +76,7 @@ test.describe('the room head folds its chips in a short window (story 4946)', ()
     expect(g.ulDisplay).toBe('none'); expect(g.chipLists, 'the chips are in the popup only once it is open').toBe(0); expect(g.peopleButtons).toBe(1);
     expect(g.btnDisplay).not.toBeNull(); expect(g.btnW).toBeGreaterThan(30); expect(g.btnH).toBeGreaterThanOrEqual(28);
     expect(g.btnName).toContain('3');
-    expect(g.headH, 'the folded head').toBeLessThan(72);
+    expect(g.headH, 'the folded head is exactly the kit minimum (80) — reverting min-h-20 turns this red').toBe(80); // story 5031 (C1 2b): min-h-20
   });
   test('[SID:4946] ⭐647 · 900 high: the chip row is drawn as before and the people button is not (the head is the 3-row one)', async ({ page }) => {
     for (const h of [647, 900]) {

@@ -148,13 +148,21 @@ describe('줄의 href · 표식 · 지금 여기', () => {
     expect(hrefOf('chats')).toBe('/chats');
   });
 
-  it('프로젝트 범위 줄(일감 · 목표 · 실행 · 문서 · 산출물 · 스토리지)엔 «프로젝트» 표식이 붙고 조직 범위 줄(콘텐츠)엔 안 붙는다', async () => {
+  it('⭐줄마다 «프로젝트» 표식이 붙지 않는다 — 프로젝트는 위쪽 프로젝트 필터 하나로 알린다(PO 11-26 · 칩은 한 자리에 하나)', async () => {
     pathnameRef.current = '/chats';
     await mount(OFF);
-    const text = (id: string) => container.querySelector(`[data-nav-id="${id}"]`)?.textContent ?? '';
-    for (const id of ['board', 'goals', 'loops', 'docs', 'artifacts', 'storage']) expect(text(id), id).toContain('프로젝트');
-    expect(text('content')).not.toContain('프로젝트');
-    expect(text('chats')).not.toContain('프로젝트');
+    for (const id of rowIds()) expect(container.querySelector(`[data-nav-id="${id}"]`)?.textContent ?? '', String(id)).not.toContain('프로젝트');
+    expect(container.querySelector('[data-testid="depth1-list"]')?.textContent).not.toContain('프로젝트');
+  });
+
+  it('⭐목록 칸에는 검색 상자 · 계정 줄 · 언어 · 테마 · 사업자 정보가 없다 — 아이콘 막대의 검색 · 계정 팝오버가 가진다(둘씩 보이던 것 · PO 11-26)', async () => {
+    await mount(OFF);
+    expect(container.querySelector('[aria-label="검색…"]')).toBeNull();
+    expect(container.textContent).not.toContain('검색…');
+    expect(container.textContent).not.toContain('사업자');
+    expect(container.querySelector('[data-testid="depth1-list"]')).not.toBeNull();
+    // the project filter stays at the top of the column (one place for it)
+    expect(container.querySelector('[data-sidebar="header"]')).not.toBeNull();
   });
 
   it('줄은 높이 40 · 아이콘 24 · 아이콘과 글 16 · 구분선 없음(눈금 클래스만 — 임의 수치 0)', async () => {

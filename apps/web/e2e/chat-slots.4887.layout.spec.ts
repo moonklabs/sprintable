@@ -80,11 +80,11 @@ test('[SID:4887] a 1100 px window (lg) with no thread open: the list slot is 248
   expect(g.main).toBe(1028 - 248);
 });
 
-test('[SID:4887] a 1440 px window (xl): nothing changes — the list slot stays 270 and the thread slot 320', async ({ page }) => {
+test('[SID:5031] a 1440 px window (xl): the kit numbers — the list slot is 400 and the thread slot 256', async ({ page }) => {
   const g = await shell(page, 1440, true);
-  expect(g.rail, 'list slot').toBe(270); // the xl width is NOT narrowed
-  expect(g.thread, 'thread slot').toBe(320);
-  expect(g.main).toBe(1440 - 72 - 270 - 320);
+  expect(g.rail, 'list slot').toBe(400); // story 5031 (C1 2b): the chat list is the place's navigation column
+  expect(g.thread, 'thread slot').toBe(256);
+  expect(g.main).toBe(1440 - 72 - 400 - 256);
 });
 
 test('[SID:4887] 1024 px (the narrowest lg window): the room body still gets at least 400 with a thread open', async ({ page }) => {
@@ -114,7 +114,7 @@ async function build() {
         import { ToastProvider } from './src/components/ui/toast';
         window.__mount = (w) => {
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, React.createElement(ToastProvider, null,
-            React.createElement('div', { id: 'slot', className: 'flex flex-col overflow-hidden', style: { width: w + 'px', height: '640px' } },
+            React.createElement('div', { id: 'slot', className: 'flex flex-col overflow-hidden @container', style: { width: w + 'px', height: '640px' } },
               React.createElement(ThreadPanel, { parentMessage: ${JSON.stringify(PARENT)}, conversationId: 'c1', currentTeamMemberId: 'me-1', projectId: 'p1', onClose() {} })))));
         };`,
       resolveDir: WEB, loader: 'tsx',
@@ -125,7 +125,7 @@ async function build() {
     plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...tailwindCandidates(js), 'flex flex-col overflow-hidden'];
+  const candidates = [...tailwindCandidates(js), 'flex flex-col overflow-hidden @container'];
   built = { js, css: await css(candidates) };
   return built;
 }
@@ -150,7 +150,7 @@ async function openThread(page: Page, width: number) {
   await page.waitForTimeout(400);
 }
 
-for (const width of [300, 320]) {
+for (const width of [256, 300, 320]) { // 256 = the kit's thread slot from xl (story 5031 · C1 2b)
   test(`[SID:4887] the real thread panel at ${width} px: nothing runs past the slot, every button is inside it, and the reply box keeps at least 96 px`, async ({ page }) => {
     await openThread(page, width);
     const m = await page.evaluate(() => {
