@@ -167,11 +167,13 @@ async def upsert_preferences(
             # _resolve_target_member_id는 agent면 TeamMember.id를 그대로 돌려주므로(캐너 축
             # 그대로) 그 id로 TeamMember를 다시 조회해 agent 여부만 확인(재구현 아님 — 존재
             # 확인 1쿼리).
+            # `team_members` is a VIEW with one row per project an agent has — «is it an agent?» needs ONE row, not exactly one (a two-project agent answered 500 «Multiple rows were
+            # found» on dev, 11-26: the channel switch of an agent could not be written). `.limit(1)`, as every other read of the view by member id does.
             target_is_agent = (await db.execute(
                 select(TeamMember.id).where(
                     TeamMember.id == target_member_id, TeamMember.org_id == org_id,
                     TeamMember.type == "agent",
-                )
+                ).limit(1)
             )).scalar_one_or_none() is not None
 
     results = []

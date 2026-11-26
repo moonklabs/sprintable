@@ -318,6 +318,60 @@ async def test_the_channel_switch_api_writes_a_row_the_router_then_honours():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_the_channel_switch_api_accepts_an_agent_that_belongs_to_two_projects():
+    """dev 11-26 (QA admin, error_id 7daa536d…): `PUT /notification-preferences` for an agent answered 500 «Multiple rows were found» — `team_members` is a VIEW with one row per project the
+    agent has, and the «is the target an agent?» read took exactly one. A one-project agent passed, a two-project agent (the dev test agent) did not. The switch has to work for either."""
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.main import app
+    from app.models.project import OrgMember, Project
+    from app.models.project_access import ProjectAccess
+    from httpx import ASGITransport, AsyncClient
+    from tests.conftest import override_db_and_read
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            w = await _world(s)
+            h = w["m"]["H"]
+            s.add(OrgMember(id=uuid.uuid4(), org_id=w["org"].id, user_id=h.user_id, role="admin"))
+            second = Project(id=uuid.uuid4(), org_id=w["org"].id, name="P2")
+            s.add(second)
+            await s.commit()
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=second.id, member_id=w["m"]["B"].id, permission="granted", role="member"))
+            await s.commit()
+
+        async def _db():
+            async with Session() as sess:
+                try:
+                    yield sess
+                    await sess.commit()
+                except Exception:
+                    await sess.rollback()
+                    raise
+
+        async def _auth():
+            return AuthContext(user_id=str(h.user_id), email="h@test", claims={"app_metadata": {"org_id": str(w["org"].id), "role": "admin"}})
+
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                r = await client.put("/api/v2/notification-preferences", json={
+                    "member_id": str(w["m"]["B"].id),
+                    "preferences": [{"scope_type": "conversation", "scope_id": str(w["room"].id), "channel": "sse", "level": "all"}],
+                })
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+
+        async with Session() as s:
+            heard = await _heard(s, await _say(s, w["room"], h))
+            assert {n for n in "ABC" if w["m"][n].id in heard} == {"B"}, heard
+    finally:
+        await engine.dispose()
+
+
 # ── 4b ─ the websocket room follows the router ─────────────────────────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_an_agent_holding_a_websocket_room_hears_only_what_the_router_delivered():
