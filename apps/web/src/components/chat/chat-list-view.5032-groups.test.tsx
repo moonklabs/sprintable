@@ -73,12 +73,12 @@ describe('[SID:5032] ChatListView — two groups', () => {
     expect(rooms.querySelector('[data-testid="room-row-glyph"] [data-icon="tag"]'), 'a room never does').toBeNull();
   });
 
-  it('⭐ a channel row is named by its project (one channel per project) and carries no project line of its own; a room keeps the project line', async () => {
+  it('⭐ a channel row is named by its project (one channel per project) and NO row carries a project line (the room\'s project is the chip in its head)', async () => {
     await mount([room('r1', { project_id: 'p2', project_name: '디자인', title: null, is_project_channel: true }), room('r2', { title: '점심' })]);
     const channelRow = q('chat-list-channels')!;
     expect(channelRow.textContent).toContain('디자인');
     expect(channelRow.querySelector('[data-testid="room-project"]')).toBeNull();
-    expect(q('chat-list-room-group')!.querySelector('[data-testid="room-project"]')?.textContent).toBe('런칭');
+    expect(container.querySelectorAll('[data-testid="room-project"]')).toHaveLength(0);
   });
 
   it('⭐ with no channel the head is still there and says so — and the second group holds every room (an older server marks none)', async () => {

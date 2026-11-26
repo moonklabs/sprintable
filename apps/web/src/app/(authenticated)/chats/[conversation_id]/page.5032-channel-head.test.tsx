@@ -114,6 +114,13 @@ describe('[SID:5032] ConversationPage — the channel head', () => {
     expect(document.activeElement === cog, 'focus is back on the cog').toBe(true);
   });
 
+  it('⭐ a room of a project says the project ONCE, as the head chip (its name), and the line is «N명» only; a room with no project says its kind', async () => {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectId: 'proj-content', projectMemberships: [{ projectId: 'proj-content', projectName: '런칭' }] });
+    stubFetch(false); await mount();
+    expect(q('room-head-tag')?.textContent).toBe('런칭'); // reverted → «프로젝트 방»
+    expect(q('room-head-subline')?.textContent).toBe('3명'); // the name is not repeated on the line
+  });
+
   it('⭐ a one-to-one / group room keeps its own head: no channel tag, no cog, the old «N명» line', async () => {
     stubFetch(false); await mount();
     expect(q('room-head-tag')?.textContent).not.toBe('채널');

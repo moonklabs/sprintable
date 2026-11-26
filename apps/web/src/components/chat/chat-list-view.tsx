@@ -183,15 +183,12 @@ function ConversationRow({
   isAgentConv,
   domainLabels,
   eventDefinitionName,
-  projectLabel,
   onClick,
   onContextMenu,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
-  /** story 4847 (AC1) — which project the room is in, drawn under its name (absent = nothing to say, e.g. the project-only list) */
-  projectLabel?: string;
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
   // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
   domainLabels: OrgDomainLabels;
@@ -349,7 +346,6 @@ function ConversationRow({
             )}
           </span>
         </div>
-        {projectLabel && !isChannel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
         <p className="truncate text-xs text-muted-foreground">{preview}</p>
       </div>
@@ -952,17 +948,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     void fetchConversations(0, false);
   };
 
-  // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
-  const projectLabelOf = (c: ConversationItem): string | undefined => {
-    if (c.project_id === undefined) return undefined;
-    if (c.project_id === null) return undefined; // story 5032 (C2 · PO 11-26): to a person a project IS a channel — a room with none carries no «프로젝트 없음» mark (the row keeps at most one chip)
-    // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
-    // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
-    // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
-    if (!dashboardCtx.projectMembershipsFailed && projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined; // (a failed read can leave ONE project synthesized from /me — the person may have more: then the name stays)
-    return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
-  };
-
+  // story 5032 (C2 · PO 11-26): a row carries NO project line — to a person a project is a channel (the first group, named by the project) and a room's own project is said once, as the chip in the room's head. (story 4847's per-row project name moved there.)
 
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
@@ -1072,7 +1058,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       <section aria-labelledby="chat-list-channels-h" data-testid="chat-list-channels">
         {channelsHeader}
         {grouped.channels.length === 0 ? <p className="px-4 py-2 text-ds-small text-ds-ink-3" data-testid="chat-list-channels-empty">{t('channelsEmpty')}</p> : grouped.channels.map((conv) => (
-          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
         ))}
       </section>
       <section aria-labelledby="chat-list-rooms-h" data-testid="chat-list-room-group">
@@ -1082,7 +1068,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-rooms-count">{grouped.rooms.length}</span>}
         />
         {grouped.rooms.map((conv) => (
-          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+          <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
         ))}
       </section>      {conversations.length < myTotal && (
         <Button

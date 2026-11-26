@@ -339,14 +339,15 @@ export default function ConversationPage() {
 
   // story 4887 (UI-4 screen PR · the approved layout B3) — the room head: name · tag · one line of facts · a chip per participant (an agent's chip says how it is connected, from the presence the page already polls)
   const roomProjectName = meta?.projectId ? (projectMemberships.find((m) => m.projectId === meta.projectId)?.projectName ?? null) : null;
-  const headTag = meta ? (meta.isProjectChannel ? t('roomTagChannel') : meta.projectId ? t('roomTagProject') : meta.type === 'dm' ? t('dmSection') : t('groupSection')) : null;
+  // story 5032 (C2 · PO 11-26): ONE chip in the head says the room's project (the rows of the list carry none): the project's name — «프로젝트 방» only while the name is not known yet; a room with none says its kind (DM · 그룹); a channel says «채널» (its title is the project)
+  const headTag = meta ? (meta.isProjectChannel ? t('roomTagChannel') : meta.projectId ? (roomProjectName ?? t('roomTagProject')) : meta.type === 'dm' ? t('dmSection') : t('groupSection')) : null;
   // story 5032 (C2): a channel's head says who is in it at a glance — «사람 N · 부를 수 있는 에이전트 N» (the people are the humans in the room, the agents are the ones that can be called here)
   const channelPeople = meta ? meta.participants.filter((p) => p.type !== 'agent').length : 0;
   const channelAgents = meta ? meta.participants.filter((p) => p.type === 'agent').length : 0;
   const headSubline = meta
     ? (meta.isProjectChannel
       ? t('roomHeadChannelFacts', { people: channelPeople, agents: channelAgents })
-      : [roomProjectName, t('roomHeadPeople', { count: meta.participants.length })].filter(Boolean).join(' · '))
+      : t('roomHeadPeople', { count: meta.participants.length }))
     : null;
   const HEAD_CHIP_MAX = 8;
   const headChips = (meta?.participants ?? []).slice(0, HEAD_CHIP_MAX).map((p) => {
