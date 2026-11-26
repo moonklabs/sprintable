@@ -16,6 +16,8 @@ import { presetName } from '@/lib/platform-preset-copy';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { clearLineProject, readLineProject, type LineProject } from '@/lib/onboarding/line-project';
+import { findProjectChannelId } from '@/lib/onboarding/first-chat';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { endsWithAgentWord, forgetActiveSetup, moveProgress, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type MoveProgress, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
@@ -45,13 +47,29 @@ export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   );
 }
 
+/** story 5036 (C6 · step ③ of the first-run line in the Mac app, PO 11-26): the person who came through the line (their step ① project is marked — lib/onboarding/line-project.ts) opens THE PROJECT'S CHANNEL as
+ *  their first conversation, the same room the web's step ③ opens. The mark is used up when the room is asked for (found or not): not found → null, and the caller goes where it always went (the start's own
+ *  conversation · Today). Someone who did not come through the line (no mark · another organization's) gets null at once — the page is exactly what it was. */
+function lineMarkFor(orgId: string | null | undefined, currentProjectId: string | null | undefined): LineProject | null {
+  const mark = readLineProject();
+  // the organization AND the project the tab is on: a mark of a project the person has left (or never used here) is not this setup's (codex 5036)
+  return mark && orgId && mark.orgId === orgId && (!currentProjectId || mark.projectId === currentProjectId) ? mark : null;
+}
+async function lineChannelId(orgId: string | null | undefined, currentProjectId: string | null | undefined): Promise<string | null> {
+  const mark = lineMarkFor(orgId, currentProjectId);
+  if (!mark) return null;
+  const channelId = await findProjectChannelId(mark.projectId);
+  clearLineProject();
+  return channelId; // (the address is made by the screen that holds `useFlatHref()` — this helper only names the room, so no flat destination is built here)
+}
+
 export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false, onPhoneRetry, canWorkdir = false }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean; /** story 4832: the app said `caps=workdir` — the move page's per-agent [작업 폴더 고르기] link is offered (an older app gets none) */ canWorkdir?: boolean; /** story 4711 (PO 10-16): a solo start whose «폰으로도 다루기» switch did not turn on — turns it on again; true = it did */ onPhoneRetry?: () => Promise<boolean> }) {
   const t = useTranslations('desktop.setup');
   const tOnboarding = useTranslations('onboarding'); // story 4711: [대화 열기] is the words the first-instruction card already uses (Yuna)
   const locale = useLocale();
   const tOrg = useTranslations('organization');
   const tPreset = useTranslations('recipePreset');
-  const { orgId, orgMemberships, currentProjectSlug, navV3Flags } = useDashboardContext();
+  const { orgId, projectId: currentProjectId, orgMemberships, currentProjectSlug, navV3Flags } = useDashboardContext();
   const flatHref = useFlatHref();
   // story 4670 (U2): the end card's [폰 페어링 열기] is for an owner/admin (the same reading as the setup page's isAdmin); the link names
   // the app that opened this page (story #4626 · `?app=`)
@@ -103,8 +121,11 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   useEffect(() => {
     if (!soloRoom || opened.current || holdRoom) return;
     opened.current = true;
-    window.location.assign(flatHref(`/chats/${soloRoom}`)); // a full load: the page's address holds nothing to keep, and a new token may be needed
-  }, [soloRoom, flatHref, holdRoom]);
+    // story 5036: a person on the first-run line goes to the project's channel (step ③); everyone else to the conversation with that agent, as before
+    // (no mark → at once, as it always was: nothing is awaited for someone who did not come through the line)
+    if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } // a full load: the page's address holds nothing to keep, and a new token may be needed
+    void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`)));
+  }, [soloRoom, flatHref, holdRoom, orgId, currentProjectId]);
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
   const done = move ? move.settled : !!progress && progress.settled;
@@ -129,7 +150,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
         <p className="text-sm" role="status">{t('phoneControl.failedStopped')}</p>
         <div className="flex flex-wrap gap-2">
           <Button disabled={phoneRetrying} onClick={() => { setPhoneRetrying(true); void onPhoneRetry!().finally(() => setPhoneRetrying(false)); }}>{t('phoneControl.again')}</Button>
-          <Button variant="outline" onClick={() => { opened.current = true; window.location.assign(flatHref(`/chats/${soloRoom}`)); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
+          <Button variant="outline" onClick={() => { opened.current = true; if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`))); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
         </div>
       </Card>
     );
@@ -371,12 +392,15 @@ function PhoneHandoffCardBody({ isAdmin, app }: { isAdmin: boolean; app: NativeR
  */
 function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, isAdmin, app, canWorkdir }: { move: MoveProgress; kind: 'move' | 'solo'; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null; canWorkdir: boolean }) {
   const t = useTranslations('desktop.setup');
+  const tLine = useTranslations('onboarding.line');
   const flatHref = useFlatHref();
+  const { orgId, projectId: currentProjectId } = useDashboardContext();
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
   if (move.blocked) return <Failure failure="managed" />;
   if (move.expired) return <Failure failure="expired" />;
   const group = (names: string[]) => ({ text: names.join(' · '), last: names.at(-1) ?? '', count: names.length });
   const done = move.connected === 'done';
+  const lineMark = lineMarkFor(orgId, currentProjectId); // story 5036: this person came through the first-run line (their step ① project is marked)
   const [readyShown, connectShown] = move.shown;
   // story 4832: one link per agent that waits for its folder — only for an app that said `caps=workdir` (an older app would read the link as «start a setup»), and only
   // for an id the link can carry (uuid-shaped); an agent without such an id keeps the pointer line
@@ -454,8 +478,10 @@ function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, 
         </div>
       ) : null}
       <footer className="flex flex-col gap-1">
+        {/* story 5036 (C6 · step ③ in the Mac app): the agents are in → a person on the first-run line opens the project's channel as their first conversation (the same room the web's step ③ opens) */}
         <div className="flex flex-wrap gap-2" data-testid="setup-way-out">
-          <Button asChild><a href={todayHref}>{t('goToday')}</a></Button>
+          {done && lineMark ? <Button onClick={() => void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(channel ? flatHref(`/chats/${channel}`) : todayHref))} data-testid="setup-line-first-chat">{tLine('connectedGo')}</Button> : null}
+          <Button asChild variant={done && lineMark ? 'outline' : undefined}><a href={todayHref} onClick={() => { if (lineMark) clearLineProject(); }}>{t('goToday')}</a></Button>
         </div>
         <p className="text-xs text-muted-foreground">{done ? t('move.doneNote') : t('move.runningNote')}</p>
         {/* story 4986 AC5: only a MOVE can leave another computer behind (a solo start made a new agent); said once the new computer is connected — the old key still worked until then (measured on dev) */}

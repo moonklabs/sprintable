@@ -1891,6 +1891,8 @@
       "stateUpcoming": "Next step",
       "defaultProjectName": "My project",
       "projectCheckFailed": "Couldn't check your projects — we'll make one once that's checked",
+      "startNew": "Start a new one",
+      "startMove": "Start moving",
       "connectedBefore": "An agent is already connected",
       "connectedGo": "To the first chat",
       "connectTitle": "Connect an agent",

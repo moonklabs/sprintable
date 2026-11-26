@@ -48,6 +48,9 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // before still goes on sign-out or switch (a session area: it is gone with the tab anyway; drop the entry once no such tab can be open)
   { key: 'sp_onboarding_org_draft:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-form.tsx'] },
   { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-telemetry.ts'] },
+  // story 5036: «the project the first-run line (step ①) made» — the organization it belongs to and its id, carried from the onboarding to the Mac app's start screen and its progress end (a tab's own, an hour long).
+  // It names one account's organization and project, so a sign-out or an account switch clears it: another account must never be seated in, or sent to the channel of, this one's project
+  { key: 'sprintable:onboarding-line-project', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/onboarding/line-project.ts'] },
   { key: 'sprintable_pending_toast', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/cross-project-toast-provider.tsx'] },
   // dismissed banners carry no organization in the key — kept, they would hide the next account's banner
   { key: 'au-usage-warn-dismissed-band', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['ee/components/billing/au-usage-banner.tsx'] },

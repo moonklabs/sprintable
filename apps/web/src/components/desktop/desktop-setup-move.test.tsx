@@ -17,6 +17,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { DesktopSetup, PROGRESS_FRAGMENT, progressFromFragment, progressWorkdirFromFragment } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
+import { readLineProject, writeLineProject } from '@/lib/onboarding/line-project';
 import { moveConfirmBody, moveListOrder, moveRowState, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,6 +34,8 @@ let root: Root;
 let calls: { url: string; method?: string; body?: unknown }[];
 let agentsNow: () => Response;
 let statusNow: () => unknown = () => ({});
+/** story 5036: what GET /api/conversations?project_id=… answers (the project's rooms — the first-run line looks for its channel there); default 404 */
+let roomsNow: () => Response = () => new Response('{}', { status: 404 });
 // story 4670 AC1 — GET/PUT /api/organizations/{id}/remote-control (default 404: not known → no «폰에서도 다루기» row)
 const REMOTE_OFF_OWNER = { enabled: false, can_change: true, enabled_at: null };
 let remoteGet: () => Response = () => new Response('{}', { status: 404 });
@@ -47,6 +50,7 @@ function stub(confirm: () => Response | Promise<Response>) {
     if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+    if (url.startsWith('/api/conversations?')) return roomsNow();
     if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     return new Response('{}', { status: 404 });
   }));
@@ -584,6 +588,89 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     const out = container.querySelector('[data-testid=setup-way-out]') as HTMLElement;
     expect([...out.querySelectorAll('a,button')].map((b) => b.textContent)).toEqual(['홈으로 가기']);
     expect(text()).toContain('이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요');
+  });
+
+  describe('[SID:5036 · C6] step ③ in the Mac app — the person who came through the first-run line opens the PROJECT\'S CHANNEL', () => {
+    const allIn = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }, { member_id: 'm-kad', at: '2026-10-06T04:41:02Z' }] });
+    const wayOut = () => [...(container.querySelector('[data-testid=setup-way-out]') as HTMLElement).querySelectorAll('a,button')].map((b) => b.textContent);
+    const withAssign = async (run: () => Promise<void>) => {
+      const assign = vi.fn();
+      const real = window.location;
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...real, pathname: real.pathname, search: real.search, hash: real.hash, assign } });
+      try { await run(); } finally { Object.defineProperty(window, 'location', { configurable: true, value: real }); }
+      return assign;
+    };
+    const press = async () => { await act(async () => { (container.querySelector('[data-testid=setup-line-first-chat]') as HTMLElement).click(); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+
+    it('the mark + every agent connected → [첫 대화로] stands first, [홈으로 가기] stays; the press goes to the project\'s channel and uses the mark up', async () => {
+      writeLineProject({ orgId: 'o-1', projectId: 'p-1' });
+      statusNow = allIn;
+      roomsNow = () => new Response(JSON.stringify({ data: [{ id: 'dm-1', is_project_channel: false }, { id: 'chan-1', is_project_channel: true }] }), { status: 200 });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(wayOut()).toEqual(['첫 대화로', '홈으로 가기']); // reverted (no step ③ here) → only the old way out
+      const assign = await withAssign(press);
+      expect(assign).toHaveBeenCalledTimes(1);
+      expect(String(assign.mock.calls[0]![0])).toContain('/chats/chan-1');
+      expect(calls.some((c) => c.url.startsWith('/api/conversations?') && c.url.includes('project_id=p-1'))).toBe(true);
+      expect(readLineProject()).toBeNull();
+    });
+
+    it('the channel cannot be found → the person is not stranded: they go to Today (the way out that was always there)', async () => {
+      writeLineProject({ orgId: 'o-1', projectId: 'p-1' });
+      statusNow = allIn;
+      roomsNow = () => new Response('{}', { status: 500 });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      const assign = await withAssign(press);
+      expect(assign).toHaveBeenCalledTimes(1);
+      expect(String(assign.mock.calls[0]![0])).not.toContain('/chats/');
+    });
+
+    it('no mark, or a mark of another organization → exactly the old way out: only [홈으로 가기]', async () => {
+      statusNow = allIn;
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(wayOut()).toEqual(['홈으로 가기']);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      writeLineProject({ orgId: 'o-other', projectId: 'p-1' });
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(wayOut()).toEqual(['홈으로 가기']);
+      expect(readLineProject()).not.toBeNull(); // another organization's mark is not ours to use up
+    });
+
+    it('a mark of a project the tab is NOT on (stale) → no [첫 대화로] (codex 5036)', async () => {
+      writeLineProject({ orgId: 'o-1', projectId: 'p-other' }); // the tab is on p-1
+      statusNow = allIn;
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(wayOut()).toEqual(['홈으로 가기']);
+    });
+
+    it('[홈으로 가기] on the line uses the mark up (it is not left for a later, unrelated setup)', async () => {
+      writeLineProject({ orgId: 'o-1', projectId: 'p-1' });
+      statusNow = allIn;
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      await act(async () => { ([...container.querySelectorAll('[data-testid=setup-way-out] a')].find((a) => a.textContent === '홈으로 가기') as HTMLElement).click(); });
+      expect(readLineProject()).toBeNull();
+    });
+
+    it('while the agents are not all connected yet there is no [첫 대화로] (it is the end of the line, not a skip)', async () => {
+      writeLineProject({ orgId: 'o-1', projectId: 'p-1' });
+      statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(container.querySelector('[data-testid=setup-line-first-chat]')).toBeNull();
+    });
   });
 
   // story 4986 AC5: a MOVE can leave another computer behind — said only once this computer is connected (the old key still worked until then), with a link to the list where it is ended

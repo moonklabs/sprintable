@@ -36,6 +36,8 @@ interface FirstScreenProps {
   orgName: string | null;
   /** story 5036: the project step ① made — the browser's key way puts its agent on it (null: a place that has no project step — the phone app · a server host · the Mac app) */
   projectId?: string | null;
+  /** story 5036: the Mac app person is on the first-run line (a NEW account — the form decided it) — this screen is then the three ways, not the redirect to the app's own start screen */
+  appLine?: boolean;
   /** story 5036: the key way's agent connected (its first call was seen) — the page moves on to step ③ */
   onConnected?: (agentId: string) => void;
   /** story 4766: the landing the page's way out ends on (the person's «오늘»/«대시보드» word follows this) */
@@ -46,7 +48,7 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, orgName, projectId = null, onConnected, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, orgName, projectId = null, appLine = false, onConnected, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const tLine = useTranslations('onboarding.line');
   const to = useTranslations('onboarding');
@@ -62,7 +64,10 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   // (`did-navigate` → the setup flow's «setup page arrival», sprintable-mobile desktop-electron/src/setup-wiring.ts · setup-flow.ts) and hands it its values, as it does when it opens the page itself.
   const wentToSetup = useRef(false);
   const flatHref = useFlatHref(); // story 4763 AC14: the app's own setup page (folder · agent · [시작]) is a flat destination — it carries the project like every other entrance (the ratchet: no bare flat destination)
-  useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [inMacApp]);
+  // (story 5036: a Mac app person on the first-run line — a new account that made the project in step ① — stays here: the three ways are this screen, and the first of them opens the start screen itself.
+  //  Anyone else in the app goes to the start screen as it always did, whatever else the page holds)
+  const goesToSetup = inMacApp === true && !appLine;
+  useEffect(() => { if (goesToSetup && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [goesToSetup]);
   // story 5024 (AC4): a workspace SERVER HOST has no Mac app to get — «에이전트는 내 Mac에서 돌아가요 · 지금은 받을 수 없어요» told the person who set the server up nothing about how an agent gets attached. Here: the one command for the
   // computer that will run the agent, with this server's own address filled in. (Any browser — the server host's people are not on a Mac by assumption: no Mac-or-not fork.)
   if (serverHostOrigin !== null || serverHostPending) {
@@ -83,7 +88,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
     );
   }
   if (elsewhere === null || inMacApp === null) return null;
-  if (inMacApp) return null; // the page is going to the setup page
+  if (goesToSetup) return null; // the page is going to the setup page
   // story 4891: the way out's word follows where it lands (resolveOnboardingLandingHref: flag ON → Today, OFF → «대화»), as the three other onboarding exits already do
   // (advanced-connect · connect-step · phone-start-page). It said «Go to Today» always, and on a build with the flag off it landed on the chats page.
   const finishLabel = todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta');
@@ -118,7 +123,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
 
       {/* story 5036: the three ways side by side, the same weight (no «고급» fold). `projectId` is the project step ①'s — a browser always has it by here */}
       {projectId ? (
-        <ConnectBranches orgId={orgId} projectId={projectId} isMac={!elsewhere} onConnected={(agentId) => onConnected?.(agentId)} onWorking={setAdvancedBusy} />
+        <ConnectBranches orgId={orgId} projectId={projectId} isMac={!elsewhere} inApp={inMacApp === true} onConnected={(agentId) => onConnected?.(agentId)} onWorking={setAdvancedBusy} />
       ) : null}
       {orgLine}
 

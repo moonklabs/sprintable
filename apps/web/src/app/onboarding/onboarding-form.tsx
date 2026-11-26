@@ -23,6 +23,7 @@ import { withProjectParam } from '@/hooks/use-flat-href';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { desktopApp } from '@/lib/desktop-app';
+import { writeLineProject } from '@/lib/onboarding/line-project';
 
 // story 4715 (UX-1 · plan yuna/4715-plan-1016.md): no organization-name step and no fork. On arrival the page finds the person's
 // organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»).
@@ -181,9 +182,11 @@ export function OnboardingForm({
   // story 4904: one «does the person already have an organization?» re-read at a time (the limit answer of createOrg)
   const joiningExisting = useRef(false);
 
-  // story 5036: a place that is not a browser has its own first screen and no project step (the Mac app's setup page makes the project itself; the phone app and a server host never had one)
-  const lineApplies = !(serverHostOrigin !== null || serverHostPending || inPhoneApp || inMacApp);
-  const lineIndex = !initialStep && lineApplies ? onboardingLineIndex(step) : null;
+  // story 5036: a server host and the phone app have their own first screen and no project step (they never had one). The Mac app joined the line for a NEW account (PO 11-26): a person who
+  // already has a project keeps the app's own way — the start screen (/desktop/setup) — exactly as before; `appLine` says which of the two this app person is on.
+  const lineApplies = !(serverHostOrigin !== null || serverHostPending || inPhoneApp);
+  const [appLine, setAppLine] = useState(false);
+  const lineIndex = !initialStep && lineApplies && (!inMacApp || appLine) ? onboardingLineIndex(step) : null;
 
   // story 4763 (codex): the session is renewed by ONE call at a time for the whole page (`refreshSessionOnce` — the very flight `fetchWithAuth` joins on a 401): the refresh token rotates on use, so
   // the deleted screen's own renewal, the press's, a double press and an interceptor's must share the call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of
@@ -203,6 +206,9 @@ export function OnboardingForm({
   // story 5036: the project of the line is the session's current one (the chat, the board … open on it) — set when it is made and when an existing one is taken
   const adoptProject = async (id: string) => {
     setProjectId(id);
+    // the Mac app: the start screen (step ②'s «새로 만들기» opens it) is told which project is the line's, so it seats the agent there and makes no second one (lib/onboarding/line-project.ts)
+    // (only the LINE does — the standalone `?step=project` (a new project from elsewhere) is not the first-run project and leaves nothing for the start screen to pick up)
+    if (inMacApp && appLine && orgId) writeLineProject({ orgId, projectId: id });
     await fetchWithAuth('/api/current-project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -215,8 +221,16 @@ export function OnboardingForm({
   // the plan's project limit), else step ①. A list that could not be read is not «there is none» (rule 4832): nothing is made, the person is told and presses [다시 확인].
   const proceedWithOrg = async (org: string) => {
     setOrgId(org);
-    if (!lineApplies || desktopApp()) { setStep('connect'); return; }
+    if (!lineApplies) { setStep('connect'); return; }
     const found = await readOldestProject();
+    if (inMacApp || desktopApp()) {
+      // the Mac app: a NEW account (no project) takes the line; anyone who has a project — or whose list could not be read, which is not «none» but must not stop the app's own way —
+      // keeps the app's start screen exactly as it was (the first screen sends the app there)
+      if (found !== null) { setStep('connect'); return; }
+      setAppLine(true);
+      setStep('project');
+      return;
+    }
     if (found === 'unreadable') { setStep('arrive'); setArrival('project-check-failed'); return; }
     if (found) { await adoptProject(found); setStep('connect'); return; }
     setStep('project');
@@ -597,6 +611,7 @@ export function OnboardingForm({
               serverHostPending={serverHostPending}
               orgName={orgName}
               projectId={projectId}
+              appLine={appLine}
               onConnected={(agentId) => handleConnected(agentId)}
               todayV3Enabled={todayV3Enabled}
               todayHref={todayHref}

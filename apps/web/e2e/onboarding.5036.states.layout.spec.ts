@@ -104,7 +104,7 @@ const API: Record<string, Answer> = {
 };
 const CONNECTED = { data: { steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: true, first_roundtrip: false }, completed: 4, total: 5, all_complete: false, first_instruction_conversation_id: null } };
 
-async function open(page: Page, o: { width: number; locale?: 'ko' | 'en'; mac?: boolean; api?: Record<string, Answer> }) {
+async function open(page: Page, o: { width: number; locale?: 'ko' | 'en'; mac?: boolean; inApp?: boolean; api?: Record<string, Answer> }) {
   const { js, css } = await build();
   const api = { ...API, ...(o.api ?? {}) };
   await page.setViewportSize({ width: o.width, height: o.width < 500 ? 844 : 1000 });
@@ -124,6 +124,10 @@ async function open(page: Page, o: { width: number; locale?: 'ko' | 'en'; mac?: 
   await page.goto('http://preview.test/');
   if (o.mac !== false) {
     await page.evaluate(() => { Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36', configurable: true }); });
+  }
+  if (o.inApp) {
+    // the Mac app's bridge (the shape the page reads — lib/desktop-app.ts `desktopAppOf`): the page runs inside the app
+    await page.evaluate(() => { (window as unknown as { sprintableDesktop: unknown }).sprintableDesktop = { inApp: true, device: { name: 'Mac' }, runtimes: [], pickFolder: async () => null, startHere: async () => ({ ok: true }), setProjectFolder: async () => ({ ok: true }) }; });
   }
   const thrown: string[] = [];
   page.on('pageerror', (e) => thrown.push(e.message));
@@ -303,6 +307,30 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('onboarding-first-org')).toBeVisible();
       await clean(page, 'connect long en', phone);
       await shot(page, card(page), `5036-2-connect-long-en-${tag}`);
+    });
+
+    // ── the Mac app (story 5036 · PO 11-26): a NEW account takes the same line — ① the project, ② the three ways in their in-app shape ─────────────────────
+    test(`① project · in the Mac app (a new account) · ${tag}`, async ({ page }) => {
+      await open(page, { width, inApp: true, api: { 'GET /api/projects': { data: [] } } });
+      await expect(page.locator('h1')).toHaveText('첫 프로젝트 만들기');
+      expect(await stepStates(page)).toEqual(['current', 'upcoming', 'upcoming']);
+      await clean(page, 'app project', phone);
+      await cardPlace(page, phone, 'app project');
+      await shot(page, card(page), `5036-1-project-app-${tag}`);
+    });
+
+    test(`② connect · in the Mac app (the two app ways are done here: no chip · no download · no phone card) · ${tag}`, async ({ page }) => {
+      await open(page, { width, inApp: true, api: { 'GET /api/projects': { data: [] } } });
+      await page.getByTestId('onboarding-project-create').click();
+      await expect(page.locator('h1')).toHaveText('에이전트를 연결해요');
+      expect(await stepStates(page)).toEqual(['done', 'current', 'upcoming']);
+      for (const id of ['connect-branch-new', 'connect-branch-move', 'connect-branch-key']) await expect(page.getByTestId(id)).toBeVisible();
+      await expect(page.getByTestId('connect-branch-new-open')).toHaveText('새로 만들기 시작');
+      await expect(page.getByTestId('connect-branch-move-open')).toHaveText('옮기기 시작');
+      await expect(page.getByTestId('connect-branches-download')).toHaveCount(0);
+      await expect(page.getByText('데스크톱 앱에서 해요')).toHaveCount(0);
+      await clean(page, 'app connect', phone);
+      await shot(page, card(page), `5036-2-connect-app-${tag}`);
     });
 
     // ── ③ the first conversation ────────────────────────────────────────────────────────

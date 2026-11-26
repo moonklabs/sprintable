@@ -19,6 +19,7 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
+import { clearLineProject, readLineProject } from '@/lib/onboarding/line-project';
 import { agentRoomOf, heldProjectOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, appCannotDrive, type AgentRoom, type AttachableAgent, type HeldProject, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
@@ -163,7 +164,13 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const askedByPress = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
   const refused = isFolderRefused(query.folder) ? query.folder.refused : null;
   // the project the app found for this folder counts only if this organization really has it — else it is a new project by the folder's name
-  const matched = folder?.projectId && !newOrg ? orgProjects.find((p) => p.projectId === folder.projectId) : undefined;
+  const folderMatched = folder?.projectId && !newOrg ? orgProjects.find((p) => p.projectId === folder.projectId) : undefined;
+  // story 5036 (C6 · the first-run line in the Mac app, PO 11-26 (가) «프로젝트 두 번 생김 금지»): a person who made their first project in step ① and pressed «새로 만들기» comes here with that
+  // project as the line's own (lib/onboarding/line-project.ts — checked against what this organization really has). A folder the app already knows a project for keeps that project (the
+  // app's own record wins); otherwise the agent is seated in the line's project — never a second one named by the folder.
+  const lineMark = readLineProject();
+  const lineSeat = !folderMatched && !agent && !newOrg && lineMark && lineMark.orgId === orgId ? orgProjects.find((p) => p.projectId === lineMark.projectId) : undefined;
+  const matched = folderMatched ?? lineSeat;
   // story 4934: a folder that would need a NEW project in an organization whose plan has no room for one asks at once — the same project the 402 names, chosen by
   // [넣고 만들기] only (nothing is put there on its own). A folder whose project the organization has (matched) makes no new project: no question.
   const limitAsk = askedByPress ?? (folder && !agent && !newOrg && !matched && heldProject ? { id: heldProject.id, name: heldProject.name, folderKey: folder.shown } : null);
@@ -247,11 +254,14 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
     try {
       const res = newOrg
         ? await fetchWithAuth('/api/desktop/setup-codes/confirm-solo-new-org', { ...json, body: JSON.stringify(soloNewOrgConfirmBody(query.code, runtime, folder, orgName, { name: agentName, role: roleTyped })) })
-        : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, { name: agentName, role: roleTyped }, useProject)) });
+        : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, folderMatched ? folder : { ...folder, projectId: undefined }, { name: agentName, role: roleTyped }, useProject ?? lineSeat?.projectId)) });
       if (res.ok) {
         const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string; setup_id?: string } | null;
         const made = progressIdOf(okBody?.setup_id, query.setupId);
         setMadeSetupId(made);
+        // story 5036: the first-run line's mark stays only while it is TRUE — the agent really went into the line's project. Seated anywhere else (the folder is bound to another project · the server chose one) it is used up here,
+        // so the progress screen's step ③ never opens the channel of a project the setup did not use (codex 5036)
+        if (lineMark && (okBody?.project_id ?? (lineSeat ? lineSeat.projectId : folderMatched?.projectId)) !== lineMark.projectId) clearLineProject();
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none

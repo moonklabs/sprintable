@@ -15,6 +15,7 @@ import { CONNECT_BRANCH_IDS } from './connect-branches';
 import koMessages from '../../../messages/ko.json';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
+import { readLineProject } from '@/lib/onboarding/line-project';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -143,6 +144,7 @@ afterEach(async () => {
   setUserAgent(realUserAgent);
   Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
   delete (window as { sprintableDesktop?: unknown }).sprintableDesktop;
+  sessionStorage.clear(); // the first-run line's mark (story 5036) is the tab's: no test leaves one for the next
 });
 
 describe('[SID:5036] the line itself — three steps in this order, three ways in this order', () => {
@@ -358,19 +360,64 @@ describe('[SID:5036] ③ the first conversation — once an agent has connected,
   });
 });
 
-describe('[SID:5036] no regression — the places that are not a browser keep their own first screen and come through NO project step', () => {
+describe('[SID:5036] the places that are not a browser: the phone app and a workspace server host keep their own first screen and NO project step; the Mac app takes the line for a NEW account only', () => {
   const bridge = () => ({
     inApp: true as const, device: { name: 'SYJ-MacBook-Pro' }, runtimes: [],
     pickFolder: async () => null, startHere: async () => ({ ok: true as const }), setProjectFolder: async () => ({ ok: true as const }),
   });
+  const replaced = () => (window.location.replace as unknown as ReturnType<typeof vi.fn>);
 
-  it('R1 inside the Mac app: no project step, no strip, no project read — the app\'s own setup page (which makes the project itself) is where it goes', async () => {
+  it('R1 inside the Mac app, an account that ALREADY has a project: no project step, no strip, no second project — the app\'s own setup page, exactly as before (退行 0)', async () => {
     (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    stubFetch({ projects: [{ id: 'proj-old' }] });
     await mount();
     expect(byTestId('onboarding-project-step')).toBeNull();
     expect(stepStates()).toEqual([]);
-    expect(calls.some((c) => c.url.split('?')[0] === '/api/projects')).toBe(false);
-    expect((window.location.replace as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('/desktop/setup');
+    expect(posts('/api/projects')).toEqual([]);
+    expect(replaced()).toHaveBeenCalledWith('/desktop/setup');
+    expect(readLineProject()).toBeNull(); // reverted (the line takes this person too) → a mark and no redirect here
+  });
+
+  it('R1b inside the Mac app, the project list cannot be read: that is not «none» — but it must not stop the app\'s own way either: the setup page, as before', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    stubFetch({ projects: 'fail' });
+    await mount();
+    expect(byTestId('onboarding-project-step')).toBeNull();
+    expect(posts('/api/projects')).toEqual([]);
+    expect(replaced()).toHaveBeenCalledWith('/desktop/setup');
+  });
+
+  it('R1d inside the Mac app, the standalone `?step=project` (a new project from elsewhere) writes NO mark — it is not the first-run project (codex 5036)', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    stubFetch({ projects: [{ id: 'proj-old' }] });
+    await mount({ initialStep: 'project', initialOrgId: 'org-1' });
+    expect(byTestId('onboarding-project-step')).not.toBeNull();
+    await click(byTestId('onboarding-project-create'));
+    expect(posts('/api/projects').length).toBe(1);
+    expect(readLineProject()).toBeNull(); // reverted (every adopted project is marked) → a mark here that a later start screen would seat an agent in
+  });
+
+  it('R1c inside the Mac app, a NEW account (no project): the line — ① the first project (the strip at 1 of 3), no redirect; the project made is the line\'s mark for the start screen', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    stubFetch({ projects: [] });
+    await mount();
+    expect(byTestId('onboarding-project-step')).not.toBeNull();
+    expect(stepStates()).toEqual(['current', 'upcoming', 'upcoming']);
+    expect(replaced()).not.toHaveBeenCalled();
+    await click(byTestId('onboarding-project-create'));
+    expect(posts('/api/projects').length).toBe(1);
+    // ② in the app: the three ways, the first two are done HERE (no «데스크톱 앱에서 해요» chip · no download · no phone card), their press hands the app's start screen over
+    expect(h1()).toBe(line.connectTitle);
+    expect(branchRoots().map((e) => e.getAttribute('data-testid'))).toEqual(['connect-branch-new', 'connect-branch-move', 'connect-branch-key']);
+    expect(container.textContent).not.toContain(line.inApp);
+    expect(byTestId('connect-branches-download')).toBeNull();
+    expect(byTestId('connect-branch-new-open')?.textContent).toBe(line.startNew);
+    expect(byTestId('connect-branch-move-open')?.textContent).toBe(line.startMove);
+    expect(byTestId('connect-branch-new-open')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup');
+    expect(byTestId('connect-branch-move-open')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=move');
+    // the start screen is told which project is the line's — reverted (no mark) it would make a second project from the folder's name
+    expect(readLineProject()).toEqual({ orgId: 'org-1', projectId: 'proj-new' });
+    expect(replaced()).not.toHaveBeenCalled();
   });
 
   it('R2 the phone app: its own pairing screen, no project step, no strip', async () => {
