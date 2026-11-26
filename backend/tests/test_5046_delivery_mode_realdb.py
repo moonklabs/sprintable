@@ -193,17 +193,43 @@ async def test_a_report_rewrites_nothing_else_in_the_messages_metadata():
         await engine.dispose()
 
 
-async def test_a_plain_message_with_no_metadata_at_all_can_be_reported():
-    """the common case: a message sent the old way holds a JSON null as its metadata (not an object) — the report must still make the line (found by the concurrent-reports test: `jsonb_set` cannot set a path in a scalar)"""
+@pytest.mark.parametrize("old_row", ["json_null", "sql_null"])
+async def test_an_old_message_with_no_metadata_object_can_be_reported(old_row):
+    """a message written before metadata carried anything holds a JSON null (the ORM's None) or an SQL NULL — not an object. The report must still make the line (found by the concurrent-reports test: `jsonb_set` cannot set a path
+    in a scalar). New plain messages carry an object now (story 5977 stores the sender's delivery_decision), so the old row is made here by hand — it exists in the database."""
     engine, Session, w = await _world()
     try:
         _r, msg = await _send(Session, w, w.r_human)
         async with Session() as s:
-            kind = (await s.execute(text("SELECT jsonb_typeof(metadata) FROM conversation_messages WHERE id = :m"), {"m": msg})).scalar_one_or_none()
-        assert kind in (None, "null"), kind  # a message with no metadata of its own
+            await s.execute(text("UPDATE conversation_messages SET metadata = " + ("'null'::jsonb" if old_row == "json_null" else "NULL") + " WHERE id = :m"), {"m": msg})
+            await s.commit()
         r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "turn"})
         assert r.status_code == 200, r.text
         assert list((await _read(Session, w, w.r_human, msg))["delivery_log"]) == [str(w.g_p)]
+    finally:
+        await engine.dispose()
+
+
+async def test_the_report_adds_its_line_beside_the_senders_delivery_decision_and_never_removes_it():
+    """two writers share one metadata document: the SENDER's delivery_decision (story 5977, written when the message is sent) and this report's delivery_log. The report must add its key and leave the other one exactly as it was."""
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human)
+        decision = {"state": "delivered", "agents_delivered": [str(w.g_p)], "marker": "kept-as-is"}
+        async with Session() as s:
+            await s.execute(text("UPDATE conversation_messages SET metadata = COALESCE(CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata END, '{}'::jsonb) || CAST(:extra AS jsonb) WHERE id = :m"),
+                            {"m": msg, "extra": json.dumps({"delivery_decision": decision})})
+            await s.commit()
+        r = await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "next_turn"})
+        assert r.status_code == 200, r.text
+        async with Session() as s:
+            meta = (await s.execute(text("SELECT metadata FROM conversation_messages WHERE id = :m"), {"m": msg})).scalar_one()
+        meta = meta if isinstance(meta, dict) else json.loads(meta)
+        assert meta["delivery_decision"] == decision, meta  # untouched, to the last key
+        assert list(meta["delivery_log"]) == [str(w.g_p)] and meta["delivery_log"][str(w.g_p)]["via"] == "next_turn", meta
+        # and the sender's own read still shows its decision next to the new line
+        read = await _read(Session, w, w.r_human, msg)
+        assert read["delivery_log"][str(w.g_p)]["via"] == "next_turn"
     finally:
         await engine.dispose()
 
