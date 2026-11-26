@@ -109,15 +109,14 @@ describe('[SID:4713] the real sidebar draws it under the switcher — inside the
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   }
 
-  it('in the app: the line is in the sidebar header, after the switcher trigger and before the search', async () => {
+  it('in the app: the line is in the sidebar header, right after the switcher trigger (story 5031: the column has no search box any more — the icon bar owns it)', async () => {
     inApp();
     await mountSidebar();
     const line = entry();
     expect(line).not.toBeNull(); // built but not wired → fails
     const header = line!.parentElement!;
     const kids = Array.from(header.children);
-    const search = kids.find((k) => k.textContent?.includes('⌘K'))!;
-    expect(kids.indexOf(line!)).toBeLessThan(kids.indexOf(search));
+    expect(kids.some((k) => k.textContent?.includes('⌘K'))).toBe(false);
     expect(kids.indexOf(line!)).toBeGreaterThan(0); // the switcher comes first
   });
 

@@ -80,11 +80,11 @@ test('[SID:4887] a 1100 px window (lg) with no thread open: the list slot is 248
   expect(g.main).toBe(1028 - 248);
 });
 
-test('[SID:4887] a 1440 px window (xl): nothing changes — the list slot stays 270 and the thread slot 320', async ({ page }) => {
+test('[SID:5031] a 1440 px window (xl): the kit numbers — the list slot is 400 and the thread slot 256', async ({ page }) => {
   const g = await shell(page, 1440, true);
-  expect(g.rail, 'list slot').toBe(270); // the xl width is NOT narrowed
-  expect(g.thread, 'thread slot').toBe(320);
-  expect(g.main).toBe(1440 - 72 - 270 - 320);
+  expect(g.rail, 'list slot').toBe(400); // story 5031 (C1 2b): the chat list is the place's navigation column
+  expect(g.thread, 'thread slot').toBe(256);
+  expect(g.main).toBe(1440 - 72 - 400 - 256);
 });
 
 test('[SID:4887] 1024 px (the narrowest lg window): the room body still gets at least 400 with a thread open', async ({ page }) => {

@@ -1,18 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Search } from 'lucide-react';
-import { LocaleSwitcher } from '@/components/locale-switcher';
-import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { findActiveStaticItemId, isResourceItemActive } from '@/lib/nav-active';
 import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
-import { ProfileMenu } from '@/components/nav/profile-menu';
-import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { NavRow } from '@/components/nav/sidebar-nav-parts';
@@ -30,7 +25,6 @@ import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-fram
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -48,6 +42,7 @@ interface AppSidebarProps {
   // bare `/docs`로 폴백(미들웨어 리다이렉트 안전망이 받음).
   currentProjectSlug?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
+  /** kept for the shell's call site: the account row moved to the icon bar's account popover (story 5031) */
   userName?: string;
   // story #2007(perf·서버부하): dashboard-shell.tsx가 단일 useChatUnreadTotal() 호출 결과를
   // prop으로 내려준다 — 여기서 직접 훅을 호출하면 MobileTabBar와 각자 SSE 연결을 열게 된다.
@@ -66,7 +61,6 @@ export function AppSidebar({
   projectId,
   currentProjectSlug,
   projectMemberships,
-  userName,
   chatUnreadTotal,
   navV3Flags = DEFAULT_NAV_V3_FLAGS,
 }: AppSidebarProps) {
@@ -146,10 +140,6 @@ export function AppSidebar({
   // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
   // story #4413 — 팔레트 열림 상태는 셸 층 한 벌(사이드바 단추 · ⌘K · 폰 «전체» 검색 행이 같은 상태).
   const { open: paletteOpen, setOpen: setPaletteOpen } = useCommandPalette();
-
-  // story #4211 — setPaletteOpen은 안정 참조라 동작 무변. React Compiler가 추론한 의존성과 맞춰 컴파일 건너뜀(lint error)을 없앤다
-  // (이 컴포넌트가 scopedResourceHref를 부르며 컴파일러가 이 자리까지 분석하게 되면서 드러난 기존 불일치).
-  const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
 
   // story 5031 — the zones and their fold memory are gone from this column: drop the value an earlier version left in this browser (a failed removal changes nothing).
   useEffect(() => {
@@ -239,21 +229,6 @@ export function AppSidebar({
         <NewProjectEntry className="mt-1 h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
         {/* story 4832: the door for this organization's agents → this computer, named by what it does (not behind «새 프로젝트») */}
         <MoveAgentsEntry className="h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
-        {/* 3826-pre — text-sidebar-foreground/60(알파 합성) → solid text-muted-foreground.
-            v3 ink 재조정 후 실 대비 미달 실측(#767573/#fbfaf9=4.43:1·⌘K kbd
-            #747371/#f7f6f3=4.37:1). */}
-        <button
-          type="button"
-          onClick={openPalette}
-          className="mt-2 flex w-full items-center gap-2 rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2.5 py-1.5 text-left text-sm text-muted-foreground transition hover:border-sidebar-border hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-          aria-label={t('search')}
-        >
-          <Search className="size-4" />
-          <span className="flex-1 truncate">{t('search')}</span>
-          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-micro font-medium text-muted-foreground sm:inline-flex">
-            ⌘K
-          </kbd>
-        </button>
       </SidebarHeader>
 
       <SidebarContent className="scrollbar-visible">
@@ -279,7 +254,6 @@ export function AppSidebar({
                     Icon={Icon}
                     isActive={link.isActive}
                     activeRef={link.isActive ? activeMenuItemRef : undefined}
-                    scopeMark={item.scope === 'project' ? t('scopeProject') : null}
                     kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
                     badgeCount={item.badgeKey ? badgeCount : 0}
                     badgeCap={badgeCap}
@@ -291,20 +265,6 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter className="space-y-2 p-2">
-        {/* story #3775(유나 定 2026-09-10) — 이름 없는(OAuth 신규 가입) 사용자는 이전엔
-            이 칩 자체가 안 그려져 설정으로 가는 경로 하나가 통째로 막혀 있었다(결함,
-            유도 장치가 아니다). 이름 유무와 무관하게 항상 그린다 — 이름 없을 때의
-            표시(「이름 없는 구성원」)와 「이름 설정」 메뉴 항목은 ProfileMenu 내부에서
-            처리(공용 memberDisplayLabel 재사용, story #3755/#3758과 같은 헬퍼). */}
-        <ProfileMenu name={userName ?? null} />
-        <div className="flex items-center gap-1">
-          <LocaleSwitcher />
-          <ThemeToggle />
-        </div>
-        <BusinessInfoDisclosure />
-      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>

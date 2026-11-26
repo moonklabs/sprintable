@@ -77,6 +77,8 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 소스 순서로 컴파일하므로 xl:flex가 lg:hidden을 폭 ≥1280에서 CSS 캐스케이드로 자연히 이긴다).
   // railMode==='overlay'는 고정 오버레이로 뜬다 — main/reading 폭을 다시 누르지 않는다(③④).
   // story 4887 (UI-4 P6-b) — the list slot is 248 px between lg and xl and 270 from xl up. Measured over ten rows of the real list: 232 px and up cuts exactly what 270 cuts, 224 px newly cuts the short computer name P2-e made readable — but the CI's Linux fallback font needs 41 px for «SYJ-Mac» where a Mac needs 36, and at 232 it showed 32 of 41; so 248 (7 px of margin on the wider font, 17 px on the Mac) instead of the 232 edge. It gives the room body +22 px next to an open thread.
+  // story 5031 (C1 step 2b, kit numbers): the list slot is 400 from xl up (the kit's chat list = the place's navigation column), the thread slot 256. A 400 list + an opened reading panel (480–720) no longer leaves the conversation its room
+  // below 2xl (1536), so the list folds (collapsed · overlay) while reading is open up to 2xl; `2xl:flex` is the always-visible safety (was `xl:flex`).
   const railHiddenClass = railMode === 'collapsed' ? 'lg:hidden' : '';
   // story #2921 S6 후속(PO dev 라이브 실측, 2026-08-22) — 이 fixed 분기 컨테이너에 배경이
   // 없어(rail 자신의 base className은 border-border만 지정하고 bg-*는 어디에도 없다) docked
@@ -87,7 +89,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 shadow-xl 리터럴 대신
   // --elev-overlay.
   const railOverlayClass = railMode === 'overlay'
-    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
+    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] 2xl:static 2xl:z-auto 2xl:w-100 2xl:shadow-none'
     : '';
 
   return (
@@ -111,7 +113,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
           aria-hidden="true"
           tabIndex={-1}
           onClick={toggleManualExpand}
-          className="fixed inset-0 z-30 hidden bg-scrim-1 lg:block xl:hidden"
+          className="fixed inset-0 z-30 hidden bg-scrim-1 lg:block 2xl:hidden"
         />
       )}
 
@@ -126,7 +128,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         role={railMode === 'overlay' ? 'dialog' : undefined}
         aria-modal={railMode === 'overlay' ? true : undefined}
         aria-labelledby={railMode === 'overlay' ? 'chat-rail-heading' : undefined}
-        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[248px] xl:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
+        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[248px] xl:w-100 lg:shrink-0 lg:border-r ${railHiddenClass} 2xl:flex ${railOverlayClass}`}
       >
         {/* story 4887 (UI-4 screen PR) — the head «대화 N · + · ⋯» lives in the list itself now (it owns the count, the filters and the new-room modal state) */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -155,7 +157,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         type="button"
         aria-label={t('expandRail')}
         onClick={toggleManualExpand} aria-expanded={railMode !== 'collapsed'}
-        className={`fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block xl:hidden ${railMode !== 'collapsed' ? '!hidden' : ''}`}
+        className={`fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block 2xl:hidden ${railMode !== 'collapsed' ? '!hidden' : ''}`}
       >
         <PanelLeftOpen className="h-4 w-4" />
       </button>

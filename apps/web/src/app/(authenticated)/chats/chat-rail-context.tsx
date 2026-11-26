@@ -9,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
  * (chat-view.tsx)은 서로 다른 컴포넌트라 "지금 reading이 열려 있는지"를 끌어올려야(lift) 한다.
  *
  * 규칙(유나 확定, 산수 근거):
- * ① xl(1280px)↑ — 3-pane 항상 나란히(rail 270+main 530+reading 480). rail은 절대 안 접힘.
+ * ① 2xl(1536px)↑ — 3-pane 항상 나란히(rail 400+main+reading 480~720). rail은 절대 안 접힘. (story 5031 C1 2b: rail이 270 → 400이 되며 문턱이 xl 1280 → 2xl 1536으로 올랐다 — 그 아래에서 reading이 열리면 rail이 접힌다.)
  * ② 1024~1279px, reading 닫힘 — 현행 2-pane(rail+main) 그대로, 무변화.
  * ③ 1024~1279px, reading 열림 — rail 자동 접힘(main 544 보장), reading은 clamp 아니라 480 고정.
  * ④ 접힌 rail은 토글로 다시 부를 수 있다 — 그땐 모바일과 동형인 오버레이(main/reading을
@@ -62,7 +62,7 @@ const ChatRailContext = createContext<ChatRailContextValue | null>(null);
 
 export function ChatRailProvider({ children }: { children: ReactNode }) {
   const [readingOpen, setReadingOpenState] = useState(false);
-  const [isBelowXl, setIsBelowXl] = useState(false);
+  const [isBelowWide, setIsBelowWide] = useState(false);
   const [manuallyExpanded, setManuallyExpanded] = useState(false);
   // ChatListView의 초기 loading 상태(true)와 짝을 맞춘다 — 첫 렌더에서 "0건"으로 잘못
   // 단정하지 않는다.
@@ -80,8 +80,8 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 1279px)');
-    const update = () => setIsBelowXl(mq.matches);
+    const mq = window.matchMedia('(max-width: 1535px)');
+    const update = () => setIsBelowWide(mq.matches);
     update();
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
@@ -98,7 +98,7 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const railMode: ChatRailMode = !isBelowXl || !readingOpen
+  const railMode: ChatRailMode = !isBelowWide || !readingOpen
     ? 'normal'
     : manuallyExpanded ? 'overlay' : 'collapsed';
 
