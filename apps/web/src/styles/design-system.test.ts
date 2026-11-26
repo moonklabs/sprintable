@@ -58,8 +58,10 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
   it('⭐별칭 없음 — 옛 이름(--background · --foreground · --primary · --proof-* …)을 이 파일이 정의하지 않는다', () => {
     const defined = [...css.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map((m) => m[1]);
     // 허용: 뜻 이름(--ds-) + 그것을 Tailwind 이름 공간에 잇는 ds 접두 이름(색 · 글자 · 모서리 · 밀도 · 그림자 · 움직임). 옛 이름은 여전히 0.
-    const DS_NAMESPACES = ['--ds-', '--color-ds-', '--text-ds-', '--radius-ds-', '--spacing-ds-', '--container-ds-', '--shadow-', '--shadow-ds-', '--animate-ds-'];
-    const legacy = defined.filter((n) => !DS_NAMESPACES.some((p) => n.startsWith(p)));
+    const DS_NAMESPACES = ['--ds-', '--color-ds-', '--text-ds-', '--radius-ds-', '--spacing-ds-', '--container-ds-', '--shadow-ds-', '--animate-ds-'];
+    // story 5048 T0 ③a: Tailwind의 일곱 그림자 단 이름만(정확한 목록) — 아무 `--shadow-*`나 허용하지 않는다
+    const TAILWIND_SHADOWS = ['--shadow-2xs', '--shadow-xs', '--shadow-sm', '--shadow-md', '--shadow-lg', '--shadow-xl', '--shadow-2xl'];
+    const legacy = defined.filter((n) => !DS_NAMESPACES.some((p) => n.startsWith(p)) && !TAILWIND_SHADOWS.includes(n));
     expect(legacy).toEqual([]);
   });
 

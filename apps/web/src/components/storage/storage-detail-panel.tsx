@@ -101,7 +101,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
           <TabsTrigger value="usage">
             {t('tabUsage')}
             {/* story #2590(TIER3) — tint 위 계열색 글자는 text-ds-ink(#2420 규칙). */}
-            <span className="rounded-full bg-ds-action-soft px-[5px] text-xs font-bold text-ds-ink">{usageCount}</span>
+            <span className="rounded-full bg-ds-action-soft px-[5px] text-xs font-bold leading-4 text-ds-ink">{usageCount}</span>
           </TabsTrigger>
         </TabsList>
       </div>

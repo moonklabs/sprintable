@@ -57,7 +57,7 @@ export function EventDefinerForm({
                 className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
               >
                 {state.format === value ? (
-                  <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">✓</span>
+                  <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs leading-none text-primary-foreground">✓</span>
                 ) : null}
                 <Icon className="mb-1.5 size-5 text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">{t(`definerFormat_${value}`)}</p>
