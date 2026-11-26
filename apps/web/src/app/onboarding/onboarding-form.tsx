@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2 } from 'lucide-react';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
-import { Card } from '@/components/ui/card';
+import { Card as LegacyCard } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
+import { Card } from '@/components/ds/card';
+import { Stepper, type StepperStep } from '@/components/ds/stepper';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth, logoutUser, refreshSessionAfterChange, refreshSessionOnce } from '@/lib/db/client';
 import { Button as DsButton } from '@/components/ds/button';
@@ -13,30 +14,23 @@ import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
-import { ConnectStep } from './connect-step';
 import { FirstScreen } from './first-screen';
+import { ProjectStep } from './project-step';
+import { FirstChatStep } from './first-chat-step';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
-import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
+import { useActivationStatus } from '@/hooks/use-activation-status';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
-
-const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
-// story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
-// AGENT_ROLES를 <option> 라벨로도 그대로 썼어(value===label) 한국어 온보딩 흐름 한복판에
-// "developer" 등 영문이 그대로 노출됐다.
-const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
-  developer: 'roleDeveloper',
-  designer: 'roleDesigner',
-  pm: 'rolePm',
-  qa: 'roleQa',
-  devops: 'roleDevops',
-};
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { desktopApp } from '@/lib/desktop-app';
 
 // story 4715 (UX-1 · plan yuna/4715-plan-1016.md): no organization-name step and no fork. On arrival the page finds the person's
-// organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
-// screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
-// keeps project → agent → connect.
+// organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»).
+// story 5036 (C6): from there a STRAIGHT LINE of three steps (선생님 11-26) — ① the first project (only its name) → ② connect an agent (three ways side by side:
+// new · moved · by key — first-screen.tsx / connect-branches.tsx) → ③ once one has connected, the first conversation in THAT project (first-chat-step.tsx).
+// The places that are not a browser keep the screen they had and come through no project step: the Mac app (its own setup page makes the project), the phone app and a
+// workspace server host. `?step=project` (an organization exists: a new project from elsewhere — the org switcher) is the project step alone: made → home, no line.
 /** story 4763 (H6 · codex): how long the organization-deleted screen waits for its quiet check before it is drawn anyway (the same screen a failed check shows) */
 export const DELETED_CHECK_MAX_MS = 8000;
 
@@ -45,20 +39,21 @@ function forgetOrgDeletedMarker() {
   try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* an address that cannot be changed stays */ }
 }
 
-type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect' | 'deleted';
+type Step = 'arrive' | 'invited' | 'project' | 'connect' | 'chat' | 'deleted';
 
-/** The progress strip: only the web way's three steps have one (1/3 · 2/3 · 3/3) — arrival, invites and the one screen have none. */
-export function onboardingProgress(step: Step): { fraction: number; label: { current: number; total: number } } | null {
-  switch (step) {
-    case 'project': return { fraction: 1 / 3, label: { current: 1, total: 3 } };
-    case 'agent': return { fraction: 2 / 3, label: { current: 2, total: 3 } };
-    case 'connect': return { fraction: 1, label: { current: 3, total: 3 } };
-    default: return null;
-  }
+/** story 5036: the straight line, in order — the structure test pins this list (a revert turns it red). The ids are the steps' own names; the words are `onboarding.line.step*`. */
+export const ONBOARDING_LINE = ['project', 'connect', 'chat'] as const;
+export type OnboardingLineStep = (typeof ONBOARDING_LINE)[number];
+
+/** where the step stands on the line (0-based), or null — arrival, invites, the deleted screen have no strip */
+export function onboardingLineIndex(step: Step): number | null {
+  const at = (ONBOARDING_LINE as readonly string[]).indexOf(step);
+  return at < 0 ? null : at;
 }
 
 interface OnboardingFormProps {
-  initialStep?: Step;
+  /** `project`: an organization exists and a project is asked for from elsewhere (the org switcher) — that step alone, made → home */
+  initialStep?: 'project';
   initialOrgId?: string;
   // story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지: ON이면 todayHref·OFF면 chatsHref.
   // 서버(page.tsx)가 내려준다(이 컴포넌트는 'use client'라 직접 못 읽음). 기본값
@@ -83,16 +78,52 @@ interface OnboardingFormProps {
   afterOrgDelete?: boolean;
 }
 
-/** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
-type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
+/** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure ·
+ *  story 5036: stopped because the organization's projects could not be read (nothing made: «not read» is not «there is none», or a second project is made) */
+type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'project-check-failed' | 'failed';
+
+const noSubscribe = () => () => undefined;
+
+/** story 5036: the oldest project of the signed-in organization (the list is its own), `null` when there is none, `'unreadable'` when the list could not be read */
+async function readOldestProject(): Promise<string | null | 'unreadable'> {
+  try {
+    const listed = await fetchWithAuth('/api/projects');
+    if (!listed.ok) return 'unreadable';
+    const body = (await listed.json().catch(() => null)) as { data?: { id: string; created_at?: string }[] } | null;
+    if (!body || !Array.isArray(body.data)) return 'unreadable';
+    // by the instant (offsets differ), a missing or unreadable time last
+    const at = (c?: string) => { const n = c ? Date.parse(c) : NaN; return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY; };
+    const oldest = [...body.data].sort((a, b) => at(a.created_at) - at(b.created_at))[0];
+    return oldest?.id ?? null;
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/** story 5036 · step ② on a browser, the ways that leave the page (the app makes the agent): the organization's activation says an agent has connected — step ③. One watcher while step ② is on screen. */
+function AppConnectWatcher({ orgId, onConnected }: { orgId: string; onConnected: () => void }) {
+  // read again every 15 s while open and at once when the tab comes back in front (the person returns from the app). A checklist this browser already saw complete is not read at all (`state` stays null,
+  // `allComplete` is true) — that organization has had an agent connected, so it counts too.
+  const { state, allComplete } = useActivationStatus(undefined, { orgId, refreshWhileIncomplete: true });
+  const connected = allComplete || (state?.steps.agent_connected === true && state.scope_is_requested_org !== false);
+  useEffect(() => {
+    if (connected) onConnected();
+    // told once when it turns true (the page's handler is idempotent)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+  return null;
+}
 
 export function OnboardingForm({
   initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, afterOrgDelete = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
+  const tl = useTranslations('onboarding.line');
   const tc = useTranslations('common');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tSettings = useTranslations('settings');
+  const { inPhoneApp } = usePhoneBridge();
+  const inMacApp = useSyncExternalStore(noSubscribe, () => !!desktopApp(), () => false);
 
   const [step, setStep] = useState<Step>(initialStep ?? (afterOrgDelete ? 'deleted' : 'arrive'));
   const [arrival, setArrival] = useState<Arrival>('working');
@@ -100,22 +131,11 @@ export function OnboardingForm({
   const [invites, setInvites] = useState<MyInvite[]>([]);
   // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
   const [orgName, setOrgName] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState('');
-  const [projectDesc, setProjectDesc] = useState('');
-  // story 4937 — the project step the server draws (`?step=project`): what was typed before the screen came alive is taken into the state once (nothing is there to take on any other way in: the step is reached by a press, after it is alive)
-  const projectNameRef = useRef<HTMLInputElement>(null);
-  const projectDescRef = useRef<HTMLTextAreaElement>(null);
-  useAdoptPrehydrationValues([{ ref: projectNameRef, initial: '', set: setProjectName }, { ref: projectDescRef, initial: '', set: setProjectDesc }]);
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
+  // story 5036: the project of the line — made by step ①, or the one the organization already had (the oldest)
   const [projectId, setProjectId] = useState<string | null>(null);
-  // story #3196 ⑥ — 하드코딩 영문 기본값 제거. 빈 값으로 두면 이미 로컬라이즈돼 있던
-  // agentNamePlaceholder(t('agentNamePlaceholder'))가 정상 노출된다(placeholder는 value가
-  // 있으면 안 보이는 표준 동작이라, value 자체를 채워두면 placeholder 번역이 무의미해짐).
-  const [agentName, setAgentName] = useState('');
-  const [agentRole, setAgentRole] = useState('developer');
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const [newApiKey, setNewApiKey] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // story 5036: the agent that connected through the key way (null: the app made it, or none yet) — step ③ opens the conversation with it
+  const [connectedAgentId, setConnectedAgentId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState('');
@@ -132,7 +152,9 @@ export function OnboardingForm({
   // story 4904: one «does the person already have an organization?» re-read at a time (the limit answer of createOrg)
   const joiningExisting = useRef(false);
 
-  const progress = onboardingProgress(step);
+  // story 5036: a place that is not a browser has its own first screen and no project step (the Mac app's setup page makes the project itself; the phone app and a server host never had one)
+  const lineApplies = !(serverHostOrigin !== null || serverHostPending || inPhoneApp || inMacApp);
+  const lineIndex = !initialStep && lineApplies ? onboardingLineIndex(step) : null;
 
   // story 4763 (codex): the session is renewed by ONE call at a time for the whole page (`refreshSessionOnce` — the very flight `fetchWithAuth` joins on a 401): the refresh token rotates on use, so
   // the deleted screen's own renewal, the press's, a double press and an interceptor's must share the call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of
@@ -148,6 +170,28 @@ export function OnboardingForm({
   useEffect(() => {
     emitOnboardingEvent('onboarding_started');
   }, []);
+
+  // story 5036: the project of the line is the session's current one (the chat, the board … open on it) — set when it is made and when an existing one is taken
+  const adoptProject = async (id: string) => {
+    setProjectId(id);
+    await fetchWithAuth('/api/current-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: id }),
+    }).catch(() => null);
+  };
+
+  // story 5036: the organization is known (made now · found · joined) — where the line goes next.
+  // A place with no project step goes straight to its own screen. A browser: the organization's own project when it has one (a reload in the middle of the line must never ask for a second —
+  // the plan's project limit), else step ①. A list that could not be read is not «there is none» (rule 4832): nothing is made, the person is told and presses [다시 확인].
+  const proceedWithOrg = async (org: string) => {
+    setOrgId(org);
+    if (!lineApplies || desktopApp()) { setStep('connect'); return; }
+    const found = await readOldestProject();
+    if (found === 'unreadable') { setStep('arrive'); setArrival('project-check-failed'); return; }
+    if (found) { await adoptProject(found); setStep('connect'); return; }
+    setStep('project');
+  };
 
   // story 4715 (AC1 · AC6): the organization is never asked for — make it with a made name, but only once the invites are known to be none
   const createOrg = async (name: string) => {
@@ -178,7 +222,7 @@ export function OnboardingForm({
             joiningExisting.current = true;
             try {
               const joined = await readExistingOrg();
-              if (joined) { setOrgId(joined); setStep('first'); return; }
+              if (joined) { await proceedWithOrg(joined); return; }
             } finally {
               joiningExisting.current = false;
             }
@@ -194,7 +238,6 @@ export function OnboardingForm({
         return;
       }
 
-      setOrgId(json.data.id);
       setOrgName(name);
       // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
@@ -202,7 +245,7 @@ export function OnboardingForm({
       // story 4762 — refreshSessionAfterChange(lib/db/client.ts · 한 번에 하나, 바뀐 뒤에 발급)가 새로고침과 함께 셸에 «세션이 바뀌었다»(session-changed)도 알린다: 이 순간 앱이 꺼져도 org 클레임이 든
       // 새 토큰이 디스크에 남도록. 맨 fetch는 이 신호를 안 보냈다(폰 강제 종료 뒤 클레임 없는 옛 토큰이 남아 /glance가 404 — 실측 10-24).
       await refreshSessionAfterChange().catch(() => null); // story 4776 — one rotation at a time for the page, minted after the organization exists
-      setStep('first');
+      await proceedWithOrg(json.data.id);
     } catch {
       setError(t('networkError'));
       setArrival('failed');
@@ -274,7 +317,7 @@ export function OnboardingForm({
         }
       }
       // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
-      if (existing) { setOrgId(existing); setStep('first'); return; }
+      if (existing) { await proceedWithOrg(existing); return; }
       // the e-mail gate normally stands before this page; if it is still unverified, say so and make nothing (story #2441)
       // story 5023 (e): only when the server ASKS for it (`email_verification_required` — a server with no mail turns it off, and the page must not ask a person for what that server can never give); a server that says nothing keeps the old behaviour
       if (me?.data?.email_verified === false && me?.data?.email_verification_required !== false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
@@ -310,9 +353,10 @@ export function OnboardingForm({
       const res = await fetchWithAuth('/api/auth/me');
       if (!res.ok) return;
       const existing = existingOrgIdFromMe(await res.json());
-      if (existing && !off) { forgetOrgDeletedMarker(); setOrgId(existing); setStep('first'); } // the marker goes too: a reload is the usual onboarding, not this check again
+      if (existing && !off) { forgetOrgDeletedMarker(); await proceedWithOrg(existing); } // the marker goes too: a reload is the usual onboarding, not this check again
     })().catch(() => undefined).finally(() => { clearTimeout(giveUp); if (!off) setDeletedChecked(true); });
     return () => { off = true; clearTimeout(giveUp); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   useEffect(() => {
@@ -356,113 +400,41 @@ export function OnboardingForm({
   // E-ONB S5: 온보딩 완료 후 홈(chat, story #3179 S3c) 이동 전 토큰 refresh.
   // register JWT는 app_metadata 비어(org_id 없음) — TeamMember는 project 생성 시 최초 생기므로,
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
-  const finishToHome = async () => {
+  // story 5036: the project is an argument — the one made a moment ago is not in the closure yet (the address went without `?p=` before)
+  const finishToHome = async (pid: string | null = projectId) => {
     await refreshSessionAfterChange().catch(() => null); // story 4762 — same: the shell writes the new token out now · story 4776 — one rotation at a time, minted after the project and agent exist
     // story #4231 — 첫 착지(flat)는 방금 만든 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음).
-    window.location.href = withProjectParam(resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref), projectId);
+    window.location.href = withProjectParam(resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref), pid);
   };
 
-  const handleCreateProject = async () => {
-    if (!projectName.trim() || !orgId) return;
-    setLoading(true);
-    setError('');
-
-    try {
-      // E-ONB S5 FINAL: org 생성 직후 refresh로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: orgId, name: projectName.trim(), description: projectDesc.trim() || null }),
-      });
-      const json = await res.json();
-
-      if (!res.ok) {
-        // story #2484 — backend projects.py create_project()는 'PLAN_LIMIT_EXCEEDED'(resource:"project")를 낸다.
-        if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED') {
-          setUpgradeReason(t('projectLimitExceededError', { limit: json.error.limit ?? 1 }));
-          setShowUpgrade(true);
-          return;
-        }
-        // 그 외 code만 보고 raw message는 안 씀.
-        setError(t('createProjectFailed'));
-        return;
-      }
-
-      const project = json.data;
-      if (!project) {
-        setError(t('createProjectFailed'));
-        return;
-      }
-
-      setProjectId(project.id);
-
-      // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
-
-      await fetch('/api/current-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: project.id }),
-      }).catch(() => null);
-
-      if (initialStep === 'project') {
-        await finishToHome();
-        return;
-      }
-      setStep('agent');
-    } catch {
-      setError(t('networkError'));
-    } finally {
-      setLoading(false);
-    }
+  // story 5036: step ① — the project exists. On the line it goes on to step ②; `?step=project` (a new project from elsewhere) ends at home as it always did.
+  const handleProjectCreated = async (id: string) => {
+    await adoptProject(id);
+    if (initialStep === 'project') { await finishToHome(id); return; }
+    setStep('connect');
   };
 
-  const handleCreateAgent = async () => {
-    if (!agentName.trim() || !projectId || !orgId) return;
-    setLoading(true);
-    setError('');
+  const handleProjectLimit = (limit: number | null) => {
+    setUpgradeReason(t('projectLimitExceededError', { limit: limit ?? 1 }));
+    setShowUpgrade(true);
+  };
 
-    try {
-      const memberRes = await fetch('/api/team-members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          org_id: orgId,
-          project_id: projectId,
-          type: 'agent',
-          name: agentName.trim(),
-          role: agentRole,
-        }),
-      });
-      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { code?: string; message?: string } };
-      // story #2484 — 도달 가능한 고유 code가 없어 raw message 대신 통일된 안전 폴백만 사용.
-      if (!memberRes.ok) {
-        setError(t('createAgentFailed'));
-        return;
-      }
-
-      const newAgentId = memberJson.data?.id;
-      if (!newAgentId) {
-        setError(t('createAgentFailed'));
-        return;
-      }
-      setAgentId(newAgentId);
-
-      // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
-      if (memberJson.data?.api_key) {
-        setNewApiKey(memberJson.data.api_key);
-      }
-
-      setStep('connect');
-    } catch {
-      setError(t('networkError'));
-    } finally {
-      setLoading(false);
-    }
+  // story 5036: step ③ — an agent connected (through the key way: its own id · through the app: the organization's activation said so). Told twice (both signals), moved once.
+  const handleConnected = (agentId: string | null) => {
+    if (agentId) setConnectedAgentId((cur) => cur ?? agentId);
+    setStep((cur) => (cur === 'connect' ? 'chat' : cur));
   };
 
   const handleFinish = () => {
     void finishToHome();
   };
+
+  const finishLabel = todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta');
+  const lineSteps: StepperStep[] = [
+    { id: 'project', label: tl('stepProject') },
+    { id: 'connect', label: tl('stepConnect') },
+    { id: 'chat', label: tl('stepChat') },
+  ];
 
   // story 4763 (H6): the only organization was just deleted — the screen says so; the new organization is made by this press (a second reading of invites included)
   if (step === 'deleted' && !deletedChecked) {
@@ -478,7 +450,7 @@ export function OnboardingForm({
   if (step === 'deleted') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md space-y-4 p-6 text-center shadow-lg sm:p-8" data-testid="onboarding-org-deleted">
+        <LegacyCard className="w-full max-w-md space-y-4 p-6 text-center shadow-lg sm:p-8" data-testid="onboarding-org-deleted">
           <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
           <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
           <Button onClick={() => { forgetOrgDeletedMarker(); setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
@@ -489,7 +461,7 @@ export function OnboardingForm({
             <DsButton variant="quiet" onClick={() => setShowDeleteAccount(true)} data-testid="onboarding-org-deleted-delete-account">{tSettings('deleteAccount')}</DsButton>
           </div>
           {showDeleteAccount ? <DeleteAccountDialog onClose={() => setShowDeleteAccount(false)} onDeleted={() => window.location.assign('/login')} /> : null}
-        </Card>
+        </LegacyCard>
       </div>
     );
   }
@@ -507,35 +479,17 @@ export function OnboardingForm({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`} data-testid="onboarding-card">
-        {/* 진행 표시줄 — story 4715: the web way's three steps only */}
-        {progress ? (
-          <div className="space-y-1.5" data-testid="onboarding-progress">
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span data-testid="onboarding-step-of">{t('stepOf', progress.label)}</span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-muted">
-              <div
-                className="h-1.5 rounded-full bg-primary transition-all duration-300"
-                style={{ width: `${progress.fraction * 100}%` }}
-                data-testid="onboarding-progress-bar"
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {step === 'project' || step === 'agent' || step === 'connect' ? (
-          <div className="text-center">
-            <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">
-              {step === 'project' && t('createProject')}
-              {step === 'agent' && t('createAgent')}
-              {step === 'connect' && t('connectAgent')}
-            </h1>
-            <p className="mt-2 break-keep text-sm text-muted-foreground">
-              {step === 'project' && (orgName ? t('projectSubtitle', { orgName }) : t('projectSubtitleNoOrg'))}
-              {step === 'agent' && t('agentSubtitle')}
-              {step === 'connect' && t('connectSubtitle')}
-            </p>
+      <Card className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 p-6 sm:p-8`} data-testid="onboarding-card">
+        {/* story 5036: the straight line's strip — three steps, ds Stepper (check · ring · number + a hidden state word: never colour alone). Arrival, invites and the places that are not a browser have none. */}
+        {lineIndex !== null ? (
+          <div data-testid="onboarding-progress">
+            <Stepper
+              aria-label={tl('stepperLabel')}
+              steps={lineSteps}
+              current={lineIndex}
+              stateLabels={{ done: tl('stateDone'), current: tl('stateCurrent'), upcoming: tl('stateUpcoming') }}
+              data-testid="onboarding-stepper"
+            />
           </div>
         ) : null}
 
@@ -588,105 +542,45 @@ export function OnboardingForm({
                 <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-invite-check-failed">{t('inviteCheckFailed')}</p>
                 <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-invite-check-again">{t('inviteCheckAgain')}</Button>
               </div>
+            ) : arrival === 'project-check-failed' ? (
+              <div className="space-y-3">
+                <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-project-check-failed">{tl('projectCheckFailed')}</p>
+                <Button variant="outline" onClick={() => { if (orgId) { setArrival('working'); void proceedWithOrg(orgId); } }} data-testid="onboarding-project-check-again">{t('inviteCheckAgain')}</Button>
+              </div>
             ) : (
               <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-arrive-retry">{tc('retry')}</Button>
             )}
           </div>
         )}
 
-        {step === 'first' && (
-          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} serverHostOrigin={serverHostOrigin} serverHostPending={serverHostPending} orgName={orgName} todayV3Enabled={todayV3Enabled} todayHref={todayHref} onFinish={handleFinish} />
-        )}
-
-        {step === 'project' && (
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('projectName')}</label>
-              <OperatorInput
-                type="text"
-                ref={projectNameRef}
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder={t('projectNamePlaceholder')}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('projectDesc')}</label>
-              <OperatorTextarea
-                ref={projectDescRef}
-                value={projectDesc}
-                onChange={(e) => setProjectDesc(e.target.value)}
-                placeholder={t('projectDescPlaceholder')}
-                rows={3}
-              />
-            </div>
-            <Button
-              variant="hero"
-              size="lg"
-              className="w-full"
-              onClick={() => void handleCreateProject()}
-              disabled={!projectName.trim() || loading}
-            >
-              {loading ? tc('creating') : t('createProjectAction')}
-            </Button>
-          </div>
-        )}
-
-        {step === 'agent' && (
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('agentName')}</label>
-              <OperatorInput
-                type="text"
-                value={agentName}
-                onChange={(e) => setAgentName(e.target.value)}
-                placeholder={t('agentNamePlaceholder')}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('agentRole')}</label>
-              <OperatorSelect
-                value={agentRole}
-                onChange={(e) => setAgentRole(e.target.value)}
-              >
-                {AGENT_ROLES.map((r) => (
-                  <option key={r} value={r}>{t(AGENT_ROLE_LABEL_KEYS[r] ?? r)}</option>
-                ))}
-              </OperatorSelect>
-            </div>
-            <Button
-              variant="hero"
-              size="lg"
-              className="w-full"
-              onClick={() => void handleCreateAgent()}
-              disabled={!agentName.trim() || loading}
-            >
-              {loading ? tc('creating') : t('createAgentAction')}
-            </Button>
-            {/* story 4668 (AC2): skipping goes to the connect step (the app card is there) — before, it went home: a dead end */}
-            <Button
-              variant="glass"
-              size="lg"
-              className="w-full"
-              onClick={() => setStep('connect')}
-            >
-              {t('skip')}
-            </Button>
-          </div>
-        )}
+        {step === 'project' && orgId ? (
+          <ProjectStep orgId={orgId} orgName={orgName} onCreated={handleProjectCreated} onLimit={handleProjectLimit} />
+        ) : null}
 
         {step === 'connect' && (
-          <ConnectStep
-            agentId={agentId}
-            apiKey={newApiKey}
-            projectId={projectId}
-            orgId={orgId}
-            onFinish={handleFinish}
-            todayV3Enabled={todayV3Enabled}
-            onMakeAgent={() => setStep('agent')}
-          />
+          <>
+            <FirstScreen
+              orgId={orgId}
+              chatsHref={chatsHref}
+              macDownloadEnabled={macDownloadEnabled}
+              serverHostOrigin={serverHostOrigin}
+              serverHostPending={serverHostPending}
+              orgName={orgName}
+              projectId={projectId}
+              onConnected={(agentId) => handleConnected(agentId)}
+              todayV3Enabled={todayV3Enabled}
+              todayHref={todayHref}
+              onFinish={handleFinish}
+            />
+            {/* story 5036: the ways that leave the page (the app makes the agent) are told by the organization's activation — only where the line runs */}
+            {lineApplies && orgId && projectId ? <AppConnectWatcher orgId={orgId} onConnected={() => handleConnected(null)} /> : null}
+          </>
         )}
-      </div>
+
+        {step === 'chat' && projectId ? (
+          <FirstChatStep projectId={projectId} agentId={connectedAgentId} onFinish={handleFinish} finishLabel={finishLabel} />
+        ) : null}
+      </Card>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}
     </div>
   );

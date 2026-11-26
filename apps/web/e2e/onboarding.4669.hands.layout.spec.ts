@@ -7,8 +7,9 @@
  * `onboarding.4668.layout.spec.ts`. The test then COUNTS the hands: it presses nothing on its own; every time the first screen is not
  * yet there, it must press the first control the card offers, and each press is one hand. A page that asks for a name, an
  * organization, a fork, or any press before the first screen costs hands — more than 3 fails the test and prints the number.
- * The count today is 0: arrival finds the account has no organization, reads the invites (none) and makes the organization with a made
- * name by itself (name only — the server derives the address).
+ * The count today is 1 (story 5036): arrival finds the account has no organization, reads the invites (none) and makes the organization with a made
+ * name by itself (name only — the server derives the address); then step ① asks the first project's name — already filled («첫 프로젝트») — and the one press goes on to
+ * step ② (the three ways), the screen the count runs to.
  *
  * Scope: from the mounted form on. What comes before it — the OAuth callback's redirect, the authenticated layout sending an org-less person
  * to /onboarding, and the page's e-mail gate (open for a provider-verified account, so it adds no hand) — is not exercised here.
@@ -23,7 +24,8 @@ const WEB = path.join(__dirname, '..');
 
 /** AC4's bound */
 const MAX_HANDS = 3;
-const FIRST_SCREEN = { mac: '에이전트는 내 Mac에서 돌아가요' };
+// story 5036: the straight line's step ② — «에이전트를 연결해요» (the three ways) is the screen the count runs to; step ① (the first project, its name already filled) stands before it and costs one hand
+const FIRST_SCREEN = { mac: '에이전트를 연결해요' };
 
 let built: string | null = null;
 async function build() {
@@ -72,6 +74,10 @@ const AFTER_GOOGLE: Record<string, unknown> = {
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
   'POST /api/onboarding/events': {},
+  // story 5036: a new account has no project — step ① asks for it (the name is filled in); the press makes it and goes on
+  'GET /api/projects': { data: [] },
+  'POST /api/projects': { data: { id: 'proj-1' } },
+  'POST /api/current-project': {},
   'GET /desktop/downloads/macos.json': { product: 'Sprintable Dev Setup', version: '0.4.0', build: 'abc1234', notarized: false, url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/Sprintable-Dev-Setup.dmg' },
 };
 
@@ -144,17 +150,17 @@ test('the counter is not blind: a page that asks for one more press before the f
   AFTER_GOOGLE['GET /api/invites/mine'] = { invites: [{ invite_id: 'inv-1', org_id: 'org-x', org_name: '문클랩스', role: 'member', expires_at: '2026-10-30T00:00:00Z' }] };
   try {
     await openAfterGoogle(page, requests);
-    // the invited card's «초대와 따로 내 조직 만들기» is the one press (it makes the organization and lands on the first screen)
-    expect(await countHands(page), 'with an invite pending the first screen costs exactly that one press').toBe(1);
+    // the invited card's «초대와 따로 내 조직 만들기» is the first press (it makes the organization and lands on step ①); step ①'s [프로젝트 만들기] is the second
+    expect(await countHands(page), 'with an invite pending the screen costs that press and step ①\'s').toBe(2);
   } finally {
     AFTER_GOOGLE['GET /api/invites/mine'] = { invites: [] };
   }
 });
 
-test('the counter counts a press: the account read fails once → arrival stops with one primary → one press, then the first screen = 1 hand', async ({ page }) => {
+test('the counter counts a press: the account read fails once → arrival stops with one primary → one press (and step ①\'s) = 2 hands', async ({ page }) => {
   const requests: { method: string; path: string; body: string | null }[] = [];
   await openAfterGoogle(page, requests, 'GET /api/auth/me');
   const hands = await countHands(page);
-  expect(hands).toBe(1);
+  expect(hands).toBe(2);
   expect(requests.filter((r) => r.method === 'POST' && r.path === '/api/organizations'), 'still one organization').toHaveLength(1);
 });

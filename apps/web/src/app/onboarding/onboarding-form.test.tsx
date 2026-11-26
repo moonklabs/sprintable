@@ -148,7 +148,9 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     await act(async () => { root.render(wrap(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await flush();
 
-    // story 4715 — the organization is made on arrival · story 4766 — the web way is the folded «고급» press: it makes the project, then the agent
+    // story 4715 — the organization is made on arrival · story 5036 — step ① asks the first project's name (one press), then step ②'s key way makes the agent on it
+    await act(async () => { container.querySelector('[data-testid=onboarding-project-create]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
     const make = container.querySelector('[data-testid=advanced-make]');
     await act(async () => { make?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();

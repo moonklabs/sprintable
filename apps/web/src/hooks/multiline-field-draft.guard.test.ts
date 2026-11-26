@@ -48,7 +48,6 @@ const EXEMPT: Record<string, string> = {
   'app/internal-dogfood/page.tsx': '내부 점검 페이지 — 창 밖',
   'app/onboarding/advanced-connect.tsx': '붙일 명령을 보여 주는 읽기 전용 상자(readOnly · 복사가 거절됐을 때만) — 사람이 쓰는 칸이 아님. 초안 훅은 칸 값을 기기 저장소에 남기는데 이 값은 에이전트 키가 든 명령이라 저장하면 안 됨 — 4766',
   'app/onboarding/connect-step.tsx': '온보딩 단계 — 페이지 흐름, 창 밖',
-  'app/onboarding/onboarding-form.tsx': '온보딩 폼 — 페이지 흐름, 창 밖',
   'components/agents/agent-api-key-manager.tsx': '읽기 전용 키 표시(readOnly) — 쓰는 칸 아님',
   'components/agents/agent-connection-settings-section.tsx': '에이전트 상세 페이지 섹션 — 창 밖',
   'components/chat/chat-input.tsx': '자체 보존(스레드 답글 localStorage) — 4370 인벤토리 19행 NO',

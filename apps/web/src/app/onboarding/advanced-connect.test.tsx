@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 /**
- * story 4766 — the folded web way: one press makes the project + agent + key and copies the ONE line; the screen names where the key stays
- * (Kadir's lens); [키 폐기] is in the same place; the panel (4761) turns «connected» by itself. Nothing here runs anything on the computer.
+ * story 4766 · story 5036 — the web way (branch 3 of step ②): one press makes the agent + key — on the project step ① made, never a project of its own — and
+ * copies the ONE line; the screen names where the key stays (Kadir's lens); [키 폐기] is in the same place; the panel (4761) turns «connected» by itself and
+ * tells the page (`onConnected`, once per agent). The two exit buttons are gone: step ③ — the first conversation — is the page's, shared by all three ways.
+ * Nothing here runs anything on the computer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -58,11 +60,11 @@ const text = () => container.textContent ?? '';
 const flush = async () => { for (let i = 0; i < 8; i += 1) await act(async () => { await Promise.resolve(); }); };
 const press = async (id: string) => { await act(async () => { q(id)!.click(); }); await flush(); };
 
+/** story 5036: the key way never reads, makes or sets a project (step ① owns that) — a revert of that turns every test that checks this red */
+const projectCalls = () => calls.filter((c) => /^\/api\/(projects|current-project)/.test(c.url));
+
 function happyRoutes(overrides: Record<string, Handler> = {}) {
   routes.clear();
-  routes.set('GET /api/projects', () => ({ ok: true, body: { data: [] } }));
-  routes.set('POST /api/projects', () => ({ ok: true, body: { data: { id: 'proj-1' } } }));
-  routes.set('POST /api/current-project', () => ({ ok: true, body: {} }));
   routes.set('POST /api/team-members', () => ({ ok: true, body: { data: { id: 'agent-1', api_key: KEY } } }));
   routes.set('GET /api/agents/agent-1/connection-artifact', () => ({ ok: true, body: { data: { files: [{ filename: '.mcp.json', content: ARTIFACT }] } } }));
   routes.set('GET /api/agents/agent-1/verification-status', () => ({ ok: true, body: { data: { verified: false, rail: [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'active' }] } } }));
@@ -72,15 +74,15 @@ function happyRoutes(overrides: Record<string, Handler> = {}) {
   for (const [k, v] of Object.entries(overrides)) routes.set(k, v);
 }
 
-async function mount(onFinish = vi.fn(), locale: 'ko' | 'en' = 'ko', onWorking?: (w: boolean) => void) {
+async function mount(onConnected = vi.fn(), locale: 'ko' | 'en' = 'ko', onWorking?: (w: boolean) => void, projectId = 'proj-1') {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <AdvancedConnect orgId="org-1" onFinish={onFinish} onWorking={onWorking} />
+        <AdvancedConnect orgId="org-1" projectId={projectId} onConnected={onConnected} onWorking={onWorking} />
       </NextIntlClientProvider>,
     );
   });
-  return onFinish;
+  return onConnected;
 }
 
 beforeEach(() => {
@@ -104,12 +106,14 @@ describe('AdvancedConnect — story 4766', () => {
     expect(calls).toHaveLength(0); // nothing is made until the press
   });
 
-  it('AC2: ONE press makes the project, the agent and its key, reads the hosted address, and copies the line — the screen shows it masked', async () => {
+  it('AC2: ONE press makes the agent and its key on the GIVEN project, reads the hosted address, and copies the line — the screen shows it masked', async () => {
     await mount();
     await press('advanced-make');
     expect(calls.map((c) => `${c.method} ${c.url.split('?')[0]}`)).toEqual(expect.arrayContaining([
-      'GET /api/projects', 'POST /api/projects', 'POST /api/current-project', 'POST /api/team-members', 'GET /api/agents/agent-1/connection-artifact',
+      'POST /api/team-members', 'GET /api/agents/agent-1/connection-artifact',
     ]));
+    // story 5036 (PO 11-26): no project of its own with a made name — the project is step ①'s. Reverted (the old ensureProject back) → a project list read / POST here
+    expect(projectCalls()).toEqual([]);
     const agentBody = calls.find((c) => c.url === '/api/team-members')!.body as Record<string, unknown>;
     expect(agentBody).toMatchObject({ org_id: 'org-1', project_id: 'proj-1', type: 'agent', name: ko.defaultAgent });
     // the clipboard holds the real line — once, the only place the key is copied from
@@ -183,7 +187,6 @@ describe('AdvancedConnect — story 4766', () => {
   it('AC7 failure branches each say one thing and make no half-state the person cannot retry', async () => {
     const cases: [string, Record<string, Handler>, string][] = [
       ['agent', { 'POST /api/team-members': () => ({ ok: false, status: 500, body: { error: { message: 'raw server text' } } }) }, ko.failure.agent],
-      ['project', { 'POST /api/projects': () => ({ ok: false, status: 500, body: {} }) }, ko.failure.project],
       ['key', { 'POST /api/team-members': () => ({ ok: true, body: { data: { id: 'agent-1' } } }), 'POST /api/agents/agent-1/api-key': () => ({ ok: false, status: 500, body: {} }) }, ko.failure.key],
       ['hosted', { 'GET /api/agents/agent-1/connection-artifact': () => ({ ok: false, status: 400, body: {} }) }, ko.failure.hosted],
     ];
@@ -259,7 +262,6 @@ describe('AdvancedConnect — story 4766', () => {
 
   it('codex/Kadir — every failure branch REJECTS the promise the clipboard was handed (nothing half-written, no hanging write)', async () => {
     const branches: [string, Record<string, Handler>][] = [
-      ['project', { 'POST /api/projects': () => ({ ok: false, status: 500, body: {} }) }],
       ['agent', { 'POST /api/team-members': () => ({ ok: false, status: 500, body: {} }) }],
       ['key', { 'POST /api/team-members': () => ({ ok: true, body: { data: { id: 'agent-1' } } }), 'POST /api/agents/agent-1/api-key': () => ({ ok: false, status: 500, body: {} }) }],
       ['hosted', { 'GET /api/agents/agent-1/connection-artifact': () => ({ ok: false, status: 400, body: {} }) }],
@@ -280,24 +282,29 @@ describe('AdvancedConnect — story 4766', () => {
     }
   });
 
-  it('an existing first project is used, not a second one made (a reload · a second visit)', async () => {
-    happyRoutes({ 'GET /api/projects': () => ({ ok: true, body: { data: [{ id: 'proj-existing' }] } }) });
-    await mount();
+  it('the agent goes on the project the page gave — whichever it is (the page found or made it; this panel never chooses)', async () => {
+    await mount(vi.fn(), 'ko', undefined, 'proj-existing');
     await press('advanced-make');
-    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/projects')).toBe(false);
+    expect(projectCalls()).toEqual([]);
     expect((calls.find((c) => c.url === '/api/team-members')!.body as { project_id: string }).project_id).toBe('proj-existing');
   });
 
-  it('the panel turns «connected» by itself, naming the first call; the first instruction button then goes to a new conversation', async () => {
+  it('the panel turns «connected» by itself, naming the first call — and tells the page ONCE with the agent (step ③ is the page\'s)', async () => {
     vi.useFakeTimers();
     try {
-      await mount();
+      const onConnected = await mount();
       await act(async () => { q('advanced-make')!.click(); await vi.advanceTimersByTimeAsync(50); });
+      expect(onConnected).not.toHaveBeenCalled(); // made, pasted nowhere yet: not connected
       routes.set('GET /api/agents/agent-1/verification-status', () => ({ ok: true, body: { data: { verified: true, first_call_at: '2026-10-23T23:24:04.418874+00:00', rail: [
         { state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'done' }, { state: 'mcp_reachable', status: 'done' }, { state: 'verified', status: 'done' }] } } }));
       await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
       expect(q('advanced-verified')?.textContent).toContain('처음 호출했어요');
       expect(q('advanced-verified')?.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-23T23:24:04.418874+00:00');
+      // reverted (the panel only draws the banner) → the page is never told and step ③ never comes
+      expect(onConnected).toHaveBeenCalledTimes(1);
+      expect(onConnected).toHaveBeenCalledWith('agent-1');
+      await act(async () => { await vi.advanceTimersByTimeAsync(7000); }); // a later poll that reads «verified» again tells nothing more
+      expect(onConnected).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -319,11 +326,12 @@ describe('AdvancedConnect — story 4766', () => {
     }
   });
 
-  it('the finish button leaves the way the caller says (오늘 · 대시보드)', async () => {
-    const onFinish = await mount();
+  it('story 5036: no exit buttons here any more — «첫 지시 보내기» and the finish are step ③\'s and the page\'s, the same for all three ways', async () => {
+    await mount();
     await press('advanced-make');
-    await press('advanced-finish');
-    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(q('advanced-ready')).not.toBeNull();
+    expect(q('advanced-first-instruction')).toBeNull();
+    expect(q('advanced-finish')).toBeNull();
   });
 
   it('codex round 1 — a late failure (the agent was made, the hosted address was not readable) is RESUMED, not repeated: the retry makes no second agent', async () => {
@@ -335,7 +343,7 @@ describe('AdvancedConnect — story 4766', () => {
     artifactOk = true;
     await press('advanced-make');
     expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/team-members')).toHaveLength(1); // one agent, however many presses
-    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/projects')).toHaveLength(1);
+    expect(projectCalls()).toEqual([]);
     expect(q('advanced-line')?.textContent).toContain('sk_live_••••ABCD');
   });
 
@@ -348,21 +356,6 @@ describe('AdvancedConnect — story 4766', () => {
     expect(q('advanced-ready')).not.toBeNull();
   });
 
-  it('codex round 1 — a project list that cannot be read is a failure (never «there is none», or a second project is made)', async () => {
-    happyRoutes({ 'GET /api/projects': () => ({ ok: false, status: 500, body: {} }) });
-    await mount();
-    await press('advanced-make');
-    expect(q('advanced-failed')?.textContent).toBe(ko.failure.project);
-    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/projects')).toBe(false);
-  });
-
-  it('codex round 1 — with several projects the OLDEST is the first project', async () => {
-    happyRoutes({ 'GET /api/projects': () => ({ ok: true, body: { data: [{ id: 'p-new', created_at: '2026-10-24T01:00:00Z' }, { id: 'p-old', created_at: '2026-10-01T01:00:00Z' }] } }) });
-    await mount();
-    await press('advanced-make');
-    expect((calls.find((c) => c.url === '/api/team-members')!.body as { project_id: string }).project_id).toBe('p-old');
-  });
-
   it('codex round 1 — a key that is not plain characters is never put on a command line (the press says it did not get a key)', async () => {
     happyRoutes({ 'POST /api/team-members': () => ({ ok: true, body: { data: { id: 'agent-1', api_key: "sk_live_a'b$(x)000000" } } }), 'POST /api/agents/agent-1/api-key': () => ({ ok: true, body: { data: { api_key: 'also odd key' } } }) });
     await mount();
@@ -370,18 +363,6 @@ describe('AdvancedConnect — story 4766', () => {
     expect(q('advanced-failed')?.textContent).toBe(ko.failure.key);
     expect(q('advanced-line')).toBeNull();
     expect(copied).toHaveLength(0); // nothing reached the clipboard
-  });
-
-  it('codex round 2 — «oldest» is by the instant, whatever offset the times are written in; a project without a time comes last', async () => {
-    happyRoutes({ 'GET /api/projects': () => ({ ok: true, body: { data: [
-      { id: 'p-none' },
-      { id: 'p-lexically-first', created_at: '2026-10-01T23:00:00-05:00' }, // = 10-02T04:00Z — the smaller STRING, the later instant
-      { id: 'p-earliest-instant', created_at: '2026-10-02T01:00:00+09:00' }, // = 10-01T16:00Z — the larger string, the earlier instant
-      { id: 'p-unreadable', created_at: 'not a time' },
-    ] } }) });
-    await mount();
-    await press('advanced-make');
-    expect((calls.find((c) => c.url === '/api/team-members')!.body as { project_id: string }).project_id).toBe('p-earliest-instant');
   });
 
   it('codex round 2 — a press that failed on the key (agent made) and is pressed again keeps the SAME agent and asks the key route', async () => {

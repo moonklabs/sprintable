@@ -75,7 +75,7 @@ const API: Record<string, Answer> = {
   'GET /api/invites/mine': { invites: [] }, // the backend's one shape (MyInvitesResponse · no envelope)
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
-  'GET /api/projects': { data: [] },
+  'GET /api/projects': { data: [{ id: 'proj-1' }] }, // story 5036: the organization has a project — the first screen is step ② (the three ways)
   'POST /api/projects': { data: { id: 'proj-1' } },
   'POST /api/current-project': {},
   // story 4766: the folded web way's one press — the agent and its key, the hosted address, the panel's first answer
@@ -145,7 +145,7 @@ for (const locale of ['ko', 'en'] as const) {
   for (const width of [1100, 390]) {
     test(`[SID:4906] «Advanced» · the install commands break after a slash or at a space, never inside a word · ${locale} · ${width}`, async ({ page }) => {
       await open(page, { width, theme: 'L', locale });
-      await page.getByTestId('onboarding-first-advanced-summary').click();
+      // story 5036: the key way is a card on the screen (no «고급» fold to open) — its install lines are drawn from the start
       for (const rt of ['claude', 'codex']) {
         const line = page.getByTestId(`advanced-install-line-${rt}`);
         await expect(line).toBeVisible();

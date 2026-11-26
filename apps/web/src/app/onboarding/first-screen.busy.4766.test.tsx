@@ -38,7 +38,7 @@ describe('FirstScreen — the way out waits while the web way is making things (
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-          <FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onFinish={onFinish} />
+          <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName={null} onFinish={onFinish} />
         </NextIntlClientProvider>,
       );
     });
