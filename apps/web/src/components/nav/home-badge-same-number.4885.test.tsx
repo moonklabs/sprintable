@@ -44,7 +44,7 @@ async function read(badge: number, partial: boolean) {
   await act(async () => { root.render(wrap(<><NavRailWithHomeBadge account={undefined as never} /><MobileTabBar chatUnreadTotal={0} /></>)); });
   await act(async () => { await Promise.resolve(); });
   // 웹 막대 「홈」 아이콘의 배지(ds CountBadge · data-testid="rail-badge") — 「대화」 배지는 안 읽음이라 0이면 없다.
-  const rail = container.querySelector('[data-rail-group="now"] [data-testid="rail-badge"]');
+  const rail = container.querySelector('[data-rail-item="depth1-home"] [data-testid="rail-badge"]');
   const tabLink = [...container.querySelectorAll('[data-testid="mobile-tab-bar"] a')].find((a) => a.getAttribute('href')?.startsWith('/org-briefing'))!;
   const tab = tabLink.querySelector('[data-slot="ds-count-badge"]');
   return {

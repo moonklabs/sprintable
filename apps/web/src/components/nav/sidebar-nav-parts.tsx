@@ -61,14 +61,15 @@ export function NavRow({
 }: NavRowProps) {
   return (
     <SidebarMenuItem>
-      <ListRow asChild density="compact" selected={isActive} className="gap-2 px-3">
+      {/* story 5031 (C1 step 2a) — the kit's row: height 40 · side padding 16 · icon 24 · icon↔label 16 · no divider line (the 4px between rows comes from the menu's gap) — scale classes only */}
+      <ListRow asChild density="compact" selected={isActive} className="h-10 gap-x-4 border-b-0 px-4 py-0">
         <Link
           href={href}
           ref={activeRef}
           aria-current={isActive ? 'page' : undefined}
           {...(navId ? { 'data-nav-id': navId } : {})}
         >
-          <Icon className="size-4 shrink-0 text-ds-ink-3" />
+          <Icon className="size-6 shrink-0 text-ds-ink-3" />
           <span data-nav-label className="min-w-0 flex-1 truncate text-ds-body font-semibold text-ds-ink">{label}</span>
           {scopeMark || kbd ? (
             <span className="flex shrink-0 items-center gap-1.5">

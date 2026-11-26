@@ -1,10 +1,10 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { LayoutGrid, Search, MessageSquare } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -15,14 +15,15 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
-import { NavGroupHeader, NavRow } from '@/components/nav/sidebar-nav-parts';
+import { NavRow } from '@/components/nav/sidebar-nav-parts';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import {
-  ALL_SCREENS_ITEM,
   CHAT_CENTER_ITEM,
-  NAV_GROUPS,
+  OTHER_NAV_ITEMS,
   resolveNavGroups,
 } from '@/lib/nav-config';
+import { depth1ForPath, listItemsForSlot, navItemRoute } from '@/lib/nav-depth1';
+import { ROUTE_PLACEMENT } from '@/lib/nav-placement';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
@@ -56,47 +57,8 @@ interface AppSidebarProps {
   navV3Flags?: NavV3Flags;
 }
 
-// story #d986fd6c(IA·S4)의 «활성 구역+뷰포트 높이로 기본 접힘을 역산» 규칙은 폐기된
-// 전제다(선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고 접을 수 있게 하면
-// 좋을 것 같다」 — story #f81657f8). nav-config.ts::computeActiveZoneCollapsedGroupIds
-// 자체가 삭제됐고, 기본 접힘은 이제 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침) —
-// 컴포넌트 내부의 useMemo(defaultCollapsedGroupIds)가 그 상수를 그대로 반환한다.
-//
-// 사람별 기억(AC3) — 그룹 id별 접힘 여부 수동 오버라이드. localStorage(계정 단위가 아니라
-// 이 브라우저 단위이지만, "사람별로 기억된다"는 AC 문면은 "같은 사람이 다시 왔을 때
-// 유지"를 요구할 뿐 서버 동기화까지 요구하지 않는다 — sidebar_width와 같은 관례). 값이
-// 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
-const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
-
-// story #4885(UI-2 AC4 PR 1) — 「더보기」 서랍은 걷혔다. 조직 항목은 NAV_GROUPS의 'org' 묶음 안에 있고 그 묶음만 기본 접힘이다(사람이 펼치면 기억 · 지금 화면이 그 안이면 열려 있다).
-const DEFAULT_COLLAPSED_GROUP_IDS: readonly string[] = ['org'];
-
-function readStoredCollapsedOverrides(): Record<string, boolean> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function mergeStoredCollapsedOverrides(
-  defaults: Set<string>,
-  overrides: Record<string, boolean>,
-  collapsibleGroupIds: string[],
-): Set<string> {
-  const next = new Set(defaults);
-  for (const groupId of collapsibleGroupIds) {
-    const stored = overrides[groupId];
-    if (stored === undefined) continue;
-    if (stored) next.add(groupId);
-    else next.delete(groupId);
-  }
-  return next;
-}
+// story 5031 (C1 step 2a) — the list column draws the rows of the ONE place you are in (홈 · 채팅 · 에이전트 · 설정): no zone headers, nothing to fold, no per-person fold memory (the old zones are gone from this column;
+// every screen is still reached — the icon bar's four places, ⌘K «모든 화면», cards and panels; nav-placement.json is the table and nav-placement.test.ts keeps it «빠짐 0»).
 
 export function AppSidebar({
   orgId,
@@ -114,7 +76,6 @@ export function AppSidebar({
   const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
   // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
   const flatHref = useFlatHref();
-  const chatCenterItem = CHAT_CENTER_ITEM;
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
@@ -139,9 +100,17 @@ export function AppSidebar({
   // story #4885 (codex 1판) — 정적 항목의 «지금 여기» 판정 한 곳. 예전 isActive(href)는 쿼리 달린 경로(`/inbox?tab=gates`)를 pathname과 글자 그대로 비교해 영영 켜지지 않았고,
   // 접두 비교라 `/organization/workforce/runs`가 «에이전트»와 «실행 기록»을 함께 켜고 `/content/channel-posts`가 «블로그 포스트»와 «채널 포스트»를 함께 켰다.
   // 이제 lib/nav-active.ts 한 곳(아이콘 막대와 같은 판정): ① 쿼리는 경로와 따로 보고 ② 맞는 항목이 여럿이면 가장 구체적인 하나만 ③ 정확히 맞는 항목이 없으면 같은 화면의 가장 구체적인 항목(탭만 다른 경우).
-  const activeStaticItemId = findActiveStaticItemId([...navGroups.flatMap((g) => g.items), ALL_SCREENS_ITEM], pathname, searchParams);
-  // story #4906 — the chat card is outside the groups (2930), so «here» is asked of it on its own, by the same rule as every other static item
-  const chatCenterActive = findActiveStaticItemId([chatCenterItem], pathname, searchParams) === chatCenterItem.id;
+  const activeStaticItemId = findActiveStaticItemId([CHAT_CENTER_ITEM, ...navGroups.flatMap((g) => g.items), ...OTHER_NAV_ITEMS], pathname, searchParams);
+
+  // story 5031 — which of the four places this path belongs to, and that place's rows. A path the table does not know yet (a flat bare «/flow» that the proxy is about to forward) falls back to the place of the catalog row that is active for it, then to 홈.
+  const catalogItems = useMemo(() => [CHAT_CENTER_ITEM, ...navGroups.flatMap((g) => g.items), ...OTHER_NAV_ITEMS], [navGroups]);
+  const pathSlot = depth1ForPath(pathname);
+  const activeCatalogItem = pathSlot ? undefined : catalogItems.find((item) => (
+    item.kind === 'static' ? item.id === activeStaticItemId : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []).isActive
+  ));
+  const itemSlot = activeCatalogItem ? ROUTE_PLACEMENT[navItemRoute(activeCatalogItem)]?.slot : undefined;
+  const activeSlot = pathSlot ?? (itemSlot && itemSlot !== 'outside' ? itemSlot : 'home');
+  const slotItems = useMemo(() => listItemsForSlot(catalogItems, activeSlot), [catalogItems, activeSlot]);
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -182,63 +151,14 @@ export function AppSidebar({
   // (이 컴포넌트가 scopedResourceHref를 부르며 컴파일러가 이 자리까지 분석하게 되면서 드러난 기존 불일치).
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
 
-  // story #f81657f8(IA·S4 후속, 선생님 決 2026-09-09 01:28Z 「그냥 디폴트를 다 펼쳐두고
-  // 접을 수 있게 하면 좋을 것 같다」) — 예전엔 여기서 현재 라우트의 활성 구역+뷰포트 높이를
-  // 훑어 기본 접힘 집합을 역산했다(story #d986fd6c). 그 규칙 자체가 폐기됐으니 그 입력을
-  // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
-  // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
-  // 유일한 접힘 경로다.
-  // story #4885 — 기본은 전부 펼침(f81657f8)이되 조직 묶음만 접힘(위 DEFAULT_COLLAPSED_GROUP_IDS).
-  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(DEFAULT_COLLAPSED_GROUP_IDS), []);
-
-  // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
-  // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
-  // 읽기와 동형 패턴 — ui/sidebar.tsx:81-83) 마운트 후 이 effect가 localStorage 원문을
-  // 그대로 얹는다. localStorage는 React 밖 외부 저장소라 마운트 시점 1회 동기화는 정확히
-  // 이 effect가 있어야 하는 자리(구독 없는 단발성 읽기 — storage 이벤트는 다른 탭 변경만
-  // 알리고 같은 탭 내 최초 하이드레이션은 못 잡는다).
-  // sidebar_width와 같은 목적(SSR-세이프 localStorage 하이드레이션)이나 그쪽은 원시값
-  // 단일 setState라 react-hooks/set-state-in-effect에 안 걸리고, 이쪽은 객체라 걸린다 —
-  // 파생값(Set)은 이미 위 useMemo로 분리해 뒀으니 이 setState 자체는 "외부 저장소를
-  // 그대로 얹는" 정당한 동기화다.
-  //
-  // story #f81657f8 후속(페드루 PO 지적 2026-09-09) — 이 effect는 원래부터 이 형태였는데
-  // disable 없이도 lint가 초록이었다(컴포넌트가 activeGroupId/viewportHeight 등 hook이
-  // 많아 react-hooks 정적분석이 이 지점까지 못 들어가고 bail-out했던 것으로 보임). 이번
-  // PR이 그 두 hook을 제거해 컴포넌트를 단순화하면서 분석이 실제로 이 자리까지 도달해
-  // 가려져 있던 위반이 드러났다 — 지워 보고 lint를 돌려 재확인(그대로 걸림). 정당성은
-  // 위 문단 그대로: localStorage 마운트-후 1회 하이드레이션(구독 없는 단발 읽기), 파생값은
-  // 이미 useMemo로 분리.
-  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
+  // story 5031 — the zones and their fold memory are gone from this column: drop the value an earlier version left in this browser (a failed removal changes nothing).
   useEffect(() => {
-    const overrides = readStoredCollapsedOverrides();
-    if (Object.keys(overrides).length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 위 정당성 참고(localStorage 1회 하이드레이션)
-      setCollapsedOverrides(overrides);
+    try {
+      window.localStorage.removeItem('sidebar_group_collapsed');
+    } catch {
+      /* private window / blocked storage — nothing to clean */
     }
   }, []);
-  const collapsibleGroupIds = useMemo(
-    () => NAV_GROUPS.map((g) => g.id),
-    [],
-  );
-  const collapsedGroupIds = useMemo(
-    () => mergeStoredCollapsedOverrides(defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds),
-    [defaultCollapsedGroupIds, collapsedOverrides, collapsibleGroupIds],
-  );
-
-  const toggleGroupCollapsed = useCallback((groupId: string) => {
-    setCollapsedOverrides((prev) => {
-      const wasCollapsed = collapsedGroupIds.has(groupId);
-      const next = { ...prev, [groupId]: !wasCollapsed };
-      try {
-        window.localStorage.setItem(SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // story #d986fd6c — localStorage 실패(프라이빗 창·용량 등)는 이 세션 안 상태만
-        // 유지하고 조용히 넘어간다(기억 실패가 사이드바 자체를 못 쓰게 만들면 안 된다).
-      }
-      return next;
-    });
-  }, [collapsedGroupIds]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -299,47 +219,6 @@ export function AppSidebar({
     return subscribeDesignatedPendingCount(mux, setInboxPendingCount);
   }, [mux]);
 
-  // story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
-  // «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
-  // 게 이 승격의 요점). «항상 눈에 띄어야 하는 1급 자리» — 이 뜻은 그대로다.
-  // story #4906(PO 11-12): 처음엔 시안(6242dffb .chatc) 그대로 상시 파란 테두리 카드(active/inactive 톤 동일)였으나, 그 테두리가 모든 화면에서 «지금 이 화면»으로 읽혀
-  // 진짜 현재 페이지 표시와 두 군데가 강조됐다 — 지금은 /chats일 때만 다른 항목과 같은 «현재 페이지» 채움 + aria-current, 아닐 때는 테두리 · 그림자 없이 아이콘 · 글자만 파랑.
-  // story #3824 CHANGES①(페드루 PO 確定, 2026-09-13 09:01Z) — 정본 순서는 오늘→대화→
-  // 일감→결과→연결·규칙(「오늘」=첫 화면). NAV_GROUPS는 계속 "구역 밖 1급"이라 순회
-  // 대상은 아니지만(승격 자체는 무변경), 렌더 위치만 옮겨 NAV_GROUPS[0](오늘) 바로
-  // 뒤·NAV_GROUPS[1](일감) 앞에 서게 한다 — 이 변수를 아래 SidebarContent map 안,
-  // 첫 그룹 뒤에 삽입한다.
-  const chatCenterCard = (
-    <div className="mx-2.5 mt-2">
-      <Link
-        href={flatHref(chatCenterItem.path)}
-        data-nav-id={chatCenterItem.id}
-        // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
-        // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
-        // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
-        // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
-        aria-current={chatCenterActive ? 'page' : undefined}
-        // story #4906 (PO 11-12): the card stays the always-conspicuous first-class place (2930's meaning) but its blue outline read as «you are here» on every screen, next to the real current-page mark. Now: the filled
-        // look of the current page ONLY on /chats; anywhere else no outline — the icon and the word carry the ds action colour, nothing more.
-        // story 4930: it was `text-proof-blue` (the old info blue, rgb 31,95,191 — always on, neither «unread» nor «active»), a second accent next to the ds action violet; now the ds action-text.
-        className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-ds-action-text transition hover:bg-sidebar-accent ${chatCenterActive ? 'bg-sidebar-accent' : 'bg-transparent'}`}
-        data-chat-center-active={chatCenterActive ? 'true' : 'false'}
-      >
-        <MessageSquare className="size-[18px] shrink-0" />
-        <span className="flex-1 truncate text-editorial-ui font-bold">{t(chatCenterItem.labelKey)}</span>
-        {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
-            4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
-            bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
-            sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
-        {chatUnreadTotal > 0 ? (
-          <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-micro font-bold text-sidebar-primary-foreground">
-            {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
-          </span>
-        ) : null}
-      </Link>
-    </div>
-  );
-
   return (
     <>
     {/* story #4885 B 셸 — 이 칸은 «목록» 칸이다: 왼쪽 끝은 아이콘 막대(nav-rail · w-14 = 3.5rem)가 쥐고, 이 칸은 그 오른쪽에 선다(접히면 막대 뒤로 들어감). */}
@@ -378,97 +257,36 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent className="scrollbar-visible">
-        {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
-            파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
-            nav-config.ts가 유일한 출처이고, 여기선 오직 순회+렌더만 한다 — 순서·라벨·아이콘·
-            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
-            프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
-            챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다.
-            story #3762 — 4구역+관리 프레임 전체 높이가 흔한 뷰포트(≤900px)를 넘어서며
-            전역 스크롤바 숨김(#2165)까지 겹쳐 신뢰 아래 구역이 스크롤 가능한데도 "없다"로
-            보였다(그라운딩: org/role 무관 재현 — CSS overflow affordance 결함, 컨텍스트
-            문제 아님). .scrollbar-visible은 story #2528과 동일한 기존 옵트인 패턴. */}
-        {navGroups.map((group, groupIndex) => {
-          // story #d986fd6c(IA·S4) — 라벨 없는 유틸 그룹(설정)은 접기 대상이 아니다(항목
-          // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
-          // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
-          const isCollapsible = Boolean(group.labelKey);
-          // story #4885 — 접힌 묶음이어도 지금 화면이 그 안이면 열어 둔다(현재 위치가 사라지지 않게; 접힘 기억은 건드리지 않는다).
-          const groupHasActiveItem = group.items.some((item) => (
-            item.kind === 'static' ? item.id === activeStaticItemId : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []).isActive
-          ));
-          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id) && !groupHasActiveItem;
-          const groupLabel = group.labelKey ? t(group.labelKey) : '';
-          // 접힘 상태는 aria-expanded, 접근 가능한 이름은 그룹명(SectionHeader 단추) — 이름에 «접기/펼치기»를 또 싣지 않는다.
-          return (
-          <Fragment key={group.id}>
-          <SidebarGroup>
-            {group.labelKey ? (
-              <NavGroupHeader
-                label={groupLabel}
-                collapsed={isCollapsed}
-                onToggle={() => toggleGroupCollapsed(group.id)}
-              />
-            ) : null}
-            {!isCollapsed ? (
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => {
-                  // story #4003(4002 그라운딩 AC1, CHANGES PR#4386 1차 리뷰) — 「일감」
-                  // (id 'board')의 1차 진입점(item.path)은 이미 resolveNavGroups가
-                  // dest.work.path('work-list'|'flow', 플래그 인지)로 덮어써 넘겨준다 —
-                  // 여기선 그 값을 그대로 resourceLink에 넘길 뿐, 어느 경로인지 다시
-                  // 판단하지 않는다(단일 소스, id 분기 중복 0). isActive는 여전히
-                  // WORKSPACE_FRAME_TAB_PATHS 전체(flow 포함)를 봐 sprints/epics/
-                  // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
-                  // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
-                  const link = item.kind === 'static'
-                    ? { href: flatHref(item.path), isActive: item.id === activeStaticItemId }
-                    : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
-                  const Icon = item.icon;
-                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
-                  const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
-                  const label = t(item.labelKey);
-                  return (
-                    <NavRow
-                      key={item.id}
-                      navId={item.id}
-                      href={link.href}
-                      label={label}
-                      Icon={Icon}
-                      isActive={link.isActive}
-                      activeRef={link.isActive ? activeMenuItemRef : undefined}
-                      scopeMark={item.scope === 'project' ? t('scopeProject') : null}
-                      kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
-                      badgeCount={item.badgeKey ? badgeCount : 0}
-                      badgeCap={badgeCap}
-                      badgeLabel={item.badgeKey === 'inbox' ? t('railNeedsHand') : undefined}
-                    />
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-            ) : null}
-          </SidebarGroup>
-          {/* story #3824 CHANGES①(페드루 PO 確定) — 「대화」 챗 center를 「오늘」(항상
-              groupIndex 0) 바로 뒤·「일감」 앞에 삽입. 구역 밖 1급 승격 자체는 무변경 —
-              렌더 «위치»만 옮긴다. */}
-          {groupIndex === 0 ? chatCenterCard : null}
-          </Fragment>
-          );
-        })}
-        {/* story #4885(UI-2 AC4 PR 1) — «전체»: 위 구역 전부 + «그 밖»의 평평한 목록(폰 하단 탭 «전체»와 같은 화면, 같은 이름). 구역이 아니라 입구 하나. */}
-        <SidebarGroup>
+        {/* story 5031 (C1 step 2a) — one group: the rows of the place you are in (nav-depth1 · listItemsForSlot). A row is the same NavRow as before (ds ListRow); the chat place also lists its chat row (CHAT_CENTER_ITEM) first. */}
+        {/* the kit's list column: 256 wide, rows 240 (8 each side → the group takes no padding of its own) with 4 between rows (gap-1) */}
+        <SidebarGroup className="p-0">
           <SidebarGroupContent>
-            <SidebarMenu>
-              <NavRow
-                href={flatHref(ALL_SCREENS_ITEM.path)}
-                label={t(ALL_SCREENS_ITEM.labelKey)}
-                Icon={LayoutGrid}
-                isActive={activeStaticItemId === ALL_SCREENS_ITEM.id}
-                activeRef={activeStaticItemId === ALL_SCREENS_ITEM.id ? activeMenuItemRef : undefined}
-                navId="all-screens"
-              />
+            <SidebarMenu className="gap-1" data-testid="depth1-list" data-depth1-slot={activeSlot}>
+              {slotItems.map((item) => {
+                // «일감»(id 'board')의 1차 진입점은 resolveNavGroups가 정한 경로 그대로 resourceLink에 넘긴다 — 활성 판정만 WORKSPACE_FRAME_TAB_PATHS 전체(탭 어디서든 켜짐 · story #3844).
+                const link = item.kind === 'static'
+                  ? { href: flatHref(item.path), isActive: item.id === activeStaticItemId }
+                  : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
+                const Icon = item.icon;
+                const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : item.badgeKey === 'chats' ? chatUnreadTotal : 0;
+                const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
+                return (
+                  <NavRow
+                    key={item.id}
+                    navId={item.id}
+                    href={link.href}
+                    label={t(item.labelKey)}
+                    Icon={Icon}
+                    isActive={link.isActive}
+                    activeRef={link.isActive ? activeMenuItemRef : undefined}
+                    scopeMark={item.scope === 'project' ? t('scopeProject') : null}
+                    kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
+                    badgeCount={item.badgeKey ? badgeCount : 0}
+                    badgeCap={badgeCap}
+                    badgeLabel={item.badgeKey === 'inbox' ? t('railNeedsHand') : undefined}
+                  />
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

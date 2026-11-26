@@ -1094,7 +1094,7 @@
 @layer components {
   .dashboard-shell-root {
     --shell-inset: 0.5rem;
-    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
+    --shell-chrome-h: calc(4rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   .dashboard-shell-root[data-topbar-hidden] {
     --shell-chrome-h: calc(2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));

@@ -47,10 +47,10 @@ afterEach(() => {
 });
 
 describe('sidebar-nav-parts (4885) — 길잡이 줄·묶음 머리는 한 자리에서만 만든다', () => {
-  it('app-sidebar.tsx는 줄·머리의 모양을 직접 모른다(NavRow · NavGroupHeader만 쓴다)', () => {
+  it('app-sidebar.tsx는 줄의 모양을 직접 모른다(NavRow만 쓴다 — story 5031: 목록 칸은 활성 자리의 줄만 그리고 묶음 머리가 없다)', () => {
     const src = read('app-sidebar.tsx');
     expect(src).toContain('<NavRow');
-    expect(src).toContain('<NavGroupHeader');
+    expect(src).not.toContain('<NavGroupHeader');
     expect(src).not.toMatch(/<SidebarMenuButton/);
     expect(src).not.toMatch(/<SidebarGroupLabel/);
     expect(src).not.toMatch(/<SidebarMenuItem/);
