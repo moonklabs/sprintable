@@ -150,7 +150,7 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
   const ordered = boardIndex < 0 ? [...fromNav, ...fromAnchors] : [...fromNav.slice(0, boardIndex + 1), ...fromAnchors, ...fromNav.slice(boardIndex + 1)];
   // 길잡이 맨 아래 «전체»(폰 «전체» 탭과 같은 목록) — «그 밖» 앞, 설정 뒤.
   const allScreens: DerivedNavItem = {
-    id: ALL_SCREENS_ITEM.id, icon: LayoutGrid, labelKey: ALL_SCREENS_ITEM.labelKey, href: ALL_SCREENS_ITEM.path, labelSource: 'nav', isWorkspaceless: true,
+    id: ALL_SCREENS_ITEM.id, icon: LayoutGrid, labelKey: 'allScreens', href: ALL_SCREENS_ITEM.path, labelSource: 'nav', isWorkspaceless: true, // story 5031 (C1): ⌘K says «모든 화면» (the sidebar / phone keep «전체» until C1 steps 2–3)
   };
   const settingsIndex = ordered.findIndex((item) => item.id === 'settings');
   return settingsIndex < 0 ? [...ordered, allScreens] : [...ordered.slice(0, settingsIndex + 1), allScreens, ...ordered.slice(settingsIndex + 1)];

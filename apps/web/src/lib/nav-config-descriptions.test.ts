@@ -35,8 +35,8 @@ describe('NAV_GROUPS descriptionKey 완전성 — story #fddd0e6b AC2', () => {
   // 형제 화면)로 21→22. 가드가 신규 항목을 설계대로 잡은 것(파서 결함 아님).
   // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 걷어 22→21.
   // story #4885(UI-2 AC4 PR 1) — 새 구조: NAV_GROUPS 23 + 그 밖 2 = 25(서랍이 걷혀 17개가 사이드바 묶음으로 올라오고, 결재 · 목표 · 실행 기록 · API 키 · 실행이 입구를 얻음).
-  it('항목이 정확히 25개다(NAV_GROUPS 23 + OTHER_NAV_ITEMS 2)', () => {
-    expect(allNavGroupItems()).toHaveLength(25);
+  it('항목이 정확히 26개다(NAV_GROUPS 23 + OTHER_NAV_ITEMS 3 — story 5031: «지금 개입할 것» 입구)', () => {
+    expect(allNavGroupItems()).toHaveLength(26);
   });
 
   it('⭐23개 전부가 descriptionKey를 갖는다(빈 문자열 아님) — board·inbox도 예약값을 가진다', () => {

@@ -1,0 +1,689 @@
+{
+ "_about": "story 5031 (C1): where every screen lives in the four-place shell. Read by nav-placement.ts / nav-depth1.ts; checked by nav-placement.test.ts. Plain data on purpose (route strings in .ts files are counted by the flat-link and pairing ratchets).",
+ "depth1": [
+  {
+   "id": "home",
+   "path": "/org-briefing",
+   "shortcut": "1",
+   "badge": "needs-hand"
+  },
+  {
+   "id": "chat",
+   "path": "/chats",
+   "shortcut": "2",
+   "badge": "unread"
+  },
+  {
+   "id": "agents",
+   "path": "/organization/workforce",
+   "shortcut": "3"
+  },
+  {
+   "id": "settings",
+   "path": "/settings",
+   "shortcut": "4"
+  }
+ ],
+ "routes": {
+  "/activity": {
+   "slot": "home",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "조직 활동 기록 — 홈에서 보는 흐름"
+  },
+  "/gates/[id]": {
+   "slot": "home",
+   "doors": [
+    "in-page"
+   ],
+   "why": "결재 항목 상세 — 받은 함에서 엶",
+   "from": "/inbox"
+  },
+  "/inbox": {
+   "slot": "home",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "결재 · 알림 받은 함 — 홈의 «내 손 필요»"
+  },
+  "/loop-queue": {
+   "slot": "home",
+   "doors": [
+    "cmdk"
+   ],
+   "why": "실제 화면인데 링크가 없던 것 — ⌘K 입구만 붙임(PO 11-26 · 홈 자리)"
+  },
+  "/more": {
+   "slot": "home",
+   "doors": [
+    "cmdk"
+   ],
+   "why": "전체 화면 목록 — 지우지 않고 ⌘K «모든 화면» 한 줄로(PO 11-26)"
+  },
+  "/org-briefing": {
+   "slot": "home",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "조직 전체 한눈 관제 — 홈의 첫 화면"
+  },
+  "/organization/insights-board": {
+   "slot": "home",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "결과 보드 — 홈 관제의 숫자(PO 11-26)"
+  },
+  "/[ws]/[proj]/artifacts": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "산출물 — 시안 · 캔버스를 채널에서 보고 코멘트"
+  },
+  "/[ws]/[proj]/artifacts/[id]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "산출물 상세",
+   "from": "/[ws]/[proj]/artifacts"
+  },
+  "/[ws]/[proj]/docs": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "문서 — 프로젝트 일 · ⌘K 문서 검색도 같이"
+  },
+  "/[ws]/[proj]/docs/[slug]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "문서 상세",
+   "from": "/[ws]/[proj]/docs"
+  },
+  "/[ws]/[proj]/docs/[slug]/view": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "문서 보기",
+   "from": "/[ws]/[proj]/docs"
+  },
+  "/[ws]/[proj]/epics": {
+   "slot": "chat",
+   "doors": [
+    "in-page",
+    "cmdk"
+   ],
+   "why": "에픽 탭",
+   "from": "/[ws]/[proj]/flow"
+  },
+  "/[ws]/[proj]/flow": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "일감 — 채널에서 보는 프로젝트 일"
+  },
+  "/[ws]/[proj]/goals": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "목표 — 프로젝트 일 · 진행률 숫자는 C3 홈 카드에서(PO 11-26)"
+  },
+  "/[ws]/[proj]/goals/[id]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "목표 상세",
+   "from": "/[ws]/[proj]/goals"
+  },
+  "/[ws]/[proj]/hypotheses": {
+   "slot": "chat",
+   "doors": [
+    "in-page",
+    "cmdk"
+   ],
+   "why": "가설 탭",
+   "from": "/[ws]/[proj]/flow"
+  },
+  "/[ws]/[proj]/loops": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "실행 — 프로젝트 일"
+  },
+  "/[ws]/[proj]/loops/[id]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "실행 상세",
+   "from": "/[ws]/[proj]/loops"
+  },
+  "/[ws]/[proj]/retro": {
+   "slot": "chat",
+   "doors": [
+    "in-page",
+    "cmdk"
+   ],
+   "why": "회고 탭",
+   "from": "/[ws]/[proj]/flow"
+  },
+  "/[ws]/[proj]/retro/[id]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "회고 상세",
+   "from": "/[ws]/[proj]/retro"
+  },
+  "/[ws]/[proj]/sprints": {
+   "slot": "chat",
+   "doors": [
+    "in-page",
+    "cmdk"
+   ],
+   "why": "스프린트 탭",
+   "from": "/[ws]/[proj]/flow"
+  },
+  "/[ws]/[proj]/storage": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "스토리지 — 프로젝트 일(PO 11-26 · 채팅)"
+  },
+  "/[ws]/[proj]/work-list": {
+   "slot": "chat",
+   "doors": [
+    "in-page",
+    "cmdk"
+   ],
+   "why": "일감 목록 탭",
+   "from": "/[ws]/[proj]/flow"
+  },
+  "/campaigns/[campaignId]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "캠페인 상세",
+   "from": "/content"
+  },
+  "/channel": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "채널 채팅 — 채팅 안"
+  },
+  "/chats": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "대화 목록 — 채팅의 첫 화면"
+  },
+  "/chats/[conversation_id]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "대화방 — 대화 목록에서 엶",
+   "from": "/chats"
+  },
+  "/content": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "콘텐츠 — 채널 글 · 캠페인"
+  },
+  "/content/[draftId]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "콘텐츠 상세",
+   "from": "/content"
+  },
+  "/content/channel-posts": {
+   "slot": "chat",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "채널 포스트"
+  },
+  "/content/channel-posts/[draftId]": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "채널 포스트 상세",
+   "from": "/content/channel-posts"
+  },
+  "/content/channel-posts/calendar": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "채널 포스트 캘린더 보기",
+   "from": "/content/channel-posts"
+  },
+  "/content/channel-posts/engagement": {
+   "slot": "chat",
+   "doors": [
+    "in-page"
+   ],
+   "why": "채널 포스트 성과 보기",
+   "from": "/content/channel-posts"
+  },
+  "/organization/memory": {
+   "slot": "agents",
+   "doors": [
+    "none"
+   ],
+   "why": "«아직 준비 중이에요»뿐인 자리표시 — 빈 화면에 길을 내지 않음(PO 11-26 · story 4183)"
+  },
+  "/organization/trust": {
+   "slot": "agents",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "신뢰 — 에이전트가 얼마나 믿을 만한가(PO 11-26)"
+  },
+  "/organization/workforce": {
+   "slot": "agents",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "에이전트 목록 — 에이전트의 첫 화면"
+  },
+  "/organization/workforce/[id]": {
+   "slot": "agents",
+   "doors": [
+    "in-page"
+   ],
+   "why": "에이전트 상세",
+   "from": "/organization/workforce"
+  },
+  "/organization/workforce/api-keys": {
+   "slot": "agents",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "API 키"
+  },
+  "/organization/workforce/runs": {
+   "slot": "agents",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "실행 기록"
+  },
+  "/rewards": {
+   "slot": "agents",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "보상 — 에이전트 쪽(PO 11-26)"
+  },
+  "/desktop": {
+   "slot": "settings",
+   "doors": [
+    "depth1"
+   ],
+   "why": "데스크톱 앱 · 연결된 기기 — 설정 «이 컴퓨터 · 폰»(켜진 곳에서만 목록 칸에 줄이 섬 · ⌘K는 이 줄을 싣지 않음)"
+  },
+  "/desktop/pair": {
+   "slot": "settings",
+   "doors": [
+    "flow"
+   ],
+   "why": "폰 짝짓기 흐름 — 설정 «이 컴퓨터 · 폰»에서 엶"
+  },
+  "/desktop/remote": {
+   "slot": "settings",
+   "doors": [
+    "flow"
+   ],
+   "why": "원격 제어 — 맥 앱이 #code로 직접 엶(채팅 줄 링크는 /desktop으로 감)"
+  },
+  "/desktop/remote-on": {
+   "slot": "settings",
+   "doors": [
+    "flow"
+   ],
+   "why": "원격 제어 켜는 흐름"
+  },
+  "/desktop/setup": {
+   "slot": "settings",
+   "doors": [
+    "flow"
+   ],
+   "why": "맥 앱 셋업 흐름"
+  },
+  "/organization/channels": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "채널 연결 — 설정 «연결»"
+  },
+  "/organization/content-rules": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "콘텐츠 규칙 — 설정"
+  },
+  "/organization/events": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "이벤트 — 설정"
+  },
+  "/organization/generation-connectors": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "생성 커넥터 — 설정 «연결»"
+  },
+  "/organization/members": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "사람 명단 — 설정 «사람과 역할»(D1 시안 · PO 11-26)"
+  },
+  "/organization/roles": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "역할 — 설정 «사람과 역할»"
+  },
+  "/settings": {
+   "slot": "settings",
+   "doors": [
+    "depth1",
+    "cmdk"
+   ],
+   "why": "설정 — 설정의 첫 화면"
+  },
+  "/settings/integrations": {
+   "slot": "settings",
+   "doors": [
+    "in-page"
+   ],
+   "why": "설정 안 통합 화면",
+   "from": "/settings"
+  },
+  "/": {
+   "slot": "outside",
+   "doors": [
+    "redirect"
+   ],
+   "why": "랜딩 — 로그인이면 홈 · 아니면 /login으로 보내기만 함"
+  },
+  "/auth/reset-required": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "아무도 이 주소로 보내지 않음 — 스캐폴드(지우기는 이 장 밖)"
+  },
+  "/chat": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "꺼진 시안(v3 «대화») — 정본은 /chats · 플래그 그대로"
+  },
+  "/connect-rules": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "꺼진 시안(v3 «연결·규칙») — 정본은 설정의 연결 · 규칙 쪽(채널 연결 · 콘텐츠 규칙) · 플래그 그대로"
+  },
+  "/dashboard": {
+   "slot": "outside",
+   "doors": [
+    "redirect"
+   ],
+   "why": "리다이렉트 유지 — 옛 주소가 대화(/chats)로 보내기만 함"
+  },
+  "/dashboard/settings": {
+   "slot": "outside",
+   "doors": [
+    "redirect"
+   ],
+   "why": "리다이렉트 유지 — 설정으로 보냄"
+  },
+  "/design-system": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "내부 도구 — 팀이 ds 부품 · 토큰을 보는 견본(주소로만)"
+  },
+  "/docs/design-tokens": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "내부 도구 — 개발자용 참고 쪽(주소로만)"
+  },
+  "/forgot-password": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름"
+  },
+  "/internal-dogfood": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "내부 도구 — 도그푸딩(프록시 전용)"
+  },
+  "/invite": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "초대 흐름"
+  },
+  "/invite/accept": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "초대 흐름"
+  },
+  "/login": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름"
+  },
+  "/mfa": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "아무도 이 주소로 보내지 않음 — 로그인이 TOTP를 화면 안에서 처리 · 스캐폴드(지우기는 이 장 밖)"
+  },
+  "/native/continue": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "앱 로그인 흐름"
+  },
+  "/native/oauth-return": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "앱 로그인 흐름"
+  },
+  "/onboarding": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "온보딩 흐름"
+  },
+  "/onboarding/first-instruction": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "온보딩 흐름"
+  },
+  "/organization/connectors": {
+   "slot": "outside",
+   "doors": [
+    "redirect"
+   ],
+   "why": "리다이렉트 유지 — 채널 연결 화면(/organization/channels)으로 보내기만 함 · 이 주소로 거는 링크는 주석뿐"
+  },
+  "/phone-files": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "폰 연결 흐름"
+  },
+  "/phone-landing": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "폰 연결 흐름"
+  },
+  "/phone-start": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "폰 연결 흐름"
+  },
+  "/privacy": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "공개 약관(바닥글)"
+  },
+  "/refund-policy": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "공개 약관(바닥글)"
+  },
+  "/register": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름(가입)"
+  },
+  "/reset-password": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름"
+  },
+  "/session-unconfirmed": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "세션 확인 실패 때 프록시가 rewrite로 보여 주는 공개 «다시 시도» 화면"
+  },
+  "/set-password/confirm": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름"
+  },
+  "/share/[token]": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "공유 링크"
+  },
+  "/terms": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "공개 약관(바닥글)"
+  },
+  "/today": {
+   "slot": "outside",
+   "doors": [
+    "none"
+   ],
+   "why": "꺼진 시안(v3 «오늘») — 정본은 /org-briefing · 플래그 그대로"
+  },
+  "/unsubscribe": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "메일 수신 거부 링크"
+  },
+  "/verify-email": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "로그인 흐름"
+  }
+ }
+}

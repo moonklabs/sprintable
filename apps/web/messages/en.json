@@ -248,7 +248,11 @@
     "descWorkforceApiKeys": "Connection keys the agents use",
     "descRewards": "Rewards, penalties and the leaderboard",
     "channelChat": "Channel chat",
-    "descChannelChat": "Talk straight to a channel"
+    "descChannelChat": "Talk straight to a channel",
+    "depth1Chat": "Chat",
+    "allScreens": "All screens",
+    "loopQueue": "Needs a look",
+    "descLoopQueue": "The queue of work that needs a person to look"
   },
   "storage": {
     "title": "Storage",

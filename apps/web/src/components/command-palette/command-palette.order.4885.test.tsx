@@ -86,7 +86,7 @@ describe('⌘K 이동 목록 — 실제 렌더 순서', () => {
     vi.unstubAllGlobals();
   });
 
-  it('맨 위 세 줄이 홈 · 결재 · 대화이고, «전체로 이동»이 그려진다', async () => {
+  it('맨 위 세 줄이 홈 · 결재 · 대화이고, «모든 화면으로 이동»이 그려진다', async () => {
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -97,6 +97,6 @@ describe('⌘K 이동 목록 — 실제 렌더 순서', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const commandIds = [...document.querySelectorAll('[data-command-id]')].map((el) => el.getAttribute('data-command-id'));
     expect(commandIds.slice(0, 3)).toEqual(['org-briefing', 'inbox', 'chats']);
-    expect(document.body.textContent).toContain('전체로 이동');
+    expect(document.body.textContent).toContain('모든 화면으로 이동');
   });
 });
