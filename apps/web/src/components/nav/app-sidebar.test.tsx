@@ -97,10 +97,10 @@ describe('⭐목록 칸 — 지금 있는 «자리»의 줄만(story 5031)', () 
     expect(container.querySelector('[data-testid="depth1-list"]')?.getAttribute('data-depth1-slot')).toBe('chat');
   });
 
-  it('에이전트: 에이전트 → 실행 기록 → API 키 → 신뢰 센터 → 리워드 (구성원은 설정 «사람과 역할»로 갔다)', async () => {
+  it('에이전트: 에이전트 → 신뢰 센터 → 리워드 (실행 기록 · API 키는 목록 위 «전체 보기» 줄로 — story 5035) (구성원은 설정 «사람과 역할»로 갔다)', async () => {
     pathnameRef.current = '/organization/workforce';
     await mount(OFF);
-    expect(rowIds()).toEqual(['org-workforce', 'org-workforce-runs', 'org-workforce-api-keys', 'org-trust', 'rewards']);
+    expect(rowIds()).toEqual(['org-workforce', 'org-trust', 'rewards']);
     expect(rowIds()).not.toContain('org-members');
   });
 
@@ -184,7 +184,7 @@ describe('줄의 href · 표식 · 지금 여기', () => {
     root = createRoot(container);
     pathnameRef.current = '/organization/workforce/runs';
     await mount(OFF);
-    expect(current()).toEqual(['org-workforce-runs']);
+    expect(current()).toEqual(['org-workforce']); // story 5035: «실행 기록»은 전체 보기 줄로 갔다 — 그 아래 주소도 «에이전트» 줄이 켜진다
   });
 
   it('⭐일감 줄은 일감 탭 어디서든(flow · work-list · sprints · epics · retro · hypotheses) 켜진다(story #3844)', async () => {

@@ -152,7 +152,8 @@ describe('«팀» 탭줄', () => {
 // ④ 두 화면 묶음의 레이아웃이 줄을 싣는다(구성원 화면 + 에이전트 화면들 — 라우트는 그대로).
 describe('레이아웃이 «팀» 탭줄을 싣는다', () => {
   const read = (rel: string) => readFileSync(join(__dirname, '../../app/(authenticated)/organization', rel), 'utf8');
-  for (const dir of ['workforce', 'members']) {
+  // story 5035 (C5): the agents' place no longer carries the strip — its layout carries the list → detail frame instead (components/agents/workforce-frame.test.tsx pins it, and that every old tab is still reached). Members keeps the strip.
+  for (const dir of ['members']) {
     it(`organization/${dir}/layout.tsx`, () => {
       const src = read(`${dir}/layout.tsx`);
       expect(src).toContain("from '@/components/team/team-tabs'");

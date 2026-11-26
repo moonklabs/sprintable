@@ -3,7 +3,8 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentPerformancePanel } from '@/components/agents/agent-performance-panel';
-import { AgentManagementTab } from '@/components/agents/agent-management-tab';
+import { EmptyState } from '@/components/ds/empty-state';
+import { useTranslations } from 'next-intl';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
 import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -55,7 +56,7 @@ export function AgentsPageTabs() {
           <AgentPerformancePanel /> /* story 4912 (D): the scope chip «이 프로젝트» is the panel's own PageHead line now */
         )
       ) : null}
-      {tab === 'manage' ? <AgentManagementTab onAddAgent={() => goTab('recruit')} /> : null}
+      {tab === 'manage' ? <ManagePane /> : null}
       {tab === 'recruit' ? (
         !projectId ? (
           <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
@@ -72,4 +73,10 @@ export function AgentsPageTabs() {
       {tab === 'access' && isAdmin ? <AccessMatrixTab /> : null}
     </>
   );
+}
+
+/** story 5035 (C5): the list lives in the frame's left column now (components/agents/workforce-frame.tsx); with no agent picked the right column says what to do. A phone never draws this (the detail is a sheet that only opens for a picked agent). */
+function ManagePane() {
+  const ta = useTranslations('agents');
+  return <div data-testid="workforce-pane-empty"><EmptyState title={ta('paneEmptyTitle')} description={ta('paneEmptyDescription')} /></div>;
 }

@@ -117,7 +117,8 @@ interface AccessRecord {
 
 interface AgentManagementTabProps {
   /** story d82c1092(생성경로 단일화) — "에이전트 추가"는 채용 탭으로 라우팅한다(별도 모달 제거). */
-  onAddAgent?: () => void;
+  onAddAgent?: () => void;  /** story 5035 (C5): drawn inside the agents frame's list COLUMN (360–420) — the frame already gives the side gutter, so the page's own padding is dropped. Off (default) = the page it always was. */
+  compact?: boolean;
 }
 
 /**
@@ -135,7 +136,7 @@ export function requiresDeactivateConfirm(agent: Pick<OrgAgent, 'is_active'>): b
  * (AgentProjectAccessSection 의 단일-에이전트 fan-out과 동일 원천, org 목록에 맞게 방향만 반전 —
  * Phase 2 매트릭스가 우려하는 N×M 콜과 다름: 프로젝트 수 P에만 비례, 에이전트 수와는 무관).
  */
-export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
+export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagementTabProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const embedded = useEmbeddedServer(); // story 4832: one computer — a computer name that tells two apart says nothing there
@@ -306,7 +307,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   ) : null;
 
   return (
-    <PageFrame width="reading">
+    <PageFrame width="reading" className={compact ? 'p-0 sm:p-0' : undefined}>
       <PageHead description={t('orgAgentsDescription')} actions={addAgentButton} />
 
       {message ? <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner> : null}

@@ -9,13 +9,14 @@ import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab
 import { sessionStateLabel } from '@/components/chat/agent-session-strip';
 import type { SessionLimit } from '@/lib/agent-session-limit';
 import type { SessionRun } from '@/lib/agent-session-run';
-import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-section';
+import { AgentRunsList } from '@/components/agents/agent-runs-list';
 import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
@@ -147,7 +148,7 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
-type DetailTab = 'run' | 'keys' | 'notify' | 'access';
+type DetailTab = 'run' | 'runs' | 'keys' | 'notify' | 'access';
 
 export default function AgentDetailPage() {
   const embedded = useEmbeddedServer();
@@ -610,11 +611,7 @@ export default function AgentDetailPage() {
   return (
     <PageFrame width="wide">
       <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
-      {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). story 4912 (A2): the back link keeps its place; the big «조직 에이전트» title is gone (the top bar says the screen's name). */}
-      <Link href={flatHref('/organization/workforce?tab=manage')} replace className="inline-flex w-fit items-center gap-1.5 text-ds-small text-ds-ink-3 hover:text-ds-ink" data-testid="agent-detail-back">
-        <ArrowLeft className="h-4 w-4" />
-        {ta('title')}
-      </Link>
+      {/* story 5035 (C5): no «← 에이전트» link here any more — the list is on the left (wide) or the sheet's own ✕ closes to it (phone); a back link beside its own list is a second door to the same place. */}
 
       <PageSplit asideLabel={ta('detailSideLabel')} aside={<SummaryCard title={ta('detailSummaryTitle')} items={summaryItems} emptyText={ta('detailSummaryEmpty')} emptyLabel={ta('detailSummaryEmptyLabel')} />}>
         <div className="flex flex-col gap-6">
@@ -735,6 +732,7 @@ export default function AgentDetailPage() {
       <Tabs value={shownTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
         <TabsList aria-label={ta('detailTabsLabel')} data-testid="agent-detail-tabs">
           <TabsTrigger value="run">{ta('detailTabRun')}</TabsTrigger>
+          <TabsTrigger value="runs">{ta('detailTabRuns')}</TabsTrigger>
           {showKeysTab ? <TabsTrigger value="keys">{ta('detailTabKeys')}</TabsTrigger> : null}
           {showNotifyTab ? <TabsTrigger value="notify">{ta('detailTabNotify')}</TabsTrigger> : null}
           <TabsTrigger value="access">{ta('detailTabAccess')}</TabsTrigger>
@@ -880,6 +878,10 @@ export default function AgentDetailPage() {
           </DetailCard>
         ) : null}
 
+        </TabsContent>
+        {/* story 5035 (C5): this agent's run history — the same list as «전체 보기 › 실행 기록», narrowed to this agent by the server's own `agent_id` filter (no backend change). Not kept mounted: it makes three calls when it opens. */}
+        <TabsContent value="runs" className="pt-4">
+          <AgentRunsList agentId={id} />
         </TabsContent>
         <TabsContent value="keys" keepMounted className="space-y-6 pt-4">
         {/* API Keys */}

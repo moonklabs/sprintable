@@ -334,18 +334,20 @@
   "/organization/workforce/api-keys": {
    "slot": "agents",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "API 키"
+   "why": "API 키 — «전체 보기» 줄에서 (에이전트 목록 위, 옛 주소 그대로 · story 5035)",
+   "from": "/organization/workforce"
   },
   "/organization/workforce/runs": {
    "slot": "agents",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "실행 기록"
+   "why": "실행 기록 — «전체 보기» 줄에서 (에이전트 목록 위, 옛 주소 그대로 · story 5035)",
+   "from": "/organization/workforce"
   },
   "/rewards": {
    "slot": "agents",
