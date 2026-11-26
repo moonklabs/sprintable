@@ -48,6 +48,7 @@ export async function fetchKanbanSummary(sprintId: string): Promise<KanbanSummar
   for (const row of stories) {
     if (typeof row !== 'object' || row === null) continue;
     const r = row as Record<string, unknown>;
+    if (r.is_excluded === true) continue; // the board hides excluded stories (live-QA cards · opted out) — so does this card
     if (!isColumn(r.status)) continue;
     counts[r.status]++;
     if ((r.status === 'in-progress' || r.status === 'in-review') && now.length < KANBAN_NOW_MAX && typeof r.id === 'string') {

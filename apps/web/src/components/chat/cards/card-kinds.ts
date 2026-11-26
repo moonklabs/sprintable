@@ -17,6 +17,8 @@ export interface CardRef {
   kind: CardKind;
   /** the object's id (a UUID) — the one thing the agent names; everything shown is read by the server for THE VIEWER */
   ref: string;
+  /** story 5034 step 4: the agent (its member id) that asked to show this object and may NOT see it (or the object does not exist — not told apart) — written by the server only; the card is then drawn as a REFUSED card, by each viewer's own rights */
+  refusedFor?: string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,7 +33,9 @@ export function isEntityCardKind(k: CardKind): k is EntityCardKind {
 /** what a message carries → a card reference, or `null` (absent · not an object · an unknown kind · a reference that is not a UUID). Never throws; never reads anything but the two words. */
 export function parseCardRef(raw: unknown): CardRef | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { kind, ref } = raw as { kind?: unknown; ref?: unknown };
+  const { kind, ref, refused_for: refusedFor } = raw as { kind?: unknown; ref?: unknown; refused_for?: unknown };
   if (!isCardKind(kind) || typeof ref !== 'string' || !UUID_RE.test(ref)) return null;
-  return { kind, ref };
+  if (refusedFor === undefined || refusedFor === null) return { kind, ref };
+  // a `refused_for` that is present but is not a UUID makes the whole thing not a card (fail closed, like the server)
+  return typeof refusedFor === 'string' && UUID_RE.test(refusedFor) ? { kind, ref, refusedFor } : null;
 }

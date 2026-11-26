@@ -79,10 +79,20 @@ describe('sprint board card', () => {
     expect(frame()!.dataset.cardState).toBe('ready');
     expect(container.querySelector('[data-testid="chat-card-kanban-now"]')).toBeNull();
   });
-  it('a board with more than one page says so (the total is shown with «+»), never a wrong exact number', async () => {
+  it('a board with more than one page says so — the total AND every column are shown with «+» (a lower bound), never a wrong exact number', async () => {
     stub({ stories: json(200, { data: [story(1, 'backlog')], meta: { limit: KANBAN_PAGE, hasMore: true, nextCursor: 'x' } }) });
     await show();
     expect(container.textContent).toContain('장 1개+');
+    expect([count('backlog'), count('done')]).toEqual(['1+', '0+']);
+    stub({ stories: json(200, { data: [story(1, 'backlog')], meta: { limit: KANBAN_PAGE, hasMore: false } }) });
+    await show();
+    expect(count('backlog')).toBe('1');
+  });
+  it('a story the board excludes (is_excluded) is neither counted nor listed as being worked on', async () => {
+    stub({ stories: json(200, { data: [story(1, 'backlog'), { ...story(2, 'in-progress', '제외된 장'), is_excluded: true }, { ...story(3, 'done'), is_excluded: true }, story(4, 'in-progress', '보이는 장')] }) });
+    await show();
+    expect([count('backlog'), count('in-progress'), count('done')]).toEqual(['1', '1', '0']);
+    expect(container.textContent).toContain('장 2개'); expect(container.textContent).toContain('보이는 장'); expect(container.textContent).not.toContain('제외된 장');
   });
   it('«not found» of the sprint (404) · «not yours» of its stories (403) look EXACTLY the same, with no «try again»', async () => {
     const seen: string[] = [];

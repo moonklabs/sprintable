@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ds/empty-state';
 import { CardFrame } from './card-frame';
 import { EntityCard } from './entity-card';
 import { KanbanCard } from './kanban-card';
+import { RefusedCard } from './refused-card';
 import { CARD_KINDS, isEntityCardKind, parseCardRef, type CardKind } from './card-kinds';
 
 /**
@@ -46,6 +47,8 @@ export function ChatCard({ card }: { card: unknown }) {
   const ref = parseCardRef(card);
   const Part = ref ? CARD_PARTS[ref.kind] : null;
   if (!ref || !Part) return <UnknownCard />;
+  // a REFUSED card (the server posted it for an agent that may not see the object): drawn for each viewer by their own rights — only the kinds the show-card tool can post
+  if (ref.refusedFor) return isEntityCardKind(ref.kind) || ref.kind === 'kanban' ? <RefusedCard kind={ref.kind} refId={ref.ref} agentId={ref.refusedFor} /> : <UnknownCard />;
   return <Part kind={ref.kind} refId={ref.ref} />;
 }
 
