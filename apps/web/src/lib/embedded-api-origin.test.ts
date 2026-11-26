@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NextResponse } from 'next/server';
 import { createRequire } from 'node:module';
 import { NextRequest } from 'next/server';
-import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal, isEmbeddedServer, isServerHost, publicHostOf, serverHostOrigin } from './embedded-api-origin';
+import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal, isEmbeddedServer, isLocalModeServer, isServerHost, publicHostOf, serverHostOrigin } from './embedded-api-origin';
 
 const ENV_KEYS = ['SPRINTABLE_EMBEDDED', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -143,6 +143,28 @@ describe('story 5024 (AC4) — serverHostOrigin: the address a person gives `spr
     const envs: Array<Record<string, string>> = [{ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, { SPRINTABLE_EMBEDDED: '1' }, { SPRINTABLE_PUBLIC_ORIGIN: 'https://a.example.com' }, {}];
     for (const env of envs) {
       expect(serverHostOrigin(e(env)) !== null, JSON.stringify(env)).toBe(isServerHost(e(env)));
+    }
+  });
+});
+
+describe('story 5025 — LOCAL MODE is the app\'s own loopback server, not a workspace server host', () => {
+  const env = (o: Record<string, string | undefined>) => o as unknown as NodeJS.ProcessEnv;
+  it('embedded + no public address = local mode; embedded + a valid public address = a server host, NOT local mode', () => {
+    expect(isLocalModeServer(env({ SPRINTABLE_EMBEDDED: '1' }))).toBe(true);
+    expect(isLocalModeServer(env({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
+  });
+  it('an invalid public address does not make a server host (still local mode); not embedded is never local mode', () => {
+    for (const origin of ['', 'http://team.example.com', 'https://localhost', 'https://team.example.com/path', 'team.example.com']) {
+      expect(isLocalModeServer(env({ SPRINTABLE_EMBEDDED: '1', SPRINTABLE_PUBLIC_ORIGIN: origin })), origin).toBe(true);
+    }
+    expect(isLocalModeServer(env({}))).toBe(false);
+    expect(isLocalModeServer(env({ SPRINTABLE_PUBLIC_ORIGIN: 'https://team.example.com' }))).toBe(false);
+    expect(isLocalModeServer(env({ SPRINTABLE_EMBEDDED: '0' }))).toBe(false);
+  });
+  it('is exactly «embedded && !isServerHost» for every combination (the siblings spell it out; this is the one name)', () => {
+    for (const e of [undefined, '0', '1']) for (const o of [undefined, 'https://team.example.com', 'http://x']) {
+      const v = env({ SPRINTABLE_EMBEDDED: e, SPRINTABLE_PUBLIC_ORIGIN: o });
+      expect(isLocalModeServer(v), `${String(e)} ${String(o)}`).toBe(isEmbeddedServer(v) && !isServerHost(v));
     }
   });
 });

@@ -8,7 +8,7 @@ import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-n
 import { ME_REASON_MEMBERSHIP_ELSEWHERE, readMe404Reason } from '@/lib/auth/me-reason';
 import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
-import { isEmbeddedServer } from '@/lib/embedded-api-origin';
+import { isLocalModeServer } from '@/lib/embedded-api-origin';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
@@ -266,8 +266,9 @@ async function AuthenticatedLayoutBody({
         activationSeedFromHint={activationHint === 'complete'}
         activationOrgId={activationOrgId}
         initialActivationCollapsed={activationCollapsed}
-        // story 4832 — whether this is the desktop app's own server (read once per request); the shell hands it to every client component below (`useEmbeddedServer()`)
-        embedded={isEmbeddedServer()}
+        // story 4832 — whether this is the desktop app's own LOCAL server (read once per request); the shell hands it to every client component below (`useEmbeddedServer()`).
+        // story 5025: a workspace SERVER HOST is not local mode (it serves several people and computers, and the phone relay goes through it) — only `isLocalModeServer()` is true for the app's own loopback server
+        embedded={isLocalModeServer()}
       >
         <StorageCapacityToastProvider>
           <CrossProjectToastProvider>
