@@ -20,6 +20,16 @@ CARD_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifa
 TOOL_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban")
 
 
+# The line of text a card message carries (the web draws the CARD, not this line — it is what an agent that reads the room through MCP, or a notification, sees). In words a first-time reader understands, never the
+# bare kind word; the words live in the server's message catalogue (`app/services/i18n_catalog.py`, `chat_card.*`). The refused line is the SAME for «does not exist» and «not yours» (it names the kind only — never
+# the object, never who can see it).
+def card_text(kind: str, *, refused: bool, locale: str) -> str:
+    from app.services.i18n_catalog import t
+
+    word = t(f"chat_card.kind.{kind}", locale)
+    return t("chat_card.text_refused" if refused else "chat_card.text_shown", locale, kind=word)
+
+
 def resolver_kind(kind: str) -> str:
     """the entity registry's kind whose project decides who may see the card's object (a board is its sprint's)"""
     return "sprint" if kind == "kanban" else kind

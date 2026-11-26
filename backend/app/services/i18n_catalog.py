@@ -1264,6 +1264,18 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "payload.kind={kind}는 type={expected_type}로 실려야 해요 (받은 type={received_type}).",
         "en": "payload.kind={kind} must be sent with type={expected_type} (received type={received_type}).",
     },
+    # story 5034 (C4) — the text a card message carries (the web draws the CARD; this line is what an agent reading the room through MCP, or a notification, sees). `{kind}` is the kind's own word below.
+    "chat_card.text_shown": {"ko": "{kind} 카드", "en": "A {kind} card"},
+    "chat_card.text_refused": {"ko": "볼 수 없는 {kind} 카드", "en": "A {kind} card that could not be shown"},
+    "chat_card.kind.story": {"ko": "장", "en": "story"},
+    "chat_card.kind.epic": {"ko": "에픽", "en": "epic"},
+    "chat_card.kind.task": {"ko": "태스크", "en": "task"},
+    "chat_card.kind.sprint": {"ko": "스프린트", "en": "sprint"},
+    "chat_card.kind.doc": {"ko": "문서", "en": "doc"},
+    "chat_card.kind.artifact": {"ko": "산출물", "en": "artifact"},
+    "chat_card.kind.hypothesis": {"ko": "가설", "en": "hypothesis"},
+    "chat_card.kind.evidence": {"ko": "증거", "en": "evidence"},
+    "chat_card.kind.kanban": {"ko": "스프린트 칸반", "en": "sprint board"},
 }
 
 
