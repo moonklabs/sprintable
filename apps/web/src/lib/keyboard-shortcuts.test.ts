@@ -20,14 +20,16 @@ describe('REAL_SHORTCUTS — 표의 줄마다 받는 처리가 실제로 있다'
     }
   });
 
-  it('지금 실제 단축키는 ⌘K(팔레트 열기) 하나뿐이다 — 늘릴 땐 키 처리를 먼저 만들고 이 표에 올린다', () => {
-    expect(REAL_SHORTCUTS.map((s) => s.keys.join(' '))).toEqual(['⌘ K']);
+  it('지금 실제 단축키는 ⌘K(팔레트 열기)와 ⌘1~⌘4(1뎁스 넷 · story 5031)뿐이다 — 늘릴 땐 키 처리를 먼저 만들고 이 표에 올린다', () => {
+    expect(REAL_SHORTCUTS.map((s) => s.keys.join(' '))).toEqual(['⌘ K', '⌘ 1', '⌘ 2', '⌘ 3', '⌘ 4']);
   });
 });
 
 describe('isRealShortcut — 표시 관문', () => {
   it('표에 있는 조합만 참 · 받는 곳 없던 옛 표시(G I/B/M/A/S · B)는 거짓', () => {
     expect(isRealShortcut(['⌘', 'K'])).toBe(true);
+    for (const n of ['1', '2', '3', '4']) expect(isRealShortcut(['⌘', n]), n).toBe(true);
+    expect(isRealShortcut(['⌘', '5'])).toBe(false);
     for (const keys of [['G', 'I'], ['G', 'B'], ['G', 'M'], ['G', 'A'], ['G', 'S'], ['B'], ['K'], []]) expect(isRealShortcut(keys), keys.join(' ')).toBe(false);
     expect(isRealShortcut(undefined)).toBe(false);
   });
