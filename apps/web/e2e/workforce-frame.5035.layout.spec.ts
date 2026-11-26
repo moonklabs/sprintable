@@ -48,11 +48,13 @@ async function build() {
         import React from 'react'; import { createRoot } from 'react-dom/client';
         import { NextIntlClientProvider } from 'next-intl';
         import messages from './messages/ko.json';
+        import { TopBarProvider } from './src/components/nav/top-bar-context';
         import { WorkforceFrame } from './src/components/agents/workforce-frame';
         window.__mount = () => createRoot(document.getElementById('root')).render(
           React.createElement(NextIntlClientProvider, { locale: 'ko', messages, timeZone: 'Asia/Seoul' },
-            React.createElement(WorkforceFrame, null,
-              React.createElement('div', { 'data-testid': 'detail-probe', style: { height: 2400, background: 'transparent' } }, 'detail probe'))));`,
+            React.createElement(TopBarProvider, null, // the frame mounts the top bar's title itself on a phone list (codex 5939)
+              React.createElement(WorkforceFrame, null,
+                React.createElement('div', { 'data-testid': 'detail-probe', style: { height: 2400, background: 'transparent' } }, 'detail probe')))));`,
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
