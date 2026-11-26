@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
-import { EmptyState } from '@/components/ds/empty-state';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +12,7 @@ import { cn } from '@/lib/utils';
  * story 5034 (C4) — the one frame every chat card sits in, so every card has the SAME six states (the story's close rule): ready · loading · empty · error (with «try again») ·
  * hidden («찾을 수 없어요» — a thing that does not exist and a thing the viewer may not see look exactly alike, by design: the server answers both with the same 404) · and the two
  * that are not states but conditions of the content — a long text (the title wraps, it never pushes the card wider) and a narrow screen (the card is always the width of its column).
- * Built only from the design system's parts (Card · Banner · Button · EmptyState · Skeleton): no colour, size or radius of its own.
+ * Built only from the design system's parts (Card · Banner · Button · Skeleton): no colour, size or radius of its own.
  */
 export type CardFrameState = 'ready' | 'loading' | 'empty' | 'error' | 'hidden';
 
@@ -27,6 +26,11 @@ export interface CardFrameProps {
   'data-testid'?: string;
 }
 
+/** «nothing to show» / «not found»: a supporting line (secondary step), never a title — these two are the most common card states in a room and must not be the loudest thing on it (PO, dev lap 11-26) */
+function QuietLine({ children }: { children: ReactNode }) {
+  return <p className="m-0 px-3 py-3 text-ds-small text-ds-ink-2">{children}</p>;
+}
+
 export function CardFrame({ state, children, onRetry, className, 'data-testid': testId }: CardFrameProps) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -38,9 +42,9 @@ export function CardFrame({ state, children, onRetry, className, 'data-testid': 
           <Skeleton variant="text" size="small" className="w-1/3" />
         </SkeletonGroup>
       ) : state === 'empty' ? (
-        <EmptyState size="inline" title={t('cardEmpty')} />
+        <QuietLine>{t('cardEmpty')}</QuietLine>
       ) : state === 'hidden' ? (
-        <EmptyState size="inline" title={t('cardHidden')} />
+        <QuietLine>{t('cardHidden')}</QuietLine>
       ) : state === 'error' ? (
         <div className="p-3">
           <Banner tone="failed" action={onRetry ? <Button size="md" variant="secondary" onClick={onRetry}>{tc('retry')}</Button> : undefined}>{t('cardError')}</Banner>
