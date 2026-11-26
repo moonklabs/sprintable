@@ -222,7 +222,7 @@ function VariantSlot({
                 onChange={(e) => setReasons((prev) => ({ ...prev, [artifact.id]: e.target.value }))}
                 aria-label={`${selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')} · ${artifact.variant_label}`}
                 placeholder={selectedForSubmit ? t('chooseReasonPlaceholder') : t('rejectionReasonPlaceholder')}
-                className={cn('min-h-[52px]', VARIANT_REASON_FACE)}
+                className={cn('min-h-13', VARIANT_REASON_FACE)}
               />
               <p className="m-0 text-ds-small text-ds-ink-3">
                 {selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}

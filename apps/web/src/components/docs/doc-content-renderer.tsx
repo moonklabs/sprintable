@@ -539,7 +539,7 @@ export function DocContentRenderer({
         block.appendChild(wrapper);
       } else if (type === 'figma') {
         const wrapper = document.createElement('div');
-        wrapper.className = 'h-[480px] w-full overflow-hidden rounded-xl border border-border';
+        wrapper.className = 'h-120 w-full overflow-hidden rounded-xl border border-border';
         const iframe = document.createElement('iframe');
         iframe.src = embedUrl;
         iframe.title = 'Figma embed';

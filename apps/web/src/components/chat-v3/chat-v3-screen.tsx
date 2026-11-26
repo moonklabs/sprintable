@@ -357,7 +357,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   이 상태 무관하게 항상 같이 보인다(현행 3열 무변, AC7). */}
               {/* PO CHANGES-1 ①(2026-09-22) — w-full에 lg: 접두가 없어 1440에서도 레일이
                   전폭으로 늘어나 메시지 열을 0px로 밀어냈다(실측 scrollWidth 1780). lg
-                  이상은 w-auto로 풀어 ChatV3ThreadRail 자신의 lg:w-[320px]가 실 폭을 정하게. */}
+                  이상은 w-auto로 풀어 ChatV3ThreadRail 자신의 lg:w-80가 실 폭을 정하게. */}
               <div className={cn('min-w-0 lg:flex lg:w-auto', narrowDetailOpen ? 'hidden' : 'flex w-full')}>
                 <ChatV3ThreadRail threads={threads} meId={me.id} selectedId={selectedId} onSelect={handleSelectThread} />
               </div>
@@ -372,7 +372,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                   <div className="flex min-w-0 flex-1 flex-col">
                     {/* story #4006 AC4 §4 — 「← 대화 목록」 뒤로·「맥락」 열기 둘 다
                         lg 미만 전용(lg↑는 레일·맥락 패널이 항상 인라인이라 불요). */}
-                    <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-border px-3 lg:hidden">
+                    <div className="flex h-13 shrink-0 items-center justify-between border-b border-border px-3 lg:hidden">
                       <Button type="button" variant="ghost" size="sm" onClick={() => setNarrowDetailOpen(false)} className="gap-1 px-2">
                         <ChevronLeft className="size-4" aria-hidden="true" />
                         {t('threadRailTitle')}

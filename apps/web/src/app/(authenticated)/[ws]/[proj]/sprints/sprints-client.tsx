@@ -812,7 +812,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* story #4291 — 탭 줄은 `[ws]/[proj]` 레이아웃의 sticky 띠로 올라갔다(한 자리 · 전환 때 안 다시 그려짐). 이 칼럼의 뷰포트 앵커는
           그 띠 높이(--work-tabs-h)만큼 뺀다(빼지 않으면 띠 높이만큼 셸이 한 번 더 스크롤된다). */}
       <div className="focus-inset flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-y-auto">
-      <div className="flex min-h-[420px] shrink-0 overflow-hidden border-b border-border">
+      <div className="flex min-h-105 shrink-0 overflow-hidden border-b border-border">
       {/* Sprint list */}
       {/* story #4291(유나) — 본문 바깥 여백 24 → 16px(레이아웃 탭 띠 `px-4`와 한 왼쪽 끝). */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-4 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>

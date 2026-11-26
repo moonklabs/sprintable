@@ -17,13 +17,13 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 const tokens = (el: Element) => el.className.split(/\s+/);
 
 describe('OperatorTextarea — 바탕 Textarea 위(story 4831)', () => {
-  it('바탕 Textarea이고 운영자 최소 높이(min-h-[96px])가 부품의 min-h-16을 이기며, 쓴 글이 onChange로 간다', async () => {
+  it('바탕 Textarea이고 운영자 최소 높이(min-h-24)가 부품의 min-h-16을 이기며, 쓴 글이 onChange로 간다', async () => {
     const onChange = vi.fn();
     await act(async () => { root.render(<OperatorTextarea rows={3} placeholder="메모" onChange={(e) => onChange(e.target.value)} />); });
     const el = container.querySelector('textarea') as HTMLTextAreaElement;
     expect(el.dataset.slot).toBe('textarea');
     expect(el.rows).toBe(3);
-    expect(tokens(el)).toContain('min-h-[96px]');
+    expect(tokens(el)).toContain('min-h-24');
     expect(tokens(el)).not.toContain('min-h-16');
     expect(tokens(el)).toContain('resize-y');
     await act(async () => {

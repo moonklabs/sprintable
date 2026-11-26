@@ -614,7 +614,7 @@ export default function InboxPage() {
             (lg+ unchanged). lg(1024px) matches MOBILE_BREAKPOINT/GNB lg:hidden SSOT — md(768px)
             caused a 768-1023 tablet seam where the mobile bottom-tab shell and this master-detail
             split disagreed on what "mobile" means. */}
-        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 lg:max-w-[420px] max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
+        <div className={`flex w-full min-w-80 flex-col border-r border-border/80 lg:max-w-105 max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
           <div className="focus-inset flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="space-y-2 px-3 pt-2">

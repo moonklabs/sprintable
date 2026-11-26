@@ -423,7 +423,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           type="button"
           variant="secondary"
           onClick={openFolderDrawer}
-          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
+          className="h-auto min-h-ds-touch min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
           data-testid="storage-folder-drawer-trigger"
         >
           <FolderIcon className="size-4 shrink-0 text-ds-ink-3" aria-hidden="true" />
@@ -506,7 +506,7 @@ export function StorageView({ projectId }: { projectId: string }) {
         role="dialog"
         aria-modal="true"
         aria-label={t('metaFolder')}
-        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-surface shadow-ds-overlay outline-none lg:hidden"
+        className="fixed inset-y-0 left-0 z-50 flex w-70 flex-col overflow-hidden border-r border-ds-line bg-ds-surface shadow-ds-overlay outline-none lg:hidden"
         style={{
           transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
           transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',

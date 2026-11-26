@@ -14,7 +14,7 @@ export function OperatorInput({ className, ...props }: React.ComponentProps<type
 export function OperatorTextarea({ className, ...props }: React.ComponentProps<'textarea'>) {
   return (
     <Textarea
-      className={cn(operatorControlClassName, 'min-h-[96px] w-full resize-y', className)}
+      className={cn(operatorControlClassName, 'min-h-24 w-full resize-y', className)}
       {...props}
     />
   );

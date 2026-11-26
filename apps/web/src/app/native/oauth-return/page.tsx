@@ -32,7 +32,7 @@ export default function NativeOauthReturnPage() {
         </p>
         <a
           href={href}
-          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+          className="inline-flex min-h-ds-touch w-full items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
         >
           {t('returnButton')}
         </a>

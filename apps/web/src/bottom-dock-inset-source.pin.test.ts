@@ -151,7 +151,7 @@ describe('BottomDock 높이 예산(story #3759 CHANGES, #4106) — 패널 top �
 
   it('support-widget-launcher.tsx 패널이 min-h-0 + max-h-(고정 h- 아님)다(양보하는 쪽)', () => {
     const content = read('src/components/support-widget/support-widget-launcher.tsx');
-    expect(content).toContain('max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col');
+    expect(content).toContain('max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-90 max-w-[calc(100vw-2.5rem)] min-h-0 flex-col');
     // 옛 고정 h-[...] 리터럴이 되돌아오면(패널이 다시 "고정" 높이를 고집하면) 잡는다.
     // (\b는 "max-h"의 "-h" 앞에서도 걸려 오탐하므로, 따옴표/공백 뒤에 바로 오는 단독
     // "h-[min(..." 토큰인지를 직접 요구한다 — "max-h-["는 그 앞이 "x-"라 안 걸린다.)

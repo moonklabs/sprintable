@@ -2109,7 +2109,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onPaste={handlePasteAttach}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="field-sizing-content min-h-[160px] resize-y py-2 font-mono lg:text-sm"
+                    className="field-sizing-content min-h-40 resize-y py-2 font-mono lg:text-sm"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2169,7 +2169,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onChange={setAcDraft}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="field-sizing-content min-h-[160px] resize-y py-2 font-mono lg:text-sm"
+                    className="field-sizing-content min-h-40 resize-y py-2 font-mono lg:text-sm"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2611,7 +2611,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] resize-none px-2.5"
+                    className="flex field-sizing-content min-h-20 resize-none px-2.5"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

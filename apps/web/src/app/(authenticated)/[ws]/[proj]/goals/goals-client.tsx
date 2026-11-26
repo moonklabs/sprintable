@@ -618,7 +618,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   const frame = `h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden ${GOALS_FRAME_FACE}`;
 
   const listColumn = (
-    <div data-testid="goals-list-column" className={`flex min-h-0 w-full min-w-0 flex-col ${showDetail ? 'lg:w-[420px] lg:shrink-0 lg:border-r lg:border-ds-line' : ''}`}>
+    <div data-testid="goals-list-column" className={`flex min-h-0 w-full min-w-0 flex-col ${showDetail ? 'lg:w-105 lg:shrink-0 lg:border-r lg:border-ds-line' : ''}`}>
       {/* STEER v2 조타 보내기(커밋) — 드래그(조용한 초안)와 분리된 명시적 발화. 큐레이션이 있고 전체 뷰일 때만. 누르면 수신자 선택 모달 → POST /epics/steer-dispatch. */}
       {sortable && hasCurated ? (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ds-line px-4 py-2">

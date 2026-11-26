@@ -81,7 +81,7 @@ export function AiGenerationLoading({
                 </p>
                 {step.desc ? <p className="text-micro leading-snug text-muted-foreground">{step.desc}</p> : null}
                 {isActive ? (
-                  <div className="relative h-[3px] w-full max-w-[220px] overflow-hidden rounded-full bg-muted">
+                  <div className="relative h-[3px] w-full max-w-55 overflow-hidden rounded-full bg-muted">
                     <span className="absolute inset-y-0 left-0 w-[36%] animate-ai-loading-indeterminate rounded-full bg-gradient-to-r from-transparent via-info to-transparent" aria-hidden />
                   </div>
                 ) : null}

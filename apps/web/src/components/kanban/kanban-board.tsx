@@ -1603,7 +1603,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
-                  <span className="max-w-[80px] truncate">
+                  <span className="max-w-20 truncate">
                     {sprintChipLabel}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
@@ -1662,7 +1662,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
-                  <span className="max-w-[80px] truncate">
+                  <span className="max-w-20 truncate">
                     {selectedEpicId ? (epics.find((e) => e.id === selectedEpicId)?.title ?? t('allEpics')) : t('allEpics')}
                   </span>
                   <ChevronDown className="size-3 shrink-0" />
@@ -1721,7 +1721,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
-                  <span className="max-w-[80px] truncate">
+                  <span className="max-w-20 truncate">
                     {/* story #4284 — 이름 없는 구성원을 골랐을 때 «모든 담당자»로 뜨던 것(거르고 있는데 안 거른다고 보임) → «이름 없는 구성원». */}
                     {selectedAssigneeId ? (() => {
                       const selected = members.find((m) => m.id === selectedAssigneeId);
@@ -1807,7 +1807,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                         : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
                     }`}
                   >
-                    <span className="max-w-[80px] truncate">
+                    <span className="max-w-20 truncate">
                       {selectedLabelIds.length > 0 ? t('labelsActive', { count: selectedLabelIds.length }) : t('allLabels')}
                     </span>
                     <ChevronDown className="size-3 shrink-0" />

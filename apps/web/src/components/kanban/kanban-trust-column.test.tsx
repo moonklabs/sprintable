@@ -47,8 +47,8 @@ afterEach(async () => {
 });
 
 function columnDiv(): HTMLElement {
-  // 최외곽 컬럼 div — h-full w-[280px] 조합으로 식별(다른 wrapper와 안 겹침).
-  return container.querySelector('[class*="w-\\[280px\\]"]') as HTMLElement;
+  // 최외곽 컬럼 div — h-full w-70 조합으로 식별(다른 wrapper와 안 겹침).
+  return container.querySelector('[class~="w-70"]') as HTMLElement;
 }
 
 describe('KanbanTrustColumn — 파생 컬럼 드래그 중 "닫힘" 시각(story #2933 H4)', () => {

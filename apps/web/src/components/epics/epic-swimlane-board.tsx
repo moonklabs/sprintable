@@ -161,7 +161,7 @@ function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryCli
     <div
       ref={setNodeRef}
       // 4908 — 칸은 «내용 칸 층»(LAYER.panel): 카드(글 줄 층)가 바탕 위에 맨몸으로 서지 않는다(열 보드와 같은 규칙).
-      className={`flex h-full min-h-[64px] w-[220px] shrink-0 flex-col gap-1.5 rounded-lg border border-ds-line p-1.5 transition ${LAYER.panel} ${
+      className={`flex h-full min-h-16 w-55 shrink-0 flex-col gap-1.5 rounded-lg border border-ds-line p-1.5 transition ${LAYER.panel} ${
         closedDuringDrag ? 'opacity-45' : isOver && !locked ? 'ring-1 ring-ds-action' : ''
       }`}
     >
@@ -184,12 +184,12 @@ function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryCli
 
 // 컬럼 라벨은 레인마다 반복하면 소음(모든 레인이 같은 축을 공유하므로) — 격자 맨 위에
 // 한 번만 그린다(KanbanColumn/KanbanTrustColumn의 헤더를 레인 수만큼 복제하는 대신, 셀
-// 너비(w-[220px])만 맞춰 아래 각 레인의 SwimlaneCell과 시각적으로 정렬).
+// 너비(w-55)만 맞춰 아래 각 레인의 SwimlaneCell과 시각적으로 정렬).
 function SwimlaneColumnHeader({ columns }: { columns: readonly { id: string; label: string; locked: boolean }[] }) {
   return (
     <div className="flex gap-2 border-b border-border px-1 pb-1.5">
       {columns.map((col) => (
-        <div key={col.id} className="flex w-[220px] shrink-0 items-center gap-1 text-xs font-semibold text-foreground">
+        <div key={col.id} className="flex w-55 shrink-0 items-center gap-1 text-xs font-semibold text-foreground">
           {col.label}
           {/* story #2954(유나 처방·H4 kanban-trust-column.tsx:99 문법 이식) — at-rest(드래그
               중이 아니어도) 파생 열임을 한 번 알린다. 레인×열 격자라 per-셀 힌트 텍스트는

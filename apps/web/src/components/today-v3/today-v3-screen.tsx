@@ -58,7 +58,7 @@ function TodayV3Topbar({ needsMeCount }: { needsMeCount: number }) {
   const t = useTranslations('todayV3');
   return (
     <div className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card px-5" data-testid="today-v3-topbar">
-      <div className="flex h-[34px] max-w-[420px] flex-1 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
+      <div className="flex h-[34px] max-w-105 flex-1 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
         <span>{t('searchPlaceholder')}</span>
       </div>
       <div className="relative ml-auto flex items-center gap-3.5">
@@ -113,7 +113,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
             {/* story #4006 AC3/AC4 — lg 미만은 목록(이 칸)이 전폭(오늘 화면은 상세 칸이
                 항상 빈 셸 자리라 실제로 열 것이 없다 — §3 "선택→상세" 토글은 대상/대화
                 칸에 실 콘텐츠가 생기는 후속 스토리 스코프, 지금은 목록 칸만 있으면 된다). */}
-            <section className="min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]" data-testid="today-v3-today-column">
+            <section className="min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-98" data-testid="today-v3-today-column">
               <p className="text-xs text-muted-foreground">{dateLabel ?? <InvisibleSample>{dateSample}</InvisibleSample>}</p>
               <h1 className="mb-1 text-[26px] font-bold tracking-tight text-foreground">{t('title')}</h1>
               <p className="mb-6 text-xs text-muted-foreground">
@@ -155,7 +155,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
               <p className="text-sm text-muted-foreground">{t('targetColumnEmpty')}</p>
             </section>
             <section
-              className="hidden w-[384px] shrink-0 items-center justify-center bg-card lg:flex"
+              className="hidden w-96 shrink-0 items-center justify-center bg-card lg:flex"
               data-testid="today-v3-chat-column"
             >
               <p className="text-sm text-muted-foreground">{t('chatColumnEmpty')}</p>

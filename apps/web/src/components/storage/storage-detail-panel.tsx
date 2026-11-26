@@ -56,12 +56,12 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
   return (
     <section className="flex h-full min-h-0 flex-col bg-ds-surface">
       {/* preview */}
-      <div className="relative grid h-[168px] shrink-0 place-items-center overflow-hidden border-b border-ds-line bg-ds-surface-highest">
+      <div className="relative grid h-42 shrink-0 place-items-center overflow-hidden border-b border-ds-line bg-ds-surface-highest">
         {isImage ? (
           <StorageThumbnail key={asset.id} asset={asset} />
         ) : (
           <div
-            className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-ds-info shadow-lg"
+            className="grid size-24 w-32 place-items-center rounded-[0.5rem] text-ds-info shadow-lg"
             style={{
               backgroundImage:
                 'repeating-linear-gradient(45deg, var(--ds-info-soft), var(--ds-info-soft) 9px, transparent 9px, transparent 18px)',

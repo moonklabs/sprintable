@@ -26,7 +26,7 @@ export function StorageAssetMenuContent({
   return (
     <MenuContent align="end">
       <MenuGroup>
-        {labelled ? <MenuLabel className="max-w-[200px] truncate">{asset.name}</MenuLabel> : null}
+        {labelled ? <MenuLabel className="max-w-50 truncate">{asset.name}</MenuLabel> : null}
         <MenuItem icon="open_in_full" onClick={() => onOpen(asset)}>{t('rowOpen')}</MenuItem>
         <MenuItem icon="download" onClick={() => onDownload(asset)}>{t('download')}</MenuItem>
       </MenuGroup>

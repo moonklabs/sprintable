@@ -73,7 +73,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
       ref={menuRef}
       role="menu"
       // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
-      className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-[var(--elev-overlay)]"
+      className="fixed z-50 min-w-40 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-[var(--elev-overlay)]"
       style={estimated}
     >
       <button

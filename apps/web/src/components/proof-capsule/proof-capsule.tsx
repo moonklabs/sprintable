@@ -328,7 +328,7 @@ function CardVariant({
   proofState, stateLabel, claim, evidence, footer, className, onClaimClick, headerAside, cardHeader,
 }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className' | 'onClaimClick' | 'headerAside' | 'cardHeader'>) {
   return (
-    <CutCornerShell state={proofState} className={cn('w-full max-w-[280px]', className)}>
+    <CutCornerShell state={proofState} className={cn('w-full max-w-70', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
         {/* 카디르 QA(#3446) REQUEST_CHANGES 적출 — 이전엔 headerAside 유무와 무관하게
             justify-between div로 항상 감쌌다("영향 없음"은 시각적 얘기였을 뿐, DOM은
@@ -386,7 +386,7 @@ function InlineRow({
 }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'duration' | 'className' | 'typeBadge'>) {
   return (
     <CutCornerShell state={proofState} className={cn('w-full', className)}>
-      <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
+      <div className="flex min-h-13 min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
         <span className="flex shrink-0 items-center gap-1.5">
           {/* story #2923 AQ2(Yuna 확定 2026-08-22) — 개입유형(GATE/STEER/BLOCK/Q) compact
               배지. 「색은 신뢰상태 축 하나(레일/점+아래 StateHeader)뿐」 — 이 배지는 무채

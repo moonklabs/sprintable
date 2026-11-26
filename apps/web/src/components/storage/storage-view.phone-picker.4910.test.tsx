@@ -63,7 +63,7 @@ describe('폰 폴더 고르기 단추 · 서랍 닫기 단추 (4910 스토리지
     expect(cls).toContain('bg-ds-surface-sunk'); // story 5048 ②a: 보조형 = 옅은 회색 채움(키트) — 옛 ui 부품의 미색 토큰(bg-background · bg-input)은 없다
     expect(cls).toContain('border-transparent'); // 윤곽 없음
     expect(cls.some((c) => /^(dark:)?bg-(background|input)(\/|$)/.test(c) || c === 'bg-background')).toBe(false);
-    expect(cls).toContain('min-h-[44px]');
+    expect(cls).toContain('min-h-ds-touch');
   });
 
   it('⭐동작: 서랍은 처음에 닫힘(aria-hidden · inert) → «전체 자산» 단추가 열고 → 닫기 단추(ds IconButton · 이름 «닫기»)가 닫는다 · 두 단추 모두 type=button', async () => {

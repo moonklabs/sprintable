@@ -52,7 +52,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
           showCloseButton={false}
           // [SID:4375] 머리 줄이 보이는 제목이다(DialogTitle 아님 → 창 이름 0이던 자리) — 그 줄로 창 이름을 잇는다(배치 무변경).
           aria-labelledby={asset ? titleId : undefined}
-          className="flex w-[440px] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[440px]"
+          className="flex w-110 max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-110"
         >
           {asset ? (
             <>
@@ -65,7 +65,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               </div>
 
               {/* Body — usage list가 길면 이 영역만 내부 스크롤(footer는 항상 노출) */}
-              <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-xs leading-[1.55] text-muted-foreground">
+              <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-1 text-xs leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
                   name: asset.name,
                   // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다

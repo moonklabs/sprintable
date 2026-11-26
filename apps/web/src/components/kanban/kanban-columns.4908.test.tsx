@@ -42,7 +42,7 @@ afterEach(async () => {
   container.remove();
 });
 
-const columnDiv = () => container.querySelector('[class*="w-\\[280px\\]"]') as HTMLElement;
+const columnDiv = () => container.querySelector('[class~="w-70"]') as HTMLElement;
 
 describe('4908 열 — 면(층)', () => {
   it('⭐신뢰축 열은 내용 칸 층(LAYER.panel)이다 — 투명 바탕이 아니다', async () => {

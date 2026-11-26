@@ -130,7 +130,7 @@ describe('AgentProjectAccessSection — ds 한 층(story 4912 · C2c)', () => {
     const blocked = rowOf('베타').querySelector('button') as HTMLButtonElement;
     expect(allowed.className).toContain('bg-ds-done-soft');
     expect(blocked.className).not.toContain('bg-ds-done-soft');
-    expect(blocked.className).toContain('min-w-[72px]');
+    expect(blocked.className).toContain('min-w-18');
     await act(async () => { blocked.click(); });
     expect((rowOf('베타').querySelector('button') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => { release(); }); await settle();

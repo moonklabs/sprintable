@@ -195,7 +195,7 @@ describe('필터 줄 — 폰 폭(실측: 한 줄에 다 넣으면 검색칸이 �
     const filters = container.querySelector<HTMLElement>('[data-testid="storage-filters"]')!;
     expect(filters.className.split(/\s+/)).toContain('flex-wrap');
     const input = filters.querySelector<HTMLInputElement>('input[type="search"]')!;
-    expect(input.className.split(/\s+/)).toEqual(expect.arrayContaining(['basis-full', 'min-w-0', 'sm:basis-auto', 'sm:flex-1', 'sm:max-w-[300px]']));
+    expect(input.className.split(/\s+/)).toEqual(expect.arrayContaining(['basis-full', 'min-w-0', 'sm:basis-auto', 'sm:flex-1', 'sm:max-w-75']));
   });
 });
 

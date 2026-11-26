@@ -174,7 +174,7 @@ describe('FlowMapCanvas — port 가시성 사이징(2026-08-27, rest 10px/hover
     await renderCanvas(lane);
     const port = getPort('n1');
     expect(port.className).toContain('w-11'); // 44px
-    expect(port.className).toContain('h-[24px]');
+    expect(port.className).toContain('h-6');
   });
 
   it('crosshair 커서가 여전히 유지된다(회귀 없음)', async () => {

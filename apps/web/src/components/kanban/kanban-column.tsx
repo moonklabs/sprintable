@@ -145,7 +145,7 @@ export function KanbanColumn({
     <div
       ref={setNodeRef}
       data-board-column={id}
-      className={`flex h-full flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-1.5 ${collapsed ?'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
+      className={`flex h-full flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-1.5 ${collapsed ?'w-13 min-w-13' : 'w-70 min-w-60'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -180,7 +180,7 @@ export function KanbanColumn({
               {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩
                   (Heading 무게, sans 유지 — 한글이라 caps/mono 금지). 크기(text-xs)는 불변. */}
               {/* 유나 design:changes(PR#3687, 2026-09-01) — org 커스텀 라벨은 길이가
-                  자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-[280px])에서 wip 카운트·
+                  자유(«아이디어 검토 대기열»)라 고정폭 컬럼(w-70)에서 wip 카운트·
                   버튼을 밀어낼 수 있었다. h3에 min-w-0(flex item이 컨텐츠 크기로
                   안 밀어붙이게)+텍스트 자체에 truncate, 잘려도 title로 전체 문구 확인. */}
               <h3 className="flex min-w-0 items-center gap-2 text-xs font-extrabold text-foreground lg:[@media(max-height:600px)]:leading-5"> {/* story 5048 T0 ②d: 글자 16/24 — 낮은 창(≤ 600)에서는 제목 줄높이 20으로(열 칸 ≥ 90) */}
@@ -320,7 +320,7 @@ export function KanbanColumn({
                 p-1.5(6px)로 4px 돌출분보다 넉넉한 여백을 준다. */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
               {stories.length === 0 && !composing ? (
-                <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
+                <div className="flex min-h-25 items-center justify-center px-4 text-center">
                   <p className={`text-xs ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>{t('noStories')}</p>
                 </div>
               ) : null}

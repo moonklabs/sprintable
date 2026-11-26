@@ -179,7 +179,7 @@ const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }>
   '/settings': { source: '(authenticated)/settings/page.tsx', container: 'mx-auto w-full max-w-3xl p-4 lg:p-6' },
   '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
-  '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]' },
+  '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-98' },
   '/chat': { source: '../components/chat-v3/chat-v3-screen.tsx', container: 'flex flex-1 flex-col gap-3 p-5' },
 };
 // 폭 · 여백 컨테이너가 없는(전폭 · 자체 레이아웃) 목적지 — 기본 PageSkeleton(`space-y-6 p-6`) 또는 전용 스켈레톤.

@@ -112,7 +112,7 @@ describe('스토리 상세 패널 — 날것 칸 4곳이 바탕 부품(story 483
     expect(box, '댓글 입력칸').toBeTruthy();
     const cls = box!.className.split(/\s+/);
     expect(cls).toContain('field-sizing-content');
-    expect(cls).toContain('min-h-[80px]');
+    expect(cls).toContain('min-h-20');
     expect(cls).toContain('resize-none');
     expect(cls).not.toContain('resize-y');
     expect(cls).not.toContain('min-h-16');

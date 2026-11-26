@@ -183,7 +183,7 @@ export function StorageAssetList({
           placeholder={t('searchPlaceholder')}
           aria-label={t('searchPlaceholder')}
           // 폰(390): 검색칸이 줄 전체를 쓰고 정렬 · 보기는 아래 줄로 — 한 줄에 다 넣으면 검색칸이 글자 하나 폭(실측 «이름»)으로 쪼그라든다. sm 이상은 한 줄.
-          className="min-w-0 basis-full sm:max-w-[300px] sm:flex-1 sm:basis-auto"
+          className="min-w-0 basis-full sm:max-w-75 sm:flex-1 sm:basis-auto"
         />
 
         <Menu>
@@ -222,7 +222,7 @@ export function StorageAssetList({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {sidebar ? <div className="hidden w-[248px] shrink-0 lg:flex" data-testid="storage-folder-tree-column">{sidebar}</div> : null}
+        {sidebar ? <div className="hidden w-62 shrink-0 lg:flex" data-testid="storage-folder-tree-column">{sidebar}</div> : null}
       {/* body */}
       {/* story #4277 — e2e가 행 출현을 기다리지 않고 «다 불러온 뒤 한 번 세도록» 지금 상태를 싣는다(행 0이면 즉시 건너뜀). */}
       <div

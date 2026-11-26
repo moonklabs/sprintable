@@ -198,7 +198,7 @@ export function EntityDispatchPanel({
             </Button>
             {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
             {moreOpen && (
-              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-ds-panel border border-ds-line-control bg-ds-surface-raised py-1 text-ds-ink shadow-ds-overlay">
+              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-35 max-w-[calc(100vw-1rem)] rounded-ds-panel border border-ds-line-control bg-ds-surface-raised py-1 text-ds-ink shadow-ds-overlay">
                 <button
                   type="button"
                   role="menuitem"

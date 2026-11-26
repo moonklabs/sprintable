@@ -163,13 +163,13 @@ function RankedHookList({ hookKeys, summaries }: { hookKeys: string[]; summaries
               {i + 1}
             </span>
             <span className="flex-1 truncate text-xs font-medium text-foreground">{hookKey}</span>
-            <div className="h-2 w-[120px] shrink-0 overflow-hidden rounded-full bg-muted">
+            <div className="h-2 w-30 shrink-0 overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-info" style={{ width: `${widthPct}%` }} />
             </div>
             <span className="w-[90px] shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
               {value !== null ? value.toLocaleString() : <span className="text-editorial-meta font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
             </span>
-            <span className="w-[64px] shrink-0 text-right text-editorial-meta text-muted-foreground">
+            <span className="w-16 shrink-0 text-right text-editorial-meta text-muted-foreground">
               {summary ? t('rankedHooksVariantCount', { n: summary.variant_count }) : null}
             </span>
           </Card>
