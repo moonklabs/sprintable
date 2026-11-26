@@ -18,6 +18,10 @@ have at least one collected test (a file is never cut in two; a test is never dr
                                   one — a green run in the reverse order is part of the evidence for a change to the split.
 
 The number of tests per file is a proxy for its time (the suite is mostly small real-DB tests); the measured per-shard times are in the PR / story.
+
+11-27 measurement — the proxy is uneven. Six shards of ≈ 2690 tests each ran 292 · 538 · 694 · 642 · 367 · 420 s of pytest in one develop run (4.9 → 11.6 min, 2.4×): a few real-DB files (the gateway backlog file, the agent-creator-seat file …) take most of
+the time and landed together; over 14 recent runs the job minutes per shard were mean 6.2 · 7.7 · 10.4 · 11.9 · 8.9 · 6.2 and the worst one was cut at 15.3 min (→ `cancelled` → the dev promotion stopped). The CI now runs 8 shards with a 20-minute ceiling
+(`ci.yml` · `backend-test-shard-plan` and `backend-test-work`). If the worst shard drifts back up, the next step is a weights file of measured per-file times, as the destructive shards have.
 """
 from __future__ import annotations
 
