@@ -2994,7 +2994,7 @@ async def show_card(
     is posted as the agent's message (201). If it cannot — or the object does not exist, which is NOT told apart — a REFUSED card (`refused_for` = this agent) is posted instead, so each person in the room sees
     it by THEIR rights (the web: a viewer who can see the object is told which agents can; one who cannot sees «not found»), and the agent itself gets the same 404 «Target not found» either way (no list, no hint).
     Only an agent key may call this (a person shows a thing by writing its link)."""
-    from app.services.chat_card import TOOL_KINDS, card_text, normalize_card, resolver_kind
+    from app.services.chat_card import TOOL_KINDS, card_text, deploy_card_visible, normalize_card, resolver_kind
     from app.services.org_locale import resolve_org_locale
     from app.services.project_auth import has_project_access
     from app.services.reference_registry import PROJECT_ID_RESOLVERS
@@ -3005,8 +3005,12 @@ async def show_card(
     if card is None or card["kind"] not in TOOL_KINDS:
         raise HTTPException(status_code=422, detail="kind must be one of " + ", ".join(TOOL_KINDS) + " and ref a UUID")
     agent_id = uuid.UUID(auth.user_id)
-    pid = await PROJECT_ID_RESOLVERS[resolver_kind(card["kind"])](db, org_id, uuid.UUID(card["ref"]))
-    visible = pid is not None and await has_project_access(db, agent_id, pid, org_id)
+    if card["kind"] == "deploy":
+        # a person's placement in a project is not an object of ONE project: the card is allowed by the ROOM's project and the target being an agent of this organization (see deploy_card_visible)
+        visible = await deploy_card_visible(db, org_id, agent_id, conversation_id, uuid.UUID(card["ref"]))
+    else:
+        pid = await PROJECT_ID_RESOLVERS[resolver_kind(card["kind"])](db, org_id, uuid.UUID(card["ref"]))
+        visible = pid is not None and await has_project_access(db, agent_id, pid, org_id)
     posted = {**card} if visible else {**card, "refused_for": str(agent_id)}
     out = await send_message_core(
         conversation_id,

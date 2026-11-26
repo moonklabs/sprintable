@@ -1276,6 +1276,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "chat_card.kind.hypothesis": {"ko": "가설", "en": "hypothesis"},
     "chat_card.kind.evidence": {"ko": "증거", "en": "evidence"},
     "chat_card.kind.kanban": {"ko": "스프린트 칸반", "en": "sprint board"},
+    "chat_card.kind.deploy": {"ko": "프로젝트 소속", "en": "project membership"},
 }
 
 
