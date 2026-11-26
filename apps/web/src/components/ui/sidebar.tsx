@@ -69,6 +69,8 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  resizable = true,
+  defaultWidth = SIDEBAR_WIDTH_DEFAULT,
   className,
   style,
   children,
@@ -77,21 +79,26 @@ function SidebarProvider({
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** story 5048 T0 ②b(민 C1 요청): `false`면 너비를 사람이 끌어 바꾸지 않는다 — localStorage에서 읽지도 쓰지도 않고 `defaultWidth`(기본 256)에 고정. 기본 `true`(옛 동작). */
+  resizable?: boolean
+  defaultWidth?: number
 }) {
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  const [width, _setWidth] = React.useState(SIDEBAR_WIDTH_DEFAULT)
+  const [width, _setWidth] = React.useState(defaultWidth)
   const [isResizing, setIsResizing] = React.useState(false)
   React.useEffect(() => {
+    if (!resizable) return
     const stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
     if (stored) _setWidth(Number(stored))
-  }, [])
+  }, [resizable])
   const setWidth = React.useCallback((w: number) => {
+    if (!resizable) return // 고정 너비 — 끌기 · 저장 없음
     const clamped = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, w))
     _setWidth(clamped)
     localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped))
-  }, [])
+  }, [resizable])
 
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
@@ -472,7 +479,7 @@ function SidebarGroupLabel({
       {
         className: cn(
           // 3826-pre — 알파 합성(text-sidebar-foreground/70) → solid text-muted-foreground.
-          "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-muted-foreground ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          "flex h-ds-control shrink-0 items-center rounded-ds-control px-ds-4 text-ds-body font-semibold text-muted-foreground ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-10 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },
@@ -518,7 +525,7 @@ function SidebarGroupContent({
     <div
       data-slot="sidebar-group-content"
       data-sidebar="group-content"
-      className={cn("w-full text-sm", className)}
+      className={cn("w-full text-ds-body", className)}
       {...props}
     />
   )
@@ -529,7 +536,7 @@ function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn("flex w-full min-w-0 flex-col gap-0", className)}
+      className={cn("flex w-full min-w-0 flex-col gap-ds-1", className)}
       {...props}
     />
   )
@@ -551,19 +558,22 @@ const sidebarMenuButtonVariants = cva(
   // 테마 무관 고정 다크 톤)+시트론 좌측 엣지(PR-3, border-l-2 border-l-proof-citron)+light
   // 텍스트(sidebar-active-fill-foreground). "generic shadcn 결"이던 bg-sidebar-accent
   // 갈음을 대체 — hover/열림 상태는 기존 sidebar-accent 그대로(활성 상태만 시그니처).
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md border-l-2 border-l-transparent p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:border-l-proof-citron data-active:bg-sidebar-active-fill data-active:font-medium data-active:text-sidebar-active-fill-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-ds-2 overflow-hidden rounded-ds-control border-l-2 border-l-transparent px-ds-4 py-ds-2 text-left text-ds-body font-medium ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:border-l-ds-action data-active:bg-sidebar-active-fill data-active:font-semibold data-active:text-sidebar-active-fill-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
         default: "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        // story 5048 T0 ②b(민 C1 요청): 평평한 «줄만 있는 칸» — 모서리 · 면 없이 아래 1px 선으로 칸을 가른다(활성은 왼쪽 막대 + 옅은 면)
+        flat: "rounded-none border-b border-b-ds-line hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         outline:
           // story #4325 — 토큰은 완성된 색이라 hsl()로 감싸면 그림자 값 전체가 무효(링이 안 보임) → var() 그대로.
           "bg-background shadow-[0_0_0_1px_var(--sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--sidebar-accent)]",
       },
       size: {
-        default: "h-8 text-sm",
-        sm: "h-7 text-xs",
-        lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
+        // story 5048 T0 ②b(키트): 탐색 항목 = 높이 40 · 좌우 16 · 글자 16 Medium(가장 작은 글자도 16)
+        default: "h-ds-control",
+        sm: "h-ds-tag",
+        lg: "h-ds-control-xl group-data-[collapsible=icon]:p-0!",
       },
     },
     defaultVariants: {

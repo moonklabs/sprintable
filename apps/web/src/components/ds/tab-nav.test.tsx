@@ -42,14 +42,14 @@ describe('ds TabNav', () => {
     expect(container.querySelector('[role="tablist"], [role="tab"]')).toBeNull();
   });
 
-  it('⭐켜진 칸만 aria-current=page, 밑줄 + 굵기 · 꺼진 칸은 ink-3', async () => {
+  it('⭐켜진 칸만 aria-current=page, 면 채움 + 굵기 · 꺼진 칸은 ink-3', async () => {
     await render(<Strip active="agents" />);
     expect(links().map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null]);
-    expect(links()[1]!.className).toContain('border-ds-action');
+    expect(links()[1]!.className).toContain('bg-ds-surface-sunk');
     expect(links()[1]!.className).toContain('font-semibold');
-    expect(links()[1]!.className).toContain('text-ds-action-text');
+    expect(links()[1]!.className).toContain('text-ds-ink');
     expect(links()[0]!.className).toMatch(/(^|\s)text-ds-ink-3(\s|$)/);
-    expect(links()[0]!.className).not.toContain('border-ds-action');
+    expect(links()[0]!.className).not.toContain('bg-ds-surface-sunk');
   });
 
   it('asChild: 자식 링크의 href · data 속성이 그대로 살고 모양이 입혀진다', async () => {
@@ -121,7 +121,7 @@ describe('ds TabNav', () => {
     expect(nav.parentElement!.className).toContain('border-b');
     expect(links()[0]!.className).toContain('touch:min-h-ds-touch');
     expect(links()[0]!.className).toContain('focus-visible:ring-inset');
-    expect(links()[0]!.className).toMatch(/(^|\s)-mb-px(\s|$)/);
+    expect(links()[0]!.className).not.toMatch(/(^|\s)-mb-px(\s|$)/); // 밑줄이 없다(story 5048 ②b)
   });
 
   it('⭐바깥에서 준 ref도 받고 scrollIntoView도 여전히 된다(ref 합성)', async () => {

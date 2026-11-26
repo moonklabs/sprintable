@@ -61,14 +61,17 @@ describe('ds Tabs', () => {
     expect((container.querySelector('[role="tabpanel"]') as HTMLElement).textContent).toBe('관리 패널');
   });
 
-  it('⭐켜짐 모양은 색만이 아니다: 밑줄(border) + 굵기가 data-active로 걸린다 · 꺼짐은 ink-3', async () => {
+  it('⭐켜짐 모양은 색만이 아니다: 면 채움 + 굵기가 data-active로 걸린다 · 꺼짐은 ink-3 · 높이 40 · 모서리 8(story 5048 ②b)', async () => {
     await render(<Demo />);
     const cls = tabs()[0]!.className;
-    expect(cls).toContain('data-active:border-ds-action');
+    expect(cls).toContain('data-active:bg-ds-surface-sunk');
     expect(cls).toContain('data-active:font-semibold');
-    expect(cls).toContain('data-active:text-ds-action-text');
+    expect(cls).toContain('data-active:text-ds-ink');
     expect(cls).toMatch(/(^|\s)text-ds-ink-3(\s|$)/);
-    expect(cls).toMatch(/(^|\s)font-normal(\s|$)/);
+    expect(cls).toMatch(/(^|\s)font-medium(\s|$)/);
+    expect(cls).toContain('min-h-ds-control');
+    expect(cls).toContain('rounded-ds-control');
+    expect(cls).toContain('px-ds-4');
   });
 
   it('⭐화살표 키로 다음 탭에 초점이 옮겨 가고 끝에서 비활성 칸을 건너뛴다', async () => {
@@ -88,12 +91,12 @@ describe('ds Tabs', () => {
     expect(tabs()[0]!.getAttribute('aria-selected')).toBe('true');
   });
 
-  it('⭐초점 링은 안쪽(inset) — 줄의 overflow 클립이 자르지 않는다 · 켜진 밑줄은 아래 선 위에 겹친다(-mb-px)', async () => {
+  it('⭐초점 링은 안쪽(inset) — 줄의 overflow 클립이 자르지 않는다 (밑줄이 없어져 -mb-px도 없다 — story 5048 ②b)', async () => {
     await render(<Demo />);
     const cls = tabs()[0]!.className;
     expect(cls).toContain('focus-visible:ring-inset');
     expect(cls).not.toContain('ring-offset');
-    expect(cls).toMatch(/(^|\s)-mb-px(\s|$)/);
+    expect(cls).not.toMatch(/(^|\s)-mb-px(\s|$)/);
   });
 
   it('폰(coarse)은 누름 영역 44 · 초점 링 action · 비활성은 눌리지 않는 모양', async () => {

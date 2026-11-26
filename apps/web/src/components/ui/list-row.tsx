@@ -31,7 +31,7 @@ export function ListRow({
   'data-testid'?: string;
 }) {
   return (
-    <div className={cn('space-y-2 px-3 py-3', className)} data-testid={dataTestId}>
+    <div className={cn('space-y-2 px-ds-4 py-ds-3', className)} data-testid={dataTestId}>
       {/* [SID:4282 · 유나 추가 결정] 글자 칸이 basis 0(flex-1)이면 flex-wrap이 안 꺾여 390에서 글자 칸이 50px까지 줄었다
           (신뢰 센터 꼬리 잘림 · en 부제 낱말 중간 끊김). 글자 칸은 10rem을 바탕 너비로 두고, 상태 · 동작 · 메뉴는 한 묶음
           (ml-auto)으로 같이 다음 줄로 내려간다. 넓은 폭(1440)에선 종전처럼 한 줄. */}

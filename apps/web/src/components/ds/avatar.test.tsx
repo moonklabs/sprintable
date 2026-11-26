@@ -193,3 +193,11 @@ describe('ds Avatar — 코너 글자 배지 · 툴팁', () => {
     expect(node.getAttribute('aria-hidden')).toBe('true');
   });
 });
+
+// story 5048 T0 ②b — 키트 아바타 눈금(모양 신호는 그대로: 사람 둥근 사각 · 에이전트 원)
+describe('avatarSizes (story 5048 T0 ②b)', () => {
+  it('키트 눈금 40 · 48 · 64 · 128', async () => {
+    const { avatarSizes } = await import('./avatar');
+    expect(avatarSizes).toEqual({ sm: 40, md: 48, lg: 64, xl: 128 });
+  });
+});

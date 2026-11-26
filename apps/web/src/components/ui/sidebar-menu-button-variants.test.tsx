@@ -15,9 +15,9 @@ describe('sidebarMenuButtonVariants — 시트론 엣지 + carbon fill(story #29
     expect(classes).toContain('border-l-transparent');
   });
 
-  it('활성(data-active) 상태는 border-l-proof-citron으로 색이 들어온다', () => {
+  it('활성(data-active) 상태는 border-l-ds-action으로 색이 들어온다', () => {
     const classes = sidebarMenuButtonVariants({});
-    expect(classes).toContain('data-active:border-l-proof-citron');
+    expect(classes).toContain('data-active:border-l-ds-action');
   });
 
   it('활성 상태는 carbon fill 배경+light 텍스트를 갖는다(유나 확定, generic shadcn 결 갈음)', () => {

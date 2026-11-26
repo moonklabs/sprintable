@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar } from '../avatar';
+import { Avatar, avatarSizes } from '../avatar';
 import { Banner } from '../banner';
 import { Button, buttonVariants } from '../button';
 import { Card, CardInset } from '../card';
@@ -26,6 +26,7 @@ import { Skeleton, SkeletonGroup } from '../skeleton';
 import { StatusLabel } from '../status-label';
 import { TabNav, TabNavLink } from '../tab-nav';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../tabs';
+import { BigTabsList, BigTabsTrigger } from '../big-tabs';
 import { Toggle } from '../toggle';
 import { ToastCard } from '../toast-card';
 import { ToastContainer } from '../toast';
@@ -132,10 +133,11 @@ export function ShowcasePartsA() {
           </RowList>
         </PageFrame>
       </Block>
-      <Block title="ListRow — 기본 · 촘촘 · 고름 · 내 손이 필요">
+      <Block title="ListRow — 기본 · 촘촘 · 대화(88) · 고름 · 내 손이 필요">
         <div className="overflow-hidden rounded-ds-control border border-ds-line">
           <ListRow leading={<Avatar name="개발" actorType="agent" size={32} decorative />} title="결제 수단 두 개 추가" subtitle="PR-4821 · 14:02" trailing={<Chip tone="done" dot>끝남</Chip>} />
           <ListRow density="compact" title="촘촘한 줄" trailing={<Kbd>⌘K</Kbd>} />
+          <ListRow density="chat" leading={<Avatar name="개발" actorType="agent" size={avatarSizes.lg} decorative />} title="대화 목록 줄" subtitle="마지막 말 미리보기 · 14:02" />
           <ListRow selected title="고른 줄" subtitle="aria-current" />
           <ListRow needsHand needsHandLabel="내 손이 필요" title="승인이 필요해요" trailing={<Button variant="primary">보기</Button>} />
         </div>
@@ -205,6 +207,15 @@ export function ShowcasePartsA() {
             <TabsTrigger value="c" disabled>끔</TabsTrigger>
           </TabsList>
           <TabsContent value="a"><p className="m-0 py-2 text-ds-body text-ds-ink-2">같은 화면 안 칸 갈아 보이기</p></TabsContent>
+          <TabsContent value="b"><p className="m-0 py-2 text-ds-body text-ds-ink-2">두 번째 칸</p></TabsContent>
+        </Tabs>
+        <Tabs defaultValue="a">
+          {/* story 5048 T0 ②b — 큰 제목 탭(24 Semibold) */}
+          <BigTabsList aria-label="큰 제목 탭">
+            <BigTabsTrigger value="a">대화</BigTabsTrigger>
+            <BigTabsTrigger value="b">문서</BigTabsTrigger>
+          </BigTabsList>
+          <TabsContent value="a"><p className="m-0 py-2 text-ds-body text-ds-ink-2">큰 제목이 곧 탭</p></TabsContent>
           <TabsContent value="b"><p className="m-0 py-2 text-ds-body text-ds-ink-2">두 번째 칸</p></TabsContent>
         </Tabs>
         <TabNav aria-label="팀">
