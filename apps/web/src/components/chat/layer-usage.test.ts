@@ -42,7 +42,7 @@ describe('대화 방은 화면 층 규칙의 토큰을 쓴다 (4906)', () => {
 
   it('⭐에이전트 글은 맨글(py-0.5만)로 바탕에 서지 않는다 — 말풍선 분기에 층 클래스가 있다(plainRow만 맨글)', () => {
     const src = read('chat-bubble.tsx');
-    expect(src).toMatch(/isAgent\s*\?\s*`rounded-lg rounded-tl-sm \$\{LAYER\.rowOthers\}/);
+    expect(src).toMatch(/isAgent\s*\?\s*`rounded-ds-bubble rounded-tl-ds-tail \$\{LAYER\.rowOthers\}/);
     expect(src).toContain("data-bubble={plainRow ? 'plain' : 'filled'}");
   });
 

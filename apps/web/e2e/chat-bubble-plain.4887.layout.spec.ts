@@ -44,7 +44,7 @@ test('[SID:4906] an agent\'s message sits on a layer: a drawn fill, the same fil
   const agent = await scene(browser, 'agent');
   const agentFill = await agent.style('#box', 'background-color');
   expect(agentFill, 'a fill is drawn').not.toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/); // reverted (plain agent, no fill) → transparent
-  expect(await agent.style('#box', 'padding-left')).toBe('14px'); // reverted (no padding box) → 0px
+  expect(await agent.style('#box', 'padding-left')).toBe('16px'); // reverted (no padding box) → 0px
   expect((await agent.x('#t')) - (await agent.x('#name')), 'the text is inset by the bubble padding').toBeGreaterThanOrEqual(13);
   await agent.context.close();
   const person = await scene(browser, 'person');
@@ -64,7 +64,7 @@ for (const kind of ['person', 'mine'] as const) {
   test(`[SID:4887] ${kind === 'mine' ? 'my' : 'another person\'s'} message keeps its bubble: a drawn fill and the text inset by the padding`, async ({ browser }) => {
     const { context, x, style } = await scene(browser, kind);
     expect(await style('#box', 'background-color'), 'a fill is drawn').not.toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/);
-    expect(await style('#box', 'padding-left')).toBe('14px');
+    expect(await style('#box', 'padding-left')).toBe('16px');
     expect((await x('#t')) - (await x('#name')), 'the text is inset by the bubble padding').toBeGreaterThanOrEqual(13);
     await context.close();
   });

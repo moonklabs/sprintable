@@ -28,7 +28,7 @@ function classesFromSource() {
   if (!text || !tern) throw new Error('the bubble text classes not found');
   return {
     row: pick(/className=\{`(group\/bubble flex scroll-mt-4 gap-2 transition-shadow )\$\{isMine/, 'the row'),
-    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
+    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[min\(72%,var\(--container-ds-bubble\)\)\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     textBase: text[1]!.trim(), textMine: tern.mine, textPerson: tern.person,
     metaTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the meta time'),
     contMine: cont[1]!, contTheirs: cont[2]!,
@@ -200,7 +200,7 @@ for (const mine of [false, true]) {
     test(`[SID:4887] mouse ${width} · ${who} full-width bubble: a wide window keeps the usual 72% (the width cap changes nothing there)`, async ({ browser }) => {
       const s = await scene(browser, { touch: false, mine, width, withReply: true, text: LONG, continuation: true });
       const row = (await s.box('#row'))!; const col = (await s.box('#col'))!;
-      expect(col.width, `column ${Math.round(col.width)} of row ${Math.round(row.width)}`).toBeCloseTo(row.width * 0.72, 0); // reverted/over-tight cap (e.g. 100% − 200px) → narrower than 72%
+      expect(col.width, `column ${Math.round(col.width)} of row ${Math.round(row.width)}`).toBeCloseTo(Math.min(row.width * 0.72, 480), 0); /* story 5048 ②c: 72% but at most 480 */ // reverted/over-tight cap (e.g. 100% − 200px) → narrower than 72%
       await s.context.close();
     });
   }
@@ -221,7 +221,7 @@ for (const mine of [false, true]) {
     const s = await scene(browser, { touch: false, mine, width: 320, withReply: false, text: LONG, continuation: true });
     await s.page.hover('#row');
     const row = (await s.box('#row'))!; const col = (await s.box('#col'))!; const m = (await s.box('#meta'))!;
-    expect(col.width, `column ${Math.round(col.width)} of row ${Math.round(row.width)}`).toBeCloseTo(row.width * 0.72, 0); // reverted (the cap everywhere) → narrower
+    expect(col.width, `column ${Math.round(col.width)} of row ${Math.round(row.width)}`).toBeCloseTo(Math.min(row.width * 0.72, 480), 0); /* story 5048 ②c: 72% but at most 480 */ // reverted (the cap everywhere) → narrower
     const gap = mine ? col.x - (m.x + m.width) : m.x - (col.x + col.width);
     expect(gap, `the hover time sits ${Math.round(gap)} px from the bubble`).toBeCloseTo(8, 0); // reverted (always 36) → 36
     await s.context.close();

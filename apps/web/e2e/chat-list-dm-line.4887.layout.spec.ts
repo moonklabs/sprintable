@@ -107,11 +107,11 @@ const rowOf = (page: Page, text: string) => page.locator('button', { hasText: te
 /** the computer chip of the row whose title is `title`, as the browser lays it out */
 async function chipOf(page: Page, title: string) {
   return page.evaluate(({ t }) => {
-    const row = [...document.querySelectorAll('button')].find((b) => b.querySelector('.truncate.text-sm.font-semibold')?.textContent === t) as HTMLElement;
+    const row = [...document.querySelectorAll('button')].find((b) => b.querySelector('.truncate.text-ds-card-title')?.textContent === t) as HTMLElement;
     const line = row.querySelector('[data-testid="room-dm-line"]') as HTMLElement;
     const chip = line.querySelector('[data-testid="device-chip"]') as HTMLElement;
     const text = chip.querySelector('.truncate') as HTMLElement;
-    const col = (row.querySelector('p.truncate.text-xs') as HTMLElement).getBoundingClientRect();
+    const col = (row.querySelector('p.truncate.text-ds-small') as HTMLElement).getBoundingClientRect();
     const lr = line.getBoundingClientRect(); const cr = chip.getBoundingClientRect();
     return { other: line.querySelector('[data-testid="room-dm-other"]') !== null, textCut: text.scrollWidth > text.clientWidth, textW: Math.round(text.clientWidth), fullW: Math.round(text.scrollWidth), chipW: Math.round(cr.width), chipInsideLine: cr.right <= lr.right + 0.5, lineW: Math.round(lr.width), colW: Math.round(col.width), lineOverflow: line.scrollWidth > line.clientWidth, title: chip.getAttribute('title') };
   }, { t: title });
@@ -124,7 +124,7 @@ test('[SID:4887] the agent DM titled with the agent\'s name has no name on the l
   expect(g.textCut, `the computer's name is cut (text ${g.textW}px of ${g.fullW}px, chip ${g.chipW}px, line ${g.lineW}px)`).toBe(false);
   expect(g.chipInsideLine, 'the chip ends inside the line').toBe(true);
   expect(g.lineOverflow, 'the line does not run past its column').toBe(false);
-  expect(g.colW, 'the measured text column is the real one (dev measured 179 px)').toBeGreaterThan(150);
+  expect(g.colW, 'the measured text column is the real one (dev measured 179 px before story 5048 ②c; the avatar stays 36 px)').toBeGreaterThan(150);
   expect(g.colW).toBeLessThan(210);
 });
 
@@ -153,7 +153,7 @@ test('[SID:4887] the DM the people named keeps the agent\'s NAME on the line (ne
 
 test('[SID:4887] a person\'s DM has no participant line at all and is the shortest row', async ({ page }) => {
   await open(page);
-  const h = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-sm.font-semibold')).map((b) => [b.querySelector('.truncate.text-sm.font-semibold')!.textContent, Math.round(b.getBoundingClientRect().height)])));
+  const h = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-card-title')).map((b) => [b.querySelector('.truncate.text-ds-card-title')!.textContent, Math.round(b.getBoundingClientRect().height)])));
   const human = rowOf(page, '지우');
   await expect(human.getByTestId('room-dm-line')).toHaveCount(0);
   expect(h['지우']!, 'a row without the participant line is shorter than one with it').toBeLessThan(h[AGENT_NAME]!);

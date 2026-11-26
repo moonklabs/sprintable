@@ -23,7 +23,7 @@ function classesFromSource() {
   const button = pick(/data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`]+)`\}/, 'the menu button className');
   return {
     // story 4887 (UI-4 P4-a): the column also carries `relative` now (it anchors the hover time beside a continuation bubble)
-    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
+    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[min\(72%,var\(--container-ds-bubble\)\)\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
     // story 4887 (UI-4 P4-b): the fill · rounding · padding moved into per-sender variants — a person's bubble (mine / another's) is the geometry the «⋯» button must not cover; an agent's plain text has its own spec (chat-bubble-plain.4887)
     textMine: variants.mine,
