@@ -11,7 +11,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 import { Tabs } from '@/components/ui/tabs';
 import { SettingsNav } from './settings-nav-list';
+
 import { settingsNavGroups } from './settings-nav';
+
+// story 5037: where a catalog-named link row goes — the page reads the nav catalog; here a plain stand-in (null = the catalog has no such screen)
+let hrefFor: (navId: string) => string | null = (navId) => `/go/${navId}`;
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
@@ -25,7 +29,7 @@ async function draw(activeTab: string, onSelect: (t: string) => void = () => {},
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <Tabs value={activeTab} onValueChange={onSelect} orientation="vertical">
-          <SettingsNav groups={settingsNavGroups(g)} activeTab={activeTab} integrationsHref="/settings/integrations" />
+          <SettingsNav groups={settingsNavGroups(g)} activeTab={activeTab} integrationsHref="/settings/integrations" hrefFor={hrefFor} />
         </Tabs>
       </NextIntlClientProvider>,
     );
@@ -45,7 +49,7 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
   it('⭐every group has a heading, drawn as a SectionHeader (an h2 · not the old 10px label) — including «연동» (one row with the heading\'s own name, as before: a person who moves by headings must find it)', async () => {
     await draw('profile');
     const heads = Array.from(container.querySelectorAll('[data-slot="ds-section-header"] h2')).map((h) => h.textContent?.trim());
-    expect(heads).toEqual([koMessages.settings.myAccount, koMessages.settings.projectSettings, koMessages.settings.organizationSettings, koMessages.settings.billing, koMessages.settings.tabIntegrations, koMessages.settings.dangerZone]);
+    expect(heads).toEqual([koMessages.settings.myAccount, koMessages.settings.organizationSettings, koMessages.settings.groupPeopleRoles, koMessages.settings.groupConnections, koMessages.settings.groupProjectManagement, koMessages.settings.groupContentRules, koMessages.settings.billing, koMessages.settings.groupAppearance, koMessages.settings.dangerZone]);
   });
 
   it('the selected section is the one marked (aria-selected + aria-current), only one', async () => {
@@ -63,6 +67,23 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
     const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent?.includes(koMessages.settings.tabIntegrations));
     expect(link?.getAttribute('href')).toBe('/settings/integrations');
     expect(container.querySelector('[data-settings-tab="danger"] span')?.className).toContain('text-ds-failed');
+  });
+
+  it('⭐story 5037: a link row that names a catalog screen is named by that screen\'s own label and goes where the page says; a screen the catalog does not have is not drawn (no dead row)', async () => {
+    await draw('profile');
+    const link = (id: string) => container.querySelector<HTMLAnchorElement>(`a[data-settings-link="${id}"]`);
+    expect(link('org-channels')?.getAttribute('href')).toBe('/go/org-channels');
+    expect(link('org-channels')?.textContent?.trim()).toBe(koMessages.nav.orgChannels);
+    expect(link('org-roles')?.textContent?.trim()).toBe(koMessages.nav.orgRoles);
+    expect(link('org-content-rules')?.getAttribute('href')).toBe('/go/org-content-rules');
+    expect(link('integrations')?.getAttribute('href')).toBe('/settings/integrations');
+    hrefFor = (navId) => (navId === 'org-events' ? null : `/go/${navId}`);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await draw('profile');
+    expect(link('org-events')).toBeNull();
+    expect(link('org-channels')).not.toBeNull();
+    hrefFor = (navId) => `/go/${navId}`;
   });
 
   it('while the role is being read the role-bound groups draw placeholder rows (same testid as before)', async () => {

@@ -18,6 +18,8 @@ interface SettingsNavProps {
   activeTab: string;
   /** where the «연동» link goes (the page adds the project / flat-path rule) */
   integrationsHref: string;
+  /** story 5037: where a link row that names a nav-catalog screen (`navId`) goes (the page reads the catalog and adds the project / flat-path rule) — null = the catalog has no such screen: the row is not drawn */
+  hrefFor: (navId: string) => string | null;
 }
 
 function SettingsNavSkeleton() {
@@ -29,20 +31,23 @@ function SettingsNavSkeleton() {
   );
 }
 
-export function SettingsNav({ groups, activeTab, integrationsHref }: SettingsNavProps) {
+export function SettingsNav({ groups, activeTab, integrationsHref, hrefFor }: SettingsNavProps) {
   const t = useTranslations('settings');
+  const tNav = useTranslations('nav');
   const row = (item: SettingsNavItem) => {
+    const href = item.kind === 'link' ? (item.navId ? hrefFor(item.navId) : integrationsHref) : null;
+    if (item.kind === 'link' && href === null) return null;
     const active = item.kind === 'tab' && item.id === activeTab;
     const inner = (
       <>
         <Icon name={item.icon} size={18} className={item.danger ? 'text-ds-failed' : 'text-ds-ink-2'} />
-        <span className={cn('min-w-0 flex-1 truncate text-ds-body font-semibold', item.danger ? 'text-ds-failed' : 'text-ds-ink')}>{t(item.labelKey)}</span>
+        <span className={cn('min-w-0 flex-1 truncate text-ds-body font-semibold', item.danger ? 'text-ds-failed' : 'text-ds-ink')}>{item.ns === 'nav' ? tNav(item.labelKey) : t(item.labelKey)}</span>
         <Icon name="chevron_right" className="text-ds-ink-3 lg:hidden" />
       </>
     );
     return item.kind === 'link' ? (
       <ListRow key={item.id} asChild>
-        <Link href={integrationsHref} className="w-full">{inner}</Link>
+        <Link href={href!} className="w-full" data-settings-link={item.id}>{inner}</Link>
       </ListRow>
     ) : (
       // below lg the list is only ever shown INSTEAD of a pane (the whole screen), so a tinted «selected» row there points at nothing — the tint is for the side-by-side layout (≥lg); `aria-current` stays at every width

@@ -59,7 +59,7 @@ async function build() {
           return React.createElement('div', { style: { padding: '16px' }, className: 'space-y-4' },
             ['org', 'org-fail', 'project', 'account'].map((k) => React.createElement('button', { key: k, id: 'open-' + k, onClick: () => setOpen(k) }, 'open ' + k)),
             React.createElement('div', { id: 'frame' },
-              React.createElement(TabsPrimitive.Root, { value: 'projects' }, React.createElement(SettingsNav, { groups, activeTab: 'projects', integrationsHref: '/settings/integrations' })),
+              React.createElement(TabsPrimitive.Root, { value: 'projects' }, React.createElement(SettingsNav, { groups, activeTab: 'projects', integrationsHref: '/settings/integrations', hrefFor: (navId) => '/go/' + navId })),
               React.createElement('div', { className: 'mt-8 border-t border-ds-line pt-6' },
                 React.createElement('h2', { className: 'mb-3 text-ds-small font-semibold text-ds-ink' }, '이용약관 및 정책'),
                 React.createElement(LegalLinks, { className: 'justify-start text-ds-body text-ds-ink-3' }),

@@ -148,7 +148,7 @@ describe('[SID:4891] the account danger card and the API-keys card', () => {
 describe('[SID:4891] the settings list: the selected row', () => {
   const groups = settingsNavGroups({ adminChecked: true, isAdmin: true, inPhoneApp: false, supportWidget: true, billing: false });
   async function drawNav(active: string) {
-    await draw(<TabsPrimitive.Root value={active}><SettingsNav groups={groups} activeTab={active} integrationsHref="/settings/integrations" /></TabsPrimitive.Root>);
+    await draw(<TabsPrimitive.Root value={active}><SettingsNav groups={groups} activeTab={active} integrationsHref="/settings/integrations" hrefFor={(navId) => `/go/${navId}`} /></TabsPrimitive.Root>);
   }
 
   it('the active row is marked for assistive tech (aria-current) and tinted from the side-by-side layout (lg) up — below lg the list is the whole screen and tints nothing', async () => {

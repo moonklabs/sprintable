@@ -47,6 +47,7 @@ import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settings-tab';
 import { settingsNavGroups } from './settings-nav';
+import { allNavItems } from '@/lib/nav-config';
 import { SettingsNav } from './settings-nav-list';
 import { IconButton } from '@/components/ds/icon-button';
 import { Banner } from '@/components/ds/banner';
@@ -769,6 +770,8 @@ export default function SettingsPage() {
     }
   };
 
+  // story 5037: a link row that names a nav-catalog screen goes where the catalog says (the same path the side list and ⌘K use), with the flat-path rule
+  const settingsLinkHref = (navId: string): string | null => { const item = allNavItems().find((i) => i.id === navId && i.kind === 'static'); return item ? flatHref(item.path) : null; };
   const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, deviceKind, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
   const activeLabelKey = navGroups.flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === activeTab)?.labelKey;
 
@@ -789,7 +792,7 @@ export default function SettingsPage() {
             while `lnbOpen` (no `?tab=` on arrival) — and the pane with a back row after a section is picked (it used to be a hamburger over a 208px column squeezed next to the pane) */}
         <div className={`focus-inset shrink-0 overflow-y-auto border-ds-line lg:w-56 lg:border-r ${lnbOpen ? 'flex w-full flex-col' : 'hidden'} lg:flex lg:flex-col`} data-testid="settings-nav-column">
           <h1 className="px-4 pb-2 pt-4 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
-          <SettingsNav groups={navGroups} activeTab={activeTab} integrationsHref={flatHref('/settings/integrations')} />
+          <SettingsNav groups={navGroups} activeTab={activeTab} integrationsHref={flatHref('/settings/integrations')} hrefFor={settingsLinkHref} />
         </div>
 
         {/* Right content */}
