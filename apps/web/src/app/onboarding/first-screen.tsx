@@ -1,28 +1,23 @@
 'use client';
 
-// story 4715 (UX-1 · plan yuna/4715-plan-1016.md §2): the onboarding's one screen after the organization — in place of the fork
-// («에이전트를 어디서 돌릴까요?») and the «데스크톱 앱 받기» screen. On a Mac: the app is the way, [Mac 앱 받기] is the one primary, and a
-// small link leads to the web way (an agent already running somewhere else — the key and settings screens live only there). Not a Mac:
-// «지금은 Mac 앱만 있어요» first, the web way as the one button, no download card (it cannot install there). Phone control is not offered
-// here — it is asked when a phone is paired (PO).
+// story 4715 (UX-1 · plan yuna/4715-plan-1016.md §2) · story 5036 (C6): the onboarding's step ② — «에이전트 연결» — after the project step ①.
+// A browser (a Mac or not) gets the three ways side by side (connect-branches.tsx — no fold, the same weight). The places that are not a browser keep
+// their own screen as they were: the phone app (its pairing screen — a phone pairs with a Mac and starts its agents from it), a workspace SERVER HOST (the
+// one command for the computer that will run the agent) and the Mac app itself (it goes to its own setup page, which makes the project itself) — none of those
+// comes through the project step. Phone control is not offered here — it is asked when a phone is paired (PO).
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
-import { cardVariants } from '@/components/ds/card';
-import { cn } from '@/lib/utils';
-import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
+import { notAMac } from '@/components/desktop/desktop-download-card';
 import { ServerHostAgentCard } from '@/components/desktop/server-host-agent-card';
-import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
 import { Chip } from '@/components/ds/chip';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
-import { appSetupLink } from '@/lib/auth/native-return-app';
 import { desktopApp } from '@/lib/desktop-app';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { AdvancedConnect } from './advanced-connect';
+import { ConnectBranches } from './connect-branches';
 import { markLeaving } from '@/lib/phone-start';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { emitOnboardingEvent } from './onboarding-telemetry';
 
 const noSubscribe = () => () => undefined;
 
@@ -39,7 +34,11 @@ interface FirstScreenProps {
   serverHostPending?: boolean;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
-  /** story 4766: the landing the web way's fold ends on (the person's «오늘»/«대시보드» word follows this) */
+  /** story 5036: the project step ① made — the browser's key way puts its agent on it (null: a place that has no project step — the phone app · a server host · the Mac app) */
+  projectId?: string | null;
+  /** story 5036: the key way's agent connected (its first call was seen) — the page moves on to step ③ */
+  onConnected?: (agentId: string) => void;
+  /** story 4766: the landing the page's way out ends on (the person's «오늘»/«대시보드» word follows this) */
   todayV3Enabled?: boolean;
   /** story 4780: the Today address the server resolved from the nav flags (never a literal here) — the phone's pairing screen [Close] goes there: this screen is not worth coming back to once the phone is paired, Today's checklist goes on */
   todayHref?: string;
@@ -47,12 +46,12 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, serverHostOrigin = null, serverHostPending = false, orgName, projectId = null, onConnected, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
+  const tLine = useTranslations('onboarding.line');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
-  const [downloaded, setDownloaded] = useState(false); // story 4891: the download was pressed — the «after the download» step is shown from here
   const [advancedBusy, setAdvancedBusy] = useState(false); // story 4766: while the web way's press is making the agent and its key, the other way out waits
   const finish = () => { if (advancedBusy) return; if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
@@ -112,46 +111,16 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
 
   return (
     <div className="space-y-4" data-testid={elsewhere ? 'onboarding-first-not-mac' : 'onboarding-first-mac'}>
-      <div className="text-center">
-        <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{elsewhere ? t('notMacTitle') : t('macTitle')}</h1>
-        <p className="mt-2 break-keep text-sm text-muted-foreground">{elsewhere ? t('notMacLead') : t('macLead')}</p>
+      <div className="space-y-2 text-center">
+        <h1 id="onboarding-step-title" className="break-keep text-ds-title font-semibold text-ds-ink">{tLine('connectTitle')}</h1>
+        <p className="break-keep text-ds-body text-ds-ink-2">{tLine('connectLead')}</p>
       </div>
 
-      {elsewhere ? (
-        <>
-          {/* story 4766: not a Mac → the web way is the only way, so it is not folded: the one press that makes the agent and the line to paste */}
-          <section className="space-y-2" data-testid="onboarding-first-advanced">
-            <p className="break-keep text-sm font-medium text-foreground">{t('advancedTitleNotMac')}</p>
-            <AdvancedConnect orgId={orgId} onFinish={finish} todayV3Enabled={todayV3Enabled} onWorking={setAdvancedBusy} />
-          </section>
-          {/* story 4654: a phone gets the phone app's store links (on a Mac nothing is drawn) */}
-          <PhoneAppCard />
-          {orgLine}
-        </>
-      ) : (
-        <>
-          {/* the h1 already says what this is — the card's own «데스크톱 앱» title is not drawn twice (Yuna A-2) */}
-          {/* the 3983 funnel's «went the desktop way» signal — sent where the fork's app choice used to send it, now on the download press */}
-          <DesktopDownloadCard hideTitle ctaLabel={t('macCta')} onCta={() => { setDownloaded(true); emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' }); }} />
-          {/* story 4891 (PO 11-10): «after the download, open the app…» is the next step — it is said once the download is pressed, not before (the screen before the press is read for «what do I press») */}
-          {downloaded ? <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p> : null}
-          {/* story 4766 (AC1): the app that is already installed is opened, not downloaded again (the link is the host's own scheme — dev or prod) */}
-          <p className="flex flex-wrap items-center gap-x-1.5 break-keep text-xs text-muted-foreground" data-testid="onboarding-first-open-note">
-            {t('openAppLead')}
-            <a href={appSetupLink(null)} className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-primary underline-offset-2 hover:underline" data-testid="onboarding-first-open-app">{t('openApp')}</a>
-          </p>
-          {/* story 4671 (U3): a Mac draws the phone app's QR too — the person at the Mac is who needs it; nothing to get → nothing drawn */}
-          <PhoneAppRow />
-          {orgLine}
-          {/* story 4766 (AC1): the app is the one way offered; the web way is folded under «고급» (a closed disclosure, no longer a link to a three-screen wizard) */}
-          <details className={cn(cardVariants(), 'overflow-hidden')} data-testid="onboarding-first-advanced">
-            <summary className="flex min-h-11 cursor-pointer items-center break-keep px-3 text-xs text-muted-foreground" data-testid="onboarding-first-advanced-summary">{t('advancedSummary')}</summary>
-            <div className="px-3 pb-3 pt-1">
-              <AdvancedConnect orgId={orgId} onFinish={finish} todayV3Enabled={todayV3Enabled} onWorking={setAdvancedBusy} />
-            </div>
-          </details>
-        </>
-      )}
+      {/* story 5036: the three ways side by side, the same weight (no «고급» fold). `projectId` is the project step ①'s — a browser always has it by here */}
+      {projectId ? (
+        <ConnectBranches orgId={orgId} projectId={projectId} isMac={!elsewhere} onConnected={(agentId) => onConnected?.(agentId)} onWorking={setAdvancedBusy} />
+      ) : null}
+      {orgLine}
 
       {/* a text line out, not a button in the hierarchy (Yuna A-2 · PO ②) */}
       <p className="flex flex-wrap items-center gap-x-1.5 break-keep border-t border-border pt-2 text-xs text-muted-foreground" data-testid="onboarding-first-later">

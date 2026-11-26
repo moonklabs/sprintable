@@ -172,16 +172,16 @@ describe('computeStaleTokenAllowlist — TOKEN_ALLOWLIST 죽은 항목 탐지', 
 // 역할 약어 패밀리(AU는 "자동화" 병기)로 TOKEN_ALLOWLIST 이관, SP/WIP는 "포인트"/"진행
 // 한도"로 한국어 전환돼 값 자체가 사라졌다(baseline도 TOKEN_ALLOWLIST도 어디에도 안 남음).
 describe('실측 — story #3922가 PO·QA·PM·AU·SP·WIP를 判定대로 정리했다', () => {
-  it('PO·QA·PM·AU는 TOKEN_ALLOWLIST 안(역할 약어 패밀리)', () => {
-    for (const t of ['PO', 'QA', 'PM', 'AU']) {
+  it('PO·QA·AU는 TOKEN_ALLOWLIST 안(역할 약어 패밀리)', () => { // story 5036: PM는 값이 사라져(옛 온보딩의 역할 목록 «PM») 아래 «남아있지 않다» 묶음으로 옮김 — 죽은 토큰은 목록에서 뺀다는 가드 규칙과 같은 선례(SP·WIP)
+    for (const t of ['PO', 'QA', 'AU']) {
       expect(TOKEN_ALLOWLIST.has(t)).toBe(true);
     }
   });
 
-  it('SP·WIP는 한국어로 전환돼 ko.json 어디에도 남아있지 않다(baseline도 TOKEN_ALLOWLIST도 불필요)', () => {
+  it('SP·WIP·PM는 ko.json 어디에도 남아있지 않다(baseline도 TOKEN_ALLOWLIST도 불필요 — SP·WIP는 한국어로 전환, PM는 story 5036이 옛 온보딩 역할 목록을 걷어 사라짐)', () => {
     const koJson = loadKoJson(KO_JSON_PATH);
     const refs = scanKoValues(koJson);
-    for (const t of ['SP', 'WIP']) {
+    for (const t of ['SP', 'WIP', 'PM']) {
       expect(TOKEN_ALLOWLIST.has(t)).toBe(false);
       expect(refs.some((r) => r.token === t)).toBe(false);
     }

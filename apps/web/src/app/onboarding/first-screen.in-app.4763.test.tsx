@@ -54,7 +54,7 @@ afterEach(() => {
 const render = async (strict = false) => {
   const screen = (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <FirstScreen orgId="org-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} />
+      <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} />
     </NextIntlClientProvider>
   );
   await act(async () => { root.render(strict ? <StrictMode>{screen}</StrictMode> : screen); });
@@ -68,8 +68,8 @@ describe('FirstScreen inside the Mac app (story 4763 AC14)', () => {
     expect(replace).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith('/desktop/setup');
     expect(has('onboarding-first-mac')).toBe(false);
-    expect(has('onboarding-first-open-app')).toBe(false);
-    expect(container.textContent).not.toContain('에이전트는 내 Mac에서 돌아가요');
+    expect(has('connect-branch-new-open')).toBe(false);
+    expect(container.textContent).not.toContain('에이전트를 연결해요');
   });
 
   it('the destination carries the project like every other flat entrance (`?p=`) — and only that', async () => {
@@ -94,12 +94,12 @@ describe('FirstScreen inside the Mac app (story 4763 AC14)', () => {
     expect(replace.mock.calls[0]).toEqual(['/desktop/setup']);
   });
 
-  it('in a browser (no bridge) nothing changes: the download card, the open-the-app link, the finish link; no navigation', async () => {
+  it('in a browser (no bridge) nothing changes: the three ways (with the open-the-app links), the download card, the finish link; no navigation', async () => {
     await render();
     expect(replace).not.toHaveBeenCalled();
     expect(has('onboarding-first-mac')).toBe(true);
-    expect(has('onboarding-first-open-app')).toBe(true);
-    expect(container.textContent).toContain('에이전트는 내 Mac에서 돌아가요'); // the Mac title of the card (the card's own button text waits for the download info, which the stubbed fetch does not give)
+    expect(has('connect-branch-new-open')).toBe(true);
+    expect(container.textContent).toContain('에이전트를 연결해요'); // the step's title (the download card's own button text waits for the download info, which the stubbed fetch does not give)
     expect(has('onboarding-first-finish')).toBe(true);
   });
 

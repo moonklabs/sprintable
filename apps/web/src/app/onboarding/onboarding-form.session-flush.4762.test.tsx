@@ -48,6 +48,9 @@ beforeEach(() => {
     if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) };
     if (url === '/api/auth/refresh') return refreshAnswer();
     if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1', slug: 'workspace-3f9a1c2b' } }) };
+    // story 5036: the organization has a project — the rotations this file counts are the arrival's and the organization's, whichever screen follows
+    if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1' }] }) };
+    if (url === '/api/current-project') return { ok: true, json: async () => ({}) };
     return { ok: false, status: 404, json: async () => ({}) };
   });
 });
@@ -115,7 +118,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
 
   it('on the leaving path the rotation comes BEFORE the page change (a navigation first would drop the message together with the page)', () => {
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
-    const at = form.indexOf('const finishToHome = async () => {');
+    const at = form.indexOf('const finishToHome = async (');
     expect(at).toBeGreaterThan(-1);
     const body = form.slice(at, form.indexOf('\n  };', at));
     expect(body.indexOf('await refreshSessionAfterChange()')).toBeGreaterThan(-1);
@@ -155,7 +158,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     });
     await flush();
     expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was tried
-    expect([koMessages.onboarding.first.macTitle, koMessages.onboarding.first.notMacTitle]).toContain(container.querySelector('h1')?.textContent); // and the form went on to the one screen
+    expect(container.querySelector('h1')?.textContent).toBe(koMessages.onboarding.line.connectTitle); // and the form went on to the connect step
     expect(container.textContent).not.toContain(koMessages.onboarding.networkError); // not into the «network error» state
     // the one `session-changed` is the first (answered) rotation's; the failing one tells the shell nothing
     expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(1);

@@ -83,7 +83,7 @@ const API: Record<string, Answer> = {
   'GET /api/invites/mine': { invites: [] }, // the backend's one shape (MyInvitesResponse · no envelope)
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
-  'GET /api/projects': { data: [] },
+  'GET /api/projects': { data: [{ id: 'proj-1' }] }, // story 5036: the organization has a project — the first screen is step ② (the three ways); the project step is walked with `{ data: [] }`
   'POST /api/projects': { data: { id: 'proj-1' } },
   'POST /api/current-project': {},
   // story 4766: the folded web way's one press — the agent and its key, the hosted address, the panel's first answer
@@ -148,10 +148,11 @@ async function fitsViewport(page: Page, width: number) {
 const card = (page: Page) => page.getByTestId('onboarding-card');
 const stepOf = (page: Page) => page.getByTestId('onboarding-step-of');
 
-/** story 4715: arrival makes the organization on its own (no name field) and lands on the one first screen */
-async function toFirst(page: Page, mac = true) {
-  await expect(page.locator('h1')).toHaveText(mac ? '에이전트는 내 Mac에서 돌아가요' : '지금은 Mac 앱만 있어요');
+/** story 4715 · 5036: arrival makes the organization on its own (no name field); the organization has a project, so the first screen is step ② — «에이전트를 연결해요», the three ways (a Mac or not changes what the two app ways say, not the title) */
+async function toFirst(page: Page, _mac = true) {
+  await expect(page.locator('h1')).toHaveText('에이전트를 연결해요');
 }
+const stepper = (page: Page) => page.getByTestId('onboarding-stepper');
 
 for (const width of [1440, 390]) {
   for (const theme of ['L', 'D'] as const) {
@@ -160,8 +161,11 @@ for (const width of [1440, 390]) {
     test(`first screen · a Mac · ${tag}`, async ({ page }) => {
       await open(page, { width, theme });
       await toFirst(page);
-      await expect(stepOf(page)).toHaveCount(0); // no progress strip on the first screen
-      // the one primary control is the card's [Mac 앱 받기]; the web way is a CLOSED fold (story 4766) and an installed app is opened, not downloaded
+      await expect(stepOf(page)).toHaveCount(0); // the old «1 / 3» text strip is gone
+      // story 5036: the straight line's strip — ① done · ② now · ③ next
+      await expect(stepper(page).locator('[data-slot="ds-stepper-step"]')).toHaveCount(3);
+      await expect(stepper(page).locator('[data-slot="ds-stepper-step"]').nth(1)).toHaveAttribute('data-state', 'current');
+      // the one primary control is the card's [Mac 앱 받기]; the web way is a card of its own (no fold — story 5036) and an installed app is opened ON THE WAY chosen, not downloaded
       const primaries = page.locator('a[class~="bg-ds-action"], button[class~="bg-ds-action"]');
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
@@ -170,56 +174,48 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('onboarding-first-org')).toHaveText('시작 조직 송윤재의 조직');
       await expect(page.getByTestId('onboarding-first-org').locator('[data-slot="ds-chip"]')).toHaveText('송윤재의 조직');
       await expect(page.locator('input[type="radio"]')).toHaveCount(0);
-      await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', false);
-      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급');
-      await expect(page.getByTestId('onboarding-first-open-app')).toHaveText('앱 열기');
+      await expect(page.locator('details')).toHaveCount(0);
+      await expect(page.getByTestId('connect-branch-new-open')).toHaveText('앱에서 새로 만들기');
+      await expect(page.getByTestId('connect-branch-move-open')).toHaveText('앱에서 옮기기');
+      await expect(page.getByTestId('connect-branch-key')).toBeVisible();
       await fitsViewport(page, width);
-      await shot(page, card(page), `4715-1-first-mac-${tag}`);
+      await shot(page, card(page), `5036-1-connect-mac-${tag}`);
     });
 
     test(`first screen · not a Mac · ${tag}`, async ({ page }) => {
       await open(page, { width, theme, mac: false });
       await toFirst(page, false);
-      await expect(page.getByTestId('advanced-make')).toBeVisible(); // not a Mac: the web way is the only way, so it stands unfolded
+      await expect(page.getByTestId('advanced-make')).toBeVisible(); // not a Mac: the key way is the one that goes on
+      await expect(page.getByTestId('connect-branch-new-reason')).toHaveText('지금은 Mac 앱만 있어요. Mac에서 이 계정으로 로그인하면 쓸 수 있어요.'); // story 5036: a reason in words, not a gap
       await expect(page.getByTestId('desktop-download-card')).toHaveCount(0);
       await fitsViewport(page, width);
-      await shot(page, card(page), `4715-2-first-not-mac-${tag}`);
+      await shot(page, card(page), `5036-2-connect-not-mac-${tag}`);
     });
 
-    // story 4766 AC3: the fold is found and the one press stands on the FIRST screen — nothing to scroll to. The ruler is a real laptop window:
-    // a 900 px screen shows about 800 px under the menu bar · tabs · address bar (the measured walk had the press at 1054 px of 900)
-    test(`first screen · a Mac · the web way opened · ${tag}`, async ({ page }) => {
+    // story 4766 AC3 (the press stands on the FIRST screen of a laptop window — a 900 px screen shows about 800 px under the menu bar · tabs · address bar) was set when the web way was the ONE
+    // thing on the screen under a fold. Story 5036 puts the three ways side by side and the key way last (PO order), so its press is no longer promised to be inside the first 800 px:
+    // the spec measures where it is (printed, and attached to the test) instead of asserting a number that the new structure does not promise.
+    test(`connect step · a Mac · the key way stands on the screen · ${tag}`, async ({ page }, testInfo) => {
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
       await open(page, { width, theme, height: width >= 1000 ? 800 : undefined });
       await toFirst(page);
-      const summary = page.getByTestId('onboarding-first-advanced-summary');
-      await summary.click();
-      await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', true);
       await expect(page.getByTestId('advanced-prereq')).toBeVisible();
       await expect(page.getByTestId('advanced-install-claude')).toBeVisible();
       await expect(page.getByTestId('advanced-make')).toBeVisible();
-      if (width >= 1000) {
-        const viewportHeight = await page.evaluate(() => window.innerHeight);
-        expect(viewportHeight).toBe(800);
-        for (const id of ['onboarding-first-advanced-summary', 'advanced-make']) {
-          const box = await page.getByTestId(id).boundingBox();
-          // story 5048 T0 ①: the kit density (16/24 text · 40 px controls) makes this screen ~126 px longer (628 → 754 px on a Mac, 846 on the CI font) — the one-screen fit is re-established in ②d (Two-Pass), until then the press may sit at most 100 px under the fold
-          expect(box!.y + box!.height, `${id} is inside the first screen (no scroll)`).toBeLessThanOrEqual(viewportHeight + 100);
-        }
-        // the notes sit UNDER the press, not between the fold and the press
-        const make = await page.getByTestId('advanced-make').boundingBox();
-        const prereq = await page.getByTestId('advanced-prereq').boundingBox();
-        expect(prereq!.y, 'the «먼저 필요해요» block is below the press').toBeGreaterThan(make!.y + make!.height - 1);
-      }
+      const make = await page.getByTestId('advanced-make').boundingBox();
+      const prereq = await page.getByTestId('advanced-prereq').boundingBox();
+      // the notes sit UNDER the press, not between the way's sentence and the press
+      expect(prereq!.y, 'the «먼저 필요해요» block is below the press').toBeGreaterThan(make!.y + make!.height - 1);
+      const pageY = await page.getByTestId('advanced-make').evaluate((e) => e.getBoundingClientRect().bottom + window.scrollY);
+      testInfo.annotations.push({ type: 'press-bottom-from-page-top', description: `${Math.round(pageY)} px (viewport ${page.viewportSize()!.height})` });
       await fitsViewport(page, width);
-      await shot(page, card(page), `4766-1-first-mac-fold-open-${tag}`);
+      await shot(page, card(page), `5036-3-connect-key-way-${tag}`);
     });
 
     test(`the one press · the line, where the key stays, [키 폐기] · ${tag}`, async ({ page }) => {
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
       await open(page, { width, theme });
       await toFirst(page);
-      await page.getByTestId('onboarding-first-advanced-summary').click();
       await page.getByTestId('advanced-make').click();
       await expect(page.getByTestId('advanced-line')).toContainText('claude mcp add --transport http --scope local sprintable-mcp https://dev-mcp.sprintable.ai/mcp');
       await expect(page.getByTestId('advanced-line')).toContainText('sk_live_••••ABCD');
@@ -276,35 +272,24 @@ async function expectFirstClean(page: Page, label: string) {
 test.describe('the first screen on a touch phone (390 × 844) — story 4891', () => {
   test.use({ hasTouch: true, isMobile: true });
 
-  test('a Mac: [Mac 앱 받기] · «앱 열기» · «고급» · the way out are all ≥44 (the fold closed)', async ({ page }) => {
+  test('a Mac: [Mac 앱 받기] · the two «앱에서 …» links · the key way\'s press · the way out are all ≥44 (story 5036: nothing is folded)', async ({ page }) => {
     await open(page, { width: 390, theme: 'L' });
     await toFirst(page);
     // the card's download button comes with the manifest answer (an async read) — measure after it is drawn (a slower runner counted the page before it, 2 presses)
     await expect(page.getByTestId('desktop-download-button')).toBeVisible();
-    const m = await expectFirstClean(page, 'mac · closed');
-    expect(m.presses).toBeGreaterThanOrEqual(4);
-    for (const id of ['desktop-download-button', 'onboarding-first-open-app', 'onboarding-first-advanced-summary', 'onboarding-first-finish']) {
+    const m = await expectFirstClean(page, 'mac · the three ways');
+    expect(m.presses).toBeGreaterThanOrEqual(7);
+    for (const id of ['desktop-download-button', 'connect-branch-new-open', 'connect-branch-move-open', 'advanced-make', 'onboarding-first-finish']) {
       const box = await page.getByTestId(id).boundingBox();
       expect(box!.height, `${id} is a 44 press`).toBeGreaterThanOrEqual(43.5);
     }
   });
 
-  test('a Mac: the «고급» fold opened — the program lines\' [복사] ×2 and the one press are ≥44', async ({ page }) => {
-    await open(page, { width: 390, theme: 'L' });
-    await toFirst(page);
-    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
-    await page.getByTestId('onboarding-first-advanced-summary').tap();
-    await page.getByTestId('advanced-make').waitFor();
-    const m = await expectFirstClean(page, 'mac · fold open');
-    expect(m.presses).toBeGreaterThanOrEqual(7); // + [복사] ×2 + the one press inside the fold
-  });
-
-  test('a Mac: after the one press — runtime chips · [복사] · [키 폐기] · [첫 지시] · the way out are ≥44', async ({ page }) => {
+  test('a Mac: after the one press — runtime chips · [복사] · [키 폐기] · the way out are ≥44 ([첫 지시] is step ③\'s now)', async ({ page }) => {
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
     await open(page, { width: 390, theme: 'L' });
     await toFirst(page);
     await expect(page.getByTestId('desktop-download-button')).toBeVisible();
-    await page.getByTestId('onboarding-first-advanced-summary').tap();
     await page.getByTestId('advanced-make').tap();
     await expect(page.getByTestId('advanced-line')).toBeVisible();
     const m = await expectFirstClean(page, 'mac · the line shown');

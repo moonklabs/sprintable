@@ -41,7 +41,7 @@ const render = async (props: { serverHostOrigin?: string | null; serverHostPendi
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <FirstScreen orgId="org-1" chatsHref="/chats" orgName="우리 팀" onFinish={onFinish} {...rest} />
+        <FirstScreen orgId="org-1" projectId="proj-1" chatsHref="/chats" orgName="우리 팀" onFinish={onFinish} {...rest} />
       </NextIntlClientProvider>,
     );
   });
@@ -105,7 +105,7 @@ describe('[SID:5024 AC4] FirstScreen on a workspace server host', () => {
     await render({ serverHostOrigin: null });
     expect(has('onboarding-first-mac')).toBe(true);
     expect(has('onboarding-first-server-host')).toBe(false);
-    expect(container.textContent).toContain('에이전트는 내 Mac에서 돌아가요');
+    expect(container.textContent).toContain('에이전트를 연결해요');
     await render({});
     expect(has('onboarding-first-mac')).toBe(true);
     expect(has('onboarding-first-server-host')).toBe(false);

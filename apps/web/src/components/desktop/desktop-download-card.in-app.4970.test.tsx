@@ -151,7 +151,7 @@ describe('story 4970 — one component decides', () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const src = path.resolve(__dirname, '../..');
-    const files = ['app/(authenticated)/desktop/page.tsx', 'app/(authenticated)/settings/page.tsx', 'app/onboarding/connect-step.tsx', 'app/onboarding/first-screen.tsx', 'components/nav/new-project-mac-block.tsx', 'app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx'];
+    const files = ['app/(authenticated)/desktop/page.tsx', 'app/(authenticated)/settings/page.tsx', 'app/onboarding/connect-step.tsx', 'app/onboarding/connect-branches.tsx', 'components/nav/new-project-mac-block.tsx', 'app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx'];
     for (const f of files) expect(fs.readFileSync(path.join(src, f), 'utf8'), f).toMatch(/import \{[^}]*DesktopDownloadCard[^}]*\} from '@\/components\/desktop\/desktop-download-card'/);
   });
 });

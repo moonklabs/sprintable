@@ -35,6 +35,9 @@ beforeEach(() => {
     if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null, display_name: '문클랩스' } }) };
     if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) }; // the backend's one shape (no envelope)
     if (url === '/api/auth/refresh') return { ok: true, json: async () => ({ data: { ok: true } }) };
+    // story 5036: the organization has a project (the list is an array) — so the screen after the arrival is step ② (not the project form)
+    if (url === '/api/projects') return { ok: true, json: async () => ({ data: [{ id: 'proj-1' }] }) };
+    if (url === '/api/current-project') return { ok: true, json: async () => ({}) };
     if (url === '/api/organizations') {
       return { ok: true, json: async () => ({ data: { id: 'org-korean-1', slug: 'workspace-3f9a1c2b' } }) };
     }
@@ -71,7 +74,7 @@ describe.each([
     const orgCall = vi.mocked(fetch).mock.calls.find((c) => c[0] === '/api/organizations');
     expect(orgCall).not.toBeUndefined();
     expect(JSON.parse((orgCall![1] as RequestInit).body as string)).toEqual({ name: made }); // reverted → has `slug`
-    // and on to the one screen (4715) — its Mac or not-Mac face follows the test runner's user agent
-    expect([messages.onboarding.first.macTitle, messages.onboarding.first.notMacTitle]).toContain(container.querySelector('h1')?.textContent);
+    // and on to the connect step (4715 · 5036) — the three ways; a Mac or not changes only what the two app ways say, not the title
+    expect(container.querySelector('h1')?.textContent).toBe(messages.onboarding.line.connectTitle);
   });
 });

@@ -3,13 +3,15 @@
 // story 4715 (UX-1 · plan yuna/4715-plan-1016.md §4) — the web first screens: no organization-name step (the organization is made with a
 // made name), no fork (one screen: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»), pending invites first (no organization
 // made while invites exist or cannot be read), the web way behind a link with project → agent → connect at 1/3 · 2/3 · 3/3.
+// story 5036 (C6): what the arrival ends on is now the straight line's step ② — «에이전트를 연결해요», the three ways side by side (the organization here has a project); the «고급» fold and the three-screen
+// wizard are gone (their structure is pinned in onboarding-line.5036.test.tsx). The arrival logic below — no name step, no fork, invites first, an unreadable answer is not «none» — is unchanged.
 // Each test names the line that, reverted, turns it red.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { OnboardingForm, onboardingProgress } from './onboarding-form';
+import { OnboardingForm, onboardingLineIndex } from './onboarding-form';
 import koMessages from '../../../messages/ko.json';
 import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 
@@ -60,7 +62,8 @@ function stubFetch(o: Opts = {}) {
     }
     if (url.endsWith('/api/organizations')) return ok({ data: { id: 'org-1' } });
     if (url.endsWith('/api/auth/refresh')) return ok({ data: { ok: true } }); // the route's real success answer (story 4763: an answer without `data` is not a renewal)
-    if (url.endsWith('/api/projects')) return ok({ data: { id: 'proj-1' } });
+    // story 5036: the organization has a project (the list is an array), so the screen after the arrival is step ② — the project step is pinned in onboarding-line.5036.test.tsx
+    if (url.endsWith('/api/projects')) return ok({ data: init?.method === 'POST' ? { id: 'proj-1' } : [{ id: 'proj-1' }] });
     if (url.endsWith('/api/current-project')) return ok({});
     if (url.endsWith('/desktop/downloads/macos.json')) return { ok: true, json: async () => MANIFEST, headers: new Headers({ 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' }) };
     return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
@@ -87,6 +90,7 @@ async function click(el: Element | null | undefined) {
 }
 
 const first = koMessages.onboarding.first;
+const line = koMessages.onboarding.line;
 const byTestId = (id: string) => container.querySelector(`[data-testid=${id}]`);
 const h1 = () => container.querySelector('h1')?.textContent?.trim();
 const orgPosts = () => calls.filter((c) => c.url.endsWith('/api/organizations'));
@@ -114,7 +118,7 @@ describe('[SID:4715] AC1 — no organization-name step: the organization is made
     // reverted (the name field back) → no POST on arrival and a text input on screen
     expect(orgPosts()[0]!.body).toEqual({ name: '김지우의 조직' });
     expect(container.querySelector('input[type="text"]')).toBeNull();
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
     // story 4891: which organization the app attaches to stays — as «시작 조직 [이름]» (one chip), not a sentence
     expect(byTestId('onboarding-first-org')?.textContent).toBe(`${first.orgLead} 김지우의 조직`);
     expect(byTestId('onboarding-first-org')?.querySelector('[data-slot="ds-chip"], span')?.textContent).toBe('김지우의 조직');
@@ -130,7 +134,7 @@ describe('[SID:4715] AC1 — no organization-name step: the organization is made
     await mount();
     expect(orgPosts()).toHaveLength(0);
     expect(calls.some((c) => c.url.endsWith('/api/invites/mine'))).toBe(false);
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
     expect(byTestId('onboarding-first-org')).toBeNull();
   });
 });
@@ -145,7 +149,7 @@ describe('[SID:4715] AC6 — pending invites first: no organization is made whil
     expect(byTestId('setup-invited')?.textContent).toContain('문클랩스');
     await click(byTestId('setup-invited-own-org'));
     expect(orgPosts()).toHaveLength(1);
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
   });
 
   it('T2b the invites cannot be read → no POST · «초대를 확인하지 못했어요 …» + [다시 확인] · a good answer then makes it', async () => {
@@ -157,7 +161,7 @@ describe('[SID:4715] AC6 — pending invites first: no organization is made whil
     opts.invites = [];
     await click(byTestId('onboarding-invite-check-again'));
     expect(orgPosts()).toHaveLength(1);
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
   });
 });
 
@@ -186,7 +190,7 @@ describe('[SID:4715] 카디르 QA — an unreadable /api/auth/me is not «no org
     failMe = false;
     await click(byTestId('onboarding-account-check-again'));
     expect(orgPosts()).toHaveLength(1);
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
   });
 });
 
@@ -206,7 +210,7 @@ describe('[SID:4715] self-QA — the choice «초대와 따로 내 조직 만들
     await click(byTestId('onboarding-account-check-again'));
     expect(orgPosts()).toHaveLength(1);
     expect(calls.filter((c) => c.url.endsWith('/api/invites/mine')).length).toBe(inviteReadsBefore);
-    expect(h1()).toBe(first.macTitle);
+    expect(h1()).toBe(line.connectTitle);
   });
 });
 
@@ -236,39 +240,38 @@ describe('[SID:4715] self-QA — the phone app card stays on the first screen (s
 });
 
 describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the download screen', () => {
-  it('T3 a Mac: title · lead · [Mac 앱 받기] is the one primary · the web way is a small link · no fork radios', async () => {
+  it('T3 a Mac: title · lead · [Mac 앱 받기] is the one primary · the web way is a card of its own (no fold) · no fork radios', async () => {
     await mount();
-    expect(container.textContent).toContain(first.macLead);
+    expect(container.textContent).toContain(line.connectLead);
     expect(byTestId('desktop-download-button')?.textContent).toBe(first.macCta);
     const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.split(/\s+/).includes('bg-ds-action')); // the ds primary variant (was the old ui `bg-primary`)
     expect(primaries.map((el) => el.getAttribute('data-testid'))).toEqual(['desktop-download-button']);
-    // story 4766 (AC1): the web way is a FOLDED «고급» (a closed disclosure), not a link into a three-screen wizard; an app that is already
-    // installed is opened, not downloaded again
-    const fold = byTestId('onboarding-first-advanced') as HTMLDetailsElement | null;
-    expect(fold?.tagName).toBe('DETAILS');
-    expect(fold?.open).toBe(false);
-    expect(byTestId('onboarding-first-advanced-summary')?.textContent).toBe(first.advancedSummary);
-    expect(byTestId('onboarding-first-open-app')?.getAttribute('href')).toMatch(/^ai\.sprintable(\.dev)?:\/desktop\/setup$/);
+    // story 5036 (PO 11-26): the web way is NOT folded any more — it is a card of its own beside the two app ways, the same weight; an app that is already installed is opened ON THE WAY chosen, not downloaded again
+    expect(container.querySelector('details')).toBeNull();
+    expect(byTestId('connect-branch-key')?.querySelector('[data-testid="advanced-make"]')).not.toBeNull();
+    expect(byTestId('connect-branch-new-open')?.getAttribute('href')).toMatch(/^ai\.sprintable(\.dev)?:\/desktop\/setup$/);
     expect(byTestId('onboarding-first-connect')).toBeNull(); // the link into the wizard is gone
     expect(container.querySelector('input[type="radio"]')).toBeNull(); // reverted (the fork back) → radios
     // story 4891: the way out names its landing — this form is mounted with the Today flag off (it lands on «대화»), so it is the dashboard word (first-screen.finish-label.4891.test.tsx pins both flag states)
     expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.dashboardCta);
   });
 
-  it('T4 not a Mac: «지금은 Mac 앱만 있어요» first · the web way is the button · no download card', async () => {
+  it('T4 not a Mac: the two app ways say «지금은 Mac 앱만 있어요 …» in words · the key way is the press · no download card', async () => {
     setUserAgent(PHONE_UA);
     await mount();
-    expect(h1()).toBe(first.notMacTitle);
-    expect(container.textContent).toContain(first.notMacLead);
-    // story 4766: the web way is the only way here, so it is not folded — the one press stands on the screen
-    expect(byTestId('onboarding-first-advanced')?.tagName).toBe('SECTION');
+    expect(h1()).toBe(line.connectTitle);
+    // a reason in plain text under each app way (a button that is just gone would say nothing) — story 5036
+    expect(byTestId('connect-branch-new-reason')?.textContent).toBe(line.notMacReason);
+    expect(byTestId('connect-branch-move-reason')?.textContent).toBe(line.notMacReason);
+    // story 4766: the web way is the only way here — the one press stands on the screen
+    expect(byTestId('connect-branch-key')).not.toBeNull();
     expect(byTestId('advanced-make')).not.toBeNull();
     expect(byTestId('desktop-download-card')).toBeNull();
   });
 
-  it('T5 the folded web way holds the ONE press and the prerequisites (story 4766) — opening it needs no other screen', async () => {
+  it('T5 the key way holds the ONE press and the prerequisites (story 4766) — on the screen, no fold, no other screen', async () => {
     await mount();
-    expect(h1()).toBe(first.macTitle); // still the one screen (no «1 / 3» wizard)
+    expect(h1()).toBe(line.connectTitle); // still the one screen (no «1 / 3» text wizard — the line's strip is the ds Stepper, story 5036)
     expect(byTestId('onboarding-step-of')).toBeNull();
     expect(byTestId('advanced-make')?.textContent).toContain(koMessages.onboarding.advanced.make);
     expect(byTestId('advanced-prereq')).not.toBeNull();
@@ -285,14 +288,14 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
   });
 });
 
-describe('onboardingProgress — only the web way\'s three steps', () => {
-  it('arrive · invited · first: none; project 1/3 · agent 2/3 · connect 3/3', () => {
-    expect(onboardingProgress('arrive')).toBeNull();
-    expect(onboardingProgress('invited')).toBeNull();
-    expect(onboardingProgress('first')).toBeNull();
-    expect(onboardingProgress('project')).toEqual({ fraction: 1 / 3, label: { current: 1, total: 3 } });
-    expect(onboardingProgress('agent')).toEqual({ fraction: 2 / 3, label: { current: 2, total: 3 } });
-    expect(onboardingProgress('connect')).toEqual({ fraction: 1, label: { current: 3, total: 3 } });
+describe('onboardingLineIndex — only the straight line\'s three steps have a place on the strip (story 5036)', () => {
+  it('arrive · invited · deleted: none; project 0 · connect 1 · chat 2', () => {
+    expect(onboardingLineIndex('arrive')).toBeNull();
+    expect(onboardingLineIndex('invited')).toBeNull();
+    expect(onboardingLineIndex('deleted')).toBeNull();
+    expect(onboardingLineIndex('project')).toBe(0);
+    expect(onboardingLineIndex('connect')).toBe(1);
+    expect(onboardingLineIndex('chat')).toBe(2);
   });
 });
 

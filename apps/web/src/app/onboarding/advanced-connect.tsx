@@ -1,29 +1,28 @@
 'use client';
 
-// story 4766 (AC1–AC4): the web way, folded under «고급» on the first screen — for a person who already runs Claude Code or Codex on this
-// computer and does not want the app. One press makes the project, the agent and its key and copies the ONE line to paste in a terminal
-// (it registers the hosted server and opens the agent with the first message — see lib/onboarding/connect-command.ts). The connection
-// panel (4761) then turns «connected» by itself when the agent makes its first tool call. Four steps in all: open this fold · press ·
-// paste · allow the tool in the agent.
+// story 4766 (AC1–AC4) · story 5036 (C6 · branch 3 of step ②): the web way — for a person who already runs Claude Code or Codex on this
+// computer and does not want the app. One press makes the agent and its key — on the project step ① made (5036: never a project of its
+// own with a made name) — and copies the ONE line to paste in a terminal (it registers the hosted server and opens the agent with the first
+// message — see lib/onboarding/connect-command.ts). The connection panel (4761) then turns «connected» by itself when the agent makes its first
+// tool call, and tells the page (`onConnected`): step ③ — the first conversation — is the page's, shared by all three branches (it used to
+// be two buttons at the foot of this panel). Three steps here: press · paste · allow the tool in the agent.
 //
 // What the screen says about the key (Kadir's lens · PO): the line holds it, so shell history · clipboard · the agent's settings file keep
 // it — said by name, with [키 폐기] in the same place. It is shown masked, once; the clipboard is the only place it is copied from.
 // What the web does NOT do (4765's line · PO): it never runs anything on the computer and does not guess what is installed there — it names
 // the two programs it needs, gives the install commands (the same constants the app's setup screen uses) and says the app checks them.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, KeyRound, Loader2, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cardVariants } from '@/components/ds/card';
 import { cn } from '@/lib/utils';
-import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
+import { fetchWithAuth } from '@/lib/db/client';
 import { copyPromisedText, copyTextSafely } from '@/lib/clipboard';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
-import { withProjectParam } from '@/hooks/use-flat-href';
-import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { buildConnectLine, CODEX_KEY_ENV, isPlainKey, maskKey, mcpUrlFromArtifact, type ConnectRuntime } from '@/lib/onboarding/connect-command';
 import { INSTALL, RUNTIME_LABEL } from '@/components/desktop/desktop-setup';
 import { emitOnboardingEvent } from './onboarding-telemetry';
@@ -31,10 +30,9 @@ import { VerifyRail, useVerificationRail } from './verify-rail';
 import { MANUAL_CONNECT_RUNTIME_IDS } from '@/lib/desktop-runtimes';
 
 type Phase = 'idle' | 'working' | 'ready' | 'failed';
-type Failure = 'network' | 'project' | 'agent' | 'hosted' | 'key';
+type Failure = 'network' | 'agent' | 'hosted' | 'key';
 
 interface Made {
-  projectId: string;
   agentId: string;
   /** the key as the server gave it — only in memory, only to build the line that is copied */
   key: string;
@@ -43,15 +41,16 @@ interface Made {
 
 interface AdvancedConnectProps {
   orgId: string | null;
-  /** the landing the fold ends on (the person's own «오늘»/«대시보드» word is the caller's) */
-  onFinish: () => void;
-  todayV3Enabled?: boolean;
-  /** true while the press is making things — the screen's other way out (오늘로 가기) waits, or an agent and key could be made with nothing left to revoke them */
+  /** story 5036: the project step ① made (or the organization already had) — the agent is put on THIS project; nothing here makes a project */
+  projectId: string;
+  /** story 5036: the first call of the agent's key was seen (the connection panel turned «연결 확인 완료») — once per agent; step ③ is the page's */
+  onConnected?: (agentId: string) => void;
+  /** true while the press is making things — the screen's other way out (the page's «대화로 가기») waits, or an agent and key could be made with nothing left to revoke them */
   onWorking?: (working: boolean) => void;
 }
 
 /** what a press has made so far: a retry after a late failure resumes from here instead of making a second agent */
-interface Draft { projectId?: string; agentId?: string; key?: string }
+interface Draft { agentId?: string; key?: string }
 
 const NEW_KEY_DAYS = 90; // the same default the agent's key manager offers
 /** where Claude Code keeps the key `claude mcp add` is given (measured: ~/.claude.json, mode 0600, plain text) — passed into the sentence, not written in it */
@@ -59,7 +58,7 @@ const CLAUDE_SETTINGS_FILE = '~/.claude.json';
 /** the option Claude Code's first-run folder question is answered with — its own on-screen word, passed in rather than written into the sentence */
 const CLAUDE_TRUST_YES = 'Yes';
 
-export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWorking }: AdvancedConnectProps) {
+export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: AdvancedConnectProps) {
   const t = useTranslations('onboarding.advanced');
   const tOnb = useTranslations('onboarding');
   const [phase, setPhase] = useState<Phase>('idle');
@@ -74,7 +73,6 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
   const [revoked, setRevoked] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [revokeFailed, setRevokeFailed] = useState(false);
-  const [startingInstruction, setStartingInstruction] = useState(false);
   const [installCopied, setInstallCopied] = useState<ConnectRuntime | null>(null);
   const draft = useRef<Draft>({});
 
@@ -99,27 +97,6 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
   }, [lineFor]);
 
   const fail = (f: Failure) => { setFailure(f); setPhase('failed'); };
-
-  /** the organization's first project: the one that is there (the oldest — the list is the signed-in organization's own), or one made with a
-   *  made name (never asked for). A list that could not be read is a failure — never «there is none», or a project is made twice. */
-  const ensureProject = async (): Promise<string | null> => {
-    const listed = await fetchWithAuth('/api/projects');
-    if (!listed.ok) return null;
-    const body = (await listed.json().catch(() => null)) as { data?: { id: string; created_at?: string }[] } | null;
-    if (!body || !Array.isArray(body.data)) return null;
-    // by the instant (offsets differ), a missing or unreadable time last
-    const at = (c?: string) => { const n = c ? Date.parse(c) : NaN; return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY; };
-    const oldest = [...body.data].sort((a, b) => at(a.created_at) - at(b.created_at))[0];
-    if (oldest?.id) return oldest.id;
-    const res = await fetchWithAuth('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ org_id: orgId, name: t('defaultProject'), description: null }),
-    });
-    if (!res.ok) return null;
-    const json = (await res.json().catch(() => null)) as { data?: { id: string } } | null;
-    return json?.data?.id ?? null;
-  };
 
   /** a key for an agent that already exists (the press made the agent but did not get the key · or the first key was revoked) */
   const issueKey = async (agentId: string): Promise<string | null> => {
@@ -154,16 +131,11 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
     const clipboard = copyPromisedText(linePromise);
     try {
       const d = draft.current;
-      d.projectId ??= (await ensureProject()) ?? undefined;
-      if (!d.projectId) { rejectLine(new Error('project')); fail('project'); return; }
-      await fetchWithAuth('/api/current-project', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: d.projectId }),
-      }).catch(() => null);
       if (!d.agentId) {
         const agentRes = await fetchWithAuth('/api/team-members', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org_id: orgId, project_id: d.projectId, type: 'agent', name: t('defaultAgent'), role: 'developer' }),
+          body: JSON.stringify({ org_id: orgId, project_id: projectId, type: 'agent', name: t('defaultAgent'), role: 'developer' }),
         });
         if (!agentRes.ok) { rejectLine(new Error('agent')); fail('agent'); return; }
         const agentJson = (await agentRes.json().catch(() => null)) as { data?: { id: string; api_key?: string } } | null;
@@ -176,7 +148,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
       if (!d.key) { rejectLine(new Error('key')); fail('key'); return; }
       const mcpUrl = await hostedAddress(d.agentId);
       if (!mcpUrl) { rejectLine(new Error('hosted')); fail('hosted'); return; }
-      const next: Made = { projectId: d.projectId, agentId: d.agentId, key: d.key, mcpUrl };
+      const next: Made = { agentId: d.agentId, key: d.key, mcpUrl };
       resolveLine(lineFor(next, runtime, false));
       setMade(next);
       setRevoked(false);
@@ -250,20 +222,14 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
     configCopiedDone: copied || phase === 'ready',
   });
 
-  const firstInstruction = async () => {
-    if (!made || startingInstruction) return;
-    setStartingInstruction(true);
-    try {
-      const convId = await createFirstInstructionConversation(made.projectId, made.agentId);
-      if (!convId) { onFinish(); return; }
-      await refreshSessionAfterChange().catch(() => null); // story 4776 — one rotation at a time for the page, minted after the conversation exists
-      window.location.href = withProjectParam(`/chats/${convId}`, made.projectId);
-    } catch {
-      onFinish();
-    } finally {
-      setStartingInstruction(false);
-    }
-  };
+  // story 5036: the page is told ONCE per agent that it connected (the panel's «연결 확인 완료»); a re-keyed agent is the same agent, so it is not told twice
+  const toldConnected = useRef<string | null>(null);
+  useEffect(() => {
+    // a key that was revoked (or a panel not ready) cannot connect: a «verified» answer that was already in flight when [키 폐기] was pressed arrives late and must not advance the page (codex 5036)
+    if (!made || phase !== 'ready' || revoked || !rail.verified || toldConnected.current === made.agentId) return;
+    toldConnected.current = made.agentId;
+    onConnected?.(made.agentId);
+  }, [made, phase, revoked, rail.verified, onConnected]);
 
   const copyInstall = async (rt: ConnectRuntime) => {
     const result = await copyTextSafely(INSTALL[rt]);
@@ -272,7 +238,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
 
   const shownLine = made ? lineFor(made, runtime, true) : null; // drawn only inside the `made && !revoked` block below
   const failureText: Record<Failure, string> = {
-    network: t('failure.network'), project: t('failure.project'), agent: t('failure.agent'), key: t('failure.key'), hosted: t('failure.hosted'),
+    network: t('failure.network'), agent: t('failure.agent'), key: t('failure.key'), hosted: t('failure.hosted'),
   };
   const keyLine = made
     ? (runtime === 'claude' ? t('keyLineClaude', { key: maskKey(made.key), file: CLAUDE_SETTINGS_FILE }) : t('keyLineCodex', { key: maskKey(made.key), env: CODEX_KEY_ENV }))
@@ -421,14 +387,6 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
                   : tOnb('verifiedBanner')}
               </div>
             ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button variant="secondary" onClick={onFinish} data-testid="advanced-finish">
-                {todayV3Enabled ? tOnb('desktopFinishToToday') : tOnb('dashboardCta')}
-              </Button>
-              <Button variant="primary" onClick={() => void firstInstruction()} disabled={startingInstruction} data-testid="advanced-first-instruction">
-                {tOnb('firstInstructionCta')}
-              </Button>
-            </div>
           </div>
         </div>
       ) : null}

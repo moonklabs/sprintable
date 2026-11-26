@@ -4,6 +4,7 @@
 // «데스크톱 앱 받기». A reload there (or a re-opened `/onboarding?signup=1`) drew «조직 만들기» again, and the name typed into it ended in
 // «업그레이드가 필요해요 · 무료 플랜은 조직을 1개까지». The screens now ask `/api/auth/me` and, when the account already has an
 // organization, skip the organization step: the usual onboarding goes on to the fork, the desktop's one screen goes on to the setup page.
+// story 5036: «goes on» is now the straight line — the organization's projects are read: none → step ① (the first project), one → step ② (connect an agent).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -25,7 +26,7 @@ let root: Root;
 let urls: string[];
 let hrefSet: string[];
 
-function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 'status' } = {}) {
+function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 'status'; projects?: { id: string }[] } = {}) {
   urls = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -44,8 +45,9 @@ function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 
     if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
     if (url === '/api/organizations') return ok({ id: 'org-new' });
     if (url === '/api/auth/refresh') return ok({});
-    if (url === '/api/projects') return init?.method === 'POST' ? ok({ id: 'proj-1' }) : ok([]); // the list (GET) is an array — none yet
+    if (url === '/api/projects') return init?.method === 'POST' ? ok({ id: 'proj-1' }) : ok(opts.projects ?? []); // the list (GET) is an array — none yet unless the test gives some
     if (url === '/api/current-project') return ok({});
+    if (url === '/api/team-members' && init?.method === 'POST') return ok({ id: 'agent-1' }); // the key way's press (its later calls are not this test's matter)
     // the one screen's download manifest — not this test's matter
     if (url.startsWith('/desktop/')) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) } as Response;
     throw new Error('unexpected fetch: ' + url);
@@ -85,26 +87,29 @@ describe('[SID:4668] existingOrgIdFromMe — a live membership, not just the JWT
 });
 
 describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
-  it('an account with an organization lands on the one screen — no organization made, no invites read (story 4715)', async () => {
-    stubFetch(WITH_ORG);
+  it('an account with an organization (and a project) lands on step ② — no organization made, no invites read (story 4715 · 5036)', async () => {
+    stubFetch(WITH_ORG, { projects: [{ id: 'proj-1' }] });
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
-    expect(container.querySelector('[data-testid="onboarding-first-advanced"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="connect-branches"]')).not.toBeNull();
     expect(container.querySelector('input[type="text"]')).toBeNull(); // no organization name field
     expect(urls).not.toContain('/api/organizations'); // reverted (the form ignores the membership) → fails
     expect(urls).not.toContain('/api/invites/mine');
   });
 
-  it('the one screen carries that organization on: the web way\'s press makes its project in THIS organization (story 4766)', async () => {
-    stubFetch(WITH_ORG);
+  it('the screen carries that organization on: the key way\'s press makes its agent in THIS organization, on the project the organization already has (story 4766 · 5036)', async () => {
+    stubFetch(WITH_ORG, { projects: [{ id: 'proj-1' }] });
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
     const calls = vi.mocked(fetch).mock.calls;
     await act(async () => { (container.querySelector('[data-testid="advanced-make"]') as HTMLButtonElement).click(); });
     await settle();
-    const projectCall = calls.find((c) => c[0] === '/api/projects' && (c[1] as RequestInit | undefined)?.method === 'POST');
-    // the id came from the membership, not from a form the person filled
-    expect(JSON.parse(String((projectCall![1] as RequestInit).body)).org_id).toBe('org-1');
+    const agentCall = calls.find((c) => c[0] === '/api/team-members' && (c[1] as RequestInit | undefined)?.method === 'POST');
+    // the id came from the membership, not from a form the person filled — and no project is made by the press (5036)
+    const body = JSON.parse(String((agentCall![1] as RequestInit).body));
+    expect(body.org_id).toBe('org-1');
+    expect(body.project_id).toBe('proj-1');
+    expect(calls.some((c) => c[0] === '/api/projects' && (c[1] as RequestInit | undefined)?.method === 'POST')).toBe(false);
   });
 
   it('a stale claim (the organization was deleted from the settings page) or no organization → the invites are read, then one is made', async () => {
@@ -114,7 +119,8 @@ describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
       await settle();
       expect(urls).toContain('/api/invites/mine');
       expect(urls.filter((u) => u === '/api/organizations')).toHaveLength(1);
-      expect(container.querySelector('input[type="text"]')).toBeNull();
+      // the organization was made, so step ① (the first project) is next: its name is the ONE text field — never an organization name field
+      expect([...container.querySelectorAll('input[type="text"]')].map((i) => i.getAttribute('data-testid'))).toEqual(['onboarding-project-name']);
       await act(async () => { root.render(provider(<div />)); });
     }
   });
