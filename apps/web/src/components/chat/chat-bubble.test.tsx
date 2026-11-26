@@ -699,6 +699,31 @@ describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
   });
 });
 
+describe('ChatBubble — story 5034 (C4) 서버가 꽂은 카드(card = {kind, ref})', () => {
+  const CARD_ID = '0d6e953f-6d43-42c1-a87c-b023544497db';
+  const cardMessage = (card: unknown, extra: Partial<ChatMessage> = {}): ChatMessage => ({ ...baseMessage, content: '카드 아래 글', card, ...extra } as ChatMessage);
+
+  it('normalizeToMessage는 card를 있는 그대로 지킨다(모르는 종류여도 떨구지 않는다) — 없으면 null', () => {
+    const raw = { id: 'm1', conversation_id: 'c1', sender_id: 's1', content: 'x', created_at: '2026-11-26T00:00:00Z' };
+    expect(normalizeToMessage({ ...raw, card: { kind: 'story', ref: CARD_ID } }).card).toEqual({ kind: 'story', ref: CARD_ID });
+    expect(normalizeToMessage({ ...raw, card: { kind: 'future-kind', ref: 'x' } }).card).toEqual({ kind: 'future-kind', ref: 'x' });
+    expect(normalizeToMessage(raw).card).toBeNull();
+  });
+  it('카드가 있는 메시지는 카탈로그가 그린다 — 모르는 종류는 «이 앱 버전에서는 볼 수 없어요» 카드(구멍 아님)', async () => {
+    await act(async () => { root.render(wrap(<ChatBubble message={cardMessage({ kind: 'timeline', ref: CARD_ID })} isMine={false} />)); });
+    expect(container.querySelector('[data-testid="chat-card-unknown"]')).not.toBeNull();
+  });
+  it('approval_target이 있으면 그 결재 카드가 먼저다 — 카드 한 갈래는 기존 순서를 밀지 않는다', async () => {
+    const m = cardMessage({ kind: 'timeline', ref: CARD_ID }, { approval_target: { work_item_type: 'doc', work_item_id: CARD_ID, gate_id: CARD_ID, actions: ['approve'] } });
+    await act(async () => { root.render(wrap(<ChatBubble message={m} isMine={false} />)); });
+    expect(container.querySelector('[data-testid="chat-card-unknown"]')).toBeNull();
+  });
+  it('지워진 메시지는 카드를 그리지 않는다', async () => {
+    await act(async () => { root.render(wrap(<ChatBubble message={cardMessage({ kind: 'timeline', ref: CARD_ID }, { deleted_at: '2026-11-26T00:00:00Z' })} isMine={false} />)); });
+    expect(container.querySelector('[data-testid="chat-card-unknown"]')).toBeNull();
+  });
+});
+
 describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', () => {
   const GATE_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
   const approvalMessage: ChatMessage = {

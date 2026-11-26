@@ -43,6 +43,31 @@ const A: ReadingPanelTarget = { kind: 'entity', entityType: 'story', entityId: '
 const B: ReadingPanelTarget = { kind: 'entity', entityType: 'doc', entityId: 'd-1', title: '문서 B', status: null, href: null };
 const C: ReadingPanelTarget = { kind: 'entity', entityType: 'epic', entityId: 'e-1', title: '목표 C', status: null, href: null };
 
+describe('ReadingPanel 창 전체 단 — story 5034 (C4)', () => {
+  it('핸들러를 안 주면 «창 전체» 단추가 없다(그런 모드가 없는 호스트) — 옛 호출부 그대로', async () => {
+    await act(async () => { root.render(wrap(<ReadingPanel stack={[A]} onNavigateTo={() => {}} onClose={() => {}} />)); });
+    expect(container.querySelector('[aria-label="창 전체로 보기"]')).toBeNull();
+    expect(container.querySelector('.overflow-x-auto')).toBeNull(); // and no empty bar over the content either
+  });
+  it('주면 «창 전체로 보기»(눌림 아님)가 뜨고, 누르면 핸들러가 불린다 · 넓힌 뒤엔 «옆 패널로 줄이기»(눌림)로 바뀐다', async () => {
+    const toggle = vi.fn();
+    await act(async () => { root.render(wrap(<ReadingPanel stack={[A]} onNavigateTo={() => {}} onClose={() => {}} expanded={false} onToggleExpanded={toggle} />)); });
+    const btn = container.querySelector('[aria-label="창 전체로 보기"]') as HTMLButtonElement;
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { btn.click(); });
+    expect(toggle).toHaveBeenCalledTimes(1);
+    await act(async () => { root.render(wrap(<ReadingPanel stack={[A]} onNavigateTo={() => {}} onClose={() => {}} expanded onToggleExpanded={toggle} />)); });
+    const back = container.querySelector('[aria-label="옆 패널로 줄이기"]') as HTMLButtonElement;
+    expect(back.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[aria-label="창 전체로 보기"]')).toBeNull();
+  });
+  it('단추는 넓은 화면에만 보인다(폰은 패널이 이미 화면 전체) · 스택이 깊어도 «전체 닫기»는 그대로 있다', async () => {
+    await act(async () => { root.render(wrap(<ReadingPanel stack={[A, B]} onNavigateTo={() => {}} onClose={() => {}} onToggleExpanded={() => {}} />)); });
+    expect((container.querySelector('[aria-label="창 전체로 보기"]') as HTMLElement).className).toContain('max-lg:hidden');
+    expect(container.querySelector('[title="전체 닫기"]')).not.toBeNull();
+  });
+});
+
 describe('ReadingPanel 스택 — story #2888 R5', () => {
   it('스택 1개면 브레드크럼을 안 그린다', async () => {
     await act(async () => {

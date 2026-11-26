@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { ShowcaseFrame } from '@/components/ds/showcase/ds-showcase';
+import { CardStatesShowcase } from '@/components/chat/cards/card-states-showcase';
 
 const SHOWCASE_TODAY = '2026-11-11';
 
@@ -19,6 +20,7 @@ export default async function DesignSystemPage() {
       <h1 className="m-0 mb-1 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
       <p className="m-0 mb-4 text-ds-small text-ds-ink-3">{t('lead')}</p>
       <ShowcaseFrame today={SHOWCASE_TODAY} />
+      <CardStatesShowcase />
     </main>
   );
 }

@@ -38,6 +38,7 @@ import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
+import { ChatCard } from './cards/card-catalog';
 import { EVENT_CARD_SHELL, EventBlockCard, isMachineEventContent } from './event-block-card';
 import { EventTextFallback } from './event-text-fallback';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
@@ -508,6 +509,8 @@ export function ChatBubble({
   // 달리 sniffing(정규식 매칭) 없이 구조화 필드 존재만으로 판별 — BE가 이미 결정한 사실이라
   // FE가 다시 추측할 이유가 없다.
   const approvalTarget = !isDeleted ? message.approval_target ?? null : null;
+  // story 5034 (C4): a card the SERVER put on this message («kind + reference») — drawn by the catalogue, for the viewer
+  const chatCard = !isDeleted ? message.card ?? null : null; // (an approval_target outranks it in the chain below — one order, in one place)
   // story #2637 AC0-a — approval_target과 동일 규율(구조화 필드 존재만으로 판별).
   const eventTarget = !isDeleted ? message.event ?? null : null;
   // story #2637 AC2/PO 리뷰(head 80319636c ①) — block_template이 실제로 파싱 가능할 때만
@@ -526,7 +529,7 @@ export function ChatBubble({
   const isLiteral = !isCmd && message.content.startsWith('//');
   // story 4921 — an event message drawn as TEXT (its definition has no card template · the definitions could not be read · an old message with no `event` at all) shows the definition's name (or «이벤트»), the person's own
   // words and the other fields as a readable list — never the machine header line («[이벤트] preset.x») or raw key names, and the content is not dropped (PO 11-13 18:3xZ). Cards and ordinary messages are untouched.
-  const eventTextFallback = !eventBlockTemplate && !approvalTarget && !serverCommand && !isDeleted && isMachineEventContent(message.content);
+  const eventTextFallback = !eventBlockTemplate && !approvalTarget && !chatCard && !serverCommand && !isDeleted && isMachineEventContent(message.content);
   const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
   // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트
   // 말풍선 자리에서: 첨부가 있으면 말풍선을 생략하고 첨부만, 첨부가 없으면 «표시할 내용이 없는 메시지예요».
@@ -840,6 +843,8 @@ export function ChatBubble({
               eventDefinitionsByKey={eventDefinitionsByKey}
               gateByKey={gateByKey}
             />
+          ) : chatCard ? (
+            <ChatCard card={chatCard} />
           ) : eventTarget && eventBlockTemplate ? (
             <EventBlockCard
               template={eventBlockTemplate}
@@ -955,13 +960,13 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !chatCard && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* story #2638(P3=B1) — «승인 주시면»류 의도 문구를 말로만 쓰고 실제 기제(상신·완료
               전환·배정)를 안 거는 재발을 능동 제안으로 잡는다. ReferenceSuggestionRow와 동일
               게이트(isMine·비명령·비삭제) — 두 제안이 동시에 뜨는 것 자체는 막지 않는다(서로
               다른 축의 별개 제안이라 배타적일 이유가 없다). */}
-          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && (
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !chatCard && !(eventTarget && eventBlockTemplate) && (
             <IntentSuggestionCard
               messageId={message.id}
               content={message.content}
