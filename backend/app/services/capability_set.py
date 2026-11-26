@@ -195,6 +195,14 @@ async def _next_serial(db: AsyncSession, setup_id: uuid.UUID) -> int:
     )).scalar_one())
 
 
+async def _lock_fresh(db: AsyncSession, setup_id: uuid.UUID) -> DesktopSetup | None:
+    """The computer's row, LOCKED and RE-READ: the object a request carries was loaded earlier (its `members` · `confirmed_by` may be older than a change that has since committed — an agent moved off this computer);
+    the facts a set is computed from, and the serial it is given, come from the row as it is under the lock."""
+    return (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup_id).with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+
+
 async def build_envelope(db: AsyncSession, setup: DesktopSetup, caps: list[dict] | None = None) -> dict | None:
     """The signed set, as it goes down: `{v, kid, p, sig}` where `p` is base64url of the bytes that were signed (the verifier checks THOSE bytes, then parses them). None when the road is off."""
     current, _ = _load_keys()
@@ -202,7 +210,10 @@ async def build_envelope(db: AsyncSession, setup: DesktopSetup, caps: list[dict]
         return None
     # the computer's row is locked FIRST (a lock this transaction already holds is held again for nothing), and only then are the facts read and the serial taken — so a set's serial is in the order the changes COMMITTED:
     # a pull that read the facts before an unpair committed can never be handed a serial above the push that carries the unpair (codex: a stale set with a newer serial would bring a removed capability back)
-    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup.id).with_for_update())
+    fresh = await _lock_fresh(db, setup.id)
+    if fresh is None:
+        return None
+    setup = fresh
     if caps is None:
         caps = await compute_caps(db, setup)
     now = datetime.now(timezone.utc)
@@ -218,7 +229,10 @@ async def push_capability_set(db: AsyncSession, setup: DesktopSetup, *, force: b
     are one commit. False (and nothing written) when the road is off, the computer is cut off, remote control is off for the organization, or nothing changed."""
     if not enabled() or setup.revoked_at is not None or setup.exchanged_at is None or setup.org_id is None:
         return False
-    last = (await db.execute(select(DesktopSetup.capability_hash).where(DesktopSetup.id == setup.id).with_for_update())).scalar_one_or_none()
+    setup = await _lock_fresh(db, setup.id)  # (locked and re-read: the cut-off mark, the agents and the confirmer are the ones under the lock)
+    if setup is None or setup.revoked_at is not None:
+        return False
+    last = setup.capability_hash
     caps = await compute_caps(db, setup)
     h = caps_hash(caps)
     if not force and last == h:

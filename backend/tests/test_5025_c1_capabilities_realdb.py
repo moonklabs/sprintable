@@ -371,6 +371,27 @@ async def test_the_computers_row_is_locked_before_the_facts_are_read_so_serials_
         assert r.headers["cache-control"] == "no-store, private"  # one computer's set is never kept by a shared cache
         assert (await c.get(KEYS, headers=_tok(token))).headers["cache-control"] == "no-store, private"
 
+
+async def test_the_facts_are_read_again_under_the_lock_an_agent_moved_off_the_computer_since_the_object_was_loaded_is_not_named(world, key):
+    """codex round 2: the setup object a request carries may be older than a change that has since committed. The set is computed from the row as it is under the lock."""
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import capability_set
+
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m3")
+        phone, pid = await _phone(c)
+        await _pin(c, token, phone)
+        agents = [a["member_id"] for a in device["agents"]]
+        assert len(agents) >= 2
+        async with async_session_factory() as s:
+            stale = await s.get(DesktopSetup, setup_id)  # loaded now, with all its agents
+            moved = agents[0]
+            await _sql(f"UPDATE desktop_setups SET members = (SELECT jsonb_agg(m) FROM jsonb_array_elements(members) m WHERE m->>'member_id' <> '{moved}') WHERE id = '{setup_id}'")  # …and it moves off this computer
+            envelope = await capability_set.build_envelope(s, stale)
+            named = {e["agent_member_id"] for e in _verify(envelope, key[1])["caps"]}
+            assert moved not in named and named == set(agents[1:])
+
 # ── pull · push ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def test_a_pull_is_one_in_ten_seconds_per_computer_and_the_answer_says_to_wait_not_that_there_is_nothing(world, key):
