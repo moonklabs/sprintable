@@ -1,6 +1,6 @@
 import { PhonePairing } from '@/components/desktop/phone-pairing';
 import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
-import { isEmbeddedServer } from '@/lib/embedded-api-origin';
+import { isEmbeddedServer, isServerHost } from '@/lib/embedded-api-origin';
 import { PAIR_RETURN_PARAM, safeReturnPath } from '@/lib/pair-return';
 
 /**
@@ -10,7 +10,8 @@ import { PAIR_RETURN_PARAM, safeReturnPath } from '@/lib/pair-return';
  * story 4829 — in the app's own server (local mode) there is no middle server for a phone to pair through: one line of guidance instead of the pairing (and no read).
  */
 export default async function DesktopPairPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  if (isEmbeddedServer()) {
+  // story 5025 (found on the VM round): a workspace SERVER HOST is the app's own server too, but it IS the middle server a phone relays through — the same rule as /desktop/remote and /desktop/remote-on (5024 AC2). Only the app's own loopback server (no public address) is local mode.
+  if (isEmbeddedServer() && !isServerHost()) {
     return (
       <div className="mx-auto w-full max-w-2xl p-6">
         <PhoneRelayLocalNotice />
