@@ -978,6 +978,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const groups = groupByDate(messages, locale, displayTimezone);
   // [SID:4311 PR 3] 발신자 라벨 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 불러온 메시지 안에서만).
   // 내 메시지는 «나»로 서서 셈에서 뺀다(내 이름이 남의 줄에 꼬리를 만들지 않게).
+  // story 5032 (C2) — the sender's «→ @○○에게만 전달» line names agents by the room's participants
+  const deliveryNameOf = (memberId: string): string | undefined => participants?.find((p) => p.member_id === memberId)?.name?.trim() || undefined;
   const senderLabels = actorRowLabels(messages.filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
@@ -1153,6 +1155,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
                             senderLabel={senderLabels.get(msg.created_by)}
+                            deliveryNameOf={deliveryNameOf}
                             onOpenThread={openThread}
                             onOpenReadingPanel={openReadingPanel}
                             onDelete={handleDeleteMessage}
