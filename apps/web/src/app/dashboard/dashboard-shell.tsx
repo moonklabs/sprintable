@@ -35,6 +35,7 @@ import { useTeamPresence } from '@/components/presence/use-team-presence';
 import { useAgentAuthFailures } from '@/components/presence/use-agent-auth-failures';
 import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { useDepth1Shortcuts } from '@/hooks/use-depth1-shortcuts';
+import { useCommandPaletteShortcut } from '@/hooks/use-command-palette-shortcut';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
@@ -216,6 +217,7 @@ function ShellBody({
   const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const { setOpen: setPaletteOpen } = useCommandPalette();
   const { open: listColumnOpen, toggleSidebar } = useSidebar();
+  useCommandPaletteShortcut(); // story 5032 (PO 11-27) — ⌘K opens the palette (the binding used to be inside AppSidebar)
   useDepth1Shortcuts(); // story 5031 (C1 step 3) — ⌘1–⌘4 open the four places (the icon bar's titles name the keys)
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (

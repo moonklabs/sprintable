@@ -152,18 +152,7 @@ export function AppSidebar({
     }
   }, []);
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const isMod = event.metaKey || event.ctrlKey;
-      if (!isMod || event.key.toLowerCase() !== 'k') return;
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable) return;
-      event.preventDefault();
-      setPaletteOpen((prev) => !prev);
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setPaletteOpen]);
+  // story 5032 (PO 11-27): the ⌘K binding moved out of this component into the shell (hooks/use-command-palette-shortcut — mounted by dashboard-shell) so taking this column out of the shell cannot take ⌘K with it
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mux = useSseMultiplexerContext();

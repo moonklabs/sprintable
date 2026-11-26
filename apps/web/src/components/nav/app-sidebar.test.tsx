@@ -104,10 +104,10 @@ describe('⭐목록 칸 — 지금 있는 «자리»의 줄만(story 5031)', () 
     expect(rowIds()).not.toContain('org-members');
   });
 
-  it('설정: 설정이 맨 위 → 사람 · 역할 · 연결 · 콘텐츠 규칙 · 이벤트 (데스크톱 앱 항목은 그 화면이 켜진 곳에서만 마지막에)', async () => {
+  it('설정: 목록 칸엔 «설정» 한 줄뿐 — 사람 · 역할 · 연결 · 콘텐츠 규칙 · 이벤트는 설정 안 링크 줄로만(story 5032 · PO 11-27: 겹쳐 보여 뺌 · ⌘K는 그대로) · 데스크톱 앱 항목은 그 화면이 켜진 곳에서만 마지막에', async () => {
     pathnameRef.current = '/settings';
     await mount(OFF);
-    expect(rowIds()).toEqual(['settings', 'org-members', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'org-events', 'org-roles']);
+    expect(rowIds()).toEqual(['settings']); // reverted (the six sub-screens back as list rows) → they show beside the settings page's own link rows
     root.unmount();
     root = createRoot(container);
     await mount({ ...OFF, desktopDownloadEnabled: true });

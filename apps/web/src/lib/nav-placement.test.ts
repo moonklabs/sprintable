@@ -35,6 +35,12 @@ const paletteRoutes = new Set<string>(
 );
 const catalogRoutes = new Set(catalog.map(catalogRoute));
 
+// story 5032 (PO 11-27) — the six org screens the settings page links as its own rows (app/(authenticated)/settings/settings-nav.ts navIds); the shell's list column does not repeat them
+const SETTINGS_INSIDE: Array<[string, string]> = [
+  ['/organization/members', 'org-members-list'], ['/organization/roles', 'org-roles'], ['/organization/channels', 'org-channels'],
+  ['/organization/generation-connectors', 'org-generation-connectors'], ['/organization/events', 'org-events'], ['/organization/content-rules', 'org-content-rules'],
+];
+
 describe('⭐ ① 모든 화면이 한 줄씩(빠짐 0 · 남는 줄 0)', () => {
   it('디스크의 page.tsx 집합 = 표의 키 집합(87쪽)', () => {
     expect([...routes].sort()).toEqual(Object.keys(ROUTE_PLACEMENT).sort());
@@ -109,8 +115,10 @@ describe('⭐ ③ 줄이 말한 입구는 실제로 있다', () => {
     }
     // story 5035 (C5): the agents' «실행 기록» · «API 키» are in ⌘K and in the place's «전체 보기» strip, not rows of the list column
     const paletteOnly = new Set(['/loop-queue', '/organization/workforce/runs', '/organization/workforce/api-keys']);
+    // story 5032 (PO 11-27): the settings place's sub-screens are NOT list rows — the settings page draws them as its own link rows (they overlapped), so the table holds them in-page (from /settings) + ⌘K
+    const settingsInside = new Set(SETTINGS_INSIDE.map(([route]) => route));
     for (const route of catalogRoutes) {
-      if (paletteOnly.has(route) || route === ALL_SCREENS_ITEM.path) continue;
+      if (paletteOnly.has(route) || settingsInside.has(route) || route === ALL_SCREENS_ITEM.path) continue;
       expect(ROUTE_PLACEMENT[route]?.doors, `${route} 표에 depth1 없음`).toContain('depth1');
     }
   });
@@ -175,5 +183,15 @@ describe('⭐ ⑤ 폰 입구(story 5031 · C1 4단계) — 하단 탭 넷 = 같�
     expect(topBar).toContain('useCommandPaletteOpener');
     expect(topBar).toMatch(/contents lg:hidden/); // lg 미만(폰 · 태블릿)에서만 — lg 이상은 막대 아래 검색 · ⌘K가 같은 입구
     expect(ROUTE_PLACEMENT['/more']!.doors).toEqual(['cmdk']);
+  });
+});
+
+describe('⭐ 설정 하위 줄(story 5032 · PO 11-27) — 목록 칸에서 빠지고 설정 안 링크 줄로만, ⌘K는 그대로', () => {
+  it.each(SETTINGS_INSIDE)('%s — 표는 in-page(from /settings) + cmdk · depth1 없음 · 설정 화면이 이 줄을 정말 건다(%s)', (route, settingsItemId) => {
+    const row = ROUTE_PLACEMENT[route]!;
+    expect(row.doors).toEqual(['in-page', 'cmdk']); // reverted (depth1 back) → the list column draws it again
+    expect(row.from).toBe('/settings');
+    const src = readFileSync(join(__dirname, '..', 'app', '(authenticated)', 'settings', 'settings-nav.ts'), 'utf8');
+    expect(src, `${route}: 설정 화면(settings-nav.ts)이 이 줄을 안 건다 — 숨기면 빠짐이 생긴다`).toContain(`'${settingsItemId}'`);
   });
 });

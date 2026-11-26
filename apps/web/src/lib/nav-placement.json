@@ -395,50 +395,56 @@
   "/organization/channels": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "채널 연결 — 설정 «연결»"
+   "why": "채널 연결 — 설정 «연결» · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/organization/content-rules": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "콘텐츠 규칙 — 설정"
+   "why": "콘텐츠 규칙 — 설정 · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/organization/events": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "이벤트 — 설정"
+   "why": "이벤트 — 설정 · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/organization/generation-connectors": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "생성 커넥터 — 설정 «연결»"
+   "why": "생성 커넥터 — 설정 «연결» · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/organization/members": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "사람 명단 — 설정 «사람과 역할»(D1 시안 · PO 11-26)"
+   "why": "사람 명단 — 설정 «사람과 역할»(D1 시안 · PO 11-26) · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/organization/roles": {
    "slot": "settings",
    "doors": [
-    "depth1",
+    "in-page",
     "cmdk"
    ],
-   "why": "역할 — 설정 «사람과 역할»"
+   "why": "역할 — 설정 «사람과 역할» · story 5032 (PO 11-27): 목록 칸에서 빼고 설정 안 링크 줄로만(겹쳐 보임 · ⌘K는 그대로)",
+   "from": "/settings"
   },
   "/settings": {
    "slot": "settings",
