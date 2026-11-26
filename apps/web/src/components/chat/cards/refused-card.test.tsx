@@ -136,11 +136,17 @@ describe('what can go wrong around it never hides a card the viewer may see', ()
 });
 
 describe('which cards are refused cards', () => {
-  it('a sprint board is refused like any entity (its sprint is read) · a kind the tool cannot post (gate · deploy) with `refused_for` is the «cannot show» card · a bad `refused_for` is not a card', async () => {
+  it('a sprint board is refused like any entity (its sprint is read) · a refused card of any other kind (deploy · gate) is the plain «찾을 수 없어요» (never «update the app») · a bad `refused_for` is not a card', async () => {
     stub(); await show(refused({ kind: 'kanban' }));
     expect(container.textContent).toContain('11월 스프린트'); expect(container.querySelector('[data-testid="chat-card-refused"]')).not.toBeNull();
-    stub(); await show(refused({ kind: 'deploy' }));
-    expect(container.querySelector('[data-testid="chat-card-unknown"]')).not.toBeNull();
+    for (const kind of ['deploy', 'gate']) {
+      stub(); const before = calls.length; await show(refused({ kind }));
+      expect(container.querySelector('[data-testid="chat-card-unknown"]'), kind).toBeNull(); // NOT «update the app» — this build knows the kind
+      expect(container.textContent, kind).toBe('찾을 수 없어요'); expect((container.querySelector('[data-card-state]') as HTMLElement).dataset.cardState).toBe('hidden');
+      expect(calls.length, kind).toBe(before); // nothing is read for it
+      if (kind === 'deploy') expect(container.querySelector('[data-testid="chat-card-deploy"]'), 'drawn as the ordinary «not found» deploy card — the DOM never says «refused»').not.toBeNull();
+      expect(container.innerHTML, kind).not.toMatch(/refused/);
+    }
     for (const bad of ['nope', 7, [], `{${AGENT}}`]) { await show(refused({ refused_for: bad })); expect(container.querySelector('[data-testid="chat-card-unknown"]'), String(bad)).not.toBeNull(); }
   });
   it('parseCardRef: refused_for is read only as a plain UUID; absent or null is an ordinary card; the ordinary card is unchanged', () => {

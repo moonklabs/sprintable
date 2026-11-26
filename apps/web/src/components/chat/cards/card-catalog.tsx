@@ -2,7 +2,6 @@
 
 import type { ComponentType } from 'react';
 import { useTranslations } from 'next-intl';
-import { EmptyState } from '@/components/ds/empty-state';
 import { CardFrame } from './card-frame';
 import { DeployCard } from './deploy-card';
 import { EntityCard } from './entity-card';
@@ -39,7 +38,11 @@ export function UnknownCard() {
   const t = useTranslations('chats');
   return (
     <CardFrame state="ready" data-testid="chat-card-unknown">
-      <EmptyState size="inline" title={t('cardUnknownTitle')} description={t('cardUnknownHint')} />
+      {/* a supporting size, like «찾을 수 없어요»: a card this build cannot draw is not the loudest thing in a room */}
+      <div className="flex flex-col gap-0.5 px-3 py-3">
+        <p className="m-0 text-ds-small text-ds-ink-2">{t('cardUnknownTitle')}</p>
+        <p className="m-0 text-ds-small text-ds-ink-3">{t('cardUnknownHint')}</p>
+      </div>
     </CardFrame>
   );
 }
@@ -47,10 +50,12 @@ export function UnknownCard() {
 /** a message's `card` field (whatever the server sent) → its card. Anything that is not a known kind with a UUID reference is the unknown card. */
 export function ChatCard({ card }: { card: unknown }) {
   const ref = parseCardRef(card);
-  const Part = ref ? CARD_PARTS[ref.kind] : null;
-  if (!ref || !Part) return <UnknownCard />;
-  // a REFUSED card (the server posted it for an agent that may not see the object): drawn for each viewer by their own rights — only the kinds the show-card tool can post
-  if (ref.refusedFor) return isEntityCardKind(ref.kind) || ref.kind === 'kanban' ? <RefusedCard kind={ref.kind} refId={ref.ref} agentId={ref.refusedFor} /> : <UnknownCard />;
+  if (!ref) return <UnknownCard />;
+  // a REFUSED card (the server posted it for an agent that may not see the object): drawn for each viewer by their own rights. An object or a board is read for the viewer (RefusedCard); any OTHER kind
+  // (a project-membership card of an agent · a gate) is the plain «찾을 수 없어요», drawn EXACTLY as that kind's ordinary «not found» card (same frame and test id — the DOM must not tell «refused» from «missing») — whatever must stay hidden the server never sent, and «update the app» would be a wrong thing to say about a card this build knows
+  if (ref.refusedFor) return isEntityCardKind(ref.kind) || ref.kind === 'kanban' ? <RefusedCard kind={ref.kind} refId={ref.ref} agentId={ref.refusedFor} /> : <CardFrame state="hidden" data-testid={ref.kind === 'deploy' ? 'chat-card-deploy' : undefined} />;
+  const Part = CARD_PARTS[ref.kind];
+  if (!Part) return <UnknownCard />;
   return <Part kind={ref.kind} refId={ref.ref} />;
 }
 

@@ -7,7 +7,7 @@ import { Chip } from '@/components/ds/chip';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { CardFrame } from './card-frame';
-import { fetchDeploySummary, placeAgent, takeAgentOut, type DeploySummary, type DeployWriteResult } from './deploy-access';
+import { fetchDeploySummary, placeAgent, takeAgentOut, type DeploySummary, type DeployWrite, type DeployWriteResult } from './deploy-access';
 import { useCardRead } from './use-card-read';
 
 /**
@@ -21,21 +21,35 @@ export function DeployCard({ agentId }: { agentId: string }) {
   const projectId = ctx.projectId ?? null;
   const mayRead = canGrantProjectAccess(ctx.role);
   const { read, retry } = useCardRead(`deploy:${agentId}:${projectId ?? ''}:${mayRead}`, () => fetchDeploySummary(agentId, projectId, mayRead));
+  // what the last write made true (its own answer) — shown at once; a read that follows may still see the rows as they were (a press is a write the server has confirmed, not a guess)
+  const [appliedFor, setApplied] = useState<{ base: DeploySummary; next: Pick<DeploySummary, 'access' | 'recordId'> } | null>(null);
   if (read.state !== 'ready') return <CardFrame state={read.state} onRetry={retry} data-testid="chat-card-deploy" />;
-  return <DeployCardFace key={`${read.value.access}:${read.value.recordId ?? ''}`} summary={read.value} canAct={mayRead && projectId !== null} projectId={projectId} agentId={agentId} onChanged={retry} />;
+  // valid only for the very read it was made on: ANY newer read (another agent or project, a retry, coming back to this card) is fresher than a press and replaces it
+  const applied = appliedFor && appliedFor.base === read.value ? appliedFor.next : null;
+  const summary: DeploySummary = applied ? { ...read.value, ...applied } : read.value;
+  return (
+    <DeployCardFace
+      key={`${summary.access}:${summary.recordId ?? ''}`}
+      summary={summary}
+      canAct={mayRead && projectId !== null}
+      projectId={projectId}
+      agentId={agentId}
+      onChanged={(next) => { if (next) setApplied({ base: read.value, next }); else { setApplied(null); retry(); } }}
+    />
+  );
 }
 
 type Phase = { kind: 'idle' } | { kind: 'confirm' } | { kind: 'busy' } | { kind: 'error'; why: Exclude<DeployWriteResult, 'ok'> };
 
-export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged }: { summary: DeploySummary; canAct: boolean; projectId: string | null; agentId: string; onChanged: () => void }) {
+export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged }: { summary: DeploySummary; canAct: boolean; projectId: string | null; agentId: string; onChanged: (next: DeployWrite['applied']) => void }) {
   const t = useTranslations('chats');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const busy = phase.kind === 'busy';
-  const act = async (run: () => Promise<DeployWriteResult>) => {
+  const act = async (run: () => Promise<DeployWrite>) => {
     if (busy) return; // one press at a time
     setPhase({ kind: 'busy' });
     const r = await run();
-    if (r === 'ok') { setPhase({ kind: 'idle' }); onChanged(); } else setPhase({ kind: 'error', why: r });
+    if (r.result === 'ok') { setPhase({ kind: 'idle' }); onChanged(r.applied); } else setPhase({ kind: 'error', why: r.result });
   };
   const buttons = canAct && summary.access !== 'unknown' && projectId !== null;
   const errorText = phase.kind === 'error' ? (phase.why === 'forbidden' ? t('deployErrForbidden') : phase.why === 'invalid' ? t('deployErrInvalid') : t('deployErrFault')) : null;

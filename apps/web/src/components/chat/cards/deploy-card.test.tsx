@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (h: string) => h }));
 
 const AGENT = '0d6e953f-6d43-42c1-a87c-b023544497db';
-const REC = 'rec-1';
+const REC = '5c1f0a52-3b7e-4e0d-9a6f-1d2c3b4a5e6f';
 let container: HTMLDivElement;
 let root: Root;
 let log: { method: string; url: string; body?: unknown }[];
@@ -96,6 +96,67 @@ describe('what the card is a card of', () => {
     expect(frame()!.dataset.cardState).toBe('error');
     stub({ access: () => json(200, { data: 'nope' }) }); await show();
     expect(frame()!.dataset.cardState).toBe('error');
+  });
+});
+
+describe('a press shows its own result at once (PO, dev 11-26: the text stayed until a reload while the server had changed)', () => {
+  const ROWS_NOT = () => json(200, { data: [{ id: 'rec-other', member_id: 'someone' }] });
+  const ROWS_IN = () => json(200, { data: [{ id: REC, member_id: AGENT, permission: 'granted' }] });
+  it('«넣기» → «들어 있어요» + «빼기» even when every later read still sees the old rows (the write answered 201 with the record)', async () => {
+    stub({ access: ROWS_NOT }); await show();
+    await press('이 프로젝트에 넣기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요'); expect(container.textContent).not.toContain('들어 있지 않아요');
+    expect(btn('이 프로젝트에서 빼기')).toBeTruthy(); expect(btn('이 프로젝트에 넣기')).toBeUndefined();
+  });
+  it('«빼기» → «들어 있지 않아요» + «넣기» even when every later read still sees the old rows — and the next press uses the NEW state (a second «넣기» is a grant, not a stale take-back)', async () => {
+    stub({ access: ROWS_IN }); await show();
+    await press('이 프로젝트에서 빼기'); await press('빼기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); expect(container.textContent).not.toContain('이 프로젝트에 들어 있어요');
+    expect(btn('이 프로젝트에 넣기')).toBeTruthy(); expect(btn('이 프로젝트에서 빼기')).toBeUndefined();
+    await press('이 프로젝트에 넣기');
+    expect(writes().map((c) => c.method)).toEqual(['DELETE', 'POST']);
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
+  });
+  it('a record id that is not a UUID (blank · spaces) is not a usable record: nothing is claimed, the card READS again', async () => {
+    for (const id of [' ', '  x ', 'rec']) {
+      stub({ post: () => json(201, { data: { id } }) }); await show();
+      const before = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+      await press('이 프로젝트에 넣기');
+      expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length, id).toBe(before + 1);
+    }
+  });
+  it('the press result lives only as long as the read it was made on: coming back to the card (another project and back) shows what a FRESH read says', async () => {
+    const tree = () => <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatCard card={{ kind: 'deploy', ref: AGENT }} /></NextIntlClientProvider>; // (a NEW element each time — the same element would be skipped by React)
+    const tick = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+    stub({ access: ROWS_NOT }); // the server's rows stay «not in» for every read
+    await act(async () => { root.render(tree()); }); await tick();
+    await press('이 프로젝트에 넣기');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요'); // the press shows its own result …
+    ctx = { ...ctx, projectId: 'proj-2' }; await act(async () => { root.render(tree()); }); await tick();
+    ctx = { ...ctx, projectId: 'proj-1' }; await act(async () => { root.render(tree()); }); await tick();
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); // … and a later fresh read replaces it
+  });
+  it('the agent\'s row in the access list without a usable record id (blank · spaces) is a fault to retry — never «in this project» with a take-back that points nowhere', async () => {
+    for (const id of [' ', '', 'rec']) {
+      stub({ access: () => json(200, { data: [{ id, member_id: AGENT }] }) }); await show();
+      expect(frame()!.dataset.cardState, JSON.stringify(id)).toBe('error');
+      expect(btn('이 프로젝트에서 빼기'), JSON.stringify(id)).toBeUndefined();
+    }
+  });
+  it('only a 201 names the new record: a 200 / 202 that carries an id is not claimed — the card READS again', async () => {
+    for (const status of [200, 202]) {
+      stub({ post: () => json(status, { data: { id: REC } }) }); await show();
+      const before = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+      await press('이 프로젝트에 넣기');
+      expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length, String(status)).toBe(before + 1);
+    }
+  });
+  it('a write that answers without a usable record is not claimed: the card READS again and shows what the read says', async () => {
+    stub({ post: () => json(201, { data: {} }) }); await show();
+    const getsBefore = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+    await press('이 프로젝트에 넣기');
+    expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length).toBe(getsBefore + 1);
+    expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
   });
 });
 
