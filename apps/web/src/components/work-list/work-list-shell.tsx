@@ -303,7 +303,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
         {/* 데스크톱 aside — use-mobile.ts 기존 lg(1024) 문턱 재사용(새 breakpoint 0). */}
         {detailPanel && !isMobile ? (
           // [SID:4369] Esc 규칙의 층 뿌리 — 여러 줄 칸에서 빠져나온 초점이 여기로(tabIndex=-1).
-          <aside data-work-list-detail="" tabIndex={-1} className="w-[360px] shrink-0 border-l border-border outline-none">
+          <aside data-work-list-detail="" tabIndex={-1} className="w-90 shrink-0 border-l border-border outline-none">
             <DetailPanelSlot host={panelHost} />
           </aside>
         ) : null}

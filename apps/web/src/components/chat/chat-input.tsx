@@ -699,7 +699,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 ) : (
                   <Icon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                 )}
-                <span className="max-w-[160px] truncate text-xs text-foreground">{file.name}</span>
+                <span className="max-w-40 truncate text-xs text-foreground">{file.name}</span>
                 <button
                   type="button"
                   onClick={() => removePendingFile(i)}
@@ -1069,8 +1069,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
           // story 5031 (C1 2b): the same two-row layout applies in a NARROW CONTAINER (`@max-2xs` = under 288 px — the kit's 256 thread slot, whose slot wrapper is the `@container`): a 256 px slot left the field 87 px wide beside the buttons.
           // story 4906 (Yuna lap 3): on a phone the text is written FROM THE LEFT AT THE TOP of the box — the field takes the whole first row (`max-sm:order-first` + `flex-[1_1_100%]`) and the clip · ▾ · compass row sits under it with the send button at the right end; from `sm` up the one row is as before
-          className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none placeholder:truncate focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent max-sm:order-first max-sm:flex-[1_1_100%] @max-2xs:order-first @max-2xs:flex-[1_1_100%]"
-          style={{ minHeight: '36px', maxHeight: '160px' }}
+          className="min-h-9 max-h-40 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none placeholder:truncate focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent max-sm:order-first max-sm:flex-[1_1_100%] @max-2xs:order-first @max-2xs:flex-[1_1_100%]"
         />
 
         {/* Send — a words button at the right end of the box (the Enter key still sends; Shift+Enter breaks the line) */}

@@ -417,7 +417,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
           )}
         </div>
         {isWide && !forbidden && !loadError && (isXl || selected) ? (
-          <aside aria-label={t('detailHeading')} className="w-[360px] shrink-0 overflow-y-auto border-l border-ds-line p-4">
+          <aside aria-label={t('detailHeading')} className="w-90 shrink-0 overflow-y-auto border-l border-ds-line p-4">
             {selected ? (
               <AuditDetail ref={detailRef} id={DETAIL_ID} item={selected} actorLabel={selected.actor_id ? actorLabels.get(selected.actor_id) ?? null : null} claim={auditClaim(selected)} onClose={closeDetail} />
             ) : (

@@ -1313,7 +1313,7 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     expect(strips.map((e) => e.getAttribute('data-trust-column')).sort()).toEqual(['merge_ready', 'needs_input', 'verified']);
     for (const label of ['입력 필요', '검증·잔존', '머지 준비']) expect(container.textContent).toContain(label);
     // 비어 있는 settable 열은 띠가 아니다 — 칸(280px)으로 선다.
-    expect(container.querySelectorAll('[class*="w-\\[280px\\]"]').length).toBeGreaterThanOrEqual(4);
+    expect(container.querySelectorAll('[class~="w-70"]').length).toBeGreaterThanOrEqual(4);
   });
 
   it('⭐잠긴 열에 카드가 있으면 그 열만 칸으로 서고 나머지 빈 잠긴 열은 띠다', async () => {
@@ -1373,7 +1373,7 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     // 케이스가 거짓 green이었다). 컬럼별 헤더 라벨로 그 컬럼의 DOM 서브트리를 좁혀 카드가
     // «그 컬럼 안에» 있는지까지 스코프한다.
     function columnTextContaining(label: string): string {
-      const columns = [...container.querySelectorAll('[class*="w-\\[280px\\]"]')] as HTMLElement[];
+      const columns = [...container.querySelectorAll('[class~="w-70"]')] as HTMLElement[];
       const col = columns.find((el) => el.querySelector('h3')?.textContent?.trim().startsWith(label));
       return col?.textContent ?? '';
     }
@@ -1554,7 +1554,7 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     // 4908 — 카드 틀은 «글 줄 층»(bg-ds-surface-high)이다. 예전 ListStoryRow 자체 마크업에는 없던 층 토큰이라 진짜 atom 재사용의 증거. 옛 ProofCapsule 틀(proof-surface)과 280px 상한은 없다 — 카드가 w-full이라 목록 행이 폭을 다 쓴다.
     expect(container.innerHTML).toContain('bg-ds-surface-high');
     expect(container.innerHTML).not.toContain('proof-surface');
-    expect(container.innerHTML).not.toContain('max-w-[280px]');
+    expect(container.innerHTML).not.toContain('max-w-70');
   });
 });
 

@@ -4,13 +4,13 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { V3ShellLoading } from '@/components/nav/v3-shell-loading';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
-// 컨테이너: components/connect-rules-v3/connect-rules-v3-screen.tsx(`overflow-auto p-6` 안 `mx-auto max-w-[720px] space-y-8`).
+// 컨테이너: components/connect-rules-v3/connect-rules-v3-screen.tsx(`overflow-auto p-6` 안 `mx-auto max-w-180 space-y-8`).
 
 export default function Loading() {
   return (
     <V3ShellLoading flags={readNavV3FlagsFromEnv()} activeKey="connectRules" topbar>
       <div className="min-h-0 flex-1 overflow-auto p-6">
-        <PageSkeleton className="mx-auto max-w-[720px] space-y-8" />
+        <PageSkeleton className="mx-auto max-w-180 space-y-8" />
       </div>
     </V3ShellLoading>
   );

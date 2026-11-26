@@ -379,7 +379,7 @@ describe('목표 화면 — 넓은 화면: 상세 열', () => {
   it('필터로 보이는 목표가 0개면 상세 열 없이 목록이 전폭(빈 열을 세우지 않는다)', async () => {
     stubMedia(true); stubFetch({ goals: [] }); await mount();
     expect(q('[data-testid="goals-detail-column"]')).toBeNull();
-    expect(q('[data-testid="goals-list-column"]')!.className).not.toContain('lg:w-[420px]');
+    expect(q('[data-testid="goals-list-column"]')!.className).not.toContain('lg:w-105');
     expect(container.textContent).toContain('아직 목표가 없어요');
   });
 });

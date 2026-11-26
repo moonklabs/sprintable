@@ -98,7 +98,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
             {usageCount > 0 ? (
               <>
                 <span className="font-semibold text-ds-info">
-                  <Link2 className="mr-[3px] inline size-[12px] align-[-2px]" aria-hidden />
+                  <Link2 className="mr-[3px] inline size-3 align-[-2px]" aria-hidden />
                   <span className="sr-only">{t('colUsage')} </span>
                   {t('usageCount', { count: usageCount })}
                 </span>

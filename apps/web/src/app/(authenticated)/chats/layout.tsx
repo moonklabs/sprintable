@@ -128,7 +128,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         role={railMode === 'overlay' ? 'dialog' : undefined}
         aria-modal={railMode === 'overlay' ? true : undefined}
         aria-labelledby={railMode === 'overlay' ? 'chat-rail-heading' : undefined}
-        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[248px] xl:w-100 lg:shrink-0 lg:border-r ${railHiddenClass} 2xl:flex ${railOverlayClass}`}
+        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-62 xl:w-100 lg:shrink-0 lg:border-r ${railHiddenClass} 2xl:flex ${railOverlayClass}`}
       >
         {/* story 4887 (UI-4 screen PR) — the head «대화 N · + · ⋯» lives in the list itself now (it owns the count, the filters and the new-room modal state) */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

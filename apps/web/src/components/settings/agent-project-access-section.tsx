@@ -190,7 +190,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       disabled={toggling}
                       onClick={() => void handleToggle(project.id)}
                       className={cn(
-                        'min-w-[72px] shrink-0 gap-1',
+                        'min-w-18 shrink-0 gap-1',
                         // story 4912 (C2c): allowed = the «done» tint with ink text (never a coloured text on a tint); blocked = neutral
                         granted ? 'border-ds-done bg-ds-done-soft text-ds-ink hover:bg-ds-done-soft' : 'text-ds-ink-3',
                       )}

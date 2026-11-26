@@ -357,7 +357,7 @@ function ScrollShell({
           panelClassName="2xl:col-start-2 2xl:row-start-1"
           contentClassName={cn(
             'flex min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1',
-            tabletCentered && 'min-[768px]:mx-auto min-[768px]:w-full min-[768px]:max-w-[640px] lg:max-w-none lg:mx-0',
+            tabletCentered && 'min-[768px]:mx-auto min-[768px]:w-full min-[768px]:max-w-160 lg:max-w-none lg:mx-0',
           )}
         >
           {children}

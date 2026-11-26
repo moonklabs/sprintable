@@ -4,13 +4,13 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { V3ShellLoading } from '@/components/nav/v3-shell-loading';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
-// 컨테이너: components/today-v3/today-v3-screen.tsx «오늘» 열(`w-full p-5 lg:w-[392px]`).
+// 컨테이너: components/today-v3/today-v3-screen.tsx «오늘» 열(`w-full p-5 lg:w-98`).
 
 export default function Loading() {
   return (
     <V3ShellLoading flags={readNavV3FlagsFromEnv()} activeKey="today" topbar>
       <div className="flex min-h-0 flex-1">
-        <PageSkeleton className="w-full space-y-6 p-5 lg:w-[392px]" />
+        <PageSkeleton className="w-full space-y-6 p-5 lg:w-98" />
       </div>
     </V3ShellLoading>
   );

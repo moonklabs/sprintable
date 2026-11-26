@@ -262,8 +262,8 @@ export function ChatV3ContextPanel({
   const historyActorLabels = actorRowLabels((history.kind === 'ready' ? history.items : []).map((item) => ({ id: item.actor_id, label: item.actor_id ? historyActorLabel(item) : null })));
 
   return (
-    <section className="flex w-full shrink-0 flex-col bg-card lg:w-[340px]" data-testid="chat-v3-context-panel">
-      <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
+    <section className="flex w-full shrink-0 flex-col bg-card lg:w-85" data-testid="chat-v3-context-panel">
+      <div className="flex h-13 shrink-0 items-center border-b border-border px-4">
         <h2 className="text-editorial-ui font-bold text-muted-foreground">{t('contextPanelTitle')}</h2>
       </div>
       <div className="flex-1 space-y-4 overflow-auto p-4">

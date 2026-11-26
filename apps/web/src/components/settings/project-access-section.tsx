@@ -203,7 +203,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                       variant={granted ? 'primary' : 'secondary'}
                       disabled={toggling}
                       onClick={() => void handleToggle(member)}
-                      className="min-w-[72px] gap-1"
+                      className="min-w-18 gap-1"
                     >
                       {toggling ? (
                         <Loader2 className="h-3 w-3 animate-spin" />

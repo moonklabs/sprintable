@@ -748,7 +748,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
   // 레인마다 같은 순서로 7칸씩 그린다(헤더는 label 텍스트, 레인 칸은 카드). laneIndex번째
   // 레인의 columnIndex번째 칸을 반환.
   function nthLaneCell(laneIndex: number, columnIndex: number): Element | undefined {
-    const cells = [...container.querySelectorAll('div[class*="w-\\[220px\\]"]')];
+    const cells = [...container.querySelectorAll('div[class~="w-55"]')];
     return cells[7 + laneIndex * 7 + columnIndex];
   }
 
@@ -811,7 +811,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     // 기본축(status, 5컬럼: backlog/ready-for-dev/in-progress/in-review/done) 기준 —
     // 위 nthLaneCell(7컬럼 트러스트축 전용)과 달리 이 테스트는 축 토글을 하지 않는다.
     function nthLaneCellStatusAxis(laneIndex: number, columnIndex: number): Element | undefined {
-      const cells = [...container.querySelectorAll('div[class*="w-\\[220px\\]"]')];
+      const cells = [...container.querySelectorAll('div[class~="w-55"]')];
       return cells[5 + laneIndex * 5 + columnIndex];
     }
     await mount({

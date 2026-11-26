@@ -172,7 +172,7 @@ export function SupportWidgetLauncher() {
           role="dialog"
           tabIndex={-1}
           aria-label={t('panelTitle')}
-          className="pointer-events-auto flex outline-none max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-[360px] max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+          className="pointer-events-auto flex outline-none max-h-[min(480px,calc(100vh-var(--bottom-dock-inset)-6rem))] w-90 max-w-[calc(100vw-2.5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
         >
           <SupportWidgetPanelHeader onClose={() => setOpen(false)} />
           <SupportWidgetPanelBody session={session} />

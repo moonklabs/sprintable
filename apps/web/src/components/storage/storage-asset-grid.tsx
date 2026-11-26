@@ -63,7 +63,7 @@ export function StorageAssetGrid({ assets, selectedAssetId, onSelect, onDelete, 
               )}
             >
               {selected ? <span aria-hidden="true" data-testid="storage-card-selected-bar" className="absolute inset-y-1.5 left-0 z-10 w-[3px] rounded-r-full bg-ds-action" /> : null}
-              <div className={cn('grid h-[112px] place-items-center', ASSET_CARD_WELL)}>
+              <div className={cn('grid h-28 place-items-center', ASSET_CARD_WELL)}>
                 <span className={cn('grid size-12 place-items-center rounded-ds-control', FILE_TINT_DS_CLASS[fileTypeTint(asset.content_type)])}>
                   <Icon className="size-6" />
                 </span>

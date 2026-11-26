@@ -133,7 +133,7 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
       <PageFrame width="wide">
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('galleryTitle')}</h1>} />
         <SkeletonGroup label={tc('loading')} className={cn('space-y-3 rounded-ds-panel border border-ds-line p-4', LAYER.panel)}>
-          <Skeleton className="h-[320px] w-full" />
+          <Skeleton className="h-80 w-full" />
           <Skeleton variant="text" className="w-1/3" />
         </SkeletonGroup>
       </PageFrame>

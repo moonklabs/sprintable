@@ -255,7 +255,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   <ReactMarkdown>{selectedDoc.content?.trim() || t('emptyPolicyEpic')}</ReactMarkdown>
                 </div>
               ) : (
-                <div className="flex min-h-[280px] items-center justify-center text-sm text-muted-foreground">
+                <div className="flex min-h-70 items-center justify-center text-sm text-muted-foreground">
                   {t('selectPolicyEpic')}
                 </div>
               )}

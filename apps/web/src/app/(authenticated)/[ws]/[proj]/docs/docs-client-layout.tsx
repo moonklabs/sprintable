@@ -567,7 +567,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, 눌린 표면 재질(이후 4919가 걷음)
                 (재질 언어) 채택. */}
             {!tagsCollapsed && (
-              <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
+              <div className="flex max-h-30 flex-wrap gap-1 overflow-y-auto px-4 py-1">
                 {allTags.map((tag) => (
                   // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
                   // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
@@ -693,7 +693,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             동반(다른 미래 콘텐츠의 동일 결함 클래스 재발 방지). */}
         {!sidebarCollapsed && (
           /* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */
-          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-[300px]">
+          <aside className="focus-inset relative hidden w-59 flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-75">
             <IconButton icon="chevron_left" label={t('hideSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute right-1 top-1.5 z-10 touch:top-0" />
             {sidebarContent}
           </aside>
@@ -743,7 +743,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           aria-modal="true"
           aria-label={t('title')}
           // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 --elev-overlay.
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+          className="fixed inset-y-0 left-0 z-50 flex w-70 flex-col overflow-hidden border-r border-ds-line bg-ds-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',

@@ -212,7 +212,7 @@ export function OrgGatePolicySection({ canEdit }: OrgGatePolicySectionProps) {
                     disabled={saving}
                     aria-pressed={posture === p}
                     onClick={() => setPosture(p)}
-                    className="min-w-[80px]"
+                    className="min-w-20"
                   >
                     {t(POSTURE_LABEL_KEY[p])}
                   </Button>

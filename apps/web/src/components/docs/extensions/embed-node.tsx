@@ -120,7 +120,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
             </div>
           )}
           {type === 'figma' && (
-            <div className="h-[480px] w-full overflow-hidden rounded-xl border border-border">
+            <div className="h-120 w-full overflow-hidden rounded-xl border border-border">
               <iframe
                 src={embedUrl}
                 title={t('embedFigmaTitle')}

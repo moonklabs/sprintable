@@ -43,8 +43,8 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
   const tEventCard = useTranslations('eventCard'); // story 4921
 
   return (
-    <section className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-[320px]" data-testid="chat-v3-thread-rail">
-      <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
+    <section className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-80" data-testid="chat-v3-thread-rail">
+      <div className="flex h-13 shrink-0 items-center border-b border-border px-4">
         <h1 className="text-base font-bold text-foreground">{t('threadRailTitle')}</h1>
       </div>
       {threads.length === 0 ? (

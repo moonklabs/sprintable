@@ -10,7 +10,7 @@ describe('DocsShell', () => {
       </DocsShell>,
     );
 
-    expect(markup).toContain('w-[236px]');
+    expect(markup).toContain('w-59');
     expect(markup).toContain('border-r');
     expect(markup).not.toContain('rounded-2xl');
     expect(markup).not.toContain('GlassPanel');

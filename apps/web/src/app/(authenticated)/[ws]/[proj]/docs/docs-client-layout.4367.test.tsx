@@ -104,7 +104,7 @@ async function mount() {
 
 
 const esc = (target: EventTarget) => { const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); target.dispatchEvent(e); return e; };
-const drawer = () => [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'))!;
+const drawer = () => [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-70'))!;
 
 describe('DocsClientLayout — 서랍 안 새 폴더 입력칸 Esc는 입력칸만([SID:4367])', () => {
   it('서랍을 열고 새 폴더 입력칸에서 Esc → 입력칸 닫힘 · 서랍 그대로 → 한 번 더 Esc → 서랍 닫힘(양성 대조)', async () => {

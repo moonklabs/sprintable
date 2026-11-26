@@ -553,7 +553,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
 describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () => {
   it('닫힘(progress 0) → 서랍에 inert · aria-hidden, 안에 버튼은 있음(숨은 초점 후보를 inert가 덮는다)', async () => {
     await mount();
-    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-70'));
     expect(drawer).toBeTruthy();
     expect(drawer!.hasAttribute('inert')).toBe(true);
     expect(drawer!.getAttribute('aria-hidden')).toBe('true');
@@ -567,7 +567,7 @@ describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () =>
     const opener = container.querySelector(`button[aria-label="${koMessages.docs.openDocTree}"]`) as HTMLButtonElement | null;
     expect(opener).not.toBeNull();
     await act(async () => { opener!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'));
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-70'));
     expect(drawer!.hasAttribute('inert')).toBe(false);
     expect(drawer!.getAttribute('aria-hidden')).toBe('false');
   });
@@ -707,9 +707,9 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     stubFetch();
     await mount();
     const cls = container.querySelector('aside')!.className.split(/\s+/);
-    expect(cls).toContain('w-[236px]');        // lg: the reading column keeps its width (544 at 1100)
-    expect(cls).toContain('xl:w-[300px]');     // xl and up: the wider list column
-    expect(cls).not.toContain('w-[300px]');    // never 300 below xl
+    expect(cls).toContain('w-59');        // lg: the reading column keeps its width (544 at 1100)
+    expect(cls).toContain('xl:w-75');     // xl and up: the wider list column
+    expect(cls).not.toContain('w-75');    // never 300 below xl
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
   });
@@ -811,7 +811,7 @@ describe('DocsClientLayout — 열 머리 개수 · 접기 단추 · 폰 서랍 
     const opener = container.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.docs.openDocTree}"]`)!;
     expect(opener.getAttribute('data-slot')).toBe('ds-button');
     await act(async () => { opener.click(); });
-    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'))!;
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-70'))!;
     const close = drawer.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.common.close}"]`)!;
     expect(close.getAttribute('data-slot')).toBe('ds-icon-button');
     expect(drawer.className).toContain('border-ds-line');

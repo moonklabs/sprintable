@@ -438,7 +438,7 @@ export default function ChannelPostsEngagementPage() {
         )
       ) : (
         <Card className="overflow-x-auto p-0">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-180 text-left text-sm">
             <thead className="border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">{t('engagementColumnChannel')}</th>

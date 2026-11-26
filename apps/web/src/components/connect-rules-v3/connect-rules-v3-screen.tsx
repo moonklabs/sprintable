@@ -23,14 +23,14 @@ import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations
  *
  * story #4004 — nav 렌더(목적지·활성/호버/포커스 스타일)는 공유
  * `NavV3ItemList`가, story #4006 — nav 칸의 폭·접힘은 공유 `NavV3Sidebar`가 전담한다.
- * 이 화면 자신은 목적지 문자열·`w-[216px]` 리터럴을 안 가진다.
+ * 이 화면 자신은 목적지 문자열·`w-54` 리터럴을 안 가진다.
  */
 
 function ConnectRulesV3Topbar() {
   const t = useTranslations('connectRulesV3');
   return (
     <div className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-card px-5" data-testid="connect-rules-v3-topbar">
-      <div className="flex h-[34px] max-w-[420px] flex-1 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
+      <div className="flex h-[34px] max-w-105 flex-1 items-center gap-2 rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
         <span>{t('searchPlaceholder')}</span>
       </div>
     </div>
@@ -90,7 +90,7 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
         <div className="flex min-w-0 flex-1 flex-col">
         <ConnectRulesV3Topbar />
         <div className="min-h-0 flex-1 overflow-auto p-6">
-          <div className="mx-auto max-w-[720px] space-y-8">
+          <div className="mx-auto max-w-180 space-y-8">
             <div>
               <h1 className="mb-1 text-[22px] font-bold tracking-tight text-foreground">{t('pageTitle')}</h1>
               <p className="text-sm text-muted-foreground">{t('pageDescription')}</p>

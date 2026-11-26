@@ -177,7 +177,7 @@ export function KanbanTrustColumn({
       ref={setNodeRef}
       data-board-column={id}
       // 4908 — 열은 «내용 칸 층»(LAYER.panel): 바탕과 카드 사이를 면으로 가른다(바탕 → 열 ≥ 0.03 · 열 → 카드 ≥ 0.05, layer-rule.test). 잠긴 열은 같은 면에 안내 글만 다르다.
-      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-1.5 ${LAYER.panel} ${
+      className={`flex h-full w-70 min-w-60 flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-1.5 ${LAYER.panel} ${
         closedDuringDrag ? 'border-ds-line opacity-45' : isOver ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line'
       }`}
     >
@@ -254,7 +254,7 @@ export function KanbanTrustColumn({
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy} disabled={locked}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
           {stories.length === 0 && !composing ? (
-            <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
+            <div className="flex min-h-25 items-center justify-center px-4 text-center">
               <p className="text-xs text-ds-ink-3">{t('noStories')}</p>
             </div>
           ) : null}

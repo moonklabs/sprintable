@@ -40,7 +40,7 @@ export default function AuthResetRequiredPage() {
 
         <Link
           href="/forgot-password"
-          className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+          className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
         >
           {t('resetButton')}
         </Link>

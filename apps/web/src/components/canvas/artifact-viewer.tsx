@@ -174,7 +174,7 @@ export function ArtifactViewer({
   }
 
   // 보기 영역 안 — «받는 중 · 못 받음 · 실물 스테이지 · html 안내». 끼움 위치(옛 카드 / 새 쪽)만 다르고 안은 한 벌.
-  const stageH = layout === 'page' ? 'h-[min(70vh,720px)] min-h-[320px]' : 'h-[320px]';
+  const stageH = layout === 'page' ? 'h-[min(70vh,720px)] min-h-80' : 'h-80';
   const stageBody = (
     <>
     {!activeVersion && needsContent ? (

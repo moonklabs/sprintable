@@ -254,7 +254,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   title={floorDisabled ? t('floorDisabledHint') : undefined}
                                   onClick={() => void handleSet(wt, at, lv)}
                                   aria-pressed={selected}
-                                  className={cn('min-w-[60px] gap-1', selected && LEVEL_META[lv].selected, floorDisabled && 'opacity-40')}
+                                  className={cn('min-w-15 gap-1', selected && LEVEL_META[lv].selected, floorDisabled && 'opacity-40')}
                                 >
                                   <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
                                 </Button>

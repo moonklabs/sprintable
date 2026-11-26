@@ -69,7 +69,7 @@ export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, 
         sideOffset={0}
         aria-label={name}
         data-sender-profile-popup=""
-        className="w-auto min-w-[200px] overflow-hidden p-0 py-2"
+        className="w-auto min-w-50 overflow-hidden p-0 py-2"
       >
         <div className="flex items-center gap-2.5 px-3 py-1.5">
           <Avatar

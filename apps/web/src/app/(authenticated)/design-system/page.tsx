@@ -16,7 +16,7 @@ export async function generateMetadata() {
 export default async function DesignSystemPage() {
   const t = await getTranslations('designSystem');
   return (
-    <main className="mx-auto w-full max-w-[1800px] p-4">
+    <main className="mx-auto w-full max-w-450 p-4">
       <h1 className="m-0 mb-1 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
       <p className="m-0 mb-4 text-ds-small text-ds-ink-3">{t('lead')}</p>
       <ShowcaseFrame today={SHOWCASE_TODAY} />

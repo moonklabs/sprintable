@@ -235,7 +235,7 @@ describe('ChatsLayout — story 5031 (C1 2b): the list is 400 from xl and folds 
     setWidth(1700);
     usePathnameMock.mockReturnValue('/chats');
     await act(async () => { root.render(wrap(<ChatsLayout><div /></ChatsLayout>)); });
-    expect(rail().className).toContain('lg:w-[248px]');
+    expect(rail().className).toContain('lg:w-62');
     expect(rail().className).toContain('xl:w-100');
     expect(rail().className).toContain('2xl:flex');
     expect(rail().className).not.toMatch(/(^|\s)xl:flex(\s|$)/);

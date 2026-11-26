@@ -77,7 +77,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   // ── 로딩: 스켈레톤 카드 ──
   if (loading) {
     return (
-      <div className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 ${cardSurface}`}>
+      <div className={`mt-2 flex max-w-75 items-center gap-2.5 rounded-md border px-2.5 py-2 ${cardSurface}`}>
         <Skeleton variant="rect" className="size-[38px] shrink-0 rounded-sm" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <Skeleton variant="text" className="h-3 w-3/4" />
@@ -90,7 +90,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   // ── 미존재(graceful): 평문 라벨 + 파일 글리프, 링크/화살표 없음 ──
   if (missing || !asset) {
     return (
-      <div className="mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border border-border bg-muted/40 px-2.5 py-2">
+      <div className="mt-2 flex max-w-75 items-center gap-2.5 rounded-md border border-border bg-muted/40 px-2.5 py-2">
         <span className="grid size-[38px] shrink-0 place-items-center rounded-sm bg-muted text-ds-ink-2">
           {fileGlyph(null, 'size-[17px]')}
         </span>
@@ -128,7 +128,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
         onClick={() =>
           onOpenReadingPanel({ kind: 'attachment', assetId: asset.id, label: asset.name, contentType: asset.content_type })
         }
-        className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors ${cardSurface}`}
+        className={`mt-2 flex max-w-75 items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors ${cardSurface}`}
       >
         {inner}
       </button>
@@ -139,7 +139,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
     <Link
       // story #4231 4차 B — 채팅 임베드는 다른 프로젝트 자산일 수 있다 → 자산 자기 project_id(현재 p 아님).
       href={withProjectParam(`/storage?asset=${asset.id}`, asset.project_id ?? null)}
-      className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 no-underline transition-colors ${cardSurface}`}
+      className={`mt-2 flex max-w-75 items-center gap-2.5 rounded-md border px-2.5 py-2 no-underline transition-colors ${cardSurface}`}
     >
       {inner}
     </Link>

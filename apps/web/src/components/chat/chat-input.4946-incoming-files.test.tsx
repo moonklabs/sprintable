@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-const chips = () => [...container.querySelectorAll('span.max-w-\\[160px\\]')].map((s) => s.textContent);
+const chips = () => [...container.querySelectorAll('span.max-w-40')].map((s) => s.textContent);
 const file = (name: string) => new File(['x'], name, { type: 'application/pdf' });
 async function render(incoming: { nonce: number; files: File[] } | null) {
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatInput threadId="c1" onSend={vi.fn()} projectId="p1" incomingFiles={incoming} /></NextIntlClientProvider>); });

@@ -43,7 +43,7 @@ export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, ariaLabel }:
               aria-current={isCurrent ? 'page' : undefined}
               disabled={isCurrent}
               className={cn(
-                'max-w-[160px] truncate rounded px-1 py-0.5 transition-colors',
+                'max-w-40 truncate rounded px-1 py-0.5 transition-colors',
                 isCurrent
                   ? 'cursor-default text-foreground/70'
                   : 'hover:bg-muted hover:text-foreground',

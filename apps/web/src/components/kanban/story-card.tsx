@@ -134,7 +134,7 @@ interface StoryCardProps {
    * 이 카드엔 안 맞음 — 게이트가 정하므로). 클릭(상세 열기)은 그대로 살아있다. */
   locked?: boolean;
   /** story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — (옛 CardVariant 시절) 카드 틀이
-   * `max-w-[280px]`를 하드코딩(desktop KanbanColumn 고정폭 전제) — 모바일 단일열(list) 재사용 시
+   * `max-w-70`를 하드코딩(desktop KanbanColumn 고정폭 전제) — 모바일 단일열(list) 재사용 시
    * full-width row가 되려면 이 캡을 호출부가 override해야 한다. `cn()`이 twMerge라 나중 클래스가
    * 이긴다 — 새 prop 없이 max-w-none을 넘기면 그대로 해소(신규 시각 언어 발명 없음). */
   className?: string;

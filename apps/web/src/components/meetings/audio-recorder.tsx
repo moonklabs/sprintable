@@ -50,7 +50,7 @@ function WaveformCanvas({ analyser }: { analyser: AnalyserNode | null }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [analyser]);
 
-  return <canvas ref={canvasRef} width={240} height={48} className="w-full max-w-[240px] rounded bg-foreground/90" />;
+  return <canvas ref={canvasRef} width={240} height={48} className="w-full max-w-60 rounded bg-foreground/90" />;
 }
 
 // ─── Progress Bar (AC7) ───

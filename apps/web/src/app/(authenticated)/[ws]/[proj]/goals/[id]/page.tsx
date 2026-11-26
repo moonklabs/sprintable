@@ -390,7 +390,7 @@ export default function EpicDetailPage() {
               {t('backToList')}
             </Link>
             <span className="text-muted-foreground">/</span>
-            <span className="text-sm font-medium truncate max-w-[200px]">{epic.title}</span>
+            <span className="text-sm font-medium truncate max-w-50">{epic.title}</span>
           </div>
         }
       />
@@ -581,7 +581,7 @@ export default function EpicDetailPage() {
                         <span className="flex-1 truncate text-sm">{story.title}</span>
                         <div className="ml-3 flex shrink-0 items-center gap-2">
                           {story.assignee_name && (
-                            <span className="text-xs text-muted-foreground truncate max-w-[80px]">{story.assignee_name}</span>
+                            <span className="text-xs text-muted-foreground truncate max-w-20">{story.assignee_name}</span>
                           )}
                           {story.story_points != null && (
                             <span className="text-xs text-muted-foreground">{story.story_points} SP</span>

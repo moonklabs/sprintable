@@ -337,7 +337,7 @@ function HitRateCell({ hitRate, t }: { hitRate: number; t: ReturnType<typeof use
   return (
     <div className="flex items-center gap-2">
       <HitRateBar hitRate={hitRate} />
-      <span className="w-[72px] shrink-0 text-right text-ds-small whitespace-nowrap text-ds-ink-2" data-testid="trust-hit-rate-text">
+      <span className="w-18 shrink-0 text-right text-ds-small whitespace-nowrap text-ds-ink-2" data-testid="trust-hit-rate-text">
         {t('trustHitRate', { rate: Math.round(hitRate * 100) })}
       </span>
     </div>

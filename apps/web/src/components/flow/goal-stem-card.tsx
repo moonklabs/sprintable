@@ -185,7 +185,7 @@ export function GoalStemCard({
           좁은 인라인 자리(NextActionsStrip)에 설 때는 showCanvas=false로 이 블록을 끈다 —
           같은 레인을 두 번 그리지 않는다. */}
       {showCanvas && (
-        <div className="min-h-[520px] rounded-lg border border-border">
+        <div className="min-h-130 rounded-lg border border-border">
           <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} selectedNodeId={selectedNodeId} memberMap={memberMap} />
         </div>
       )}

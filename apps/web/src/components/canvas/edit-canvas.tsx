@@ -151,7 +151,7 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
         {showPlacementHint ? <p className="text-editorial-meta text-muted-foreground">{t('specPinPlacementHint')}</p> : null}
       </div>
 
-      <div className="h-[420px] w-full">
+      <div className="h-105 w-full">
         <ArtifactStage
           format="tree"
           content=""

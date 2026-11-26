@@ -249,7 +249,7 @@ function FlowMapNodeCard({
               aria-label={t('portLinkStart', { n: node.storyNumber })}
               onPointerDown={(e) => onPortPointerDown(e, node.id)}
               onKeyDown={(e) => onPortKeyDown(e, node.id)}
-              className="focus-inset group absolute -right-5.5 top-1/2 flex h-[24px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
+              className="focus-inset group absolute -right-5.5 top-1/2 flex h-6 w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
             />
           }
         >
