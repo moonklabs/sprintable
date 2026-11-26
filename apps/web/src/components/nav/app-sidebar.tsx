@@ -105,6 +105,8 @@ export function AppSidebar({
   const itemSlot = activeCatalogItem ? ROUTE_PLACEMENT[navItemRoute(activeCatalogItem)]?.slot : undefined;
   const activeSlot = pathSlot ?? (itemSlot && itemSlot !== 'outside' ? itemSlot : 'home');
   const slotItems = useMemo(() => listItemsForSlot(catalogItems, activeSlot), [catalogItems, activeSlot]);
+  // story 5035 (C5): a catalog screen that is NOT a row of its place's list column (the agents' «실행 기록» · «API 키» — they live in the «전체 보기» strip now) would light nothing here; its place's own row is lit instead (the same «more specific wins» rule, over the rows that are drawn).
+  const shownActiveStaticItemId = slotItems.some((item) => item.id === activeStaticItemId) ? activeStaticItemId : findActiveStaticItemId(slotItems, pathname, searchParams);
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -240,7 +242,7 @@ export function AppSidebar({
               {slotItems.map((item) => {
                 // «일감»(id 'board')의 1차 진입점은 resolveNavGroups가 정한 경로 그대로 resourceLink에 넘긴다 — 활성 판정만 WORKSPACE_FRAME_TAB_PATHS 전체(탭 어디서든 켜짐 · story #3844).
                 const link = item.kind === 'static'
-                  ? { href: flatHref(item.path), isActive: item.id === activeStaticItemId }
+                  ? { href: flatHref(item.path), isActive: item.id === shownActiveStaticItemId }
                   : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                 const Icon = item.icon;
                 const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : item.badgeKey === 'chats' ? chatUnreadTotal : 0;

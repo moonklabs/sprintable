@@ -8,11 +8,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { tabRef, pushMock, adminRef, onAddRef, onExitRef } = vi.hoisted(() => ({
+const { tabRef, pushMock, adminRef, onExitRef } = vi.hoisted(() => ({
   tabRef: { current: null as string | null },
   pushMock: vi.fn(),
   adminRef: { current: { isAdmin: true, loaded: true } },
-  onAddRef: { current: (() => {}) as () => void },
   onExitRef: { current: (() => {}) as () => void },
 }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ projectId: 'proj-1', orgId: 'org-1', projectMemberships: [] }) }));
@@ -22,7 +21,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 vi.mock('@/components/agents/agent-performance-panel', () => ({ AgentPerformancePanel: () => <div data-testid="panel-stats" /> }));
-vi.mock('@/components/agents/agent-management-tab', () => ({ AgentManagementTab: ({ onAddAgent }: { onAddAgent: () => void }) => { onAddRef.current = onAddAgent; return <div data-testid="panel-manage" />; } }));
+vi.mock('@/components/agents/agent-management-tab', () => ({ AgentManagementTab: () => <div data-testid="panel-list-must-not-render-here" /> }));
 vi.mock('@/components/agents/access-matrix-tab', () => ({ AccessMatrixTab: () => <div data-testid="panel-access" /> }));
 vi.mock('@/app/(authenticated)/organization/workforce/recruiter/recruiter-client', () => ({ RecruiterClient: ({ onExit }: { onExit: () => void }) => { onExitRef.current = onExit; return <div data-testid="panel-recruit" />; } }));
 
@@ -39,7 +38,8 @@ async function mount() {
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><TopBarProvider><AgentsPageTabs /></TopBarProvider></NextIntlClientProvider>); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
-const panels = () => [...container.querySelectorAll('[data-testid^="panel-"]')].map((e) => e.getAttribute('data-testid')!.replace('panel-', ''));
+// story 5035 (C5): the «manage» panel is the frame's right column now — with no agent picked it says so (`workforce-pane-empty`); the agent LIST itself lives in the frame's left column (workforce-frame.test.tsx)
+const panels = () => [...container.querySelectorAll('[data-testid^="panel-"], [data-testid="workforce-pane-empty"]')].map((e) => e.getAttribute('data-testid')!.replace('panel-', '').replace('workforce-pane-empty', 'manage'));
 
 describe('에이전트 화면 — 주소의 ?tab=이 유일한 진실 · 탭줄은 «팀» 줄 하나(story 4889)', () => {
   it('⭐안쪽 탭줄이 없다 — 이 화면은 tablist를 그리지 않는다(되돌리면 «두 줄»로 돌아가 빨갛다)', async () => {
@@ -75,11 +75,7 @@ describe('에이전트 화면 — 주소의 ?tab=이 유일한 진실 · 탭줄�
     expect(panels()).toEqual([]);
   });
 
-  it('⭐«에이전트 추가»는 진짜 이동이다 — 채용 탭의 주소(?tab=recruit)로 push(예전 replaceState 갈래 없음)', async () => {
-    await mount();
-    await act(async () => { onAddRef.current(); });
-    expect(pushMock).toHaveBeenCalledWith(expect.stringContaining('/organization/workforce?tab=recruit'));
-  });
+  // story 5035 (C5): «에이전트 추가» moved with the list into the frame — its push to ?tab=recruit is pinned in workforce-frame.test.tsx
 
   it('⭐채용을 나가면 ?tab=manage로 push — 팀 줄의 «에이전트»가 켜지는 주소', async () => {
     tabRef.current = 'recruit';

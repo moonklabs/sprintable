@@ -227,7 +227,8 @@ function RunSection({ title, runs, activeKey, onOpen, onActive, error, onRetry, 
   );
 }
 
-export function AgentRunsList() {
+/** story 5035 (C5): `agentId` narrows the list to ONE agent's runs (the agent detail's «실행 기록» cell). The server already takes `agent_id` (no backend change); without it the list is every agent's, as before. */
+export function AgentRunsList({ agentId }: { agentId?: string } = {}) {
   const t = useTranslations('agentRuns');
   const tc = useTranslations('common');
   // story #3680(그라운딩 2026-09-07) — 이 컴포넌트가 project_id를 «전혀» 안 보내고 있었다. BE list_agent_runs는 project_id를 Query(...) 필수로 요구해 매 요청이 422였고, 옛 non-ok 처리가
@@ -257,6 +258,7 @@ export function AgentRunsList() {
     if (!projectId) throw new Error('projectId not ready');
     const params = new URLSearchParams();
     params.set('project_id', projectId);
+    if (agentId) params.set('agent_id', agentId);
     // story #3680 — 'all'은 서버 필터 값이 아니라 "필터 안 함"의 FE 표현(normalizeRunStatusFilter) — raw 'all'을 보내면 status=all이 BE Literal 422에 걸린다.
     const normalizedStatus = status === null ? null : normalizeRunStatusFilter(status);
     if (normalizedStatus) params.set('status', normalizedStatus);
@@ -269,7 +271,7 @@ export function AgentRunsList() {
     const json = await res.json();
     // story #2231 AC4: 이 프록시는 BE의 {data,meta} 전체를 다시 자기 data 필드에 얹는다 — 바깥 meta는 항상 null이라 「더 보기」가 지금 구조적으로 죽어 있다(프록시 자체 fix는 #2231 AC2 스코프).
     return { items: (json.data ?? []) as AgentRun[], nextCursor: parseCursorMeta(json.meta, 'agent-runs-list').nextCursor };
-  }, [projectId, fromDate, toDate, viewerTz]); // story #4443 PR3a — the day bounds are the viewer's zone
+  }, [projectId, agentId, fromDate, toDate, viewerTz]); // story #4443 PR3a — the day bounds are the viewer's zone
 
   // story #2000: 네트워크 throw(오프라인 등)에서도 스켈레톤이 영원히 안 남게 try/catch/finally + loadError/retryKey. story #3680 — projectId가 아직 없으면 요청 자체를 미룬다("아직 모른다").
   // story 4911: the «all» view makes three calls at once (all · failed · waiting on a person — measured on dev: 633 ms for the three together, one call alone ≈ 630 ms). The main list failing = the list is unreadable (the error

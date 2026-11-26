@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 //
-// story 4889 — «팀» 탭줄이 셸 칼럼 왼쪽 끝에 붙어 있었다(판정 캡처: 줄 x≈316 · 본문 판 x≈312). 일감 줄 띠(WorkTabsFrame · px-4 pt-3)와 같은 안쪽 여백의 띠 안에 선다. 되돌리면 빨갛다.
+// story 5035 (C5) — the «팀» strip band (story 4889) is gone from the agents' place: its layout now hands every agent screen to the list → detail frame (components/agents/workforce-frame.tsx · pinned by workforce-frame.test.tsx).
+// «사람» keeps the strip in members' own layout (team-tabs.test.tsx). Reverting the layout back to the strip turns this red.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+vi.mock('@/components/agents/workforce-frame', () => ({ WorkforceFrame: ({ children }: { children: React.ReactNode }) => <div data-testid="frame-stub">{children}</div> }));
 vi.mock('@/components/team/team-tabs', () => ({ TeamTabs: () => <nav data-testid="team-tabs-stub" /> }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -13,17 +15,12 @@ let root: Root;
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-describe('workforce layout — «팀» 줄 띠(story 4889)', () => {
-  it('⭐줄은 일감 줄 띠와 같은 안쪽 여백(px-4 pt-3)의 띠 안에 서고, 본문은 띠 밖(그 아래)에 온다', async () => {
+describe('workforce layout — 목록 → 상세 틀(story 5035)', () => {
+  it('⭐본문은 틀 안에 들어가고, 옛 «팀» 줄(띠)은 이 레이아웃에 없다', async () => {
     const { default: WorkforceLayout } = await import('./layout');
     await act(async () => { root.render(<WorkforceLayout><div data-testid="body" /></WorkforceLayout>); });
-    const band = container.querySelector('[data-testid="team-tabs-band"]')!;
-    expect(band).toBeTruthy();
-    expect(band.className).toContain('px-4');
-    expect(band.className).toContain('pt-3');
-    expect(band.querySelector('[data-testid="team-tabs-stub"]')).toBeTruthy();
-    const body = container.querySelector('[data-testid="body"]')!;
-    expect(band.contains(body)).toBe(false);
-    expect(band.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector('[data-testid="frame-stub"] [data-testid="body"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="team-tabs-band"]')).toBeNull();
+    expect(container.querySelector('[data-testid="team-tabs-stub"]')).toBeNull();
   });
 });

@@ -16,6 +16,7 @@ import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-section';
+import { AgentRunsList } from '@/components/agents/agent-runs-list';
 import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
@@ -147,7 +148,7 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
-type DetailTab = 'run' | 'keys' | 'notify' | 'access';
+type DetailTab = 'run' | 'runs' | 'keys' | 'notify' | 'access';
 
 export default function AgentDetailPage() {
   const embedded = useEmbeddedServer();
@@ -735,6 +736,7 @@ export default function AgentDetailPage() {
       <Tabs value={shownTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
         <TabsList aria-label={ta('detailTabsLabel')} data-testid="agent-detail-tabs">
           <TabsTrigger value="run">{ta('detailTabRun')}</TabsTrigger>
+          <TabsTrigger value="runs">{ta('detailTabRuns')}</TabsTrigger>
           {showKeysTab ? <TabsTrigger value="keys">{ta('detailTabKeys')}</TabsTrigger> : null}
           {showNotifyTab ? <TabsTrigger value="notify">{ta('detailTabNotify')}</TabsTrigger> : null}
           <TabsTrigger value="access">{ta('detailTabAccess')}</TabsTrigger>
@@ -880,6 +882,10 @@ export default function AgentDetailPage() {
           </DetailCard>
         ) : null}
 
+        </TabsContent>
+        {/* story 5035 (C5): this agent's run history — the same list as «전체 보기 › 실행 기록», narrowed to this agent by the server's own `agent_id` filter (no backend change). Not kept mounted: it makes three calls when it opens. */}
+        <TabsContent value="runs" className="pt-4">
+          <AgentRunsList agentId={id} />
         </TabsContent>
         <TabsContent value="keys" keepMounted className="space-y-6 pt-4">
         {/* API Keys */}

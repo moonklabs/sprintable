@@ -1,15 +1,8 @@
 import type { ReactNode } from 'react';
-import { TeamTabs } from '@/components/team/team-tabs';
+import { WorkforceFrame } from '@/components/agents/workforce-frame';
 
-// story #4885 (UI-2 AC4) — «팀» 탭줄이 에이전트 화면들(에이전트 · 상세 · 실행 기록 · API 키 · 채용)의 맨 위에 선다. 레이아웃이라 탭 사이를 오가도 줄이 다시 그려지지 않는다.
+// story 5035 (C5) — 에이전트 1뎁스: 옛 «팀» 탭줄(일곱 링크) 자리에 «목록 → 상세» 한 틀이 선다. 주소는 하나도 안 바뀐다 — 틀이 주소를 읽어 «목록 + 상세»(관리 · 에이전트 상세) 또는 «전체 보기»(실행 기록 · 키 · 통계 · 접근표 · 영입)를 정한다.
+// 레이아웃이라 목록 ↔ 상세를 오가도 목록이 다시 그려지지 않는다. «사람» 칸은 members 쪽 «팀» 줄에 그대로 있다.
 export default function WorkforceLayout({ children }: { children: ReactNode }) {
-  return (
-    <>
-      {/* story 4889 — 줄이 셸 칼럼 왼쪽 끝에 붙어 있었다(판정 캡처: «팀» 줄 x≈316 · 본문 판 x≈312). 일감 줄 띠(WorkTabsFrame)와 같은 안쪽 여백(px-4 pt-3)으로 맞춘다. */}
-      <div className="px-4 pt-3" data-testid="team-tabs-band">
-        <TeamTabs />
-      </div>
-      {children}
-    </>
-  );
+  return <WorkforceFrame>{children}</WorkforceFrame>;
 }

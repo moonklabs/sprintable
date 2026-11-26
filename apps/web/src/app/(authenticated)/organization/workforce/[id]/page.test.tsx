@@ -30,6 +30,7 @@ vi.mock('next/navigation', () => ({
 
 // story 4912 (A2): the stub keeps the props the page passes it, so a test can play the manager's «keys read» callback
 const { managerProps } = vi.hoisted(() => ({ managerProps: { current: null as null | { onKeysRead?: (n: number) => void } } }));
+vi.mock('@/components/agents/agent-runs-list', () => ({ AgentRunsList: ({ agentId }: { agentId?: string }) => <div data-testid="stub-agent-runs-list" data-agent-id={agentId} /> }));
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
   AgentApiKeyManager: (props: { onKeysRead?: (n: number) => void }) => { managerProps.current = props; return <div data-testid="stub-agent-api-key-manager" />; },
 }));
@@ -448,10 +449,10 @@ describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
   };
   const selected = () => triggers().find((b) => b.getAttribute('aria-selected') === 'true')?.textContent ?? null;
 
-  it('⭐일반 에이전트(관리자): 구역 탭 넷이 이 순서로 서고 첫 구역은 «실행 환경»', async () => {
+  it('⭐일반 에이전트(관리자): 구역 탭 다섯이 이 순서로 서고 첫 구역은 «실행 환경»', async () => {
     stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
     await mount();
-    expect(labels()).toEqual(['실행 환경', '키', '알림 · 메시징', '접근']);
+    expect(labels()).toEqual(['실행 환경', '실행 기록', '키', '알림 · 메시징', '접근']);
     expect(selected()).toBe('실행 환경');
     expect(container.querySelector('[data-testid="agent-detail-tabs"]')?.getAttribute('aria-label')).toBe('에이전트 상세 구역');
   });
@@ -466,6 +467,18 @@ describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
     // the header card is above the panels (state · name · avatar stay on every panel)
     expect(container.querySelector('[data-testid="agent-avatar-open"]')?.closest('[role="tabpanel"]')).toBeNull();
     expect(container.querySelector('[data-testid="agent-detail-head"]')?.closest('[role="tabpanel"]')).toBeNull();
+  });
+
+  it('⭐story 5035: «실행 기록» 구역 = 이 에이전트 것만(agent_id를 실어 거른다) · 열기 전엔 마운트도 안 한다(열면 서버를 세 번 부름)', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    expect(container.querySelector('[data-testid="stub-agent-runs-list"]')).toBeNull();
+    const runsTab = triggers().find((b) => b.textContent === '실행 기록')!;
+    await act(async () => { runsTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const list = container.querySelector('[data-testid="stub-agent-runs-list"]');
+    expect(list).toBeTruthy();
+    expect(list?.getAttribute('data-agent-id')).toBe(AGENT.id);
+    expect(panelOf('stub-agent-runs-list')).toBe('실행 기록');
   });
 
   it('⭐구역 탭을 누르면 그 칸이 보이고(나머지는 숨김 · 마운트는 유지) 선택이 바뀐다', async () => {
@@ -484,7 +497,7 @@ describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
   it('⭐「시스템 발행」: 알림 · 메시징 칸은 보이지 않고(그 구역의 카드가 전부 숨김) 키 칸은 중립 설명으로 남는다', async () => {
     stubFetch({ agent: { ...AGENT, runtime_type: 'system-publisher' } });
     await mount();
-    expect(labels()).toEqual(['실행 환경', '키', '접근']);
+    expect(labels()).toEqual(['실행 환경', '실행 기록', '키', '접근']);
     expect(panelOf('agent-detail-system-publisher-notice')).toBe('키');
   });
 });

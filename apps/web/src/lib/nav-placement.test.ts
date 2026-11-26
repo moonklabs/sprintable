@@ -107,7 +107,8 @@ describe('⭐ ③ 줄이 말한 입구는 실제로 있다', () => {
     for (const route of paletteRoutes) {
       expect(ROUTE_PLACEMENT[route]?.doors, `${route} 표에 cmdk 없음`).toContain('cmdk');
     }
-    const paletteOnly = new Set(['/loop-queue']);
+    // story 5035 (C5): the agents' «실행 기록» · «API 키» are in ⌘K and in the place's «전체 보기» strip, not rows of the list column
+    const paletteOnly = new Set(['/loop-queue', '/organization/workforce/runs', '/organization/workforce/api-keys']);
     for (const route of catalogRoutes) {
       if (paletteOnly.has(route) || route === ALL_SCREENS_ITEM.path) continue;
       expect(ROUTE_PLACEMENT[route]?.doors, `${route} 표에 depth1 없음`).toContain('depth1');
