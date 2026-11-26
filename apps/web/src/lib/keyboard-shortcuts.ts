@@ -13,7 +13,7 @@ export interface RealShortcut {
 }
 
 export const REAL_SHORTCUTS: readonly RealShortcut[] = [
-  { keys: ['⌘', 'K'], handler: 'components/nav/app-sidebar.tsx', eventKey: 'k' },
+  { keys: ['⌘', 'K'], handler: 'hooks/use-command-palette-shortcut.ts', eventKey: 'k' },
   // story 5031 (C1 step 3) — the four places (lib/nav-depth1); the handler is one hook mounted by the shell
   { keys: ['⌘', '1'], handler: 'hooks/use-depth1-shortcuts.ts', eventKey: '1' },
   { keys: ['⌘', '2'], handler: 'hooks/use-depth1-shortcuts.ts', eventKey: '2' },
