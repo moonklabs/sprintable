@@ -14,7 +14,7 @@ export type PresenceStatus = 'online' | 'idle' | 'offline';
 const DOT_CLASS: Record<PresenceStatus, string> = {
   online: 'bg-success',
   idle: 'bg-warning',
-  offline: 'bg-muted-foreground/40',
+  offline: 'bg-ds-line-strong',
 };
 
 const STATUS_LABEL_KEY: Record<PresenceStatus, string> = {

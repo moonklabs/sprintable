@@ -73,7 +73,7 @@ function QueueRow({ item, memberNames, onClaim, claiming }: {
               type="button"
               disabled={claiming}
               onClick={() => onClaim(item)}
-              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted/50 disabled:opacity-50"
+              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-ds-surface-high disabled:opacity-50"
             >
               {tq('claimAction')}
             </button>

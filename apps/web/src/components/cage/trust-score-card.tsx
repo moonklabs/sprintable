@@ -54,7 +54,7 @@ function TrustScoreEmpty({ compact }: { compact?: boolean }) {
     );
   }
   return (
-    <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+    <div className="rounded-xl border border-dashed border-border bg-ds-background px-4 py-5 text-center">
       <p className="text-sm font-medium text-muted-foreground">{t('trustScoreNoData')}</p>
       <p className="mt-1 text-xs text-muted-foreground">{t('trustScoreNoDataHint')}</p>
     </div>
@@ -75,7 +75,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
   }, [memberId]);
 
   if (loading) {
-    return compact ? null : <div className="h-20 animate-pulse rounded-xl bg-muted/30" />;
+    return compact ? null : <div className="h-20 animate-pulse rounded-xl bg-ds-surface-sunk" />;
   }
 
   const scores = data?.scores ?? [];
@@ -101,7 +101,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-micro font-medium tabular-nums ${
           hitRate === null
             ? 'border-dashed border-border text-muted-foreground'
-            : 'border-border bg-muted/40 text-foreground'
+            : 'border-border bg-ds-background text-foreground'
         }`}
       >
         {hitRate === null ? t('trustScorePending') : pct(hitRate)}
@@ -128,7 +128,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
       </div>
 
       {/* 2급 delivery signal — clean_pass 격하(납품 신호). 큰 위계 X·muted. */}
-      <div className="rounded-lg border border-border bg-muted/30 p-2.5">
+      <div className="rounded-lg border border-border bg-ds-background p-2.5">
         <div className="flex items-center justify-between">
           <span className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             {t('deliverySignalLabel')}
@@ -145,7 +145,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
                 </div>
                 <div className="h-1 w-full overflow-hidden rounded-full bg-border">
                   <div
-                    className="h-full rounded-full bg-muted-foreground/40 transition-all"
+                    className="h-full rounded-full bg-ds-line-strong transition-all"
                     style={{ width: role.clean_pass_rate !== null ? `${Math.round(role.clean_pass_rate * 100)}%` : '0%' }}
                   />
                 </div>

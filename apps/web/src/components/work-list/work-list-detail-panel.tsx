@@ -564,7 +564,7 @@ export function WorkListDetailPanel({
           data(필터 前 트리)에서 이 행을 찾아 패널은 항상 뜨고, filtered(화면에 보이는
           목록)에 없을 때만 이 배너로 그 사실을 알린다. */}
       {isHiddenByFilter ? (
-        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/50 px-4 py-2" data-testid="panel-hidden-by-filter-notice">
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-ds-background px-4 py-2" data-testid="panel-hidden-by-filter-notice">
           <p className="text-xs text-muted-foreground">{t('panelHiddenByFilter')}</p>
           <Button type="button" variant="outline" size="sm" className="h-7 shrink-0" onClick={onClearFilters} data-testid="panel-clear-filters">
             {t('panelClearFilters')}

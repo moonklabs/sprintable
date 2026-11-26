@@ -453,7 +453,7 @@ export function DocEditor({
             >
               <span
                 className={`relative inline-flex h-[18px] w-[30px] flex-shrink-0 items-center rounded-full transition-colors ${
-                  autosave ? 'bg-success' : 'bg-muted-foreground/30'
+                  autosave ? 'bg-success' : 'bg-ds-line-strong'
                 }`}
               >
                 <span
@@ -518,7 +518,7 @@ export function DocEditor({
           >
             <Code className="size-3.5" />
           </BubbleButton>
-          <span className="mx-0.5 h-4 w-px bg-border/60" />
+          <span className="mx-0.5 h-4 w-px bg-ds-line" />
           <BubbleButton
             active={editor.isActive('link')}
             onClick={() => {
@@ -657,13 +657,13 @@ export function DocEditor({
           {editable && isDragging ? (
             <div
               data-testid="doc-editor-drop-overlay"
-              className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center"
+              className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info-tint text-center"
             >
-              <span className="flex size-9 items-center justify-center rounded-full bg-info/10 text-info">
+              <span className="flex size-9 items-center justify-center rounded-full bg-info-tint text-foreground">
                 <Plus className="size-4" />
               </span>
               <span className="break-keep text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
-              <span className="break-keep text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
+              <span className="break-keep text-xs text-foreground">{tEditor('attachDropHint')}</span>
             </div>
           ) : null}
         </div>
@@ -774,7 +774,7 @@ export function BubbleButton({
       aria-pressed={active}
       className={`rounded-md p-1.5 transition-colors ${
         active
-          ? 'bg-primary/14 text-primary'
+          ? 'bg-ds-action-soft text-primary'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'
       }`}
     >
@@ -808,7 +808,7 @@ export function ToolbarButton({
         disabled
           ? 'cursor-not-allowed border-border bg-card text-muted-foreground opacity-50'
           : active
-            ? 'border-ds-action bg-primary/14 text-primary'
+            ? 'border-ds-action bg-ds-action-soft text-primary'
             : 'border-border bg-card text-foreground hover:border-ds-action hover:text-primary'
       }`}
     >
@@ -818,5 +818,5 @@ export function ToolbarButton({
 }
 
 function Sep() {
-  return <span className="mx-0.5 h-5 w-px bg-border/60" />;
+  return <span className="mx-0.5 h-5 w-px bg-ds-line" />;
 }

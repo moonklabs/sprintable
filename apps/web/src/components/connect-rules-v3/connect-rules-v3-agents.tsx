@@ -167,7 +167,7 @@ export function ConnectRulesV3Agents({ isAdmin }: { isAdmin: boolean }) {
           const projectName = agent.project_id ? projectsById?.[agent.project_id] : undefined;
 
           return (
-            <div key={agent.id} className="rounded-md border border-border bg-muted/30 text-sm" data-testid="connect-rules-v3-agent-row">
+            <div key={agent.id} className="rounded-md border border-border bg-ds-background text-sm" data-testid="connect-rules-v3-agent-row">
               <Button
                 type="button"
                 variant="ghost"

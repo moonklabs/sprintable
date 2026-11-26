@@ -339,12 +339,12 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
   return (
     <div
       data-testid="flow-canvas-offscreen-hint"
-      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-editorial-meta text-muted-foreground shadow-sm"
+      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted px-2 py-1 text-editorial-meta text-muted-foreground shadow-sm"
     >
       <span aria-hidden="true">▸</span>
       <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: count })}</b>
       {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이 설명
-          줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또 라이트에서만).
+          줄이 bg-muted 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또 라이트에서만).
           #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
       <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
     </div>
@@ -741,7 +741,7 @@ export function FlowMapCanvas({
                       title={t('flowLaneProgressHint', { done: lane.progress.done, total: lane.progress.total })}
                     >
                       <div
-                        className="h-full rounded-full bg-brand/85"
+                        className="h-full rounded-full bg-ds-action"
                         style={{ width: `${Math.min(100, (lane.progress.done / lane.progress.total) * 100)}%` }}
                       />
                     </div>

@@ -113,7 +113,7 @@ function LineageTree({ edges, snapshotsByDerivedId }: {
         return (
           <div key={node.sourceEvidenceId} className="space-y-1">
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-brand bg-transparent px-2 py-1.5">
-              <Badge className="bg-brand/15 text-foreground">{t('lineageTreeMasterBadge')}</Badge>
+              <Badge className="bg-ds-action-soft text-foreground">{t('lineageTreeMasterBadge')}</Badge>
               {masterTitle
                 ? <span className="text-xs font-semibold text-foreground">{masterTitle}</span>
                 : <span className="font-mono text-editorial-meta text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>}

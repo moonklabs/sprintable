@@ -266,7 +266,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                     radius="compact"
                     className={cn(
                       'inline-block px-3.5 py-2.5 text-sm',
-                      isMine ? 'rounded-tr-sm bg-primary/10 text-left' : 'rounded-tl-sm',
+                      isMine ? 'rounded-tr-sm bg-ds-action-soft text-left' : 'rounded-tl-sm',
                     )}
                   >
                     {/* story 4921 — an event message drawn as text shows the person's line (the definition's name is not read in this screen: the word «이벤트» + the person's own words), never the machine text an agent reads */}

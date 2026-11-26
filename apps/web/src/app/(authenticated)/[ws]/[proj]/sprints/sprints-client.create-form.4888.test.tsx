@@ -109,7 +109,7 @@ describe('스프린트 만들기 폼 · 열기 단추 · 삭제 확인 — ds �
     const d = dialog();
     const card = [...d.querySelectorAll('[data-slot="ds-card"]')].find((c) => (c.textContent ?? '').includes(S.planSection));
     expect(card).toBeTruthy();
-    expect(d.querySelectorAll('.bg-muted\\/20')).toHaveLength(0);
+    expect(d.querySelectorAll('.rounded-xl.border:is(.bg-ds-background, .bg-ds-surface-sunk):not([data-slot="ds-card"])')).toHaveLength(0);
   });
 
   it('⭐닫기가 이름 있는 ds 아이콘 단추이고 누르면 폼이 닫힌다', async () => {

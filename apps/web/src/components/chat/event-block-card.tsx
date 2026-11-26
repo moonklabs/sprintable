@@ -518,7 +518,7 @@ export function renderStaticEventBlock(block: BlockTemplateBlock, key: number, w
   }
   if (block.type === 'fields') {
     return (
-      <dl key={key} className="space-y-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
+      <dl key={key} className="space-y-1.5 rounded-lg bg-ds-surface-sunk px-2.5 py-2">
         {block.fields.map((f, i) => (
           <div key={i} className="flex gap-2 text-xs">
             <dt className="shrink-0 font-medium text-muted-foreground">{f.label}</dt>

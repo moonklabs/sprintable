@@ -24,8 +24,8 @@ type SortableContextCompatProps = {
 const SortableContextCompat = SortableContext as unknown as ComponentType<SortableContextCompatProps>;
 
 const STATUS_COLOR: Record<string, { dot: string; tint: string }> = {
-  'backlog': { dot: 'bg-ds-ink-3', tint: 'bg-muted/40' },
-  'ready-for-dev': { dot: 'bg-ds-ink-3', tint: 'bg-muted/40' },
+  'backlog': { dot: 'bg-ds-ink-3', tint: 'bg-ds-surface-sunk' },
+  'ready-for-dev': { dot: 'bg-ds-ink-3', tint: 'bg-ds-surface-sunk' },
   'in-progress': { dot: 'bg-ds-needs-hand-bar', tint: 'bg-warning-tint' },
   'in-review': { dot: 'bg-ds-info', tint: 'bg-success-tint' },
   'done': { dot: 'bg-ds-done', tint: 'bg-success-tint' },
@@ -273,7 +273,7 @@ export function KanbanColumn({
       </div>
 
       {!collapsed && composing ? (
-        <div className="mb-2 rounded-xl border border-ds-line-control bg-background/50 p-2">
+        <div className="mb-2 rounded-xl border border-ds-line-control bg-background p-2">
           <Input
             autoFocus
             value={draftTitle}
@@ -361,7 +361,7 @@ export function KanbanColumn({
                 type="button"
                 onClick={onLoadMore}
                 disabled={loadingMore}
-                className={`w-full rounded-md px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-50 ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={`w-full rounded-md px-3 py-1.5 text-xs hover:bg-ds-surface-high disabled:opacity-50 ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {/* story #3776(1층B) — "불러오는 중..."/"더 보기", board ns의 기존 loading/loadMore 키 재사용. */}
                 {loadingMore ? t('loading') : t('loadMore')}

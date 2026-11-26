@@ -28,7 +28,7 @@ export function StemRow({ stem, isExpanded, onToggle }: StemRowProps) {
       onClick={onToggle}
       aria-expanded={isExpanded}
       className={`w-full rounded-lg border border-l-[3px] px-2.5 py-2 text-left transition ${accentClass} ${
-        isExpanded ? 'bg-muted' : 'hover:bg-muted/50'
+        isExpanded ? 'bg-muted' : 'hover:bg-ds-surface-high'
       }`}
     >
       <div className="truncate text-xs font-semibold text-foreground">{stem.title}</div>

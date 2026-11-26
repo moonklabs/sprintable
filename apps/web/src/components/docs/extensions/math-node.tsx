@@ -51,7 +51,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
 
   return (
     <NodeViewWrapper as="div" className="my-4 not-prose">
-      <div className="rounded-xl border border-border bg-muted/10">
+      <div className="rounded-xl border border-border bg-ds-background">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
           <span className="text-editorial-meta font-medium text-muted-foreground">math</span>
@@ -132,7 +132,7 @@ function MathInlineView({ node }: ReactNodeViewProps) {
   }
 
   return (
-    <NodeViewWrapper as="span" className="rounded bg-muted/40 px-1 font-mono text-sm">
+    <NodeViewWrapper as="span" className="rounded bg-ds-surface-sunk px-1 font-mono text-sm">
       <NodeViewContent />
     </NodeViewWrapper>
   );

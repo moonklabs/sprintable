@@ -11,7 +11,7 @@ export function RawDetailsToggle({ raw, label }: { raw: string | undefined; labe
   return (
     <details className="col-start-2 mt-1">
       <summary className="cursor-pointer text-xs text-muted-foreground">{label}</summary>
-      <pre className="mt-1 overflow-x-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{raw}</pre>
+      <pre className="mt-1 overflow-x-auto rounded-md bg-ds-surface-sunk p-2 text-xs text-muted-foreground">{raw}</pre>
     </details>
   );
 }

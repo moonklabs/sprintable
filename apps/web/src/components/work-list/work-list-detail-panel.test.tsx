@@ -792,7 +792,7 @@ describe('WorkListDetailPanel — the risk badge per grade (#4448)', () => {
     expect(container.querySelector('[data-testid="panel-risk"]')).toBeNull();
     const chip = container.querySelector('[data-testid="panel-state"] [data-testid="panel-risk-chip"]');
     expect(chip?.textContent).toBe(koMessages.workList.chipLowRisk);
-    expect(chip?.className).toContain('bg-muted/70'); // the chip variant (the row's look)
+    expect(chip?.className).toContain('bg-muted'); // the chip variant (the row's look)
     expect(chip?.className).not.toContain('bg-warning-tint');
   });
   it('high risk: the warning badge and its sentence in the risk box', async () => {

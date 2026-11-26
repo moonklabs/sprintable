@@ -548,7 +548,7 @@ export function ApprovalsQueue() {
       <>
         {perm.offLine}
         {goneLine}
-        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-ds-background px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
         </div>
       </>
@@ -559,13 +559,13 @@ export function ApprovalsQueue() {
   const renderItemCard = (item: GateInboxItem, index: number) => {
         if (isHitl(item)) {
           return (
-            <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info bg-info/5 px-4 py-3">
+            <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info bg-info-tint px-4 py-3">
               <div className="flex w-full flex-wrap items-center gap-1.5">
                 <Badge variant="chip">{t('hitlRequestBadge')}</Badge>
-                <span className="ml-auto shrink-0 text-micro text-muted-foreground">{formatAge(item.created_at, t)}</span>
+                <span className="ml-auto shrink-0 text-micro text-foreground">{formatAge(item.created_at, t)}</span>
               </div>
               <p className="text-sm text-foreground">{item.title}</p>
-              <p className="line-clamp-2 text-editorial-meta text-muted-foreground">{item.prompt}</p>
+              <p className="line-clamp-2 text-editorial-meta text-foreground">{item.prompt}</p>
               {gateErrors[item.id] ? (
                 <p
                   className="rounded-lg border border-destructive bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
@@ -584,7 +584,7 @@ export function ApprovalsQueue() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive"
+                    className="h-7 gap-1 text-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
                     aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateReject') })}
@@ -609,7 +609,7 @@ export function ApprovalsQueue() {
                   </Button>
                 </div>
               ) : (
-                <p className="mt-1 text-right text-editorial-meta text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
+                <p className="mt-1 text-right text-editorial-meta text-foreground">{t('gateReadonlyNotAuthorized')}</p>
               )}
             </div>
           );
@@ -886,7 +886,7 @@ export function ApprovalsQueue() {
               // story #3806(정정3, 페드루 PO 리뷰 2026-09-11 13:00Z) — 「작성자가 본문을
               // 수정해...」는 글 게이트(doc/content) 전용 문장이다. ads_boost는 본문이
               // 아니라 예산·기간이 바뀌는 축이라 §1 원문 그대로 별도 문장을 쓴다.
-              <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-editorial-meta text-muted-foreground">
+              <p className="mt-2 rounded-lg bg-ds-surface-sunk px-2.5 py-1.5 text-editorial-meta text-muted-foreground">
                 {gate.gate_type === 'ads_boost' ? t('adsBoostReapprovalWaiting') : t('gateReapprovalResubmitWaiting')}
               </p>
             ) : null}

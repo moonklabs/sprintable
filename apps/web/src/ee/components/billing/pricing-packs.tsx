@@ -67,7 +67,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
               <span className="text-sm font-semibold">{formatKrw(AUTOMATION_PACK.priceKrwPerPack * automationQty)}</span>
               <span className="text-xs text-muted-foreground">{t('vatExcludedNote')}</span>
             </span>
-            <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('automation', automationQty)}>
+            <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-ds-ink-2" onClick={() => onBuyPack('automation', automationQty)}>
               {t('buyPack')}
             </Button>
           </div>
@@ -87,7 +87,7 @@ export function PricingPacks({ onBuyPack }: { onBuyPack: (kind: PackKind, quanti
               <span className="text-sm font-semibold">{formatKrw(STORAGE_PACK.priceKrwPerPack * storageQty)}</span>
               <span className="text-xs text-muted-foreground">{t('vatExcludedNote')}</span>
             </span>
-            <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onBuyPack('storage', storageQty)}>
+            <Button variant="default" size="sm" className="bg-brand text-brand-foreground hover:bg-ds-ink-2" onClick={() => onBuyPack('storage', storageQty)}>
               {t('buyPack')}
             </Button>
           </div>

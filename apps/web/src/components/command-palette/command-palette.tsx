@@ -382,7 +382,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
                 aria-expanded={hasResults}
               />
               <DialogPrimitive.Close
-                className="rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="rounded border border-border bg-ds-background px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label={t('close')}
               >
                 ESC
@@ -390,7 +390,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
             </div>
 
             {contextStory ? (
-              <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 text-editorial-meta text-muted-foreground">
+              <div className="flex items-center gap-1.5 border-b border-border bg-ds-background px-3 py-1.5 text-editorial-meta text-muted-foreground">
                 <span className="text-info" aria-hidden="true">◆</span>
                 {t('contextChip', { title: contextStory.story_number ? `#${contextStory.story_number} ${contextStory.title}` : contextStory.title })}
               </div>
@@ -481,7 +481,7 @@ function NavigateRow({ item }: { item: CommandItem }) {
           {item.shortcut.map((key) => (
             <kbd
               key={key}
-              className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground"
+              className="rounded border border-border bg-ds-background px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground"
             >
               {key}
             </kbd>
@@ -507,7 +507,7 @@ function ActionRow({ item, highlighted, dangerPillLabel }: { item: ActionCommand
         <span className="flex-1 truncate">{item.label}</span>
         {item.danger ? (
           // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="ml-auto shrink-0 rounded border border-warning bg-warning/10 px-1.5 py-0.5 text-micro font-semibold text-foreground">
+          <span className="ml-auto shrink-0 rounded border border-warning bg-warning-tint px-1.5 py-0.5 text-micro font-semibold text-foreground">
             {dangerPillLabel}
           </span>
         ) : null}

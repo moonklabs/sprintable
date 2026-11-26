@@ -327,7 +327,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   const agentName = otherParticipant?.name ?? t('unknownParticipant');
 
   return (
-    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="chat-v3-screen">
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-ds-surface-sunk" data-testid="chat-v3-screen">
       <div className="flex min-h-0 flex-1">
         <NavV3Sidebar flags={flags} activeKey="chats" />
         <div className="flex min-w-0 flex-1">

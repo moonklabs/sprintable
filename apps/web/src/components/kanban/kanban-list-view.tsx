@@ -79,7 +79,7 @@ function StatusGroup({
     <div data-testid={`list-group-${columnId}`} className={cn('rounded-xl border border-ds-line p-1', LAYER.panel)}>
       <button
         type="button"
-        className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50"
+        className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-ds-surface-high"
         onClick={() => setExpanded((p) => !p)} aria-expanded={expanded}
       >
         {expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}

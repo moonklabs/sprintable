@@ -90,7 +90,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   // ── 미존재(graceful): 평문 라벨 + 파일 글리프, 링크/화살표 없음 ──
   if (missing || !asset) {
     return (
-      <div className="mt-2 flex max-w-75 items-center gap-2.5 rounded-md border border-border bg-muted/40 px-2.5 py-2">
+      <div className="mt-2 flex max-w-75 items-center gap-2.5 rounded-md border border-border bg-ds-background px-2.5 py-2">
         <span className="grid size-[38px] shrink-0 place-items-center rounded-sm bg-muted text-ds-ink-2">
           {fileGlyph(null, 'size-[17px]')}
         </span>

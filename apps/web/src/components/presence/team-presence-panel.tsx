@@ -15,7 +15,7 @@ type GroupKey = 'working' | 'online' | 'offline';
 const GROUP_DOT: Record<GroupKey, string> = {
   working: 'bg-info',
   online: 'bg-success',
-  offline: 'bg-muted-foreground/40',
+  offline: 'bg-ds-line-strong',
 };
 
 function groupItems(items: TeamPresenceItem[]): { key: GroupKey; items: TeamPresenceItem[] }[] {
@@ -136,7 +136,7 @@ export function TeamPresencePanel({
             type="button"
             onClick={onClose}
             aria-label={t('panelTitle')}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-ds-surface-high hover:text-foreground"
           >
             <X className="size-4" />
           </button>

@@ -120,7 +120,7 @@ function ConcludedRow({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(hypothesis.id); }
       }}
-      className="flex cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-muted/60"
+      className="flex cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-ds-surface-high"
     >
       <HypothesisStatusBadge status={hypothesis.status} />
       <p className="min-w-0 flex-1 truncate text-sm text-foreground">{hypothesis.statement}</p>
@@ -214,15 +214,15 @@ export function HypothesisEarthLayer({
               // story #2543 — 첫 성공 화면(SSOT ae75a8ff 3화면 중 마지막). 방금 심은 가설이
               // 이 렌더에서 이미 지구층 measuring 그리드에 있으므로(reload 완료), 배너는
               // 그 위에 「생겼다」를 한 번 확인시켜주는 정직한 확인 신호일 뿐이다.
-              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-info bg-info/10 px-4 py-3">
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-info bg-info-tint px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{t('guidedSuccessTitle')}</p>
-                  <p className="text-xs text-muted-foreground">{t('guidedSuccessSubtitle')}</p>
+                  <p className="text-xs text-foreground">{t('guidedSuccessSubtitle')}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setSuccessBannerDismissed(true)}
-                  className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  className="shrink-0 text-xs font-medium text-foreground hover:text-foreground"
                 >
                   {t('guidedSuccessDismiss')}
                 </button>

@@ -122,7 +122,7 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
           aria-label={labels.shareToWeb}
           disabled={busy || enabled === null}
           onClick={() => { if (busy || enabled === null) return; void (isOn ? disable() : enable()); }}
-          className={`relative inline-flex h-[22px] w-[38px] flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${isOn ? 'bg-success' : 'bg-muted-foreground/30'}`}
+          className={`relative inline-flex h-[22px] w-[38px] flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${isOn ? 'bg-success' : 'bg-ds-line-strong'}`}
         >
           <span className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${isOn ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
         </button>
@@ -135,7 +135,7 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
               readOnly
               value={shareUrl}
               onFocus={(e) => e.currentTarget.select()}
-              className="h-auto min-w-0 flex-1 bg-muted/30 px-2.5 py-1.5 font-mono lg:text-xs dark:bg-muted/30"
+              className="h-auto min-w-0 flex-1 bg-ds-surface-sunk px-2.5 py-1.5 font-mono lg:text-xs dark:bg-ds-background"
             />
             <Button size="sm" variant="outline" onClick={() => void copy()} className="flex-shrink-0">
               {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}

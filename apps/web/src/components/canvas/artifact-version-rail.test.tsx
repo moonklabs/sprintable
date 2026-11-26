@@ -171,6 +171,6 @@ describe('ArtifactVersionRail — 고른 판 줄의 선택 상태(story #4354)',
     expect(b.current).toHaveLength(1);
     expect(a.buttons.indexOf(a.current[0]!)).not.toBe(b.buttons.indexOf(b.current[0]!));
     // 색 표시는 그대로(시각 무변) — 고른 줄에 예전 배경 클래스가 남아 있다.
-    expect(b.current[0]!.className).toContain('bg-muted/60');
+    expect(b.current[0]!.className).toContain('bg-ds-surface-sunk');
   });
 });

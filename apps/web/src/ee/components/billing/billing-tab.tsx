@@ -447,7 +447,7 @@ export function UpgradeCheckoutDialog({
           </Button>
           <Button
             variant="default"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            className="bg-brand text-brand-foreground hover:bg-ds-ink-2"
             onClick={handleConfirm}
             disabled={submitting || paymentUnresolved}
           >
@@ -520,7 +520,7 @@ function ChangeTierConfirmDialog({
           </Button>
           <Button
             variant="default"
-            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            className="bg-brand text-brand-foreground hover:bg-ds-ink-2"
             onClick={handleConfirm}
             disabled={paymentUnresolved}
           >

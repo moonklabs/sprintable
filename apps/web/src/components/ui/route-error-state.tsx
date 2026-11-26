@@ -48,14 +48,14 @@ export function RouteErrorState({
         <div className="flex justify-center gap-3">
           <button
             onClick={reset}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
+            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-ds-ink-2"
           >
             {t('retry')}
           </button>
           {secondaryHref ? (
             <a
               href={secondaryHref}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-ds-surface-high"
             >
               {secondaryLabel ?? t('goToLogin')}
             </a>

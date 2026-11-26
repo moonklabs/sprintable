@@ -41,9 +41,9 @@ export function PresenceToggleButton() {
       aria-pressed={open}
       title={t('panelTitle')}
       className={cn(
-        'relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground touch:size-11',
+        'relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-ds-surface-high hover:text-foreground touch:size-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-        open && 'bg-muted/60 text-foreground',
+        open && 'bg-ds-surface-sunk text-foreground',
       )}
     >
       <Users className="size-4" />

@@ -36,7 +36,7 @@ export function CitationComposeBar({ mode, selectedCount, saveState, onCancel, o
   };
 
   return (
-    <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2">
+    <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-border bg-ds-background px-4 py-2">
       <span className="text-xs text-muted-foreground">
         {mode === 'anchored' ? t('citationAnchored') : t('citationSelectedCount', { count: selectedCount })}
       </span>
@@ -59,7 +59,7 @@ export function CitationComposeBar({ mode, selectedCount, saveState, onCancel, o
                 type="button"
                 onClick={onSave}
                 disabled={saveState === 'saving'}
-                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition hover:bg-ds-ink-2 disabled:opacity-50"
               >
                 {saveState === 'saving' ? tc('saving') : t('citationSaveToStory')}
               </button>

@@ -152,7 +152,7 @@ export function EventDefinitionSummary({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-border bg-muted/30 p-3">
+      <div className="rounded-xl border border-border bg-ds-background p-3">
         <SummaryLine
           label={t('eventSummaryFormatLabel')}
           value={format ? t(`definerFormat_${format}`) : t('eventSummaryFormatUnclassified')}
@@ -170,7 +170,7 @@ export function EventDefinitionSummary({
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-muted/40 text-left text-xs font-semibold text-muted-foreground">
+                <tr className="bg-ds-surface-sunk text-left text-xs font-semibold text-muted-foreground">
                   <th className="px-2 py-1">{t('definerFieldNameCol')}</th>
                   <th className="px-2 py-1">{t('definerFieldTypeCol')}</th>
                   <th className="px-2 py-1">{t('definerFieldRequiredCol')}</th>

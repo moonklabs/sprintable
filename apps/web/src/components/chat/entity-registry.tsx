@@ -56,18 +56,18 @@ export function EntityGlyph({ Icon, label, className }: { Icon: LucideIcon | nul
 // ⛔AC4: ②/③(담긴 곳으로 보내거나 갈 곳이 없는) 상태에서는 이 틴트를 쓰지 않고 GRAY_STATE_COLOR로
 // 덮어쓴다(회색 하나로 통일 — 노랑 금지 근거는 그 상수 주석 참고). 여기 있는 색은 **①일 때만** 보인다.
 export const ENTITY_COLORS: Record<string, string> = {
-  story: 'border-info bg-info/8 text-foreground',
-  doc: 'border-border bg-muted/40 text-foreground',
-  epic: 'border-secondary bg-secondary/40 text-foreground',
-  task: 'border-success bg-success/8 text-foreground',
-  sprint: 'border-warning bg-warning/8 text-foreground',
-  artifact: 'border-info bg-info/8 text-foreground',
-  hypothesis: 'border-border bg-muted/40 text-foreground',
-  evidence: 'border-border bg-muted/40 text-foreground',
+  story: 'border-info bg-info-tint text-foreground',
+  doc: 'border-border bg-ds-background text-foreground',
+  epic: 'border-secondary bg-ds-background text-foreground',
+  task: 'border-success bg-success-tint text-foreground',
+  sprint: 'border-warning bg-warning-tint text-foreground',
+  artifact: 'border-info bg-info-tint text-foreground',
+  hypothesis: 'border-border bg-ds-background text-foreground',
+  evidence: 'border-border bg-ds-background text-foreground',
   // S6: 스토리지 자산 토큰 — info 틴트(파일 아이콘은 content-type 의존이라 AssetEmbedCard 에서 getFileIcon 처리).
-  asset: 'border-info bg-info/8 text-foreground',
+  asset: 'border-info bg-info-tint text-foreground',
 };
 
 // ⛔AC4 색 규율: 노랑 금지 — 노랑은 "기다리면 풀리는 것"인데 ②/③은 사용자가 기다려서 풀 수
 // 있는 상태가 아니다(담긴 곳으로 보내거나, 애초에 갈 곳이 없는 것). 구별은 색이 아니라 말로.
-export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-ds-ink-2';
+export const GRAY_STATE_COLOR = 'border-border bg-ds-background text-ds-ink-2';

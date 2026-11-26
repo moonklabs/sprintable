@@ -57,7 +57,7 @@ export function activityActorLabel(
 
 function avatarClass(type: 'human' | 'agent' | null): string {
   return type === 'agent'
-    ? 'bg-primary/15 text-primary'
+    ? 'bg-ds-action-soft text-primary'
     : 'bg-muted text-muted-foreground';
 }
 
@@ -166,7 +166,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
         {loading ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-10 animate-pulse rounded-md bg-muted/50" />
+              <div key={i} className="h-10 animate-pulse rounded-md bg-ds-surface-sunk" />
             ))}
           </div>
         ) : items.length === 0 ? (
@@ -175,7 +175,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
           items.map((item) => (
             <div
               key={item.id}
-              className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
+              className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-ds-surface-high"
             >
               <span
                 className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarClass(item.actor_type)}`}

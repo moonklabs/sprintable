@@ -278,7 +278,7 @@ export function ChatV3ContextPanel({
                 ) : null}
               </Card>
             ) : (
-              <div className="h-16 animate-pulse rounded-md bg-muted/40" aria-hidden="true" />
+              <div className="h-16 animate-pulse rounded-md bg-ds-surface-sunk" aria-hidden="true" />
             )
           ) : (
             <p className="text-xs text-muted-foreground">{t('contextEmptySection')}</p>
@@ -374,7 +374,7 @@ export function ChatV3ContextPanel({
         <div>
           <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('contextRelatedLabel')}</p>
           {relatedNeedsMe ? (
-            <Link href={todayHref} className="block rounded-md bg-primary/10 px-3 py-2.5 text-xs text-primary" data-testid="chat-v3-related-today-link">
+            <Link href={todayHref} className="block rounded-md bg-ds-action-soft px-3 py-2.5 text-xs text-primary" data-testid="chat-v3-related-today-link">
               {t('contextRelatedTodayLink')}
             </Link>
           ) : (

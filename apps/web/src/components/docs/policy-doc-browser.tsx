@@ -118,7 +118,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
   const policyPanelToggleLabel = policyPanelInlineOpen || policyPanelDrawerOpen ? t('hidePolicySprints') : t('openPolicySprints');
 
   const renderSprintSidebar = ({ mode, closePanel }: { mode: 'inline' | 'drawer'; closePanel: () => void }) => (
-    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-overlay-line-1 bg-muted/75">
+    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-overlay-line-1 bg-muted">
       <div className="space-y-4 overflow-y-auto p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -151,7 +151,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-ds-line-control bg-brand/14 text-brand-text'
+                      ? 'border-ds-line-control bg-ds-action-soft text-brand-text'
                       : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                   )}
                 >
@@ -202,7 +202,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="h-auto border-overlay-line-1 bg-muted/90 px-4 py-2.5 dark:bg-muted/90"
+                  className="h-auto border-overlay-line-1 bg-muted px-4 py-2.5 dark:bg-muted"
                 />
               </div>
             </div>
@@ -226,7 +226,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-ds-line-control bg-brand/14 text-brand-text'
+                            ? 'border-ds-line-control bg-ds-action-soft text-brand-text'
                             : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                         )}
                       >

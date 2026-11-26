@@ -110,7 +110,7 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
           onClick={action}
           className={`flex h-11 w-11 items-center justify-center rounded-lg transition-colors ${
             active
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-ds-action-soft text-primary'
               : 'text-muted-foreground hover:bg-accent hover:text-foreground'
           }`}
         >

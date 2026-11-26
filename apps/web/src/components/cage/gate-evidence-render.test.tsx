@@ -263,7 +263,7 @@ describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
 
     expect(container.innerHTML).not.toMatch(/bg-destructive|text-destructive/);
     expect(container.innerHTML).not.toMatch(/bg-success|text-success/);
-    expect(container.querySelector('.bg-info\\/10')).toBeTruthy();
+    expect(container.querySelector('.bg-info-tint')).toBeTruthy();
   });
 
   it('draft_reason이 없으면 근거 없음을 정직하게 알린다(AC3 — 지어내지 않음)', async () => {
@@ -671,7 +671,7 @@ describe('GateEvidence — 레시피 approve 게이트 승인 대상 실물 렌�
     expect(container.textContent).not.toContain('v2\\(');
   });
 
-  // PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙: bg-muted/40 tint 위에서 값
+  // PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙: bg-ds-background tint 위에서 값
   // (stage·channel)은 라벨과 같은 muted 톤에 묻히지 않고 text-foreground여야 한다.
   it('⭐PO 변경요청② — stage·channel 값은 text-foreground, 라벨만 text-muted-foreground(값이 묻히지 않음)', async () => {
     const gate = recipeApprovalGate({ stage: 'approve', channel: 'threads' });

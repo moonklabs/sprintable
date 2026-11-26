@@ -551,7 +551,7 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
     expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 1장이 화면 밖');
   });
 
-  it('the explanation span uses text-foreground (not the inherited text-muted-foreground, which fails AA 4.5:1 on bg-muted/90 in light mode — measured 4.43:1) (유나 라이브 실측 2026-07-31)', async () => {
+  it('the explanation span uses text-foreground (not the inherited text-muted-foreground, which fails AA 4.5:1 on bg-muted in light mode — measured 4.43:1) (유나 라이브 실측 2026-07-31)', async () => {
     mockClientWidth = 700;
     mockScrollWidth = 1000;
     const lane = makeQueueLane([0, 1, 2, 3, 4]);
@@ -643,7 +643,7 @@ describe('FlowMapCanvas — 수→형 (story #2224 §A1/§A4)', () => {
   it('lane.progress가 있으면 채움 바 폭이 done/total 비율로 계산된다', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })], progress: { done: 3, total: 4 } });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    const fill = container.querySelector('.bg-brand\\/85') as HTMLElement | null;
+    const fill = container.querySelector('.bg-ds-action') as HTMLElement | null;
     expect(fill).not.toBeNull();
     expect(fill?.style.width).toBe('75%');
   });
@@ -651,7 +651,7 @@ describe('FlowMapCanvas — 수→형 (story #2224 §A1/§A4)', () => {
   it('lane.progress가 없으면 채움 바 자체를 안 그린다(0%를 지어내지 않는다)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
-    expect(container.querySelector('.bg-brand\\/85')).toBeNull();
+    expect(container.querySelector('.bg-ds-action')).toBeNull();
   });
 
   it('outgoingCount=0이면 「0건」 텍스트 대신 막다름 표식(role=img)이 뜬다', async () => {

@@ -103,7 +103,7 @@ describe('스프린트 상세 패널 번다운 — ds 부품(story #4888)', () =
 
   it('⭐손으로 만든 타일 · 상자(rounded-md border bg-muted/30 · border p-3 · border-primary/30)가 번다운 블록에 없다', async () => {
     await openDetail();
-    expect(detail().querySelectorAll('div.bg-muted\\/30')).toHaveLength(0);
+    expect(detail().querySelectorAll('div.bg-ds-background, div.bg-ds-surface-sunk')).toHaveLength(0);
     expect(detail().querySelectorAll('[class*="border-primary/30"]')).toHaveLength(0);
     expect(detail().querySelectorAll('div.rounded-md.border.p-3')).toHaveLength(0);
   });

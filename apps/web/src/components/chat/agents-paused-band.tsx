@@ -123,7 +123,7 @@ export function AgentsPausedBand({ conversationId, state, onResumed }: {
             <p id="agents-paused-confirm" className="text-sm text-foreground">{t('confirm')}</p>
             <label className="flex flex-col gap-1 text-sm text-foreground">
               {t('reasonLabel')}
-              {/* 손으로 푼 경고 색 면(bg-warning-tint) 안일 수 있어 불투명 면을 남긴다 — 흐린 안내 글자가 색 면 위에 얹히지 않게(부품은 투명 · dark:bg-input/30). */}
+              {/* 손으로 푼 경고 색 면(bg-warning-tint) 안일 수 있어 불투명 면을 남긴다 — 흐린 안내 글자가 색 면 위에 얹히지 않게(부품은 투명 · dark:bg-ds-surface-sunk). */}
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('reasonPlaceholder')}
                 aria-describedby="agents-paused-reason-note" aria-invalid={tooLong || undefined}
                 className="h-auto bg-background px-2 py-1 dark:bg-background" />

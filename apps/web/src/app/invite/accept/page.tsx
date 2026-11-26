@@ -47,7 +47,7 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
           {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 —
               목적지 모듈 경유(chatsHref, 동적 표현식이라 no-html-link-for-pages가 애초에
               안 걸려 옛 eslint-disable 주석은 제거). */}
-          <a href={chatsHref} className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          <a href={chatsHref} className="inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-ds-ink-2">
             {t('goToChatButton')}
           </a>
         </div>

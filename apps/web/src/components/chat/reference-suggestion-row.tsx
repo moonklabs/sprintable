@@ -136,7 +136,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
         return (
           <div
             key={c.raw}
-            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground"
+            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-ds-background px-2.5 py-1.5 text-xs text-muted-foreground"
           >
             <Link2 className="size-3.5 shrink-0" aria-hidden />
             {state.status === 'linked' ? (
@@ -156,7 +156,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
                 <button
                   type="button"
                   onClick={() => handleRetry(c)}
-                  className="rounded px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10"
+                  className="rounded px-1.5 py-0.5 font-medium text-primary hover:bg-ds-action-soft"
                 >
                   {t('referenceCandidateRetry')}
                 </button>
@@ -173,7 +173,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
                   type="button"
                   disabled={state.status === 'confirming' || state.status === 'undoing'}
                   onClick={() => handleConfirm(c)}
-                  className="rounded px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10 disabled:pointer-events-none disabled:opacity-50"
+                  className="rounded px-1.5 py-0.5 font-medium text-primary hover:bg-ds-action-soft disabled:pointer-events-none disabled:opacity-50"
                 >
                   {t('referenceCandidateConfirm')}
                 </button>

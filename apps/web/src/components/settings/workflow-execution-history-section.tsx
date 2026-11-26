@@ -106,7 +106,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                   {logs.map((log) => (
                     <Fragment key={log.id}>
                       <tr
-                        className="border-b border-border cursor-pointer hover:bg-muted/30"
+                        className="border-b border-border cursor-pointer hover:bg-ds-surface-high"
                         onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                       >
                         <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">

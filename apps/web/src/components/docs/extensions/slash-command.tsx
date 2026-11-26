@@ -481,13 +481,13 @@ const SlashMenu = forwardRef<
         data-active={isActive}
         className={`flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
           isActive
-            ? 'bg-brand/14 text-brand-text'
+            ? 'bg-ds-action-soft text-brand-text'
             : 'text-foreground hover:bg-overlay-fill-1'
         }`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => command(item)}
       >
-        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border ${isActive ? 'border-ds-line-control bg-brand/10' : 'bg-muted/40'}`}>
+        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border ${isActive ? 'border-ds-line-control bg-ds-action-soft' : 'bg-ds-surface-sunk'}`}>
           <Icon className={`size-3.5 ${isActive ? 'text-brand-text' : 'text-muted-foreground'}`} />
         </span>
         <span className="flex min-w-0 flex-col">

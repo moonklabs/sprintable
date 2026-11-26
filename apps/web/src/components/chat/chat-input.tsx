@@ -711,7 +711,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             return (
               <div
                 key={`${file.name}-${file.size}-${i}`}
-                className={`flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
+                className={`flex items-center gap-2 rounded-lg border bg-ds-background px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
               >
                 {sending ? (
                   <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-muted-foreground" />
@@ -741,7 +741,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
       )}
-      {/* story #2942 — STEER 패널(bg-info/8) 안이 아니라 여기 바깥(무-tint 배경)에 렌더한다.
+      {/* story #2942 — STEER 패널(bg-info-tint) 안이 아니라 여기 바깥(무-tint 배경)에 렌더한다.
           #2590(교차-요소 tint×계열색) 가드 — info-tint 조상 안의 text-destructive는 그
           tint의 대비 계산이 destructive 대상이 아니라서 걸린다(verify:cross-element-tint-text
           가 실제로 이 자리를 잡음). 무-tint 배경으로 옮기면 destructive 자체는 이미 무해한
@@ -803,9 +803,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info bg-info/8 text-foreground' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info bg-info-tint text-foreground' : 'border-border bg-ds-background text-muted-foreground'}`}>
             {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
-            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
+            <code className="rounded bg-background px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>
           </div>
         );
@@ -891,7 +891,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   role="option"
                   aria-selected={idx === commandIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectCommand(cmd); }}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${idx === commandIndex ? 'bg-brand/10' : 'hover:bg-muted'}`}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${idx === commandIndex ? 'bg-ds-action-soft' : 'hover:bg-muted'}`}
                 >
                   <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
@@ -987,7 +987,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         <div
           data-testid="chat-attach-split"
           className={`flex flex-shrink-0 items-center rounded-md transition-colors ${
-            attachMenuOpen || pickerOpen ? 'bg-info/10 text-info' : 'text-muted-foreground'
+            attachMenuOpen || pickerOpen ? 'bg-info-tint text-foreground' : 'text-muted-foreground'
           }`}
         >
           <IconButton
@@ -1006,7 +1006,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               data-testid="chat-attach-more"
               disabled={disabled}
               aria-label={t('attachMenuLabel')}
-              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
+              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-ds-surface-high hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </DropdownMenuTrigger>
@@ -1039,7 +1039,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             }}
             // a 44 × 44 press on a touch screen (it was 28 × 28 — the phone-bar spec's «every press ≥ 44» found it)
             className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center ${
-              steerMode ? 'bg-info/10 text-info' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              steerMode ? 'bg-info-tint text-foreground' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-foreground'
             }`}
           >
             <Compass className="h-4 w-4" />

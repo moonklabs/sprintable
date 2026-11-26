@@ -102,7 +102,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
         </DialogHeader>
 
         {phase === 'done' ? (
-          <div className="space-y-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <div className="space-y-2 rounded-md bg-ds-surface-sunk px-3 py-2 text-xs text-muted-foreground">
             <p>{t('exportedConfirmation')}</p>
             {result?.download_url ? (
               <button type="button" onClick={handleCopyLink} className="font-semibold text-primary hover:underline">
@@ -127,7 +127,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
           </div>
         ) : phase === 'error' ? (
           <div
-            className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            className="space-y-1 rounded-md bg-ds-surface-sunk px-3 py-2 text-xs text-muted-foreground"
             role="alert"
             aria-live="assertive"
             aria-atomic="true"
@@ -146,7 +146,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   <button
                     key={f} type="button" disabled={f === 'png' && !pngAllowed} aria-pressed={format === f} onClick={() => setFormat(f)}
                     title={f === 'png' && !pngAllowed ? t('exportPngUnavailableForHtml') : undefined}
-                    className={`rounded-md border px-2.5 py-1 text-editorial-meta font-semibold uppercase disabled:cursor-not-allowed disabled:opacity-40 ${format === f ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                    className={`rounded-md border px-2.5 py-1 text-editorial-meta font-semibold uppercase disabled:cursor-not-allowed disabled:opacity-40 ${format === f ? 'border-primary bg-ds-action-soft text-primary' : 'border-border text-muted-foreground'}`}
                   >
                     {f}
                   </button>
@@ -160,7 +160,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                 <div className="flex gap-1.5">
                   {(['light', 'dark'] as const).map((th) => (
                     <button key={th} type="button" aria-pressed={theme === th} onClick={() => setTheme(th)}
-                      className={`rounded-md border px-2.5 py-1 text-editorial-meta ${theme === th ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
+                      className={`rounded-md border px-2.5 py-1 text-editorial-meta ${theme === th ? 'border-primary bg-ds-action-soft text-primary' : 'border-border text-muted-foreground'}`}>
                       {th === 'light' ? t('themeLight') : t('themeDark')}
                     </button>
                   ))}

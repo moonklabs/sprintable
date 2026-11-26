@@ -162,7 +162,7 @@ export function WorkflowTriggerTypesSection() {
         ) : (
           <div className="space-y-2">
             {triggerTypes.map((tt, index) => (
-              <div key={tt.id} className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
+              <div key={tt.id} className="rounded-md border border-border bg-ds-background px-3 py-3 text-sm">
                 {editingId === tt.id ? (
                   <div className="space-y-2">
                     <OperatorInput

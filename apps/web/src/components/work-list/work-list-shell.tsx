@@ -53,7 +53,7 @@ function FilterDropdown({
             size="sm"
             className={cn(
               'h-8 gap-1.5 font-medium',
-              isSelected && 'border-primary bg-primary/10 text-foreground',
+              isSelected && 'border-primary bg-ds-action-soft text-foreground',
             )}
           >
             {icon}
@@ -250,7 +250,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                 size="sm"
                 aria-pressed={filters.mineOnly}
                 onClick={() => setFilters({ mineOnly: !filters.mineOnly, delegatedOnly: false })}
-                className={cn('h-8 font-medium', filters.mineOnly && 'border-primary bg-primary/10 text-foreground')}
+                className={cn('h-8 font-medium', filters.mineOnly && 'border-primary bg-ds-action-soft text-foreground')}
               >
                 {t('filterMine')}
               </Button>
@@ -260,7 +260,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                 size="sm"
                 aria-pressed={filters.delegatedOnly}
                 onClick={() => setFilters({ delegatedOnly: !filters.delegatedOnly, mineOnly: false })}
-                className={cn('h-8 font-medium', filters.delegatedOnly && 'border-primary bg-primary/10 text-foreground')}
+                className={cn('h-8 font-medium', filters.delegatedOnly && 'border-primary bg-ds-action-soft text-foreground')}
               >
                 {t('filterDelegated')}
               </Button>

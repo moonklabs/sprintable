@@ -29,7 +29,7 @@ export function UpgradeModal({ message, onClose }: UpgradeModalProps) {
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a
             href="/dashboard/settings"
-            className="flex-1 rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="flex-1 rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground hover:bg-ds-ink-2"
           >
             {t('upgradePlan')}
           </a>

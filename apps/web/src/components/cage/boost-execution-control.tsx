@@ -501,7 +501,7 @@ export function BoostExecutionControl({
   // the approved conditions (budget · schedule · objective) — the start confirmation and the «link existing campaign»
   // confirmation show the same lines (Yuna 00:49Z)
   const sealedFacts = (
-    <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-editorial-meta">
+    <div className="space-y-1 rounded-lg bg-ds-surface-sunk px-2.5 py-1.5 text-editorial-meta">
       <p>
         <span className="text-muted-foreground">{t('adsBoostBudgetLabel')} · </span>
         <span className="text-foreground font-medium">

@@ -180,7 +180,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
               onClick={() => setScope(s.id)}
               aria-pressed={on}
               className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-editorial-meta transition-colors ${
-                on ? 'border-transparent bg-info/10 font-semibold text-foreground' : 'border-border text-muted-foreground hover:bg-muted'
+                on ? 'border-transparent bg-info-tint font-semibold text-foreground' : 'border-border text-muted-foreground hover:bg-muted'
               }`}
             >
               {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}

@@ -479,7 +479,7 @@ export default function EpicDetailPage() {
 
         {/* Dispatch */}
         {epic.project_id && (
-          <div className="rounded-xl border border-border bg-muted/20 p-4">
+          <div className="rounded-xl border border-border bg-ds-background p-4">
             <p className="mb-2 text-xs font-medium text-muted-foreground">{tBoard('dispatch')}</p>
             <EntityDispatchPanel
               entityType="epic"
@@ -493,7 +493,7 @@ export default function EpicDetailPage() {
 
         {/* Edit form */}
         {isEditing && (
-          <div className="rounded-xl border border-border bg-muted/30 p-4">
+          <div className="rounded-xl border border-border bg-ds-background p-4">
             <EpicEditInline
               epic={epic}
               onSaved={(updated) => { setEpic(updated); setIsEditing(false); }}
@@ -576,7 +576,7 @@ export default function EpicDetailPage() {
                         key={story.id}
                         type="button"
                         onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}
-                        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-ds-surface-high transition-colors"
                       >
                         <span className="flex-1 truncate text-sm">{story.title}</span>
                         <div className="ml-3 flex shrink-0 items-center gap-2">

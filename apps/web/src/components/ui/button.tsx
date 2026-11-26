@@ -13,14 +13,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-ds-ink-2",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-ds-surface-sunk dark:hover:bg-ds-surface-sunk",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-muted aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
-        // story #2419 — rest 상태 bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달).
+          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-ds-surface-high",
+        // story #2419 — rest 상태 bg-destructive-tint 위 text-destructive는 3.97(AA 4.5 미달).
         // story #2420 v3 — text-foreground로 교체(정의 시점 검증은
         // scripts/verify-tint-foreground-contrast.ts). story #2420 AC4/AC7(사용처 스윕) — rest
         // 배경을 ad-hoc 알파(/10·hover /20·dark /20·/30)에서 불투명 토큰 bg-destructive-tint로
@@ -30,9 +30,9 @@ const buttonVariants = cva(
           "bg-destructive-tint text-foreground hover:brightness-95 focus-visible:border-destructive focus-visible:ring-destructive dark:focus-visible:ring-destructive",
         link: "text-primary underline-offset-4 hover:underline",
         // story #2969 §2 PR-1 — shadow-sm 제거(§1.2: 인라인 표면은 그림자 대신 라인/색).
-        // 이 자리는 "색"으로 대응 — hover:bg-primary/90(기존)이 이미 그 축을 맡고 있어
+        // 이 자리는 "색"으로 대응 — hover:bg-ds-ink-2(기존)이 이미 그 축을 맡고 있어
         // 별도 hairline 없이 이 변경만으로 §1.2 원칙을 만족한다(신규 색 발명 없음).
-        hero: "bg-primary text-primary-foreground hover:bg-primary/90",
+        hero: "bg-primary text-primary-foreground hover:bg-ds-ink-2",
         glass: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
       },
       size: {

@@ -207,7 +207,7 @@ export default function RetroPage() {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-16 animate-pulse rounded-xl bg-muted/50" />
+                <div key={i} className="h-16 animate-pulse rounded-xl bg-ds-surface-sunk" />
               ))}
             </div>
           ) : loadError ? (
@@ -234,7 +234,7 @@ export default function RetroPage() {
                 <Link
                   key={session.id}
                   href={`/${wsSlug}/${projSlug}/retro/${session.id}`}
-                  className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-muted/40"
+                  className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-ds-surface-high"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{session.title}</p>

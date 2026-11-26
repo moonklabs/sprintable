@@ -14,12 +14,12 @@ export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';
 
 /** 목업 토큰 매핑(oklch → canonical Tailwind 토큰 유틸리티). */
 export const FILE_TINT_CLASS: Record<FileTint, string> = {
-  img: 'bg-info/15 text-info',
+  img: 'bg-info-tint text-foreground',
   pdf: 'bg-destructive-tint text-destructive',
-  doc: 'bg-success/15 text-success',
+  doc: 'bg-success-tint text-foreground',
   // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측, #2420 doc).
   // 형제(img/pdf/doc)는 자기 계열색이 통과라 그대로 두고 zip만 foreground로 잠정 통일.
-  zip: 'bg-warning/15 text-foreground',
+  zip: 'bg-warning-tint text-foreground',
   code: 'bg-muted text-muted-foreground',
 };
 

@@ -104,7 +104,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
   const distinctAgentCount = new Set(snapshot.agentProgress.map((a) => a.agentName)).size;
 
   return (
-    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-muted/20" data-testid="today-v3-screen">
+    <div className="v3-shell-root flex h-screen min-h-0 flex-col bg-ds-surface-sunk" data-testid="today-v3-screen">
       <div className="flex min-h-0 flex-1">
         <NavV3Sidebar flags={flags} activeKey="today" todayBadgeCount={snapshot.needsMeCount} />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -149,7 +149,7 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
                 AC3 — lg 미만에선 이 빈 셸 2칸이 목록 칸과 겹쳐 넘칠 이유가 없으니 그냥
                 숨긴다(§3, 실 콘텐츠가 없는 자리를 토글할 필요 0). */}
             <section
-              className="hidden flex-1 items-center justify-center border-r border-border bg-background/60 lg:flex"
+              className="hidden flex-1 items-center justify-center border-r border-border bg-background lg:flex"
               data-testid="today-v3-target-column"
             >
               <p className="text-sm text-muted-foreground">{t('targetColumnEmpty')}</p>

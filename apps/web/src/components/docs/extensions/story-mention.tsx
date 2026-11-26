@@ -131,7 +131,7 @@ export function StoryMentionMenu({
           onClick={() => command(item)}
           className={`h-auto w-full justify-start gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm font-normal ${
             i === selectedIndex
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-ds-action-soft text-primary'
               : 'text-foreground'
           }`}
         >

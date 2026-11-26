@@ -123,7 +123,7 @@ function AgentJoinedDetailPanel({
       </div>
 
       {notification.body ? (
-        <div className="rounded-xl border border-overlay-line-1 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+        <div className="rounded-xl border border-overlay-line-1 bg-ds-background p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
           {notification.body}
         </div>
       ) : null}
@@ -588,7 +588,7 @@ export default function InboxPage() {
             <p className="mb-2 text-editorial-meta font-medium text-muted-foreground">{t('workflowExecutionLabel')}</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
-                <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
+                <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-ds-surface-sunk px-3 py-2 text-xs">
                   {exec.status === 'matched' ? (
                     // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달
                     // (실측, #2420 doc) — text-foreground로 잠정 통일.
@@ -648,7 +648,7 @@ export default function InboxPage() {
                         const expanded = expandedGroups.has(item.key);
                         return (
                           <div key={`group-${item.key}`} data-row-key={`group-${item.key}`}>
-                            <div className="relative flex items-stretch transition hover:bg-muted/40">
+                            <div className="relative flex items-stretch transition hover:bg-ds-surface-high">
                               {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
                               {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                               <button
@@ -698,7 +698,7 @@ export default function InboxPage() {
                               <div className="space-y-1.5 py-2 pl-9 pr-3">
                                 {item.notifications.map((n, idx) => (
                                   <div key={n.id} className="flex items-center gap-2 text-xs">
-                                    <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
+                                    <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-ds-line-strong'}`} />
                                     <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                     <span className="shrink-0 text-micro text-muted-foreground">{formatTime(n.created_at)}</span>
                                   </div>
@@ -759,7 +759,7 @@ export default function InboxPage() {
                           type="button"
                           onClick={() => void selectNotification(notification)}
                           aria-current={isSelected ? 'true' : undefined}
-                          className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
+                          className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-ds-surface-high'}`}
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
                           {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
@@ -854,7 +854,7 @@ export default function InboxPage() {
               </div>
 
               {selectedDisplay?.body ? (
-                <div className="rounded-xl border border-overlay-line-1 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+                <div className="rounded-xl border border-overlay-line-1 bg-ds-background p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
                   {selectedDisplay.body}
                 </div>
               ) : null}
@@ -881,7 +881,7 @@ export default function InboxPage() {
             )
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-xl bg-muted/55">
+              <div className="flex size-14 items-center justify-center rounded-xl bg-ds-surface-sunk">
                 <InboxIcon className="size-6 text-muted-foreground" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">{t('selectToView')}</p>

@@ -1140,9 +1140,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                 {groups.map((group) => (
                   <div key={group.date} className="flex flex-col gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-border/60" />
+                      <div className="h-px flex-1 bg-ds-line" />
                       <span className="text-editorial-meta text-muted-foreground">{group.date}</span>
-                      <div className="h-px flex-1 bg-border/60" />
+                      <div className="h-px flex-1 bg-ds-line" />
                     </div>
 
                     {group.messages.map((msg, idx) => {
@@ -1235,7 +1235,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               <button
                 type="button"
                 onClick={() => { setShowNewIndicator(false); scrollToBottom(true); }}
-                className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-primary shadow-sm transition-colors hover:bg-muted/50"
+                className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-primary shadow-sm transition-colors hover:bg-ds-surface-high"
               >
                 {t('newMessagesIndicator')}
               </button>

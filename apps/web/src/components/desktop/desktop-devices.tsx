@@ -318,7 +318,7 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
           ) : null}
         </summary>
         {gap ? <p className="break-keep px-4 pb-2 text-xs text-muted-foreground" data-testid="desktop-computer-pair-gap">{t('pairGap', gap)}</p> : null}
-        <ul className="divide-y divide-border border-t border-border bg-muted/20" data-testid="desktop-computer-setups">
+        <ul className="divide-y divide-border border-t border-border bg-ds-background" data-testid="desktop-computer-setups">
           {computer.setups.map((s) => (
             <DeviceRow key={s.setup_id} device={s} deviceName={computer.device_name} linked={s.setup_id === linked} onDisconnect={() => onDisconnectSetup(s)} />
           ))}

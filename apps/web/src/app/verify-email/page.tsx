@@ -155,7 +155,7 @@ export default function VerifyEmailPage() {
                 <Link
                   href={loginHref}
                   data-testid="verify-login-here"
-                  className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+                  className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2"
                 >
                   {t('loginHere')}
                 </Link>
@@ -165,7 +165,7 @@ export default function VerifyEmailPage() {
                 onClick={handleStart}
                 disabled={!sessionKnown}
                 aria-busy={!sessionKnown}
-                className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:cursor-wait disabled:opacity-70"
+                className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2 disabled:cursor-wait disabled:opacity-70"
               >
                 {sessionKnown ? t('startButton') : t('checkingSession')}
               </button>

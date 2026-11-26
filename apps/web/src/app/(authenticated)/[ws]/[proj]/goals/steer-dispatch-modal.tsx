@@ -155,7 +155,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
                       // story #3053(2984-S5) — subtle 헤어라인 채택, bg-proof-blue-soft 채움
                       // 폐지(체크박스 자체의 solid fill은 기능 신호라 KEEP).
                       className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        on ? 'border-proof-blue bg-transparent text-foreground' : 'border-border hover:bg-muted/50'
+                        on ? 'border-proof-blue bg-transparent text-foreground' : 'border-border hover:bg-ds-surface-high'
                       }`}
                     >
                       <span className={`flex size-4 shrink-0 items-center justify-center rounded border ${

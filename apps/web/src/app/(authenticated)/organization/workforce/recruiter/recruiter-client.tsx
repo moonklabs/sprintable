@@ -239,7 +239,7 @@ function RecruitSummary({ title, empty, items }: { title: string; empty: string;
       <p className="mb-2 text-xs font-semibold text-muted-foreground">{title}</p>
       <ul className="m-0 flex list-none flex-wrap gap-2 p-0 lg:flex-col lg:gap-3">
         {items.map((it) => (
-          <li key={it.key} data-summary-key={it.key} data-filled={it.value ? 'true' : 'false'} className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-1.5 lg:bg-transparent lg:p-0">
+          <li key={it.key} data-summary-key={it.key} data-filled={it.value ? 'true' : 'false'} className="min-w-0 rounded-lg bg-ds-surface-sunk px-2.5 py-1.5 lg:bg-transparent lg:p-0">
             <span className="block text-xs text-muted-foreground">{it.label}</span>
             <span className={cn('block break-keep text-sm wrap-anywhere', it.value ? 'font-medium text-foreground' : 'text-muted-foreground')}>{it.value ?? empty}</span>
           </li>
@@ -686,7 +686,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           </div>
         </div>
       ) : runtimeCapabilitiesError ? (
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-ds-background p-3">
           <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
           <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
           <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
@@ -730,7 +730,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
                     <span className={cn(
                       'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
-                      sel && 'bg-primary/15 text-primary',
+                      sel && 'bg-ds-action-soft text-primary',
                     )}>
                       {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                     </span>
@@ -745,7 +745,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
               {comingSoonRuntimes.map((rc) => (
-                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
+                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-ds-background p-2.5 text-left opacity-55">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
                     {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                   </span>
@@ -1144,7 +1144,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 aria-pressed={selected}
                 className={cn(
                   'rounded-md border px-4 py-4 text-left transition',
-                  selected ? 'border-ds-line-control bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                  selected ? 'border-ds-line-control bg-ds-action-soft' : 'border-border bg-ds-background hover:bg-muted',
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1179,7 +1179,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   aria-pressed={selected}
                   className={cn(
                     'rounded-md border px-4 py-4 text-left transition',
-                    selected ? 'border-ds-line-control bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                    selected ? 'border-ds-line-control bg-ds-action-soft' : 'border-border bg-ds-background hover:bg-muted',
                   )}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -1191,7 +1191,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             })}
           </div>
         ) : (
-          <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-border bg-ds-background px-4 py-3 text-sm text-muted-foreground">
             {tSettings('agentScopeAllProjectsHint', { count: orgProjects?.length ?? 0 })}
           </div>
         )}
@@ -1337,7 +1337,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
                 className={cn(
                   'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-2.5 text-left text-sm transition-colors',
-                  equipSkip ? 'border-ds-action bg-primary/5 ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
+                  equipSkip ? 'border-ds-action bg-ds-action-soft ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                 )}
               >
                 <div className="min-w-0">
@@ -1433,7 +1433,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {renderScopeChooser()}
 
               {equipSkip ? (
-                <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
+                <div className="space-y-3 rounded-xl border border-border bg-ds-background p-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentNameLabel')}</label>
                     <Input
@@ -1494,7 +1494,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('agentQuestion')}</p>
-                <div className="space-y-2.5 rounded-xl border border-info-border bg-info-tint/40 p-3">
+                <div className="space-y-2.5 rounded-xl border border-info-border bg-info-tint p-3">
                   <div className="flex w-fit rounded-lg border border-border bg-muted p-1">
                     <button
                       type="button"
@@ -1517,7 +1517,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
                       placeholder={suggestedAgentName || t('agentNamePlaceholder')}
-                      // 이 칸은 info-tint 조상 안이라 불투명 면(bg-card)이 흐린 안내 글자를 받친다(dark:도 불투명 — 부품의 dark:bg-input/30이 덮지 않게).
+                      // 이 칸은 info-tint 조상 안이라 불투명 면(bg-card)이 흐린 안내 글자를 받친다(dark:도 불투명 — 부품의 dark:bg-ds-surface-sunk이 덮지 않게).
                       // placeholder:text-muted-foreground는 부품이 이미 내지만, 정적 가드(verify-no-muted-on-tint)는 부품 안의 클래스를 못 봐서 불투명 경계를 읽도록 여기에도 적는다.
                       className="bg-card placeholder:text-muted-foreground dark:bg-card"
                     />
@@ -1537,7 +1537,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {((agents) => { const labels = memberOptionLabels(agents.map((a) => ({ ...a, type: 'agent' })), tc); return agents.map((a) => <option key={a.id} value={a.id}>{labels.get(a.id)}</option>); })(existingAgents ?? [])}
                     </Select>
                   )}
-                  <p className="flex items-start gap-1.5 text-xs text-info">
+                  <p className="flex items-start gap-1.5 text-xs text-foreground">
                     <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                     {t('agentInlineNote')}
                   </p>
@@ -1644,7 +1644,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         죽은 안내였다(fakechat은 다이얼아웃 방식, 포트를 안 쓴다). 이 화면이
                         이미 쥔 위 키가 그대로 fakechat이 필요로 하는 그 키라 재사용한다. */}
                     {/* story #4240 — 같은 안내 문구(①②③)라 같은 분절 방지(break-keep). */}
-                    <div className="space-y-1 pt-1 text-xs text-muted-foreground break-keep">
+                    <div className="space-y-1 pt-1 text-xs text-foreground break-keep">
                       <p className="flex flex-wrap items-center gap-1.5">
                         <Badge variant="info">SSE</Badge>
                         {tSettings('agentFakechatEnvKeyInstruction')}
@@ -1676,7 +1676,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                       </p>
                     )}
-                    <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-ds-ink-2">
+                    <pre className="overflow-x-auto rounded-md border border-border bg-ds-background p-3 text-xs text-ds-ink-2">
                       {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
@@ -1700,11 +1700,11 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   A-1(수 하드코딩 금지) — kitOrientingTitle에서 "2가지"/count를 뺐다: 축이
                   늘 때마다(예: 런타임별 단계 수가 갈리는 날) 그 수가 다시 거짓이 되는 재발
                   구조이기 때문이다. */}
-              <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+              <div className="space-y-2 rounded-xl border border-border bg-ds-background p-3">
                 <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">1</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">1</span>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1">
                         <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
@@ -1738,7 +1738,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       여기서 말한다. 매핑에 없는(아직 등재 안 된) 런타임이면 "아직 없다"를
                       명시적으로 말한다 — 침묵하지 않는다(§2 처방 그대로). */}
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">2</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">2</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
                       {/* story #2434(유나양 규격 v1, 2026-08-03) — "실행하세요"류 지시형은 그 경로를
@@ -1784,7 +1784,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </div>
                   </div>
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">3</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
                       {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
@@ -1834,18 +1834,18 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       다운로드가 "/"를 살리지 못함) "config.toml" 평문으로만 받는다. 실제 저장
                       위치(.codex/config.toml)는 별도 문장으로 명시 — AC1(공식 스키마·경로 안내). */}
                   {runtime === 'codex' && (
-                    <p className="border-b border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-foreground">
+                    <p className="border-b border-border bg-ds-background px-3 py-2 text-xs leading-relaxed text-foreground">
                       {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                     </p>
                   )}
-                  <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
+                  <pre className="overflow-x-auto bg-ds-surface-sunk p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
                 // 커넥터-라우팅 런타임(connector/grok/pi/openclaw/opencode)은 mcp_config=null —
                 // (story #2857 후속 — hermes는 이제 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 mcp_config를
                 // 받아 이 분기를 안 탄다. 옛 목록에 남겨두면 주석이 실제와 어긋나 §0급 오도가 된다.)
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
-                <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div className="rounded-md border border-dashed border-border bg-ds-background p-3 text-xs text-muted-foreground">
                   {t('mcpNotApplicable')}
                 </div>
               )}
@@ -1855,7 +1855,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   <span className="font-mono text-xs text-foreground">📄 {guideFilename} <span className="text-muted-foreground">{t('guideFileNote')}</span></span>
                   <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
                 </div>
-                <p className="flex items-start gap-1.5 border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <p className="flex items-start gap-1.5 border-b border-border bg-ds-background px-3 py-2 text-xs text-muted-foreground">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                   {/* story 5ea9bafe(P1-b): "전달하세요"만으론 HOW가 없다는 유나 UX 지적 — 런타임-aware
                       구체적 방법(MCP-native=작업폴더에 두고 읽으라 지시 / 커넥터=수동 연결 完 後 전달). */}
@@ -1867,7 +1867,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       })
                     : t('guideFileDeliveryNoteConnector', { filename: guideFilename, josa: pickEulReulJosa(guideFilename) })}
                 </p>
-                <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
+                <pre className="max-h-64 overflow-auto bg-ds-surface-sunk p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
               </div>
 
               <div className="space-y-2 rounded-md border border-border p-3">
@@ -2001,12 +2001,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 // (신규 가입 온보딩, 1회성)보다 크다는 것이 결함으로 판정된 근거. 레일이 이미 단계
                 // 전환을 aria-live로 말하므로 이 배너는 "완료" 한 마디만 — 중복 낭독하지 않는다.
                 // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success bg-success/10 px-3 py-2.5 text-sm text-foreground">
+                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success bg-success-tint px-3 py-2.5 text-sm text-foreground">
                   {tOnboarding('verifiedBanner')}
                 </div>
               )}
 
-              <div className="flex items-center gap-3 rounded-md border border-success bg-success/10 p-3">
+              <div className="flex items-center gap-3 rounded-md border border-success bg-success-tint p-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
                   {firstGraphemes(activeAgentName, 1) || '🪪'}
                 </span>
@@ -2015,7 +2015,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     {activeAgentName || t('deployedAgentFallback')}
                     <Badge variant="success">{t('deployedMember')}</Badge>
                   </p>
-                  <p className="text-xs text-muted-foreground">{selectedRole?.name} · {t('deployedNote')}</p>
+                  <p className="text-xs text-foreground">{selectedRole?.name} · {t('deployedNote')}</p>
                 </div>
                 {/* story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 삭제 후
                     `/flow?view=list`로 흡수. 라벨("보드에서 보기")은 목적지 콘텐츠(칸반)가

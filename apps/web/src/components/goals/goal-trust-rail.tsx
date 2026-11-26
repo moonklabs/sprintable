@@ -113,7 +113,7 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
         </li>
       </ol>
 
-      <div className="mt-6 border border-border bg-muted/30 p-3">
+      <div className="mt-6 border border-border bg-ds-background p-3">
         <div className="font-mono text-micro uppercase tracking-[0.12em] text-muted-foreground">{t('trustRailColorRuleTitle')}</div>
         <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
           {/* story #3099(DS·AA 후속) — green 소형텍스트(12px) AA 미달, text-proof-ink로

@@ -94,7 +94,7 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
           <button
             onClick={handleVerify}
             disabled={loading || code.length !== 6}
-            className="w-full rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+            className="w-full rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2 disabled:opacity-50"
           >
             {loading ? t('verifying') : t('verify')}
           </button>

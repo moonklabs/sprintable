@@ -249,7 +249,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
   // Its place (story 4766 · AC3): AFTER the press — the press stands on the first screen of a laptop window (≈800 px visible), the notes under it
   const pressShown = phase !== 'ready' || revoked;
   const prereqBlock = (
-    <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3" data-testid="advanced-prereq">
+    <div className="space-y-1.5 rounded-md border border-border bg-ds-background p-3" data-testid="advanced-prereq">
       <p className="break-keep text-ds-small font-medium text-foreground">{t('prereqTitle')}</p>
       <p className="break-keep text-ds-small text-muted-foreground">{t('prereqBody')}</p>
       <ul className="space-y-1">
@@ -324,7 +324,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
                 {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
               </Button>
             </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-muted/40 p-3 font-mono text-xs leading-relaxed" data-testid="advanced-line">{shownLine}</pre>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-ds-surface-sunk p-3 font-mono text-xs leading-relaxed" data-testid="advanced-line">{shownLine}</pre>
           </div>
 
 
@@ -338,7 +338,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
             {revokeFailed ? <p role="alert" className="w-full break-keep text-foreground" data-testid="advanced-revoke-failed">{t('revokeFailed')}</p> : null}
           </div>
 
-          {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning. The box is a destructive tint (bg-destructive-tint), so the textarea inside keeps an opaque face (the part is transparent · dark:bg-input/30) */}
+          {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning. The box is a destructive tint (bg-destructive-tint), so the textarea inside keeps an opaque face (the part is transparent · dark:bg-ds-surface-sunk) */}
           {copyFailedLine ? (
             <div className="space-y-1.5 rounded-md border border-destructive bg-destructive-tint p-3">
               <p role="alert" className="break-keep text-xs text-foreground">{t('copyFailed')}</p>
@@ -379,7 +379,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
               </div>
             ) : null}
             {rail.verified ? (
-              <div role="status" aria-live="polite" className="rounded-md border border-success bg-success/10 px-3 py-2.5 text-sm text-foreground" data-testid="advanced-verified">
+              <div role="status" aria-live="polite" className="rounded-md border border-success bg-success-tint px-3 py-2.5 text-sm text-foreground" data-testid="advanced-verified">
                 {rail.firstCallAt
                   ? tOnb.rich('verifiedBannerAt', { t: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })
                   : tOnb('verifiedBanner')}

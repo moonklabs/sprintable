@@ -141,7 +141,7 @@ describe('ReportMessageSummary — story #5c29454b 다음 행동 박스(no-ficti
     // "다음 행동" 라벨/박스가 없어야 한다 — reportViewFull("전문 보기 →")과는 무관.
     expect(container.textContent).not.toContain('카디르군');
     const boxes = Array.from(container.querySelectorAll('div')).filter((d) =>
-      d.className.includes('bg-brand/10'));
+      d.className.includes('bg-ds-action-soft'));
     expect(boxes.length).toBe(0);
   });
 });
@@ -191,7 +191,7 @@ describe('ReportMessageSummary — own message (story 5048 T0 ①)', () => {
     expect(container.querySelector('[data-slot="material-chip"]')!.className).toContain('text-ds-on-mine-2');
     expect(container.textContent).toContain('근거');
     expect(container.textContent).toContain('카디르군 QA 요청');
-    expect(container.querySelector('.bg-brand\\/10'), 'the brand-tinted box is not drawn on the dark face').toBeNull();
+    expect(container.querySelector('.bg-ds-action-soft'), 'the brand-tinted box is not drawn on the dark face').toBeNull();
   });
 
   it('the same card for someone else keeps its own colours (nothing changed for others)', async () => {
@@ -199,7 +199,7 @@ describe('ReportMessageSummary — own message (story 5048 T0 ①)', () => {
       root.render(wrap(<ReportMessageSummary content={withNext} messageKind="result" isMine={false} references={undefined} />));
     });
     expect(container.querySelector('[data-slot="material-chip"]')!.className).toContain('text-muted-foreground');
-    expect(container.querySelector('.bg-brand\\/10')).not.toBeNull();
+    expect(container.querySelector('.bg-ds-action-soft')).not.toBeNull();
   });
 
   it('the «collapse» button of an expanded own card is on-mine link colour', async () => {

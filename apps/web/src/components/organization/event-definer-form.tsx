@@ -54,7 +54,7 @@ export function EventDefinerForm({
                 type="button"
                 aria-pressed={state.format === value}
                 onClick={() => set('format', value)}
-                className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-ds-line-control' : 'border-border hover:bg-muted/40'}`}
+                className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-ds-line-control' : 'border-border hover:bg-ds-surface-high'}`}
               >
                 {state.format === value ? (
                   <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs leading-none text-primary-foreground">✓</span>
@@ -176,7 +176,7 @@ export function EventDefinerForm({
           </p>
         ) : null}
         <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{t('definerPreviewNote')}</p>
-        <div className="mt-3 rounded-xl border border-dashed border-border bg-muted/40 p-3">
+        <div className="mt-3 rounded-xl border border-dashed border-border bg-ds-background p-3">
           <p className="mb-1.5 text-xs font-semibold text-muted-foreground">{t('definerDerivedSummaryTitle')}</p>
           <DerivedRow label="payload" value={Object.keys(derived.payload_schema.properties as object).join(' · ')} />
           <DerivedRow label="routing" value={state.routing === 'assign_on_publish' ? t('definerRoutingAssignTitle') : t('definerRoutingRecordTitle')} />
@@ -211,7 +211,7 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
       role="radio"
       aria-checked={selected}
       onClick={onSelect}
-      className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-primary/5' : 'border-border'}`}
+      className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-ds-action-soft' : 'border-border'}`}
     >
       <span className={`mt-0.5 size-4 shrink-0 rounded-full border-2 ${selected ? 'border-primary bg-primary' : 'border-border'}`} />
       <div>

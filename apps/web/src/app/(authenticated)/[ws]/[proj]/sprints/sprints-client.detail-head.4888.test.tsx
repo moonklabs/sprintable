@@ -88,7 +88,7 @@ describe('스프린트 상세 패널 머리 — ds 부품(story #4888)', () => {
     expect(chips.some((c) => c.includes('20') && c.includes('SP'))).toBe(true);
     expect(chips.some((c) => c.includes('3') && c.includes(S.personCountUnit))).toBe(true);
     expect(chips.some((c) => c.includes(`14${S.days}`))).toBe(true);
-    expect(detail()!.querySelectorAll('span.bg-muted\\/30')).toHaveLength(0);
+    expect(detail()!.querySelectorAll('span.bg-ds-background, span.bg-ds-surface-sunk')).toHaveLength(0);
   });
 
   it('용량 · 인원이 둘 다 없으면 수치 칸 자체가 없다(예전과 같은 조건)', async () => {
