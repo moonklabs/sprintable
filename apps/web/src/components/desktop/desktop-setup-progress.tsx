@@ -55,12 +55,12 @@ function lineMarkFor(orgId: string | null | undefined, currentProjectId: string 
   // the organization AND the project the tab is on: a mark of a project the person has left (or never used here) is not this setup's (codex 5036)
   return mark && orgId && mark.orgId === orgId && (!currentProjectId || mark.projectId === currentProjectId) ? mark : null;
 }
-async function lineChannelHref(orgId: string | null | undefined, currentProjectId: string | null | undefined, flatHref: (href: string) => string): Promise<string | null> {
+async function lineChannelId(orgId: string | null | undefined, currentProjectId: string | null | undefined): Promise<string | null> {
   const mark = lineMarkFor(orgId, currentProjectId);
   if (!mark) return null;
   const channelId = await findProjectChannelId(mark.projectId);
   clearLineProject();
-  return channelId ? flatHref(`/chats/${channelId}`) : null;
+  return channelId; // (the address is made by the screen that holds `useFlatHref()` — this helper only names the room, so no flat destination is built here)
 }
 
 export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false, onPhoneRetry, canWorkdir = false }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean; /** story 4832: the app said `caps=workdir` — the move page's per-agent [작업 폴더 고르기] link is offered (an older app gets none) */ canWorkdir?: boolean; /** story 4711 (PO 10-16): a solo start whose «폰으로도 다루기» switch did not turn on — turns it on again; true = it did */ onPhoneRetry?: () => Promise<boolean> }) {
@@ -124,7 +124,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
     // story 5036: a person on the first-run line goes to the project's channel (step ③); everyone else to the conversation with that agent, as before
     // (no mark → at once, as it always was: nothing is awaited for someone who did not come through the line)
     if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } // a full load: the page's address holds nothing to keep, and a new token may be needed
-    void lineChannelHref(orgId, currentProjectId, flatHref).then((channel) => window.location.assign(channel ?? flatHref(`/chats/${soloRoom}`)));
+    void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`)));
   }, [soloRoom, flatHref, holdRoom, orgId, currentProjectId]);
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
@@ -150,7 +150,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
         <p className="text-sm" role="status">{t('phoneControl.failedStopped')}</p>
         <div className="flex flex-wrap gap-2">
           <Button disabled={phoneRetrying} onClick={() => { setPhoneRetrying(true); void onPhoneRetry!().finally(() => setPhoneRetrying(false)); }}>{t('phoneControl.again')}</Button>
-          <Button variant="outline" onClick={() => { opened.current = true; if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } void lineChannelHref(orgId, currentProjectId, flatHref).then((channel) => window.location.assign(channel ?? flatHref(`/chats/${soloRoom}`))); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
+          <Button variant="outline" onClick={() => { opened.current = true; if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`))); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
         </div>
       </Card>
     );
@@ -480,7 +480,7 @@ function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, 
       <footer className="flex flex-col gap-1">
         {/* story 5036 (C6 · step ③ in the Mac app): the agents are in → a person on the first-run line opens the project's channel as their first conversation (the same room the web's step ③ opens) */}
         <div className="flex flex-wrap gap-2" data-testid="setup-way-out">
-          {done && lineMark ? <Button onClick={() => void lineChannelHref(orgId, currentProjectId, flatHref).then((channel) => window.location.assign(channel ?? todayHref))} data-testid="setup-line-first-chat">{tLine('connectedGo')}</Button> : null}
+          {done && lineMark ? <Button onClick={() => void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(channel ? flatHref(`/chats/${channel}`) : todayHref))} data-testid="setup-line-first-chat">{tLine('connectedGo')}</Button> : null}
           <Button asChild variant={done && lineMark ? 'outline' : undefined}><a href={todayHref} onClick={() => { if (lineMark) clearLineProject(); }}>{t('goToday')}</a></Button>
         </div>
         <p className="text-xs text-muted-foreground">{done ? t('move.doneNote') : t('move.runningNote')}</p>
