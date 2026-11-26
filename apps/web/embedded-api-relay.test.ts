@@ -445,3 +445,154 @@ describe('the relay behind the TLS front of a server host (SPRINTABLE_PUBLIC_ORI
     expect(be.seen).toHaveLength(0);
   });
 });
+
+// story 5024 (AC5) — the MCP door of a SERVER HOST at the SAME name and port: an agent on ANOTHER computer reaches `<public address>/mcp` through the one TLS front (no second port for a person to open). The relay hands `/mcp` (and below) to the MCP door's
+// address (`SPRINTABLE_MCP_ORIGIN`, set by the supervisor only while the public door is open) exactly as it hands `/api/v2/*` to the backend — behind the same Host guard, streams piped as they arrive.
+describe('the MCP door at the same name (SPRINTABLE_MCP_ORIGIN)', () => {
+  const env = { SPRINTABLE_API_ORIGIN: 'http://127.0.0.1:5555', SPRINTABLE_MCP_ORIGIN: 'http://127.0.0.1:6666' };
+  const PUBLIC = 'https://team.example.com';
+  const savedMcp = process.env['SPRINTABLE_MCP_ORIGIN'];
+  const savedPublic = process.env['SPRINTABLE_PUBLIC_ORIGIN'];
+  beforeEach(() => { delete process.env['SPRINTABLE_MCP_ORIGIN']; delete process.env['SPRINTABLE_PUBLIC_ORIGIN']; });
+  afterEach(() => {
+    if (savedMcp === undefined) delete process.env['SPRINTABLE_MCP_ORIGIN']; else process.env['SPRINTABLE_MCP_ORIGIN'] = savedMcp;
+    if (savedPublic === undefined) delete process.env['SPRINTABLE_PUBLIC_ORIGIN']; else process.env['SPRINTABLE_PUBLIC_ORIGIN'] = savedPublic;
+  });
+
+  /** a stand-in for the MCP door: POST /mcp answers JSON (echo) or, with `Accept: text/event-stream`, a first event at once and the last one 2.5 s later; GET answers 405 like the real stateless door */
+  async function mcpDoor(): Promise<{ port: number; seen: Seen[] }> {
+    const seen: Seen[] = [];
+    const sockets = new Set<net.Socket>();
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        seen.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
+        if (req.method === 'GET') { res.writeHead(405, { Allow: 'POST', 'Content-Type': 'application/json' }); res.end('{"error":{"code":"method_not_allowed"}}'); return; }
+        if (String(req.headers['accept'] ?? '').includes('text/event-stream')) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+          res.write('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"first":true}}\n\n');
+          setTimeout(() => res.end('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"last":true}}\n\n'), 2500);
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'X-Echo-Host': String(req.headers['host']) });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { bodyLength: body.length } }));
+      });
+    });
+    server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    cleanups.push(async () => { for (const s of sockets) s.destroy(); await new Promise<void>((r) => server.close(() => r())); });
+    return { port: (server.address() as net.AddressInfo).port, seen };
+  }
+  const post = (port: number, p: string, body: string, extra = '', host = `127.0.0.1:${port}`) =>
+    `POST ${p} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n${extra}\r\n${body}`;
+
+  it('relayTarget: `/mcp` and below go to the MCP door as they are (the query too) — exactly that spelling', () => {
+    expect(relay.relayTarget('/mcp', env)?.href).toBe('http://127.0.0.1:6666/mcp');
+    expect(relay.relayTarget('/mcp?x=1', env)?.href).toBe('http://127.0.0.1:6666/mcp?x=1');
+    expect(relay.relayTarget('/mcp/', env)?.href).toBe('http://127.0.0.1:6666/mcp/');
+    expect(relay.relayTarget('/mcp/sub/path?a=b', env)?.href).toBe('http://127.0.0.1:6666/mcp/sub/path?a=b');
+    // the API path still goes to the backend when both are set
+    expect(relay.relayTarget('/api/v2/stories', env)?.href).toBe('http://127.0.0.1:5555/api/v2/stories');
+  });
+
+  it('relayTarget: another spelling, a path that only starts alike, a dot segment, an absolute or `//` target, no MCP address or an unusable one → null (Next gets it as before)', () => {
+    for (const p of ['/mcpx', '/mcp-evil', '/mcp.json', '/MCP', '/Mcp/x', '/api/mcp', '/mcp/../api/dashboard', '/mcp/%2e%2e/login', '//mcp', 'http://evil/mcp', '/mc', '/']) {
+      expect(relay.relayTarget(p, env), p).toBeNull();
+    }
+    for (const origin of [undefined, '', 'not a url', 'ftp://x', 'file:///etc']) {
+      expect(relay.relayTarget('/mcp', { SPRINTABLE_API_ORIGIN: 'http://127.0.0.1:5555', SPRINTABLE_MCP_ORIGIN: origin }), String(origin)).toBeNull();
+    }
+    // the MCP address does not make the API path go anywhere else, and the API address alone does not make `/mcp` go to the backend
+    expect(relay.relayTarget('/mcp', { SPRINTABLE_API_ORIGIN: 'http://127.0.0.1:5555' })).toBeNull();
+    expect(relay.relayTarget('/api/v2/x', { SPRINTABLE_MCP_ORIGIN: 'http://127.0.0.1:6666' })).toBeNull();
+  });
+
+  it('a POST to /mcp goes to the MCP door: whole body, the key header as sent, Host of the MCP door, forwarding headers written here — and everything that is not /mcp goes to Next', async () => {
+    const mcp = await mcpDoor();
+    process.env['SPRINTABLE_MCP_ORIGIN'] = `http://127.0.0.1:${mcp.port}`;
+    const d = await door();
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const out = await raw(d.port, post(d.port, '/mcp', body, 'Authorization: Bearer sk_test_key\r\nX-Project-Id: p-1\r\nX-Forwarded-For: 6.6.6.6\r\nX-Forwarded-Host: evil.example\r\nX-Forwarded-Proto: https\r\n'));
+    expect(status(out)).toBe('200');
+    expect(out).toContain(`"bodyLength":${body.length}`);
+    expect(out.toLowerCase()).toContain(`x-echo-host: 127.0.0.1:${mcp.port}`); // the MCP door's own Host rule (its DNS-rebinding check) sees ITS Host
+    expect(mcp.seen).toHaveLength(1);
+    expect(mcp.seen[0].method).toBe('POST'); expect(mcp.seen[0].url).toBe('/mcp'); expect(mcp.seen[0].body).toBe(body);
+    expect(mcp.seen[0].headers['authorization']).toBe('Bearer sk_test_key'); expect(mcp.seen[0].headers['x-project-id']).toBe('p-1');
+    expect(mcp.seen[0].headers['x-forwarded-for']).toBe('127.0.0.1'); // not the client's claim
+    expect(mcp.seen[0].headers['x-forwarded-host']).toBe(`127.0.0.1:${d.port}`); expect(mcp.seen[0].headers['x-forwarded-proto']).toBe('http');
+    expect(d.nextHits).toEqual([]);
+    expect(status(await raw(d.port, get(d.port, '/mcpx')))).toBe('200'); expect(status(await raw(d.port, get(d.port, '/MCP')))).toBe('200'); expect(status(await raw(d.port, get(d.port, '/login')))).toBe('200');
+    expect(d.nextHits).toEqual(['GET /mcpx', 'GET /MCP', 'GET /login']);
+    expect(mcp.seen, 'only the /mcp request reached the MCP door').toHaveLength(1);
+  });
+
+  it('what the MCP door answers goes back as it is — a 401 / 405 and its headers — and a stream is not held back: the first event arrives at once although the response goes on, nothing compressed', async () => {
+    const mcp = await mcpDoor();
+    process.env['SPRINTABLE_MCP_ORIGIN'] = `http://127.0.0.1:${mcp.port}`;
+    const d = await door();
+    const g = await raw(d.port, get(d.port, '/mcp'));
+    expect(status(g)).toBe('405'); expect(g.toLowerCase()).toContain('allow: post');
+    const first = await new Promise<{ ms: number; encoding: string | undefined; data: string }>((resolve, reject) => {
+      const t0 = Date.now();
+      const req = http.request({ host: '127.0.0.1', port: d.port, path: '/mcp', method: 'POST', agent: false, headers: { Accept: 'application/json, text/event-stream', 'Accept-Encoding': 'gzip, zstd', 'Content-Type': 'application/json', Authorization: 'Bearer k' } }, (res) => {
+        res.once('data', (c: Buffer) => { resolve({ ms: Date.now() - t0, encoding: res.headers['content-encoding'] as string | undefined, data: c.toString() }); req.destroy(); });
+      });
+      req.on('error', reject);
+      req.end('{}');
+    });
+    expect(first.data).toContain('"first":true');
+    expect(first.ms, 'the first event comes long before the response ends (2.5 s)').toBeLessThan(800);
+    expect(first.encoding).toBeUndefined();
+  });
+
+  it('without SPRINTABLE_MCP_ORIGIN `/mcp` goes to Next as before (a desktop app\'s own server never relays it) — the MCP door is not reached', async () => {
+    const mcp = await mcpDoor();
+    const d = await door();
+    const out = await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\n'));
+    expect(status(out)).toBe('200'); expect(out).toContain('next');
+    expect(d.nextHits).toEqual(['POST /mcp']);
+    expect(mcp.seen).toEqual([]);
+  });
+
+  it('the Host guard judges /mcp FIRST: a foreign Host, an absolute-form target or a browser acting for another site never reaches the MCP door; a tool without browser headers and the right Host does', async () => {
+    const mcp = await mcpDoor();
+    process.env['SPRINTABLE_MCP_ORIGIN'] = `http://127.0.0.1:${mcp.port}`;
+    const d = await door(['relay', 'guard']);
+    for (const host of ['evil.example', `localhost:${d.port}`, `127.0.0.1:${d.port + 1}`, `127.0.0.1.evil.example:${d.port}`]) {
+      const out = await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\n', host));
+      expect(status(out), host).toBe('400'); expect(out).toContain('Invalid host header');
+    }
+    for (const extra of ['Sec-Fetch-Site: cross-site\r\n', 'Sec-Fetch-Site: same-site\r\n', 'Origin: http://evil.example\r\n', 'Origin: null\r\n']) {
+      expect(status(await raw(d.port, post(d.port, '/mcp', '{}', `Authorization: Bearer k\r\n${extra}`))), extra).toBe('403');
+    }
+    expect(status(await raw(d.port, post(d.port, 'http://evil.example/mcp', '{}', 'Authorization: Bearer k\r\n')))).toBe('400');
+    expect(mcp.seen, 'the MCP door was never reached').toEqual([]);
+    expect(status(await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\n')))).toBe('200'); // an agent: no Sec-Fetch-Site, no Origin
+    expect(mcp.seen).toHaveLength(1);
+  });
+
+  it('end to end under the public name: the TLS front\'s request (the public Host, from this computer) reaches the MCP door with the person\'s address and https; the public name is NOT served without the public origin', async () => {
+    const mcp = await mcpDoor();
+    process.env['SPRINTABLE_MCP_ORIGIN'] = `http://127.0.0.1:${mcp.port}`;
+    process.env['SPRINTABLE_PUBLIC_ORIGIN'] = PUBLIC;
+    const d = await door(['relay', 'guard'], { SPRINTABLE_PUBLIC_ORIGIN: PUBLIC });
+    const via = await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\nX-Forwarded-For: 203.0.113.9\r\nX-Forwarded-Proto: http\r\n', 'team.example.com'));
+    expect(status(via)).toBe('200');
+    expect(mcp.seen[0]?.headers['x-forwarded-for']).toBe('203.0.113.9'); expect(mcp.seen[0]?.headers['x-forwarded-proto']).toBe('https'); expect(mcp.seen[0]?.headers['x-forwarded-host']).toBe('team.example.com');
+    expect(mcp.seen[0]?.headers['host']).toBe(`127.0.0.1:${mcp.port}`);
+    expect(status(await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\n', 'evil.example.com')))).toBe('400');
+    expect(mcp.seen).toHaveLength(1);
+    delete process.env['SPRINTABLE_PUBLIC_ORIGIN'];
+    const d2 = await door(['relay', 'guard']);
+    expect(status(await raw(d2.port, post(d2.port, '/mcp', '{}', 'Authorization: Bearer k\r\n', 'team.example.com')))).toBe('400');
+    expect(mcp.seen).toHaveLength(1);
+  });
+
+  it('a MCP door that is not there is a 502, not a hang', async () => {
+    process.env['SPRINTABLE_MCP_ORIGIN'] = 'http://127.0.0.1:1';
+    const d = await door();
+    expect(status(await raw(d.port, post(d.port, '/mcp', '{}', 'Authorization: Bearer k\r\n')))).toBe('502');
+  });
+});

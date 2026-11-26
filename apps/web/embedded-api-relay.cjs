@@ -11,6 +11,7 @@
 // What it does: a request whose path is `/api/v2/…` (any letter case, as lib/embedded-api-origin.ts) is relayed to `SPRINTABLE_API_ORIGIN` (read when the request arrives) and is NOT passed on to
 // Next. The upstream response is piped back as it arrives (no buffering, no compression). If the upstream is cut, the client's connection is closed; if the client goes away, the upstream request is
 // closed. Anything else — and every request while there is no usable `SPRINTABLE_API_ORIGIN` — goes to Next exactly as before.
+// story 5024 (AC5): `/mcp` (and below) is relayed the same way to the MCP door (`SPRINTABLE_MCP_ORIGIN`) — set by the supervisor only while a server host's public door is open — so an agent on ANOTHER computer reaches its tools at `<public address>/mcp` through the same TLS front, with no second port.
 //
 // Order: this layer must sit INSIDE the Host guard (embedded-host-guard.cjs), so that the guard judges a request first (Host, cross-site, body budget) and only an admitted request reaches the relay.
 // embedded-entry.cjs therefore installs this one BEFORE the guard (the guard wraps `emit` after this has wrapped it). Plain CommonJS and no dependencies.
@@ -21,6 +22,7 @@ const { pipeline } = require('node:stream');
 
 const INSTALLED = Symbol.for('sprintable.embeddedApiRelay');
 const PREFIX = '/api/v2/';
+const MCP_PATH = '/mcp';
 
 // headers of one hop (RFC 9110 7.6.1 + the ones Node sets itself); what `Connection` lists is dropped too
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'proxy-connection', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
@@ -31,19 +33,34 @@ const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'p
  */
 function relayTarget(rawUrl, env = process.env) {
   if (typeof rawUrl !== 'string' || rawUrl[0] !== '/' || rawUrl[1] === '/') return null; // origin-form only: an absolute-form or `//host` target is not ours to read
-  const origin = env['SPRINTABLE_API_ORIGIN'];
-  if (!origin) return null;
-  let base;
   let parsed;
   try {
-    base = new URL(origin);
     parsed = new URL(rawUrl, 'http://relay.invalid');
   } catch {
     return null;
   }
-  if (base.protocol !== 'http:' && base.protocol !== 'https:') return null;
+  // story 5024 (AC5) — the MCP door of a SERVER HOST, at the SAME name and port as everything else: an agent on another computer reaches `<public address>/mcp` through the one TLS front, with no second port to open. The path is the MCP door's own
+  // (`/mcp`, or below it: exactly that spelling — not `/mcpx`, not another letter case), sent on as it is; the address it goes to is `SPRINTABLE_MCP_ORIGIN`, which the supervisor gives the web ONLY while the public door is open. Not set → `/mcp` goes to Next as before.
+  if (parsed.pathname === MCP_PATH || parsed.pathname.startsWith(`${MCP_PATH}/`)) {
+    const mcpBase = baseOf(env['SPRINTABLE_MCP_ORIGIN']);
+    return mcpBase ? new URL(`${parsed.pathname}${parsed.search}`, mcpBase) : null;
+  }
+  const base = baseOf(env['SPRINTABLE_API_ORIGIN']);
+  if (!base) return null;
   if (!parsed.pathname.toLowerCase().startsWith(PREFIX)) return null;
   return new URL(`${PREFIX}${parsed.pathname.slice(PREFIX.length)}${parsed.search}`, base);
+}
+
+/** a usable http(s) origin from an environment value, or null */
+function baseOf(origin) {
+  if (!origin) return null;
+  let base;
+  try {
+    base = new URL(origin);
+  } catch {
+    return null;
+  }
+  return base.protocol === 'http:' || base.protocol === 'https:' ? base : null;
 }
 
 /** the headers to send on: no hop-by-hop ones, nothing the connection names, no `Expect` (the door has answered it), `Host` of the backend, the forwarding headers set here (a client cannot write them) */
