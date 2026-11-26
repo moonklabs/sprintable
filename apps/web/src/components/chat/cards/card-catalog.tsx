@@ -5,15 +5,17 @@ import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ds/empty-state';
 import { CardFrame } from './card-frame';
 import { EntityCard } from './entity-card';
+import { KanbanCard } from './kanban-card';
 import { CARD_KINDS, isEntityCardKind, parseCardRef, type CardKind } from './card-kinds';
 
 /**
  * story 5034 (C4) — the catalogue: for every kind of the closed vocabulary, the one part that draws it (or `null` = this build has no part for it yet). A `Record<CardKind, …>` — a kind
  * added to card-kinds.ts does not compile until it is given a part or an explicit `null`, so no kind can be «forgotten». The agent chooses a kind; it never chooses how it looks.
- * `gate` is drawn by the approval card's own road (the message's `approval_target`) · `kanban` · `deploy` come in the next steps of the story.
+ * `gate` is drawn by the approval card's own road (the message's `approval_target`) · `kanban` = the board of a sprint (its reference is the sprint's id) · `deploy` comes in the next step of the story.
  */
 type CardPart = ComponentType<{ kind: CardKind; refId: string }>;
 const EntityPart: CardPart = ({ kind, refId }) => (isEntityCardKind(kind) ? <EntityCard kind={kind} refId={refId} /> : null);
+const KanbanPart: CardPart = ({ refId }) => <KanbanCard sprintId={refId} />;
 
 export const CARD_PARTS: Readonly<Record<CardKind, CardPart | null>> = {
   story: EntityPart,
@@ -25,7 +27,7 @@ export const CARD_PARTS: Readonly<Record<CardKind, CardPart | null>> = {
   hypothesis: EntityPart,
   evidence: EntityPart,
   gate: null,
-  kanban: null,
+  kanban: KanbanPart,
   deploy: null,
 };
 

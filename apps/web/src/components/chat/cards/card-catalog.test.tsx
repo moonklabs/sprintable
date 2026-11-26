@@ -45,12 +45,12 @@ describe('catalogue', () => {
   it('every kind of the closed vocabulary has a decision — a part or an explicit «none» (a kind cannot be forgotten)', () => {
     expect(Object.keys(CARD_PARTS).sort()).toEqual([...CARD_KINDS].sort());
     const none = CARD_KINDS.filter((k) => CARD_PARTS[k] === null);
-    expect(none.sort()).toEqual(['deploy', 'gate', 'kanban']); // their parts come with the next steps of the story (gate = the approval card's own road)
+    expect(none.sort()).toEqual(['deploy', 'gate']); // deploy comes with the next step of the story (gate = the approval card's own road)
   });
   it.each([
     ['an unknown kind', { kind: 'timeline', ref: ID }],
     ['a reference that is not a UUID', { kind: 'story', ref: 'nope' }],
-    ['a kind with no part in this build yet (kanban)', { kind: 'kanban', ref: ID }],
+    ['a kind with no part in this build yet (deploy)', { kind: 'deploy', ref: ID }],
     ['a gate (drawn by the approval card\'s own road)', { kind: 'gate', ref: ID }],
     ['something that is not a card at all', 'story'],
   ])('%s → the «this app version cannot show it» card, and NOTHING is read from the server', async (_n, card) => {
@@ -108,6 +108,16 @@ describe('entity card — read for the viewer', () => {
     await show({ kind: 'epic', ref: ID });
     expect(calls).toEqual([`/api/goals/${ID}`]);
     expect(container.textContent).toContain('목표 이름');
+  });
+  it('a doc or an artifact whose preview answers 200 with a body that is not `{ data }` is «error» (retry), never a ready card that shows the reference', async () => {
+    for (const kind of ['doc', 'artifact']) {
+      for (const body of [{}, [], { data: null }, { data: [1] }]) {
+        stubFetch(() => json(200, body));
+        await show({ kind, ref: ID });
+        expect(frame()!.dataset.cardState, `${kind} ${JSON.stringify(body)}`).toBe('error');
+        expect(container.textContent).not.toContain(ID);
+      }
+    }
   });
   it('the click opens the SIDE PANEL (the second tier) with this object as the target · no panel around = no button, just the card', async () => {
     stubFetch(() => json(200, { data: { title: '열 장', status: 'done' } }));
