@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// story 5032 (C2) — a project channel's room head: the tag «채널», the line «사람 N · 부를 수 있는 에이전트 N», and a named settings cog that opens the delivery dialog; a one-to-one / group room has none of these.
+// story 5032 (C2) — a project channel's room head: the tag «채널», the line «사람 N · 부를 수 있는 에이전트 N», and a named settings cog that opens the channel settings window (story 5032: per-agent «모든 말 받기», and a button to the room's own delivery dialog); a one-to-one / group room has none of these.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -94,18 +94,25 @@ describe('[SID:5032] ConversationPage — the channel head', () => {
     expect(cog!.getAttribute('aria-label')).toBe('채널 설정');
   });
 
-  it('⭐ the cog opens the delivery dialog (the channel\'s «who gets every word» settings)', async () => {
+  it('⭐ the cog opens the CHANNEL settings window (the per-agent «모든 말 받기»), not the delivery dialog', async () => {
     stubFetch(true); await mount();
     await act(async () => { q('room-head-channel-settings')!.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(document.body.textContent).toContain(koMessages.chats.deliveryContractTitle);
+    expect(document.querySelector('[data-testid="channel-settings"]')).not.toBeNull(); // reverted → the old delivery dialog opens
+    expect(document.body.textContent).toContain(koMessages.chats.channelReceiveAllTitle);
+    expect(document.body.textContent).not.toContain(koMessages.chats.deliveryContractLevelLabel);
   });
 
-  it('⭐ the delivery dialog the cog opened gives focus back to the cog (not to the «⋯» menu)', async () => {
+  it('⭐ «내 알림 설정» in the channel window opens the delivery dialog, which gives focus back to the cog (not to the «⋯» menu)', async () => {
     stubFetch(true); await mount();
     const cog = q('room-head-channel-settings') as HTMLButtonElement;
     await act(async () => { cog.focus(); cog.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const mine = document.querySelector('[data-testid="channel-open-my-notifications"]') as HTMLButtonElement;
+    expect(mine, 'the channel window has the «내 알림 설정» button').toBeTruthy();
+    await act(async () => { mine.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="channel-settings"]')).toBeNull();
     expect(document.body.textContent).toContain(koMessages.chats.deliveryContractTitle);
     const closeBtn = [...document.querySelectorAll('button')].find((b) => /닫기|취소/.test(b.textContent ?? '')) as HTMLButtonElement | undefined;
     expect(closeBtn, 'the dialog has a close/cancel button').toBeTruthy();

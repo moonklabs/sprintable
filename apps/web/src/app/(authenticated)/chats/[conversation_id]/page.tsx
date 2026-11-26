@@ -21,6 +21,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 const PRESENCE_WORD: Record<PresenceStatus, string> = { online: 'presenceOnline', idle: 'presenceIdle', offline: 'presenceOffline' };
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
+import { ChannelSettingsModal } from '@/components/chat/channel-settings-modal';
 import { IconButton } from '@/components/ds/icon-button';
 import { ROOM_MUTED_EVENT } from '@/components/chat/room-muted-event';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -126,7 +127,10 @@ export default function ConversationPage() {
   const composeMoved = !!composeText && !!composeNoteId;
   const t = useTranslations('chats');
   const tc = useTranslations('common');
-  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships, orgMemberships, orgId } = useDashboardContext();
+  // story 5032 (C2): only an organization owner / admin may read or change another member's (an agent's) delivery level — the server's rule; the channel settings draw the per-agent switches for them only
+  const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role;
+  const canEditChannelAgents = orgRole === 'admin' || orgRole === 'owner';
   const { addToast } = useToast();
   // story 4847 — this page component is REUSED when the person moves from one room to the next (the route segment only changes): what was read for another room is not this room's.
   // Each piece of per-room state therefore says which room it is for, and an answer for another room is dropped. (The room's project is now what the pickers and the attachments
@@ -138,6 +142,7 @@ export default function ConversationPage() {
   useEffect(() => { conversationIdRef.current = conversation_id; }, [conversation_id]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
+  const [showChannelSettings, setShowChannelSettings] = useState(false); // story 5032 (C2) — the channel head's cog
   const channelCogRef = useRef<HTMLButtonElement>(null); // story 5032 (C2): the channel head's cog — where focus returns when the cog opened the settings dialog
   const [deliveryFromCog, setDeliveryFromCog] = useState(false);
   const headMenuTriggerRef = useRef<HTMLButtonElement>(null); // the «⋯» button: where focus returns after the notification-settings window closes (the menu item that opened it is gone)
@@ -398,7 +403,7 @@ export default function ConversationPage() {
     <>
       {/* story 5032 (C2): the channel's settings cog — the channel's delivery settings (who gets every word) are the same dialog the «⋯» menu opens for any room */}
       {meta.isProjectChannel ? (
-        <IconButton ref={channelCogRef} icon="settings" label={t('roomChannelSettings')} data-testid="room-head-channel-settings" onClick={() => { setDeliveryFromCog(true); setShowDeliveryContract(true); }} />
+        <IconButton ref={channelCogRef} icon="settings" label={t('roomChannelSettings')} data-testid="room-head-channel-settings" onClick={() => setShowChannelSettings(true)} />
       ) : null}
       {/* per-대화 알림 mute (270c87e6): the muted STATE stays visible — a person must see a room is muted without opening anything (story 4887 · P3-a) */}
       {meta.muted ? (
@@ -532,6 +537,18 @@ export default function ConversationPage() {
           existingParticipantIds={meta.participants.map((p) => p.member_id)}
           onClose={() => setShowAddParticipant(false)}
           onAdded={handleParticipantAdded}
+        />
+      )}
+
+      {showChannelSettings && meta?.isProjectChannel && (
+        <ChannelSettingsModal
+          conversationId={conversation_id}
+          agents={meta.participants.filter((p) => p.type === 'agent').map((p) => ({ member_id: p.member_id, name: p.name ?? null, avatar_url: p.avatar_url ?? null, runtime_type: p.runtime_type ?? null }))}
+          canEditAgents={canEditChannelAgents}
+          roomFreeResponse={meta.freeResponse}
+          onClose={() => setShowChannelSettings(false)}
+          onOpenMyNotifications={() => { setShowChannelSettings(false); setDeliveryFromCog(true); setShowDeliveryContract(true); }}
+          returnFocusRef={channelCogRef}
         />
       )}
 
