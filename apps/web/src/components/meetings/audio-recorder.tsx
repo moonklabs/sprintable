@@ -101,7 +101,7 @@ function DropZone({ onFile, t }: { onFile: (file: File) => void; t: (key: string
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
       className={`mt-3 flex cursor-pointer flex-col items-center rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-        dragging ? 'border-brand/40 bg-brand/5' : 'border-border hover:border-border/70'
+        dragging ? 'border-ds-line-control bg-brand/5' : 'border-border hover:border-border'
       }`}
     >
       <span className="text-2xl">📁</span>
@@ -314,7 +314,7 @@ export function AudioRecorder({
         {isRecording && (
           <>
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-destructive" />
-            <span className="shrink-0 font-mono text-sm text-foreground/80">{formatDuration(duration)}</span>
+            <span className="shrink-0 font-mono text-sm text-ds-ink-2">{formatDuration(duration)}</span>
             <div className="w-full sm:w-auto">
               <WaveformCanvas analyser={analyser} />
             </div>

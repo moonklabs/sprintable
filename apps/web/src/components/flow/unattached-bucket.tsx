@@ -130,7 +130,7 @@ function SuggestionChips({
             disabled={attachingId !== null}
             onClick={() => void attachGoal(c.id)}
             className={cn(
-              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-editorial-meta text-brand-text transition hover:bg-brand/10 disabled:opacity-50',
+              'rounded-full border border-ds-line-control bg-brand/5 px-2.5 py-1 text-editorial-meta text-brand-text transition hover:bg-brand/10 disabled:opacity-50',
             )}
           >
             {t('bucketGoalChip', { text: c.text })}

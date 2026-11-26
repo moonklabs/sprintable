@@ -52,8 +52,8 @@ describe('EditCanvas (C3 §2 — 클릭 선택만, 중첩 트리 재귀 렌더, 
     ];
     const markup = renderToStaticMarkup(wrap(<EditCanvas tree={tree} selectedId="n2" onSelect={vi.fn()} />));
     const buttons = nodeButtonsOnly(markup);
-    expect(buttons[0]).not.toContain('ring-primary/40');
-    expect(buttons[1]).toContain('ring-primary/40');
+    expect(buttons[0]).not.toContain('ring-ds-line-control');
+    expect(buttons[1]).toContain('ring-ds-line-control');
   });
 
   it('mounts the node tree on the shared CanvasViewport engine (edit mode — no duplicate inert TreeStageContent)', () => {

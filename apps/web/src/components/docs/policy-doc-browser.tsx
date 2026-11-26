@@ -151,8 +151,8 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-brand/20 bg-brand/14 text-brand-text'
-                      : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground/88 hover:bg-overlay-fill-2',
+                      ? 'border-ds-line-control bg-brand/14 text-brand-text'
+                      : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                   )}
                 >
                   <div className="font-medium">{sprint.title}</div>
@@ -226,8 +226,8 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-brand/20 bg-brand/14 text-brand-text'
-                            : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground/88 hover:bg-overlay-fill-2',
+                            ? 'border-ds-line-control bg-brand/14 text-brand-text'
+                            : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                         )}
                       >
                         <div className="font-medium">{doc.title || doc.epic?.title || t('untitledPolicyDoc')}</div>

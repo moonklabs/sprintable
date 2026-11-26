@@ -63,7 +63,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         // story #2969 §2 PR-3(doc proofline-system-layer-2969) — default variant 활성
         // shadow-sm 제거(§1.2, 인라인 표면은 그림자 대신 라인/색 — data-active:bg-background
         // 대비 자체가 이미 그 축을 맡는다).
-        // 3826-pre — text-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저 대비
+        // 3826-pre — text-ds-ink-2(알파 합성)이 v3 ink 재조정 후 실 브라우저 대비
         // 미달로 바뀌었다(#72706d/#f1efea = 4.28:1). 이미 값-SSOT로 AA 조정된 solid
         // text-muted-foreground(=--proof-ink-3)로 교체 — dark: 오버라이드도 이제 base와
         // 같은 클래스라 중복이라 제거.

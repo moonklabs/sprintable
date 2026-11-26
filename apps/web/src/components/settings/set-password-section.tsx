@@ -153,7 +153,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
           <p role="status" aria-live="polite" aria-atomic="true" className="text-ds-body text-ds-done">
             {t('setPasswordSuccess')}
           </p>
-          <Link href="/login" className="inline-flex min-h-11 items-center text-ds-body font-medium text-brand-text hover:text-brand-text/85 lg:min-h-0">
+          <Link href="/login" className="inline-flex min-h-11 items-center text-ds-body font-medium text-brand-text hover:text-ds-ink-2 lg:min-h-0">
             {tCommon('goToLogin')}
           </Link>
         </div>

@@ -8,10 +8,10 @@ import { Icon, type IconName } from './icon';
 import { IconButton } from './icon-button';
 
 const KINDS = {
-  info: { icon: 'info', box: 'bg-ds-info-soft border-ds-info/40', iconColor: 'text-ds-info', role: 'status' },
+  info: { icon: 'info', box: 'bg-ds-info-soft border-ds-info', iconColor: 'text-ds-info', role: 'status' },
   /** 되돌리기가 붙은 알림 — 보조 단추 «되돌리기». */
   undo: { icon: 'undo', box: 'bg-ds-surface-raised border-ds-line', iconColor: 'text-ds-ink-2', role: 'status' },
-  error: { icon: 'error', box: 'bg-ds-failed-soft border-ds-failed/40', iconColor: 'text-ds-failed', role: 'alert' },
+  error: { icon: 'error', box: 'bg-ds-failed-soft border-ds-failed', iconColor: 'text-ds-failed', role: 'alert' },
 } as const satisfies Record<string, { icon: IconName; box: string; iconColor: string; role: 'status' | 'alert' }>;
 
 export type ToastKind = keyof typeof KINDS;

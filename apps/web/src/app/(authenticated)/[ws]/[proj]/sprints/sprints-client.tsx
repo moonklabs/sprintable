@@ -954,7 +954,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           아님). 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION을 맞은 뒤에도 동일 배너로 graceful 흡수. */}
       {selected.status === 'planning' && (hypotheses.length === 0 || activateGateBlocked) ? (
         // story #4888 — 손 카드(rounded-xl 점선) → 점선 ds Card(안내 토큰 info). 안의 단추는 ds Button.
-        <Card className="mb-4 space-y-2 border-dashed border-ds-info/40 bg-ds-info-soft p-3">
+        <Card className="mb-4 space-y-2 border-dashed border-ds-info bg-ds-info-soft p-3">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             ✦ {t('declareGateQuestion')}
           </p>

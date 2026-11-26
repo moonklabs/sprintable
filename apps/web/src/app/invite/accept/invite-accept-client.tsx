@@ -71,18 +71,18 @@ export function InviteAcceptClient({ token, orgName, role, email, projects, chat
             {/* ⚠️Phase2 i18n·#2485 — "Organization" 라벨이 하드코딩 영문이다(t() 아님, 서버
                 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認. */}
             <span className="text-muted-foreground">{tInvite('orgLabel')}</span>
-            <span className="font-medium text-foreground/85">{orgName}</span>
+            <span className="font-medium text-foreground">{orgName}</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{t('profileRole')}</span>
-            <span className="font-medium text-foreground/85">{orgRoleLabel(role, t)}</span>
+            <span className="font-medium text-foreground">{orgRoleLabel(role, t)}</span>
           </div>
           <div className="mt-2 flex items-center justify-between gap-4 text-sm">
             <span className="shrink-0 text-muted-foreground">{t('acceptProjectsRow')}</span>
             {projectNames === null ? (
               <span className="text-muted-foreground">{t('acceptProjectsNone')}</span>
             ) : (
-              <span className="flex min-w-0 items-center justify-end gap-1 text-right font-medium text-foreground/85" title={projectTitle}>
+              <span className="flex min-w-0 items-center justify-end gap-1 text-right font-medium text-foreground" title={projectTitle}>
                 <span className="truncate">{projectNames}</span>
                 {moreCount > 0 && (
                   <span className="shrink-0 text-muted-foreground">{t('acceptProjectsMore', { count: moreCount })}</span>
@@ -114,7 +114,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects, chat
                 story #4017 CHANGES 2 — 목적지 모듈 경유(chatsHref prop). */}
             <Link
               href={chatsHref}
-              className="block text-center text-sm text-muted-foreground hover:text-foreground/70"
+              className="block text-center text-sm text-muted-foreground hover:text-ds-ink-2"
             >
               {tInvite('decline')}
             </Link>

@@ -129,7 +129,7 @@ export function TeamPresencePanel({
 
   return (
     <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl">
-      <header className="flex shrink-0 items-center justify-between border-b border-border/60 px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold text-foreground">{t('panelTitle')}</h2>
         {onClose ? (
           <button

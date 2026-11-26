@@ -54,7 +54,7 @@ export function EventDefinerForm({
                 type="button"
                 aria-pressed={state.format === value}
                 onClick={() => set('format', value)}
-                className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
+                className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-ds-line-control' : 'border-border hover:bg-muted/40'}`}
               >
                 {state.format === value ? (
                   <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs leading-none text-primary-foreground">✓</span>

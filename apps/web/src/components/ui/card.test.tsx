@@ -29,9 +29,9 @@ async function mountAndGetRoot(node: React.ReactNode): Promise<{ el: HTMLElement
 // rounded-2xl→rounded-lg(§1.1, 2xl은 인라인 표면에서 퇴역)로 바뀌어 두 리터럴 다 반영.
 // solid(SectionCard)는 인라인 표면이라 shadow-sm 제거(§1.2). glass는 "정책 검토"로 이
 // PR 범위 밖(§2 C행) — shadow-sm 그대로 유지.
-const ORIGINAL_SECTION_CARD_CLASSES = 'rounded-lg border border-border/80 bg-card text-card-foreground';
+const ORIGINAL_SECTION_CARD_CLASSES = 'rounded-lg border border-border bg-card text-card-foreground';
 const ORIGINAL_GLASS_PANEL_CLASSES =
-  'rounded-lg border border-border/80 bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88';
+  'rounded-lg border border-border bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88';
 
 describe('cardVariants (story #2877)', () => {
   it('surface=solid·radius=card가 SectionCard 원본 클래스 집합과 정확히 일치한다', () => {

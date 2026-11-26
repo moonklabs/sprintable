@@ -40,7 +40,7 @@ export function ArtifactGalleryTimeline({ versions, className, onSelectVersion, 
                 className={cn(
                   'h-[11px] w-[11px] shrink-0 rounded-full border-2',
                   v.isAnchor ? 'border-success bg-success' : 'border-info bg-background',
-                  isSelected && 'ring-2 ring-offset-1 ring-info/50',
+                  isSelected && 'ring-2 ring-offset-1 ring-info',
                 )}
                 aria-hidden="true"
               />

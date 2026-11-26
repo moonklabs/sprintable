@@ -234,7 +234,7 @@ function SynthesisBlock({
         ))}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border/70 pt-2.5">
+      <div className="flex items-center gap-2 border-t border-border pt-2.5">
         {editing ? <p className="flex-1 text-xs text-muted-foreground">{t('synthesisEditHint')}</p> : <p className="flex-1 text-xs text-muted-foreground">{t('synthesisFooterNote')}</p>}
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setEditing((v) => !v)}>
           {editing ? t('synthesisEditDone') : t('synthesisEdit')}
@@ -313,7 +313,7 @@ function RecommendationCard({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-2 border-t border-border/70 pt-2.5">
+      <div className="flex items-center gap-2 border-t border-border pt-2.5">
         {bucket ? (
           <span className="flex flex-1 items-center gap-1.5 text-xs text-muted-foreground">
             {t('recConfidenceLabel')}

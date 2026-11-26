@@ -219,7 +219,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
                     ? 'border-l-2 border-l-ds-action bg-ds-surface-high text-ds-ink'
                     : 'bg-ds-surface-high text-ds-ink',
                 m.pending && 'opacity-60',
-                m.failed && 'border border-ds-failed/50',
+                m.failed && 'border border-ds-failed',
               )}
             >
               {m.role === 'operator' ? (

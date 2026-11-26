@@ -627,7 +627,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             data-testid={`recruiter-found-${found.runtime}`}
             className={cn(
               'relative h-auto min-w-0 flex-col items-start gap-1 whitespace-normal rounded-xl p-2.5 text-left',
-              sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30',
+              sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'hover:border-ds-line-control',
             )}
           >
             {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
@@ -658,7 +658,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             aria-pressed={sel}
             title={found.executable}
             data-testid={`recruiter-found-${found.runtime}`}
-            className={cn('h-auto min-w-0 gap-1.5 rounded-lg px-2.5 py-1.5', sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30')}
+            className={cn('h-auto min-w-0 gap-1.5 rounded-lg px-2.5 py-1.5', sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'hover:border-ds-line-control')}
           >
             {sel && <Check className="h-3.5 w-3.5 text-primary" aria-hidden />}
             <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
@@ -724,7 +724,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     onClick={() => chooseRuntime(rc.slug)}
                     className={cn(
                       'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
-                      sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                      sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                     )}
                   >
                     {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
@@ -1144,7 +1144,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 aria-pressed={selected}
                 className={cn(
                   'rounded-md border px-4 py-4 text-left transition',
-                  selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                  selected ? 'border-ds-line-control bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1179,7 +1179,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   aria-pressed={selected}
                   className={cn(
                     'rounded-md border px-4 py-4 text-left transition',
-                    selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                    selected ? 'border-ds-line-control bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
                   )}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -1303,7 +1303,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                                 onClick={() => { setSelectedRoleSlug(role.slug); setEquipSkip(false); setHired(null); setStartHere({ kind: 'idle' }); }}
                                 className={cn(
                                   'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
-                                  sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                                  sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                                 )}
                               >
                                 {sel && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary" aria-hidden />}
@@ -1337,7 +1337,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
                 className={cn(
                   'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-2.5 text-left text-sm transition-colors',
-                  equipSkip ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40' : 'border-border/60 hover:border-primary/30',
+                  equipSkip ? 'border-ds-action bg-primary/5 ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                 )}
               >
                 <div className="min-w-0">
@@ -1637,7 +1637,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 {equipResult.api_key ? (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-foreground">{t('equipKeyOnceLabel')}</p>
-                    <code className="block break-all rounded border border-border bg-background p-2 font-mono text-xs text-foreground/80">
+                    <code className="block break-all rounded border border-border bg-background p-2 font-mono text-xs text-ds-ink-2">
                       {equipResult.api_key}
                     </code>
                     {/* story #2362(2026-07-31) — 여기 있던 「이 포트로 접속하세요」 안내는
@@ -1676,7 +1676,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                       </p>
                     )}
-                    <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                    <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-ds-ink-2">
                       {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
@@ -2001,12 +2001,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 // (신규 가입 온보딩, 1회성)보다 크다는 것이 결함으로 판정된 근거. 레일이 이미 단계
                 // 전환을 aria-live로 말하므로 이 배너는 "완료" 한 마디만 — 중복 낭독하지 않는다.
                 // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
+                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success bg-success/10 px-3 py-2.5 text-sm text-foreground">
                   {tOnboarding('verifiedBanner')}
                 </div>
               )}
 
-              <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/10 p-3">
+              <div className="flex items-center gap-3 rounded-md border border-success bg-success/10 p-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
                   {firstGraphemes(activeAgentName, 1) || '🪪'}
                 </span>

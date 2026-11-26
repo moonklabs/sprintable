@@ -546,7 +546,7 @@ export default function InboxPage() {
           #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT). */}
       <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden">
         {/* 탭 — 오늘(Attention Queue) / 알림 / 결재함(게이트). AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
-        <div className="flex shrink-0 border-b border-border/80 px-4">
+        <div className="flex shrink-0 border-b border-border px-4">
           {INBOX_TABS.map(({ key, label }) => (
             <button
               key={key}
@@ -584,7 +584,7 @@ export default function InboxPage() {
             그 데이터(/api/inbox pending)는 이제 attention 탭의 AttentionQueueView가 흡수해
             보여준다(별 패널 제거, GATE/STEER/BLOCK/Q 병합). */}
         {workflowExecs.length > 0 && (
-          <div className="shrink-0 border-b border-border/80 px-4 py-3">
+          <div className="shrink-0 border-b border-border px-4 py-3">
             <p className="mb-2 text-editorial-meta font-medium text-muted-foreground">{t('workflowExecutionLabel')}</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
@@ -614,7 +614,7 @@ export default function InboxPage() {
             (lg+ unchanged). lg(1024px) matches MOBILE_BREAKPOINT/GNB lg:hidden SSOT — md(768px)
             caused a 768-1023 tablet seam where the mobile bottom-tab shell and this master-detail
             split disagreed on what "mobile" means. */}
-        <div className={`flex w-full min-w-80 flex-col border-r border-border/80 lg:max-w-105 max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
+        <div className={`flex w-full min-w-80 flex-col border-r border-border lg:max-w-105 max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
           <div className="focus-inset flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="space-y-2 px-3 pt-2">
@@ -624,7 +624,7 @@ export default function InboxPage() {
               </div>
             ) : loadFailed ? (
               // story #4295 — 못 불러온 것은 «알림 없음»과 다른 사실 — 결재 큐(gate-inbox-load-error)와 같은 모양 · 다시 시도.
-              <div className="mx-3 mt-2 rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center" data-testid="inbox-notifications-load-error">
+              <div className="mx-3 mt-2 rounded-xl border border-dashed border-destructive bg-destructive-tint px-4 py-5 text-center" data-testid="inbox-notifications-load-error">
                 <p className="text-sm text-foreground">{t('notificationsLoadError')}</p>
                 <Button variant="outline" size="sm" className="mt-2" onClick={retryFirstPage}>
                   {tCommon('retry')}
@@ -641,7 +641,7 @@ export default function InboxPage() {
                   {/* 목업 ③: 날짜 section 라벨(calm·NOT uppercase) */}
                   <p className="px-3 pt-3 pb-1 text-editorial-meta font-medium text-muted-foreground">{section.label}</p>
                   {/* 목업 ④: dense rows — per-item 카드 테두리 제거·divide-y로 구분·content-dominant */}
-                  <div className="divide-y divide-border/60">
+                  <div className="divide-y divide-border">
                     {section.items.map((item) => {
                       // f2ec5395: status_changed 그룹 엔트리(접힘 default·chevron 토글·헤더클릭=내비+일괄읽음).
                       if (item.kind === 'group') {
@@ -819,7 +819,7 @@ export default function InboxPage() {
             <button
               type="button"
               onClick={() => setSelectedId(null)}
-              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:hidden"
+              className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:hidden"
             >
               <ArrowLeft className="size-4" />
               {t('backToList')}

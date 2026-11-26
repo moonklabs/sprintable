@@ -590,7 +590,7 @@ export function WorkListDetailPanel({
 
         {/* CHANGES 6(페드루 PO 판정 2026-09-14 10:09Z, CI「no-card-surfaceless-box」가드
             RED) — story #3785 규율: border+rounded만 있고 자기 배경(surface)이 없는
-            div는 금지, Card(surface 기본 solid=border-border/80 bg-card)로. 시안 구조·
+            div는 금지, Card(surface 기본 solid=border-border bg-card)로. 시안 구조·
             레이아웃(flex·gap·padding)은 무변 — Card가 border/bg/radius를 제공하고
             나머지 유틸은 className으로 그대로. */}
         {/* story #4448 (Yuna 04:13Z) — the box only where there is a sentence (high risk); low risk is the chip above */}

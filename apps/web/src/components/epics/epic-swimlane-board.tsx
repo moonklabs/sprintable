@@ -228,7 +228,7 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
   }, [stories, columns, axisMode]);
 
   return (
-    <div className="border-b border-border/60 py-2">
+    <div className="border-b border-border py-2">
       <div className="mb-1.5 flex items-baseline gap-2 px-1">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {subtitle ? <span className="text-xs text-muted-foreground">{subtitle}</span> : null}
@@ -587,7 +587,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
           <>
             <div className="flex items-center justify-between px-1">
               <h2 className="text-sm font-semibold text-foreground">{t('epicSwimlaneTitle')}</h2>
-              <div className="flex items-center gap-3 border-b border-border/60">
+              <div className="flex items-center gap-3 border-b border-border">
                 <button
                   type="button"
                   role="tab"
@@ -639,7 +639,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
                 ))}
 
                 {overflowEpics.length > 0 && (
-                  <div className="border-b border-border/60 py-1">
+                  <div className="border-b border-border py-1">
                     <button
                       type="button"
                       onClick={() => setOverflowOpen((v) => !v)} aria-expanded={overflowOpen}

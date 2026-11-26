@@ -73,9 +73,9 @@ describe('에픽 가설 선언 카드 — 새로 정의 모드의 칸들(story 4
 
   it('초안으로 채워진 문장(drafted)은 칸 테두리가 primary로 바뀐다 · 아니면 부품 기본 테두리', async () => {
     await mount({ ...EMPTY_DECLARATION, statement: 'AI가 쓴 초안 문장입니다', drafted: true });
-    expect(q<HTMLTextAreaElement>('textarea[data-slot="textarea"]').className).toContain('border-primary/40');
+    expect(q<HTMLTextAreaElement>('textarea[data-slot="textarea"]').className).toContain('border-ds-line-control');
     await mount({ ...EMPTY_DECLARATION, statement: '직접 쓴 문장입니다' });
-    expect(q<HTMLTextAreaElement>('textarea[data-slot="textarea"]').className).not.toContain('border-primary/40');
+    expect(q<HTMLTextAreaElement>('textarea[data-slot="textarea"]').className).not.toContain('border-ds-line-control');
   });
 
   it('기존 링크 모드의 검색 칸은 바탕 Input이고 쓴 글자로 후보를 거르며, 고른 후보가 선언 값에 실린다', async () => {

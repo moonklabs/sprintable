@@ -307,7 +307,7 @@ export function EvidenceSection({
       <div className="rounded-lg border border-ds-line p-2.5">
         <button type="button" onClick={handleToggle} aria-expanded={expanded} className="flex w-full items-center gap-2 text-left">
           <Check
-            className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning-strong')}
+            className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success' : 'text-warning-strong')}
             strokeWidth={2.6}
             aria-hidden
           />

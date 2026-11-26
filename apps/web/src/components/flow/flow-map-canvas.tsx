@@ -220,7 +220,7 @@ function FlowMapNodeCard({
         // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
         // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
         title={stalled ? t('flowNodeStalledHint') : undefined}
-        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-editorial-meta shadow-sm hover:border-info/60 ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-editorial-meta shadow-sm hover:border-info ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
         <span className="shrink-0 font-mono text-micro text-muted-foreground">#{node.storyNumber}</span>
         <GateGlyph node={node} t={t} />
@@ -927,7 +927,7 @@ export function FlowMapCanvas({
                     <button
                       type="button"
                       onClick={() => onTogglePastBundle(lane.epicId)} aria-expanded={lane.pastNodes.length > 0}
-                      className="focus-inset absolute z-10 cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left hover:border-brand/60"
+                      className="focus-inset absolute z-10 cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left hover:border-ds-action"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
                       <div className="font-mono text-micro font-semibold text-foreground">
@@ -980,7 +980,7 @@ export function FlowMapCanvas({
                       누르면 접힌다("다시 누르면 접힙니다", 유나양 규격 그대로). */}
                   {lane.pastNodes.length > 0 ? (
                     <div
-                      className="absolute rounded border border-dashed border-brand/50 bg-brand/[0.03] px-2 pb-2 pt-5"
+                      className="absolute rounded border border-dashed border-ds-action bg-brand/[0.03] px-2 pb-2 pt-5"
                       style={{
                         left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP,
                         width: PAST_EXPANDED_BOX_WIDTH,
@@ -1177,7 +1177,7 @@ export function FlowMapCanvas({
       {/* story #2353(AC15) — 실패는 토스트로 흘려보내지 않는다(㉦-2, "그 자리에 남는다") —
           여기 고정 배너가 그 "자리"다. message는 서버 원문 그대로(진단을 새로 안 짓는다). */}
       {linkDraft.phase === 'error' ? (
-        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive-tint px-3 py-2 text-editorial-meta text-foreground">
+        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive bg-destructive-tint px-3 py-2 text-editorial-meta text-foreground">
           <span>{linkDraft.message}</span>
           <button type="button" onClick={resetLinkDraft} className="shrink-0 underline">{t('portLinkErrorDismiss')}</button>
         </div>

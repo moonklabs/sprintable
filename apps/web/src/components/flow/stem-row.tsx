@@ -52,10 +52,10 @@ export function StemRow({ stem, isExpanded, onToggle }: StemRowProps) {
 
 function Flag({ tone, label }: { tone: 'info' | 'neutral' | 'brand' | 'warn'; label: string }) {
   const cls = {
-    info: 'border-info/50 text-info',
+    info: 'border-info text-info',
     neutral: 'border-border text-muted-foreground',
-    brand: 'border-primary/50 text-primary font-semibold',
-    warn: 'border-warning/50 text-warning-strong font-semibold',
+    brand: 'border-ds-action text-primary font-semibold',
+    warn: 'border-warning text-warning-strong font-semibold',
   }[tone];
   return <span className={`rounded border px-1 py-0.5 font-mono text-micro ${cls}`}>{label}</span>;
 }

@@ -92,7 +92,7 @@ export function HypothesesListShell({ projectId }: { projectId: string }) {
           className={cn(
             'h-auto min-h-0 min-w-0 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
             statusFilter === null
-              ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10'
+              ? 'border-ds-line-control bg-primary/10 text-primary hover:bg-primary/10'
               : 'border-border text-muted-foreground hover:bg-muted/50',
           )}
         >

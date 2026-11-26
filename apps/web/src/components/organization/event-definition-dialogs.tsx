@@ -369,7 +369,7 @@ export function EventFormDialog({
             </div>
           </TabsContent>
           {error ? (
-            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
+            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
@@ -464,7 +464,7 @@ export function TestPublishDialog({
         </DialogHeader>
         <JsonField id="event-test-publish-payload" label={t('eventTestPublishPayloadLabel')} value={payload} onChange={setPayload} />
         {error ? (
-          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
+          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
           </p>
         ) : null}

@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function ShareLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background">
-      <header className="flex-shrink-0 border-b border-border/60 px-4 py-3 lg:px-8">
+      <header className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-8">
         <span className="text-sm font-semibold tracking-tight text-muted-foreground">Sprintable</span>
       </header>
       <main className="flex-1">{children}</main>

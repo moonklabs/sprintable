@@ -176,7 +176,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
           <div className="text-display">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
-          <a href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
+          <a href="/login" className="text-sm font-medium text-brand-text hover:text-ds-ink-2">
             {t('backToLogin')}
           </a>
         </div>
@@ -258,7 +258,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                     'relative -mb-px px-3 py-2 text-sm font-medium transition-colors',
                     authMode === mode
                       ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground/80',
+                      : 'text-muted-foreground hover:text-ds-ink-2',
                   )}
                 >
                   {mode === 'signup' ? t2('signUp') : t2('signIn')}
@@ -336,13 +336,13 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
 
           <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-400 fill-mode-backwards">
             <div className="relative flex items-center">
-              <div className="flex-grow border-t border-border/50" />
+              <div className="flex-grow border-t border-border" />
               <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t2('orContinueWith')}</span>
-              <div className="flex-grow border-t border-border/50" />
+              <div className="flex-grow border-t border-border" />
             </div>
             <a
               href={`/auth/login?provider=google&invite_token=${encodeURIComponent(token!)}&tos_accepted=true`}
-              className="flex w-full min-h-ds-touch items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50"
+              className="flex w-full min-h-ds-touch items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-ds-ink-2 transition hover:bg-muted/50"
             >
               <GoogleIcon />
               {t2('google')}

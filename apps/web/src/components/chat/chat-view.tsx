@@ -1019,7 +1019,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
       {isMobileThreadView && (
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/80 px-3 py-2 lg:hidden">
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border px-3 py-2 lg:hidden">
           <button
             type="button"
             onClick={closeThread}

@@ -69,7 +69,7 @@ function OutputCardHeader({ kindTitle, evidence, isCurrent }: { kindTitle: strin
 }
 
 // story #3164/#3785 회귀가드 — rounded+border+카드표면 bg 조합은 손코딩 카드라 Card 프리미티브를
-// 쓴다(surface='solid'가 border-border/80+bg-card를 이미 낸다).
+// 쓴다(surface='solid'가 border-border+bg-card를 이미 낸다).
 function OutputCard({ children }: { children: React.ReactNode }) {
   return <Card className="overflow-hidden">{children}</Card>;
 }

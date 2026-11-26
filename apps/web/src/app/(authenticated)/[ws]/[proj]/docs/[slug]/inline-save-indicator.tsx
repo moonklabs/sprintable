@@ -65,7 +65,7 @@ export function InlineSaveIndicator({
       <button type="button" onClick={onAction}
         aria-label={`${t('statusError')} · ${t('retry')}`}
         title={`${t('statusError')} · ${t('retry')}`}
-        // story #3677(FE·대비·確定) — hover:text-destructive/80은 resting state(text-
+        // story #3677(FE·대비·確定) — hover:text-destructive은 resting state(text-
         // destructive, 알파 없음)보다 대비를 "낮추는" 방향이라 새 규칙 위반. 색은
         // 그대로 두고 underline으로 hover 피드백을 표현(대비 하락 0).
         className="flex max-w-30 items-center gap-1 truncate text-xs text-destructive hover:underline md:max-w-none"

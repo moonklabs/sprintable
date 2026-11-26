@@ -711,7 +711,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   className={cn(
                     'relative flex h-5 w-5 items-center justify-center rounded-full border text-micro font-medium ring-1 ring-ds-surface-high',
                     m.type === 'agent'
-                      ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
+                      ? cn('border-proof-blue', AGENT_MARK_FILL_CLASS)
                       : 'border-ds-line bg-ds-surface-sunk text-ds-ink-2',
                   )}
                   title={memberDisplayLabel(m.name, tc)}

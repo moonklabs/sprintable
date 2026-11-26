@@ -255,7 +255,7 @@ export function ApplyRecipeDialog({
                 못 불러옴)을 문구로 갈라 select 옆에 둔다. 지금까지 이 자리엔 어느 쪽도
                 텍스트가 없었다(조용히 빈 드롭다운). */}
             {agentsLoadFailed ? (
-              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-agents-load-error">
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-agents-load-error">
                 <span>{t('eventApplyAgentsLoadError')}</span>
                 <Button variant="outline" size="sm" onClick={loadProjectData}>{t('eventApplyAgentsRetry')}</Button>
               </div>
@@ -269,7 +269,7 @@ export function ApplyRecipeDialog({
                 먼저 보이면 오독), failed면 실패 문구+재시도, loaded인데 0건일 때만
                 기존 empty 문구. */}
             {hasChannelStage && channelConnectionsStatus === 'failed' ? (
-              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-channels-load-error">
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-channels-load-error">
                 <span>{tChannel('channelLoadFailed')}</span>
                 <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
               </div>
@@ -277,7 +277,7 @@ export function ApplyRecipeDialog({
               <p className="text-xs text-muted-foreground" data-testid="apply-recipe-channels-empty">{t('eventApplyChannelsEmpty')}</p>
             ) : null}
             {hasGenerationStage && generationConnectorsStatus === 'failed' ? (
-              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-generation-connectors-load-error">
+              <div className="flex items-center justify-between gap-2 rounded-md border border-destructive bg-destructive-tint px-2.5 py-1.5 text-xs text-foreground" data-testid="apply-recipe-generation-connectors-load-error">
                 <span>{t('eventApplyGenerationConnectorsLoadError')}</span>
                 <Button variant="outline" size="sm" onClick={loadGenerationConnectors}>{t('eventApplyAgentsRetry')}</Button>
               </div>
@@ -319,7 +319,7 @@ export function ApplyRecipeDialog({
         ) : null}
 
         {error ? (
-          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
+          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
           </p>
         ) : null}

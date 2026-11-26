@@ -202,8 +202,8 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   // 셸(차가운 ds 바탕) 위에 따뜻한 옛 바탕 띠가 떠 보인다. 아래 문자열은 그 자리의 클래스 한 줄 그대로다(셸 밖 화면 — 로그인 · 온보딩 · 초대 · 폰 첫 화면 · v3 /today · /chat(`app/(v3)`, DashboardShell 밖) — 은 몸통 바탕(옛 토큰) 위라 대상이 아니다: 거기 서 있는 칸을 ds 색으로 바꾸면 오히려 따뜻한 바탕 위에 차가운 칸이 뜬다).
   const PAGE_FILLS: Array<[string, string]> = [
   ['app/(authenticated)/[ws]/[proj]/loops/loops-layer.ts', "sticky top-0 z-10 -mx-4 bg-ds-background px-4 py-2 sm:-mx-6 sm:px-6"],
-  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3"],
-  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden"],
+  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 space-y-1 border-b border-border bg-ds-background px-6 py-3"],
+  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border bg-ds-background px-4 py-2 lg:hidden"],
   ['app/(authenticated)/channel/page.tsx', "sticky bottom-0 -mx-4 -mb-4 flex flex-col gap-2 border-t border-ds-line bg-ds-background px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6"],
   ['app/(authenticated)/chats/[conversation_id]/page.tsx', "flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background"],
   ['app/(authenticated)/chats/layout.tsx', "fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] 2xl:static 2xl:z-auto 2xl:w-100 2xl:shadow-none"],
@@ -213,7 +213,7 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   ['components/org-briefing/instruction-strip.tsx', "sticky bottom-[calc(-1*var(--shell-launcher-clear,0px))] -mx-4 mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1rem))] bg-ds-background px-4 pb-[calc(1rem+var(--shell-launcher-clear,0px))] lg:-mx-6 lg:mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1.5rem))] lg:px-6"],
   ['components/ui/route-error-state.tsx', "min-h-screen bg-ds-background"],
   ['components/workspace/work-tabs-frame.tsx', "sticky top-0 z-10 bg-ds-background px-4 pt-3"],
-  ['components/docs/doc-editor.tsx', 'border-t border-border/60 bg-ds-background/95 pb-[env(safe-area-inset-bottom)]'],
+  ['components/docs/doc-editor.tsx', 'border-t border-border bg-ds-background/95 pb-[env(safe-area-inset-bottom)]'],
   ];
   it.each(PAGE_FILLS)('⭐쪽 바탕 자리 = 층 토큰: %s 에 «%s»', (file, snippet) => {
     expect(readFileSync(join(__dirname, '..', file), 'utf8')).toContain(snippet);

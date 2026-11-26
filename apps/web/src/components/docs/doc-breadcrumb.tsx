@@ -45,7 +45,7 @@ export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, ariaLabel }:
               className={cn(
                 'max-w-40 truncate rounded px-1 py-0.5 transition-colors',
                 isCurrent
-                  ? 'cursor-default text-foreground/70'
+                  ? 'cursor-default text-ds-ink-2'
                   : 'hover:bg-muted hover:text-foreground',
               )}
             >

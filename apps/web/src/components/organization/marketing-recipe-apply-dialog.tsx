@@ -484,7 +484,7 @@ export function MarketingRecipeApplyDialog({
         </div>
 
         {uncovered.length > 0 ? (
-          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground" data-testid="marketing-apply-uncovered-stages">
+          <p role="alert" className="rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-xs text-foreground" data-testid="marketing-apply-uncovered-stages">
             {t('recipeApplyV2UncoveredStages', { stages: uncovered.map((s) => recipeStageLabel(s, t)).join(' · ') })}
           </p>
         ) : null}
@@ -501,7 +501,7 @@ export function MarketingRecipeApplyDialog({
         ) : null}
 
         {error ? (
-          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
+          <p role="alert" aria-live="assertive" className="rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-xs text-foreground">
             {error}
           </p>
         ) : null}

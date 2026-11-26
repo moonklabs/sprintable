@@ -497,7 +497,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             노출한다(유나 지시 — 실패 문구가 이미 "직접 선택" 지시, 별도 안내
             줄은 안 만든다). */}
         {copyFailed && copyFailedRawConfig ? (
-          <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
+          <div className="space-y-1.5 rounded-md border border-destructive bg-destructive-tint p-3">
             <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p>
             {/* 위 상자는 destructive 색 면(bg-destructive-tint)이라 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30) */}
             <Textarea
@@ -610,7 +610,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         {verified && (
           // story #2105 2차 — 검증 성공 결과도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
+          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success bg-success/10 px-3 py-2.5 text-sm text-foreground">
             {/* story #4761 (D1b) — say what was seen: the first call of this key, in the viewer's own clock */}
             {rail.firstCallAt
               ? t.rich('verifiedBannerAt', { t: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })

@@ -90,7 +90,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
     <NodeViewWrapper as="div" className="my-4 not-prose" contentEditable={false}>
       {/* URL editor — visible when block is selected */}
       {selected && (
-        <div className="mb-2 flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/6 px-3 py-2">
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-brand/6 px-3 py-2">
           <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}
@@ -141,7 +141,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
                 className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40"
               >
                 <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-foreground/80">{url}</span>
+                <span className="min-w-0 flex-1 truncate text-ds-ink-2">{url}</span>
               </a>
             ) : (
               <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm opacity-70')}>

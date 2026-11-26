@@ -310,7 +310,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}
-        <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
+        <div className="flex-shrink-0 border-b border-border px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
               <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />

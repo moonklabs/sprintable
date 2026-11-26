@@ -535,7 +535,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
         // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
-        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3">
+        <div className="sticky top-0 z-10 space-y-1 border-b border-border bg-ds-background px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
             <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
@@ -555,7 +555,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           />
 
           {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border bg-ds-background px-4 py-2 lg:hidden">
             {dateNavControls}
           </div>
         </>
@@ -563,7 +563,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
       <div className="focus-inset flex flex-col">
         {headerBadges.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-6 py-3">
             {headerBadges.map((badge) => (
               <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
             ))}
@@ -609,7 +609,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 </button>
 
                 {sprintExpanded ? (
-                  <div className="border-t border-border/60 p-4">
+                  <div className="border-t border-border p-4">
                     {loading ? (
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {[1, 2, 3].map((item) => (
@@ -622,7 +622,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {stories.map((story) => (
                               // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card(아래 2곳).
-                              <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-[var(--elev-card)]">
+                              <div key={story.id} className="rounded-xl border border-border bg-background p-4 shadow-[var(--elev-card)]">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-sm font-medium text-foreground">{story.title}</p>
                                   <Badge variant="outline">{storyStatusLabel(story.status)}</Badge>
@@ -708,7 +708,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   </div>
                   <div className="mt-2 space-y-1.5">
                     {blockerEntries.map((entry) => (
-                      <p key={entry.authorId} className="text-xs text-foreground/90">
+                      <p key={entry.authorId} className="text-xs text-foreground">
                         <span className="font-medium text-foreground">{entry.name}</span>
                         <span className="text-muted-foreground"> · {entry.blockers}</span>
                       </p>
@@ -749,7 +749,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
                       if (isCurrentUser && editingSelf) {
                         return (
-                          <div key={member.id} className="rounded-xl border border-brand/40 bg-card p-4 shadow-[var(--elev-card)] space-y-4">
+                          <div key={member.id} className="rounded-xl border border-ds-line-control bg-card p-4 shadow-[var(--elev-card)] space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="space-y-0.5">
                                 <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>
@@ -796,7 +796,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                               </div>
                             </div>
 
-                            <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
+                            <div className="space-y-3 rounded-xl border border-border bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
                                 <div className="flex items-center gap-2">
@@ -829,7 +829,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                                   {storyPickerStories.map((story) => {
                                     const checked = planStoryIds.includes(story.id);
                                     return (
-                                      <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 transition hover:bg-muted/40">
+                                      <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-background p-2.5 transition hover:bg-muted/40">
                                         <input
                                           type="checkbox"
                                           checked={checked}

@@ -525,7 +525,7 @@ export function OnboardingForm({
 
         {error && (
           // story #2105 2차 — 재시도 전 setError('')를 먼저 호출해 매 시도마다 언마운트→리마운트된다.
-          <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive-tint p-3 text-sm text-foreground">
+          <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive bg-destructive-tint p-3 text-sm text-foreground">
             {error}
           </div>
         )}
