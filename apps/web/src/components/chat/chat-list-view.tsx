@@ -272,7 +272,7 @@ function ConversationRow({
       !showDmOtherName && !isAgentInConv ? null : // a person's DM whose title already says who it is with: no line at all
       // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: the other's name is one plain text segment that gives way first, the «에이전트» chip keeps its size,
       // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped. (P2-e: the segment is there only when the title does not already say it.)
-      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line">
+      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line"> {/* story 5048 T0 ②d: the chips are 16 px now — at a 248–280 px list the agent mark and the computer chip no longer fit side by side, so the chip drops to its own line instead of being cut (the row is 88 high at least and grows) */}
         {showDmOtherName ? (
           // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
           <span className="min-w-0 truncate font-medium" data-testid="room-dm-other">{dmOtherLabel}</span>

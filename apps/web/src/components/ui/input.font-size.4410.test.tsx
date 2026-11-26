@@ -36,7 +36,7 @@ describe('공용 Input 글자 크기(story #4410)', () => {
   it.each([
     [390, 16],
     [800, 16], // iPad 세로 — 예전 md:text-sm이면 14
-    [1280, 14], // 데스크톱 무변
+    [1280, 16], // story 5048 T0 ②d: 데스크톱의 text-sm도 16(가장 작은 글자 16)
   ])('⭐폭 %ipx → %ipx', async (width, px) => {
     await act(async () => { root.render(<Input aria-label="t" />); });
     const el = container.querySelector('input')!;

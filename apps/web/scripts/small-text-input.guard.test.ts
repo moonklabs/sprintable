@@ -38,8 +38,8 @@ describe('scanSource — 셀프테스트', () => {
     expect(r.inherits).toBe(1);
   });
 
-  it('⭐프로젝트 글자 눈금(globals.css)의 이름 크기를 px로 읽는다 — editorial-meta 11 · editorial-ui 13 · micro 10 (4831: 이게 없어 lg:text-editorial-meta가 «크기 없음»으로 읽혔다)', () => {
-    expect([baseFontPx('text-editorial-meta'), baseFontPx('text-editorial-ui'), baseFontPx('text-micro')]).toEqual([11, 13, 10]);
+  it('⭐프로젝트 글자 눈금(globals.css)의 이름 크기를 px로 읽는다 — editorial-meta 11 · editorial-ui 13 · micro 16(story 5048 ②d: 10 → 16) (4831: 이게 없어 lg:text-editorial-meta가 «크기 없음»으로 읽혔다)', () => {
+    expect([baseFontPx('text-editorial-meta'), baseFontPx('text-editorial-ui'), baseFontPx('text-micro')]).toEqual([11, 13, 16]);
     expect(desktopFontPx('text-base lg:text-editorial-meta')).toBe(11);
     expect(belowLgFontPx('text-base lg:text-editorial-meta')).toBe(16);
     // 공용 부품(text-base lg:text-sm)에 호출부가 lg:text-editorial-meta를 얹어도 데스크톱 11px 그대로 — 가짜 «14 → 16» 바뀜이 없다

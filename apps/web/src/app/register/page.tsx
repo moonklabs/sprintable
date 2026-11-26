@@ -149,13 +149,13 @@ export default function RegisterPage() {
   const showRules = passwordTouched && password.length > 0;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ds-background px-4 py-2 sm:gap-8 sm:py-8">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-1 bg-ds-background px-4 py-1 sm:gap-8 sm:py-8">
       <div className="w-full max-w-sm space-y-2 rounded-2xl border border-ds-line bg-ds-surface p-4 shadow-lg sm:space-y-6 sm:p-8">
         <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
           <SprintableLogo
             variant="stacked"
             className="text-foreground"
-            markClassName="h-14"
+            markClassName="h-8 sm:h-14"
             wordmarkClassName="h-5"
           />
           <p className="text-ds-body text-ds-ink-3">{t('subtitle')}</p>

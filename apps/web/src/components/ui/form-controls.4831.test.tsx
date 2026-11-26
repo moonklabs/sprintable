@@ -40,7 +40,7 @@ describe('Textarea · Select — Input과 같은 글자 규칙', () => {
   it.each([
     [390, 16],
     [800, 16],
-    [1280, 14],
+    [1280, 16], // story 5048 T0 ②d: 가장 작은 글자도 16 — 데스크톱의 text-sm도 16/24
   ])('⭐Textarea 폭 %ipx → %ipx', async (width, px) => {
     await act(async () => { root.render(<Textarea aria-label="t" />); });
     const el = container.querySelector('textarea')!;
@@ -52,7 +52,7 @@ describe('Textarea · Select — Input과 같은 글자 규칙', () => {
   it.each([
     [390, 16],
     [800, 16],
-    [1280, 14],
+    [1280, 16], // story 5048 T0 ②d: 가장 작은 글자도 16 — 데스크톱의 text-sm도 16/24
   ])('⭐Select 폭 %ipx → %ipx', async (width, px) => {
     await act(async () => { root.render(<Select aria-label="t"><option value="a">a</option></Select>); });
     const el = container.querySelector('select')!;

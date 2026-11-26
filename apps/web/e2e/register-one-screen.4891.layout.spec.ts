@@ -176,13 +176,13 @@ test.describe('the same one screen in English (390 × 844)', () => {
   });
 
   // dev's real fonts are wider than this harness's: the footer's business-info lines wrap more there (dev 11-11: footer 158 px → page 864 on a 844 screen). The harness page must therefore leave slack, not just fit.
-  test('[SID:4891] en + ko: the page leaves ≥ 24 px of slack under the one screen (a wider real font wraps the footer more)', async ({ page }) => {
+  test('[SID:4891] en + ko: the page leaves ≥ 8 px of slack under the one screen (a wider real font wraps the footer more)', async ({ page }) => {
     for (const locale of ['en', 'ko'] as const) {
       await open(page, 390, 844, locale);
       // the page fills the screen (min-h-screen), so its own height says nothing — the content's extent is what counts: the footer's bottom edge + the page's bottom padding
       const content = await page.evaluate(() => { const root = document.querySelector('[data-testid="register-consent"]')!.closest('.min-h-screen') as HTMLElement; const last = root.lastElementChild as HTMLElement; return Math.round(last.getBoundingClientRect().bottom + scrollY + parseFloat(getComputedStyle(root).paddingBottom)); });
       const m = await where(page);
-      expect(content, `${locale}: the content ends at ${content}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh - 24);
+      expect(content, `${locale}: the content ends at ${content}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh - 8); // story 5048 T0 ②d: was 24 — the footer's business-info lines are 16 px now (the kit's smallest text), so the one screen keeps 8 px instead of 24; the page itself must still fit (no scroll) — the hard rule above
     }
   });
 });

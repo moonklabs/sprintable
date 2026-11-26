@@ -137,7 +137,8 @@ test('[SID:4887] dropping the repeated name gives the computer chip the width: t
   expect(unnamed.title).toBe(LONG_COMPUTER); // the whole name stays in the title either way
   expect(named.title).toBe(LONG_COMPUTER);
   // the chip's visible text: the name segment's width goes to the chip (reverted — the name always on the line — both rows are equal → this fails)
-  expect(unnamed.textW, `unnamed ${unnamed.textW}px vs named ${named.textW}px of ${unnamed.fullW}px`).toBeGreaterThanOrEqual(named.textW + 20);
+  // story 5048 T0 ②d: the 16 px chips no longer share one line with the name — the DM line wraps (chips on their own line), so the chip text gets the line's whole width in BOTH rows; dropping the repeated name still never gives the chip LESS
+  expect(unnamed.textW, `unnamed ${unnamed.textW}px vs named ${named.textW}px of ${unnamed.fullW}px`).toBeGreaterThanOrEqual(named.textW);
   expect(unnamed.chipInsideLine && named.chipInsideLine).toBe(true);
   expect(unnamed.lineOverflow || named.lineOverflow).toBe(false);
 });

@@ -55,7 +55,7 @@ export function BusinessInfoBlock({ className = '' }: { className?: string }) {
     BUSINESS_INFO.phone,
   ];
   return (
-    <div className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 leading-relaxed ${className}`}>
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-0 leading-6 ${className}`}> {/* story 5048 T0 ②d: 16/24 글자에서 줄간격 relaxed(26) → 24 */}
       {parts.map((part, i) => (
         <Fragment key={i}>
           {i > 0 && <span aria-hidden>·</span>}
@@ -100,7 +100,7 @@ export function LegalFooter({ className = '' }: { className?: string }) {
       className={`w-full max-w-xl px-4 text-center text-xs text-muted-foreground ${className}`}
     >
       <BusinessInfoBlock className="justify-center" />
-      <LegalLinks className="mt-2 justify-center" />
+      <LegalLinks className="mt-1 justify-center sm:mt-2" />
     </footer>
   );
 }
