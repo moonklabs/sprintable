@@ -41,7 +41,7 @@ describe('«팀» 탭줄', () => {
   it('⭐순서와 이름(관리자): 에이전트 · 구성원 · 실행 기록 · API 키 · 채용 · 통계 · 접근 권한 — 가는 화면이 이미 쓰는 낱말 그대로(ko) · 이미 쓰던 다섯이 앞(story 4889 · PO 11-10)', async () => {
     await mount('ko');
     expect(tabs().map((a) => a.getAttribute('data-team-tab'))).toEqual(['agents', 'people', 'runs', 'keys', 'recruit', 'stats', 'access']);
-    expect(tabs().map((a) => a.textContent)).toEqual(['에이전트', '구성원', '실행 기록', 'API 키', '채용', '통계', '접근 권한']);
+    expect(tabs().map((a) => a.textContent)).toEqual(['에이전트', '조직 구성원', '실행 기록', 'API 키', '채용', '통계', '접근 권한']);
     expect(tabs().map((a) => a.textContent)).toEqual([koMessages.nav.workforce, koMessages.nav.orgMembers, koMessages.nav.workforceRuns, koMessages.nav.workforceApiKeys, koMessages.agents.recruitTab, koMessages.agents.statsTab, koMessages.agents.accessTab]);
   });
 

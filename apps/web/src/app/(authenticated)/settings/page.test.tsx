@@ -247,7 +247,7 @@ describe('SettingsPage — story #3762: adminChecked 로딩 vs 권한없음 분�
     await mount(<SettingsPage />);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).not.toContain(koMessages.settings.tabOrgMembers);
+    expect(container.querySelector('[data-settings-tab="org-members"]'), 'the switched-off org-members TAB is not drawn (the «조직 구성원» LINK row of 사람과 역할 is a different row)').toBeNull();
     // 승격 목적지(조직·프로젝트) 트리거는 정상 렌더 — 가드가 그룹 전체를 과잉 차단하지 않는다.
     expect(container.textContent).toContain(koMessages.settings.tabOrganization);
     expect(container.textContent).toContain(koMessages.settings.tabProjects);
