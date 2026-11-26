@@ -48,10 +48,10 @@ export function KanbanCardFace({ summary, onOpen }: { summary: KanbanSummary; on
         <div className="flex min-h-ds-control w-full items-center gap-2 px-3 py-2">{head}</div>
       )}
       <div className="@container px-3 pb-2 pt-0">
-        {/* narrow card (under 28rem of its OWN width): one wrapping line «label count · label count» — a phone-width column cannot hold five boxes without breaking the labels letter by letter; wide: five boxes */}
-        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 @md:grid @md:grid-cols-5 @md:gap-1" data-testid="chat-card-kanban-columns">
+        {/* narrow card (under 32rem of its OWN width): one wrapping line «label count · label count» — a phone-width column cannot hold five boxes without breaking the labels letter by letter; wide: five boxes */}
+        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 @lg:grid @lg:grid-cols-5 @lg:gap-1" data-testid="chat-card-kanban-columns">
           {KANBAN_COLUMNS.map((c) => (
-            <li key={c} data-column={c} className="flex min-w-0 items-baseline gap-1 whitespace-nowrap @md:flex-col @md:items-start @md:gap-0.5 @md:whitespace-normal @md:rounded-ds-control @md:border @md:border-ds-line @md:bg-ds-surface-sunk @md:px-2 @md:py-1">
+            <li key={c} data-column={c} className="flex min-w-0 items-baseline gap-1 whitespace-nowrap @lg:flex-col @lg:items-start @lg:gap-0.5 @lg:whitespace-normal @lg:rounded-ds-control @lg:border @lg:border-ds-line @lg:bg-ds-surface-sunk @lg:px-2 @lg:py-1">
               <span className="text-ds-small text-ds-ink-3 break-keep">{translateEntityStatus('story', c)}</span>
               <span className="text-ds-body font-medium text-ds-ink">{summary.counts[c]}{summary.hasMore ? '+' : ''}</span>
             </li>

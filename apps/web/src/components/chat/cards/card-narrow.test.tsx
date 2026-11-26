@@ -28,7 +28,7 @@ describe('the board card in a narrow column', () => {
     await draw(<KanbanCardFace summary={SUMMARY} />);
     const ul = container.querySelector('[data-testid="chat-card-kanban-columns"]') as HTMLElement;
     expect(ul.className).toMatch(/\bflex\b/); expect(ul.className).toMatch(/flex-wrap/);
-    expect(ul.className).toMatch(/@md:grid\b/); expect(ul.className).toMatch(/@md:grid-cols-5/);
+    expect(ul.className).toMatch(/@lg:grid\b/); expect(ul.className).toMatch(/@lg:grid-cols-5/);
     expect(ul.parentElement!.className).toMatch(/@container\b/); // the container the query reads is the card's own wrapper — never the screen
     const li = ul.querySelector('li')!;
     expect(li.className).toMatch(/whitespace-nowrap/); // a «label count» pair never breaks inside itself

@@ -162,7 +162,7 @@ test('[SID:5034] the state toggle: every button shows its state, 390 and 1440 ch
 });
 
 // the board card at the width the PO saw it break (a 390 phone room leaves the card ~214 wide) · and wide
-for (const colWidth of [238, 390, 1440]) {
+for (const colWidth of [238, 390, 500, 1440]) {
   test(`[SID:5034] the board card at a ${colWidth}-wide column: no label breaks letter by letter, the title is one line, nothing runs past the column`, async ({ page }) => {
     mkdirSync(SHOTS, { recursive: true });
     await open(page, Math.max(colWidth, 390), false, 'kanban');
@@ -189,7 +189,7 @@ for (const colWidth of [238, 390, 1440]) {
     expect(r.titleH, 'the board title is one line').toBeLessThanOrEqual(r.titleLh + 1);
     expect(r.labelMax, 'a column label is never taller than 1.5 lines (a label broken letter by letter is 3+)').toBeLessThanOrEqual(1.5);
     expect(r.totalFits, 'the count «장 73개» stays on one line inside the head').toBe(true);
-    if (colWidth < 448) { expect(r.boxed, 'narrow: no boxes').toBe(false); }
+    if (colWidth < 512) { expect(r.boxed, 'narrow: no boxes').toBe(false); }
     else { expect(r.boxed, 'wide: five boxes').toBe(true); expect(r.rows, 'wide: the five boxes stand in one row').toBe(1); }
     await page.screenshot({ path: path.join(SHOTS, `board-card-${colWidth}.png`), fullPage: true });
   });
