@@ -4828,6 +4828,7 @@
     "detailNotFound": "Agent not found",
     "detailLoadFailed": "Could not load the agent",
     "allViewsLabel": "All-agent views",
+    "allViewsCaption": "All views",
     "allViewsBack": "← Agent list",
     "paneEmptyTitle": "Pick an agent",
     "paneEmptyDescription": "Pick an agent in the list to see its status, connection, keys and run history here.",

@@ -132,7 +132,7 @@ test('[SID:5035] 1440 long text: a very long agent name and device name do not p
   const over = await page.evaluate(() => {
     const col = document.querySelector('[data-testid="workforce-list-column"]') as HTMLElement;
     const colR = col.getBoundingClientRect();
-    const rows = Array.from(col.querySelectorAll('[data-testid^="agent-row-"]')) as HTMLElement[];
+    const rows = Array.from(col.querySelectorAll('[data-testid^="agent-row-"]')).filter((el) => el.getAttribute('data-testid') !== 'agent-row-list') as HTMLElement[];
     return { rows: rows.length, colScroll: col.scrollWidth - col.clientWidth, widest: Math.max(...rows.map((r) => r.getBoundingClientRect().right - colR.right)) };
   });
   expect(over.rows, 'the three agents are drawn').toBe(3);
@@ -144,7 +144,7 @@ test('[SID:5035] 390: the list alone — no detail column, nothing scrolls sidew
   await open(page, { viewport: [390, 800], path: '/organization/workforce' });
   expect(await rect(page, '[data-testid="workforce-detail-column"]')).toBeNull();
   expect(await pageOverflowX(page)).toBeLessThanOrEqual(0);
-  const widest = await page.evaluate(() => Math.max(...Array.from(document.querySelectorAll('[data-testid^="agent-row-"]')).map((r) => r.getBoundingClientRect().right)));
+  const widest = await page.evaluate(() => Math.max(...Array.from(document.querySelectorAll('[data-testid^="agent-row-"]')).filter((el) => el.getAttribute('data-testid') !== 'agent-row-list').map((r) => r.getBoundingClientRect().right)));
   expect(widest).toBeLessThanOrEqual(390);
 });
 

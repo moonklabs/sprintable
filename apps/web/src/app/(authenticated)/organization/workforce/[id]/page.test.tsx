@@ -547,13 +547,13 @@ describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
   const openMenu = async () => { await act(async () => { (container.querySelector('[data-testid="agent-detail-actions"]') as HTMLElement).click(); }); };
   const settle = () => act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
 
-  it('⭐머리 한 상자: 이름 · 칩(역할 · 커넥터) · 뒤로 링크 · 위 막대가 이름을 말하므로 큰 «조직 에이전트» 제목은 없다', async () => {
+  it('⭐머리 한 상자: 이름 · 칩(역할 · 커넥터) · (뒤로 링크는 5035에서 걷음) · 위 막대가 이름을 말하므로 큰 «조직 에이전트» 제목은 없다', async () => {
     stubWithPatch();
     await mount();
     const head = container.querySelector('[data-testid="agent-detail-head"]')!;
     expect(head.textContent).toContain('에이전트1');
     expect(head.querySelectorAll('[data-slot="ds-chip"]').length).toBeGreaterThanOrEqual(2);
-    expect(container.querySelector('[data-testid="agent-detail-back"]')?.getAttribute('href')).toContain('/organization/workforce?tab=manage');
+    expect(container.querySelector('[data-testid="agent-detail-back"]'), 'story 5035: the list is beside the detail — no second door back to it').toBeNull();
     expect(container.querySelector('h1')).toBeNull();
     expect(container.textContent).not.toContain(koMessages.settings.orgAgentsTitle);
   });

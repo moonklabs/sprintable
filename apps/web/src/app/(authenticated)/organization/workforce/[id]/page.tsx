@@ -9,7 +9,7 @@ import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab
 import { sessionStateLabel } from '@/components/chat/agent-session-strip';
 import type { SessionLimit } from '@/lib/agent-session-limit';
 import type { SessionRun } from '@/lib/agent-session-run';
-import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
@@ -611,11 +611,7 @@ export default function AgentDetailPage() {
   return (
     <PageFrame width="wide">
       <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
-      {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). story 4912 (A2): the back link keeps its place; the big «조직 에이전트» title is gone (the top bar says the screen's name). */}
-      <Link href={flatHref('/organization/workforce?tab=manage')} replace className="inline-flex w-fit items-center gap-1.5 text-ds-small text-ds-ink-3 hover:text-ds-ink" data-testid="agent-detail-back">
-        <ArrowLeft className="h-4 w-4" />
-        {ta('title')}
-      </Link>
+      {/* story 5035 (C5): no «← 에이전트» link here any more — the list is on the left (wide) or the sheet's own ✕ closes to it (phone); a back link beside its own list is a second door to the same place. */}
 
       <PageSplit asideLabel={ta('detailSideLabel')} aside={<SummaryCard title={ta('detailSummaryTitle')} items={summaryItems} emptyText={ta('detailSummaryEmpty')} emptyLabel={ta('detailSummaryEmptyLabel')} />}>
         <div className="flex flex-col gap-6">

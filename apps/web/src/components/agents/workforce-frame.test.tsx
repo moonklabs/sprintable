@@ -26,7 +26,7 @@ vi.mock('@/hooks/use-org-admin', () => ({ useOrgAdmin: () => ({ isAdmin: admin, 
 vi.mock('@/hooks/use-list-detail-wide', () => ({ useListDetailWide: () => wide }));
 let onAdd: () => void = () => {};
 vi.mock('@/components/agents/agent-management-tab', () => ({
-  AgentManagementTab: ({ onAddAgent }: { onAddAgent: () => void }) => { onAdd = onAddAgent; return <div data-testid="agent-list-stub" />; },
+  AgentManagementTab: ({ onAddAgent, compact }: { onAddAgent: () => void; compact?: boolean }) => { onAdd = onAddAgent; return <div data-testid="agent-list-stub" data-compact={String(!!compact)} />; },
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -101,6 +101,9 @@ describe('WorkforceFrame — 목록 → 상세', () => {
     const entry = container.querySelector('[data-testid="workforce-all-views-menu"]');
     expect(entry).toBeTruthy();
     expect(container.querySelector('[data-testid="workforce-all-views-strip"]')).toBeNull();
+    // the strip is NAMED («전체 보기») — bare links with nothing lit read as the list's own tabs — and the list drops its page padding inside the column
+    expect(entry!.querySelector('[data-testid="workforce-all-views-caption"]')?.textContent).toBe('allViewsCaption');
+    expect(container.querySelector('[data-testid="agent-list-stub"]')?.getAttribute('data-compact')).toBe('true');
   });
 
   it('넓은 화면, 에이전트 상세 주소: 목록과 상세가 «같이» 보인다(목록 → 상세 칸 순서)', async () => {

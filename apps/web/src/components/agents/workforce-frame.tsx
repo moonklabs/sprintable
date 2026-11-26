@@ -5,33 +5,37 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
+import { TEAM_TABS } from '@/lib/nav-config';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
 import { TabNav, TabNavLink } from '@/components/ds/tab-nav';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useListDetailWide } from '@/hooks/use-list-detail-wide';
 import { useOrgAdmin } from '@/hooks/use-org-admin';
 
-const WORKFORCE = '/organization/workforce';
+// The routes come from the old «팀» strip's own data (lib/nav-config TEAM_TABS) — the SAME strings, so an old address cannot drift and this file writes no route literal of its own (the flat-link ratchet counts those).
+const pathOf = (id: string): string => TEAM_TABS.find((tab) => tab.id === id)!.path;
+const WORKFORCE = pathOf('agents');
+const routeOf = (p: string): string => p.split('?')[0]!;
 
-/** The five views that look at ALL agents (not one): kept at their old addresses, reached from ONE entry (story 5035 · PO 11-26). `ns`/`labelKey` reuse the words the old «팀» strip used. */
+/** The five views that look at ALL agents (not one): kept at their old addresses, reached from ONE entry (story 5035 · PO 11-26). `ns`/`labelKey` are the words the old «팀» strip used. */
 export type AllViewKey = 'runs' | 'keys' | 'stats' | 'access' | 'recruit';
 export interface AllViewConfig { key: AllViewKey; path: string; ns: 'nav' | 'agents'; labelKey: string; adminOnly?: boolean }
-export const ALL_VIEWS: readonly AllViewConfig[] = [
-  { key: 'runs', path: `${WORKFORCE}/runs`, ns: 'nav', labelKey: 'workforceRuns' },
-  { key: 'keys', path: `${WORKFORCE}/api-keys`, ns: 'nav', labelKey: 'workforceApiKeys' },
-  { key: 'stats', path: `${WORKFORCE}?tab=stats`, ns: 'agents', labelKey: 'statsTab' },
-  { key: 'access', path: `${WORKFORCE}?tab=access`, ns: 'agents', labelKey: 'accessTab', adminOnly: true },
-  { key: 'recruit', path: `${WORKFORCE}?tab=recruit`, ns: 'agents', labelKey: 'recruitTab' },
-];
+const ALL_VIEW_KEYS: readonly AllViewKey[] = ['runs', 'keys', 'stats', 'access', 'recruit'];
+export const ALL_VIEWS: readonly AllViewConfig[] = ALL_VIEW_KEYS.map((key) => {
+  const tab = TEAM_TABS.find((t) => t.id === key)!;
+  return { key, path: tab.path, ns: tab.ns, labelKey: tab.labelKey, adminOnly: tab.adminOnly };
+});
 
 export type WorkforceView = { kind: 'split'; agentId: string | null } | { kind: 'all'; key: AllViewKey };
 
 const ALL_TABS = new Set<string>(['stats', 'access', 'recruit']);
+const RUNS_ROUTE = routeOf(pathOf('runs'));
+const KEYS_ROUTE = routeOf(pathOf('keys'));
 
 /** The address decides the frame: the list + detail («split») for the agent list and one agent's detail, the «all agents» frame for the views that read every agent. Old addresses keep their meaning (a `?tab=` we do not know reads as the list, as before). */
 export function resolveWorkforceView(pathname: string, tab: string | null): WorkforceView {
-  if (pathname === `${WORKFORCE}/runs`) return { kind: 'all', key: 'runs' };
-  if (pathname === `${WORKFORCE}/api-keys`) return { kind: 'all', key: 'keys' };
+  if (pathname === RUNS_ROUTE) return { kind: 'all', key: 'runs' };
+  if (pathname === KEYS_ROUTE) return { kind: 'all', key: 'keys' };
   if (pathname === WORKFORCE || pathname === `${WORKFORCE}/`) {
     return tab && ALL_TABS.has(tab) ? { kind: 'all', key: tab as AllViewKey } : { kind: 'split', agentId: null };
   }
@@ -52,7 +56,8 @@ function AllViewsNav({ active, testId, children }: { active: AllViewKey | null; 
   return (
     <div className="flex items-center gap-3" data-testid={testId}>
       {children}
-      <TabNav aria-label={ta('allViewsLabel')} className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1">
+      <TabNav aria-label={ta('allViewsLabel')}>
         {views.map((v) => (
           <TabNavLink key={v.key} asChild active={v.key === active}>
             <Link href={flatHref(v.path)} data-all-view={v.key}>
@@ -61,6 +66,7 @@ function AllViewsNav({ active, testId, children }: { active: AllViewKey | null; 
           </TabNavLink>
         ))}
       </TabNav>
+      </div>
     </div>
   );
 }
@@ -84,7 +90,7 @@ function AllFrame({ active, children }: { active: AllViewKey; children: ReactNod
     <>
       <div className="px-4 pt-3" data-testid="workforce-all-views-band">
         <AllViewsNav active={active} testId="workforce-all-views-strip">
-          <Link href={flatHref(WORKFORCE)} className="shrink-0 text-ds-small font-medium text-ds-action-text hover:underline" data-testid="workforce-back-to-list">
+          <Link href={flatHref(WORKFORCE)} className="shrink-0 border-r border-ds-line pr-3 text-ds-small font-medium text-ds-action-text hover:underline" data-testid="workforce-back-to-list">
             {ta('allViewsBack')}
           </Link>
         </AllViewsNav>
@@ -108,8 +114,10 @@ function SplitFrame({ agentId, children }: { agentId: string | null; children: R
         wide={wide}
         list={
           <div className="min-w-0 space-y-2" data-testid="workforce-list-column">
-            <AllViewsNav active={null} testId="workforce-all-views-menu" />
-            <AgentManagementTab onAddAgent={() => router.push(flatHref(`${WORKFORCE}?tab=recruit`))} />
+            <AllViewsNav active={null} testId="workforce-all-views-menu">
+              <span className="shrink-0 text-ds-small text-ds-ink-3" data-testid="workforce-all-views-caption">{ta('allViewsCaption')}</span>
+            </AllViewsNav>
+            <AgentManagementTab compact onAddAgent={() => router.push(flatHref(`${WORKFORCE}?tab=recruit`))} />
           </div>
         }
         detail={<div className="focus-inset lg:max-h-[inherit] lg:overflow-y-auto">{children}</div>}

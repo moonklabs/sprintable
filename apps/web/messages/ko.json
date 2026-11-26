@@ -4828,6 +4828,7 @@
     "detailNotFound": "에이전트를 찾을 수 없어요",
     "detailLoadFailed": "에이전트를 불러오지 못했어요",
     "allViewsLabel": "전체 에이전트 보기",
+    "allViewsCaption": "전체 보기",
     "allViewsBack": "← 에이전트 목록",
     "paneEmptyTitle": "에이전트를 골라 주세요",
     "paneEmptyDescription": "왼쪽 목록에서 에이전트를 고르면 상태와 연결, 키, 실행 기록을 여기서 볼 수 있어요.",
