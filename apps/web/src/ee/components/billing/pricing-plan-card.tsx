@@ -103,7 +103,7 @@ export function PricingPlanCard({
         )}
       </div>
       {isPricePublic && (
-        <div className="mb-1.5 text-[10px] text-muted-foreground">{t('vatExcludedNote')}</div>
+        <div className="mb-1.5 text-xs text-muted-foreground">{t('vatExcludedNote')}</div>
       )}
 
       <div className="mb-3 text-xs text-muted-foreground">
@@ -170,7 +170,7 @@ export function PricingPlanCard({
         </li>
       </ul>
 
-      <div className={cn('mt-3 border-t border-dashed border-border pt-3 text-[11px]', limits.canPurchasePacks ? 'text-success' : 'text-warning-strong')}>
+      <div className={cn('mt-3 border-t border-dashed border-border pt-3 text-xs', limits.canPurchasePacks ? 'text-success' : 'text-warning-strong')}>
         {limits.canPurchasePacks ? t('reachGo') : t('reachStopFree')}
       </div>
     </div>

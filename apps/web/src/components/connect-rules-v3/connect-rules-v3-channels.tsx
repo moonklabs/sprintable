@@ -162,7 +162,7 @@ function MeasurementSection({
     <div className="border-t border-border pt-3">
       <div className="mb-2 flex items-baseline gap-2">
         <h3 className="text-xs font-semibold text-foreground">{tc('measurementSectionTitle')}</h3>
-        <span className="text-[11px] text-muted-foreground">{tc('measurementSectionSubtitle')}</span>
+        <span className="text-xs text-muted-foreground">{tc('measurementSectionSubtitle')}</span>
       </div>
       <div className="space-y-1.5 text-xs">
         {beacon ? (
@@ -268,7 +268,7 @@ export function ConnectRulesV3Channels({ orgId, isOwnerStrict }: { orgId: string
             ))}
             {adChannels.length > 0 ? (
               <div className="pt-1">
-                <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">{t('adAccountsSectionTitle')}</p>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">{t('adAccountsSectionTitle')}</p>
                 <div className="space-y-2">
                   {adChannels.map((item) => (
                     <ChannelRow key={item.channel} item={item} connections={connections} t={t} tc={tc} />

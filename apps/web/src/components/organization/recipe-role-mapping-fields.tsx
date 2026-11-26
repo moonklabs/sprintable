@@ -146,7 +146,7 @@ export function RecipeRoleMappingFields({
                   )); })(membersForKind(members, memberKind))}
                 </select>
                 {surfaceUnderPicker ? (
-                  <p className="text-[11px] text-muted-foreground" data-testid="mapping-approval-note">{approvalNote(surfaceUnderPicker)}</p>
+                  <p className="text-xs text-muted-foreground" data-testid="mapping-approval-note">{approvalNote(surfaceUnderPicker)}</p>
                 ) : null}
               </div>
             )}

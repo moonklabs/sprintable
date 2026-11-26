@@ -40,7 +40,7 @@ function TodayResultsSummary({ snapshot }: { snapshot: TodaySnapshot }) {
     <section aria-label={t('resultsSectionTitle')}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('resultsSectionTitle')}</h2>
-        <span className="text-[11px] text-muted-foreground">{t('resultsHint')}</span>
+        <span className="text-xs text-muted-foreground">{t('resultsHint')}</span>
       </div>
       <p className="text-xs text-muted-foreground" data-testid="today-v3-results-summary">
         {t('resultsSummaryLine', {

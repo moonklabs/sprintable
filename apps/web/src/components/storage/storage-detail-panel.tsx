@@ -28,7 +28,7 @@ interface StorageDetailPanelProps {
 
 function MetaRow({ label, value, last = false }: { label: string; value: ReactNode; last?: boolean }) {
   return (
-    <div className={cn('flex items-center justify-between py-[7px] text-[12.5px]', last ? '' : 'border-b border-dashed border-ds-line')}>
+    <div className={cn('flex items-center justify-between py-[7px] text-xs', last ? '' : 'border-b border-dashed border-ds-line')}>
       <span className="text-ds-ink-3">{label}</span>
       <span className="flex items-center gap-1.5 font-[550] text-ds-ink">{value}</span>
     </div>
@@ -84,8 +84,8 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
       {/* dhead */}
       <div className="px-4 pb-[6px] pt-[14px]">
-        <div className="truncate text-[14px] font-[650] tracking-[-0.01em] text-ds-ink">{asset.name}</div>
-        <div className="mt-[3px] text-[11.5px] text-ds-ink-3">
+        <div className="truncate text-xs font-[650] tracking-[-0.01em] text-ds-ink">{asset.name}</div>
+        <div className="mt-[3px] text-xs text-ds-ink-3">
           {ext} · {formatFileSize(asset.size_bytes)}
         </div>
       </div>
@@ -101,7 +101,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
           <TabsTrigger value="usage">
             {t('tabUsage')}
             {/* story #2590(TIER3) — tint 위 계열색 글자는 text-ds-ink(#2420 규칙). */}
-            <span className="rounded-full bg-ds-action-soft px-[5px] text-[10px] font-bold text-ds-ink">{usageCount}</span>
+            <span className="rounded-full bg-ds-action-soft px-[5px] text-xs font-bold leading-4 text-ds-ink">{usageCount}</span>
           </TabsTrigger>
         </TabsList>
       </div>
@@ -130,7 +130,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
             {usageCount > 0 ? (
               <>
-                <div className="mb-[6px] mt-[14px] text-[11px] font-bold tracking-[0.03em] text-ds-ink-3">
+                <div className="mb-[6px] mt-[14px] text-xs font-bold tracking-[0.03em] text-ds-ink-3">
                   {t('usageSectionLabel')}
                 </div>
                 <StorageSourceUsageList links={asset.source_links} />

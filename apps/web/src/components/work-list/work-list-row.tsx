@@ -63,7 +63,7 @@ export function WorkListRowView({
     >
       <DelegatedDot isDelegated={row.isDelegated} state={row.state} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13.5px] text-foreground">{row.title}</div>
+        <div className="truncate text-xs text-foreground">{row.title}</div>
         {/* 행 부제=담당 이름(있을 때만·PO 지적 — 위임/배정 둘 다). 검토 축은 실 데이터가
             없어 생략(지어내지 않음, 시안의 "작성·검토" 서술문은 이 카드 데이터로 못 채움). */}
         {row.ownerName ? <div className="truncate text-xs text-muted-foreground">{row.ownerName}</div> : null}

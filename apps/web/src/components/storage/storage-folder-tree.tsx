@@ -68,12 +68,12 @@ function FolderNode({
         className={cn(
           // [SID:4380 · 유나] 초점은 제품 링(안쪽으로 그려 사이드바 스크롤에 안 잘림) — 배경만 바꾸던 초점은 대비 1.05~1.15로 안 보였고
           // 고른 행의 고름 색(bg-ds-action-soft)을 덮어 키보드로 서 있으면 고름이 사라졌다.
-          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-ds-ink focus-visible:-outline-offset-2',
+          'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-xs text-ds-ink focus-visible:-outline-offset-2',
           selected ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'hover:bg-ds-surface-high',
         )}
       >
         <span
-          className="grid w-[14px] place-items-center text-[10px] opacity-55"
+          className="grid w-[14px] place-items-center text-xs opacity-55"
           aria-hidden="true"
           onClick={(e) => {
             if (hasChildren) {
@@ -186,7 +186,7 @@ export function StorageFolderTree({
       <div className="px-3 pb-2 pt-3">
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-[0.5rem] border border-ds-line bg-ds-surface px-[10px] py-2 text-[12px] text-ds-ink"
+          className="flex w-full items-center gap-2 rounded-[0.5rem] border border-ds-line bg-ds-surface px-[10px] py-2 text-xs text-ds-ink"
         >
           {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}
           <span className="size-2 shrink-0 rounded-full bg-ds-action" />
@@ -198,13 +198,13 @@ export function StorageFolderTree({
       {/* 폴더 검색 + 새 폴더 */}
       <div className="mx-3 mb-1.5 flex items-center gap-1.5">
         {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
-        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-[9px] py-[7px] text-[12px] text-ds-ink-3 focus-within:border-ds-ink-2">
+        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-[9px] py-[7px] text-xs text-ds-ink-3 focus-within:border-ds-ink-2">
           <Search className="size-3.5 shrink-0 opacity-60" />
           <input
             value={folderSearch}
             onChange={(e) => onFolderSearchChange(e.target.value)}
             placeholder={t('folderSearchPlaceholder')}
-            className="w-full min-w-0 bg-transparent text-base lg:text-[12px] text-ds-ink outline-none placeholder:text-ds-ink-3"
+            className="w-full min-w-0 bg-transparent text-base lg:text-xs text-ds-ink outline-none placeholder:text-ds-ink-3"
           />
         </div>
         <button
@@ -231,15 +231,15 @@ export function StorageFolderTree({
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={submitting}
-            className="w-full min-w-0 rounded-md border border-ds-line bg-ds-surface px-2 py-1.5 text-base lg:text-[12px] text-ds-ink outline-none focus-visible:ring-1 focus-visible:ring-ds-action disabled:opacity-60"
+            className="w-full min-w-0 rounded-md border border-ds-line bg-ds-surface px-2 py-1.5 text-base lg:text-xs text-ds-ink outline-none focus-visible:ring-1 focus-visible:ring-ds-action disabled:opacity-60"
           />
-          {createError ? <p className="text-[11px] text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
+          {createError ? <p className="text-xs text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={cancelCreating}
               disabled={submitting}
-              className="rounded-md px-2 py-1 text-[11px] text-ds-ink-3 hover:bg-ds-surface-high disabled:opacity-60"
+              className="rounded-md px-2 py-1 text-xs text-ds-ink-3 hover:bg-ds-surface-high disabled:opacity-60"
             >
               {t('newFolderCancel')}
             </button>
@@ -271,7 +271,7 @@ export function StorageFolderTree({
           }}
           // [SID:4380 · PO] 나무 행과 같은 초점 규칙(제품 링 안쪽 · 고름 색 유지) — 아래 평면 목록 행도 같다.
           className={cn(
-            'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
+            'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-xs focus-visible:-outline-offset-2',
             selectedFolderId === null ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'text-ds-ink hover:bg-ds-surface-high',
           )}
         >
@@ -297,7 +297,7 @@ export function StorageFolderTree({
                   }
                 }}
                 className={cn(
-                  'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] focus-visible:-outline-offset-2',
+                  'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-xs focus-visible:-outline-offset-2',
                   selectedFolderId === f.id ? 'bg-ds-action-soft font-semibold text-ds-ink' : 'text-ds-ink hover:bg-ds-surface-high',
                 )}
               >

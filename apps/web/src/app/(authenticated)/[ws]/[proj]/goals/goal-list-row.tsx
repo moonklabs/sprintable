@@ -96,7 +96,7 @@ export function GoalListRow({ goal, selected, onSelect, onDeleteRequest, onOpen,
       style={style}
       data-testid="goal-row"
       data-row-key={goal.id}
-      className={`group relative ${isDragging ? 'shadow-[var(--elev-overlay)]' : ''}`}
+      className={`group relative ${isDragging ? 'bg-ds-surface-raised ring-1 ring-ds-line-control' : ''}`} /* story 5048 T0 ③a: 그림자 0 — 끌어 올린 줄은 떠 있는 면(raised) + 1px 선으로 보인다 */
       onClick={(e) => { if (!(e.target as HTMLElement).closest('a, [data-row-stop]')) onSelect(goal); }}
       onDoubleClick={onOpen ? (e) => { if (!(e.target as HTMLElement).closest('a, button, [data-row-stop]')) onOpen(goal); } : undefined}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, goal) : undefined}

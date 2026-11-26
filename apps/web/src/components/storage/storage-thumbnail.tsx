@@ -162,8 +162,8 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-4 text-center text-muted-foreground">
         <Lock className="size-6" aria-hidden />
-        <span className="text-[11px] font-medium">{t('previewNoAccessTitle')}</span>
-        <span className="text-[10px]">{t('previewNoAccessDesc')}</span>
+        <span className="text-xs font-medium">{t('previewNoAccessTitle')}</span>
+        <span className="text-xs">{t('previewNoAccessDesc')}</span>
       </div>
     );
   }
@@ -172,8 +172,8 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-4 text-center text-muted-foreground">
         <ImageOff className="size-6" aria-hidden />
-        <span className="text-[11px] font-medium">{t('previewPhantomTitle')}</span>
-        <span className="text-[10px]">{t('previewPhantomDesc')}</span>
+        <span className="text-xs font-medium">{t('previewPhantomTitle')}</span>
+        <span className="text-xs">{t('previewPhantomDesc')}</span>
       </div>
     );
   }

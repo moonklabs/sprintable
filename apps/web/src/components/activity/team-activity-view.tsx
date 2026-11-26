@@ -163,7 +163,7 @@ function FeedRow({
         </p>
         {item.object_type ? (
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
-            <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
+            <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-secondary-foreground">
               {item.object_type}
             </span>
             {label ? (
@@ -177,7 +177,7 @@ function FeedRow({
             ) : null}
           </p>
         ) : null}
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
           <span className="tabular-nums">#{item.activity_seq}</span>
           <span aria-hidden>·</span>
           <span>{relativeTime(item.occurred_at, locale)}</span>
@@ -385,7 +385,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
         {/* 정규화됨 pill + 캡션 바 (팀활동 탭만 — 시각/의미 차별화 생명선) */}
         <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/80 bg-muted/40 px-[22px] py-[11px]">
           <span
-            className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold text-info"
+            className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-info"
             style={{
               border: '1px solid color-mix(in oklch, var(--info) 35%, transparent)',
               backgroundColor: 'color-mix(in oklch, var(--info) 8%, transparent)',
@@ -393,7 +393,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
           >
             {t('normalizedPill')}
           </span>
-          <span className="text-[12.5px] text-muted-foreground">{t('caption')}</span>
+          <span className="text-xs text-muted-foreground">{t('caption')}</span>
         </div>
 
         {/* 필터바 (감사 로그 필터바 톤 정합 — actor·object·verb·time range·AC③) */}
