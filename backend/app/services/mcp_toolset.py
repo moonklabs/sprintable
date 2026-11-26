@@ -505,6 +505,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
     "sprintable_get_chat_attachment",  # story 4646 — 채팅 첨부 읽기
+    "sprintable_show_in_chat",  # story 5034 — 대화방에 카드 꽂기(서버가 정하고 보는 사람 권한으로 그림)
     "sprintable_list_chat_messages", "sprintable_list_conversations", "sprintable_list_docs", "sprintable_list_epics",
     # story #4430 — an agent's own block list
     "sprintable_list_user_blocks", "sprintable_remove_user_block",

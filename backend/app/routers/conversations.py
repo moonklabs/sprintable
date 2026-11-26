@@ -2926,6 +2926,72 @@ async def send_message(
     return await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
 
 
+class ShowCardRequest(BaseModel):
+    """story 5034 (C4 step 4): the body of «show a card in chat» — an agent names a kind and a reference, nothing else of the card (its looks, its title, the viewer's words are the web's and the viewer's own)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    ref: str
+    note: str | None = Field(default=None, max_length=200, description="One short sentence to go with the card (optional).")
+
+
+_SHOW_CARD_NOT_FOUND = "Target not found"
+
+
+async def _run_background_tasks_quietly(background_tasks: BackgroundTasks) -> None:
+    """Run what the message road queued for after the response (live delivery · «agent replied» marks) NOW — an exception answer drops them. A task that fails is logged and the next one still runs: the agent's
+    answer must stay the one 404 (never a 500 that tells it something went wrong around its refused card), and the tasks are run once (the list is emptied)."""
+    tasks = list(background_tasks.tasks)
+    background_tasks.tasks.clear()
+    for task in tasks:
+        try:
+            await task()
+        except Exception:  # noqa: BLE001 — logged below; the refusal answer does not depend on it
+            logger.warning("show_card: a background task of the refused card failed", exc_info=True)
+
+
+@router.post("/{conversation_id}/card", status_code=201)
+async def show_card(
+    conversation_id: uuid.UUID,
+    body: ShowCardRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> dict:
+    """POST /api/v2/conversations/{id}/card — an AGENT asks to show an object (kind + reference) in this room as a card (story 5034, C4 step 4).
+
+    The server — not the agent — decides what the card is: it writes `{kind, ref}` through the in-process message road (the public message route refuses a `card`). If the agent can see the object's project the card
+    is posted as the agent's message (201). If it cannot — or the object does not exist, which is NOT told apart — a REFUSED card (`refused_for` = this agent) is posted instead, so each person in the room sees
+    it by THEIR rights (the web: a viewer who can see the object is told which agents can; one who cannot sees «not found»), and the agent itself gets the same 404 «Target not found» either way (no list, no hint).
+    Only an agent key may call this (a person shows a thing by writing its link)."""
+    from app.services.chat_card import TOOL_KINDS, normalize_card, resolver_kind
+    from app.services.project_auth import has_project_access
+    from app.services.reference_registry import PROJECT_ID_RESOLVERS
+
+    if not (auth.claims.get("app_metadata") or {}).get("api_key_id"):
+        raise HTTPException(status_code=403, detail="agents only")
+    card = normalize_card({"kind": body.kind, "ref": body.ref})
+    if card is None or card["kind"] not in TOOL_KINDS:
+        raise HTTPException(status_code=422, detail="kind must be one of " + ", ".join(TOOL_KINDS) + " and ref a UUID")
+    agent_id = uuid.UUID(auth.user_id)
+    pid = await PROJECT_ID_RESOLVERS[resolver_kind(card["kind"])](db, org_id, uuid.UUID(card["ref"]))
+    visible = pid is not None and await has_project_access(db, agent_id, pid, org_id)
+    posted = {**card} if visible else {**card, "refused_for": str(agent_id)}
+    out = await send_message_core(
+        conversation_id,
+        SendMessageRequest(content=(body.note or "").strip() or card["kind"], mentioned_ids=[], card=posted),
+        background_tasks, db=db, auth=auth, org_id=org_id,
+    )
+    if not visible:
+        # the refused card is posted (and committed by the message road) — its live delivery (an exception answer drops the response's background work) is run here; the agent's own answer is the one 404,
+        # the same for «missing» and «not yours»
+        await _run_background_tasks_quietly(background_tasks)
+        raise HTTPException(status_code=404, detail=_SHOW_CARD_NOT_FOUND)
+    return out
+
+
 async def send_message_core(
     conversation_id: uuid.UUID,
     body: SendMessageRequest,
