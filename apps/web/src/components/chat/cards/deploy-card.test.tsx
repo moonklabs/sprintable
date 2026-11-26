@@ -143,6 +143,14 @@ describe('a press shows its own result at once (PO, dev 11-26: the text stayed u
       expect(btn('이 프로젝트에서 빼기'), JSON.stringify(id)).toBeUndefined();
     }
   });
+  it('only a 201 names the new record: a 200 / 202 that carries an id is not claimed — the card READS again', async () => {
+    for (const status of [200, 202]) {
+      stub({ post: () => json(status, { data: { id: REC } }) }); await show();
+      const before = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;
+      await press('이 프로젝트에 넣기');
+      expect(log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length, String(status)).toBe(before + 1);
+    }
+  });
   it('a write that answers without a usable record is not claimed: the card READS again and shows what the read says', async () => {
     stub({ post: () => json(201, { data: {} }) }); await show();
     const getsBefore = log.filter((c) => c.method === 'GET' && c.url.endsWith('/access')).length;

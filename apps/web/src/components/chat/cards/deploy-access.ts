@@ -50,7 +50,7 @@ export async function placeAgent(projectId: string, agentId: string): Promise<De
   try {
     const res = await fetchWithAuth(`/api/projects/${encodeURIComponent(projectId)}/access`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ member_id: agentId, org_member_id: null, permission: 'granted' }) });
     const r = result(res.status, [409]);
-    if (r !== 'ok' || res.status === 409) return { result: r, applied: null };
+    if (r !== 'ok' || res.status !== 201) return { result: r, applied: null }; // only a 201 (the route's created-record answer) names the new record; any other 2xx / «already» → the card re-reads
     // a created record names itself (`{ data: { id } }`); an answer without one is not claimed — the card re-reads instead
     let id: unknown = null;
     try { const d = ((await res.json()) as { data?: unknown }).data; id = obj(d) ? d.id : null; } catch { /* no usable body */ }
