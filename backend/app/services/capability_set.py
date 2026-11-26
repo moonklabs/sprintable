@@ -16,6 +16,8 @@ import functools
 import hashlib
 import json
 import logging
+import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -41,6 +43,8 @@ CAPABILITY_DOMAIN = b"sprintable/capability_set/v1\n"  # what is signed = this �
 ROTATE_DOMAIN = b"sprintable/attest_rotate/v1\n"
 LIFETIME = timedelta(minutes=10)  # `exp` = `iat` + this: the bound of how late a revocation can be (§3.2)
 HALF_LIFE = timedelta(minutes=5)  # a computer that is connected hears a fresh set at least this often
+ROTATE_LIFETIME = timedelta(minutes=10)  # a rotation envelope is issued fresh with every attest-keys answer over TLS and is good for this long — a captured one is dead the same way an old set is (a replay can not hand a host on to a key later)
+ATTEST_LIMIT = "6/minute"  # the keys pull signs one envelope per retired key each time: a few a minute per computer (a host that is refused waits and asks again, like a pull)
 PULL_LIMIT = "1/10 seconds"  # a pull is a computer's own: once in ten seconds (§3.2 · memo ④ — a host that is refused waits and asks again)
 REPORT_LIMIT = "12/minute"  # the rejection report: a few a minute (§6)
 REJECTION_CODES = ("no_capability", "capability_expired", "not_in_seal_to")
@@ -79,21 +83,53 @@ def _from_seed(seed_text: str) -> SigningKey:
     return SigningKey(private=private, public=_b64u(raw), kid="ak1-" + hashlib.sha256(raw).hexdigest()[:16])
 
 
+_POSIX_FILE_MODES = os.name == "posix"  # a Windows file has no 0600: its st_mode shows group/other bits whatever its ACL says — the mode check is for the systems that have one (a Windows supervisor keeps the file in the user's own data folder)
+_OTHER_SECRET_NAME = re.compile(r"(secret|signing|password|token|api_key|private_key)", re.IGNORECASE)
+
+
+def _other_secrets() -> set[str]:
+    """The values of the server's OTHER secrets, read from its own settings by NAME (a new secret setting is covered the day it is added): every setting whose name says secret · signing · password · token · api key · private key,
+    except this module's own `capability_*` ones. Used only to refuse a signing key that is the same string as one of them (story 5025 C1 follow-up: «never the JWT secret…» was a sentence and a test of this file's source; this is the runtime check)."""
+    out: set[str] = set()
+    for name in type(settings).model_fields:
+        if name.startswith("capability_") or not _OTHER_SECRET_NAME.search(name):
+            continue
+        value = getattr(settings, name, None)
+        if isinstance(value, str) and len(value.strip()) >= 8:
+            out.add(value.strip())
+    for name, value in os.environ.items():  # the secrets this server reads straight from its environment (CRON_SECRET · SLACK_SIGNING_SECRET · STORAGE_LOCAL_SIGNING_SECRET …) are not in `settings`: same name rule
+        if name.upper().startswith("CAPABILITY_") or not _OTHER_SECRET_NAME.search(name):
+            continue
+        if len(value.strip()) >= 8:
+            out.add(value.strip())
+    return out
+
+
 def _load_keys() -> tuple[SigningKey | None, list[SigningKey]]:
     """(the current key | None, the retired keys). None → the capability road is off. A key that does not read as a key is a configuration error — logged once per call, never silently «off» for a half-set server: the road is
-    off (nothing is signed with a wrong key) and the log says so."""
+    off (nothing is signed with a wrong key) and the log says so. Three more reasons for «off», all logged without the value: a key FILE that others can read or write (mode & 0o077 — it is a private key: 0600 or nothing), a key that is the very
+    same string as another secret of this server (the signing key is its own secret), and a malformed one."""
     seed = (settings.capability_signing_key or "").strip()
     if not seed and settings.capability_signing_key_file:
         try:
-            seed = Path(settings.capability_signing_key_file).read_text(encoding="utf8").strip()
+            path = Path(settings.capability_signing_key_file)
+            mode = os.stat(path).st_mode
+            if _POSIX_FILE_MODES and mode & 0o077:
+                logger.error("capability_signing_key_file is accessible to other users (mode %04o): the capability road is off — make it 0600", mode & 0o777)
+                return None, []
+            seed = path.read_text(encoding="utf8").strip()
         except OSError:
             logger.error("capability_signing_key_file cannot be read: the capability road is off")
             return None, []
     if not seed:
         return None, []
+    retired_texts = [t.strip() for t in (settings.capability_retired_keys or "").split(",") if t.strip()]
+    if {seed, *retired_texts} & _other_secrets():
+        logger.error("a capability signing key is the same string as another secret of this server: the capability road is off — the signing key is its own secret")
+        return None, []
     try:
         current = _from_seed(seed)
-        retired = [_from_seed(t) for t in (settings.capability_retired_keys or "").split(",") if t.strip()]
+        retired = [_from_seed(t) for t in retired_texts]
     except Exception:  # noqa: BLE001 — a malformed key never raises into a request: the road is off
         logger.error("a capability signing key is malformed: the capability road is off")
         return None, []
@@ -121,10 +157,11 @@ def rotations() -> list[dict]:
     if current is None:
         return []
     out = []
+    now = datetime.now(timezone.utc)
     for old in retired:
         payload = _canonical({
             "kind": "attest_rotate", "v": 1, "add": [{"kid": current.kid, "public_key": current.public}], "remove": [old.kid],
-            "epoch": int(settings.capability_epoch), "iat": _iso(datetime.now(timezone.utc)),
+            "epoch": int(settings.capability_epoch), "iat": _iso(now), "exp": _iso(now + ROTATE_LIFETIME),
         })
         out.append({"v": 1, "kid": old.kid, "p": _b64u(payload), "sig": old.sign(ROTATE_DOMAIN, payload)})
     return out
@@ -290,10 +327,17 @@ async def pull(db: AsyncSession, setup: DesktopSetup) -> dict | None:
 
 
 async def record_rejections(db: AsyncSession, setup: DesktopSetup, entries: list[dict]) -> int:
-    """Add the host's counts. Each entry is {code, phone_key_id, agent_member_id, count, at?}: a closed word, two ids that are the server's own, a count. Nothing about WHAT was refused. Returns how many entries were taken."""
+    """Add the host's counts. Each entry is {code, phone_key_id, agent_member_id, count, at?}: a closed word, two ids that are the server's own, a count. Nothing about WHAT was refused. Returns how many entries were taken.
+
+    «Two ids that are the server's own» is CHECKED: the phone must be one this computer was ever paired with (a pairing row of THIS computer, removed or not: a late refusal of a phone that has just been removed is true) and the agent one of
+    this computer's own agents; any other entry is dropped, not stored and not counted. So the table of a computer can never hold more than 3 words × its phones × its agents — a computer cannot fill it with ids it makes up."""
+    phone_ids = {r for (r,) in (await db.execute(select(RemoteDevicePairing.remote_device_id).where(RemoteDevicePairing.setup_id == setup.id))).all()}
+    agent_ids = {uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
     taken = 0
     now = datetime.now(timezone.utc)
     for e in entries:
+        if uuid.UUID(str(e["phone_key_id"])) not in phone_ids or uuid.UUID(str(e["agent_member_id"])) not in agent_ids:
+            continue
         stmt = pg_insert(DesktopCapabilityRejection).values(
             setup_id=setup.id, code=e["code"], phone_key_id=e["phone_key_id"], agent_member_id=e["agent_member_id"], count=e["count"], last_at=now,
         )

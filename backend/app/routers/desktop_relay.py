@@ -467,8 +467,12 @@ async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSess
 async def get_attest_keys(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """The keys a host checks capability sets with — for a computer that was paired BEFORE the server had a key (the first receipt: only when the host has pinned none). `{attest_keys: [{kid, public_key}], rotations: […], server_time}`;
     `rotations` are envelopes signed by a RETIRED key that hand the host on to the current one. 404 on a server with no signing key (an older server)."""
+    from app.core.rate_limit import hit_person_limits
     from app.services import capability_set
 
+    retry = hit_person_limits("desktop-attest-keys", str(setup.id), capability_set.ATTEST_LIMIT)  # (each answer signs one envelope per retired key; a host that is refused waits and asks again — never reads it as «no keys»)
+    if retry is not None:
+        raise HTTPException(status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests"}, headers={"Retry-After": str(retry)})
     keys = capability_set.attest_keys()
     if not keys:
         raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
