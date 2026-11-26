@@ -1,4 +1,4 @@
-"""스프린트 관련 MCP 도구 (7개) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트
+"""스프린트 관련 MCP 도구 (8개) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트
 hard-delete 차단, delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
@@ -69,9 +69,19 @@ async def activate_sprint(args: SprintIdInput) -> list[TextContent]:
 
 
 async def close_sprint(args: SprintIdInput) -> list[TextContent]:
-    """스프린트 종료 (active → closed)."""
+    """진행 중 · 검토 중(active · review) 스프린트 마감 — 파괴적(admin/destructive 권한 필요).
+    시작 안 한(planning) 스프린트 접기는 cancel_planning_sprint."""
     try:
         return ok(await client.post(f"/api/v2/sprints/{args.sprint_id}/close"))
+    except Exception as exc:
+        return err(exc)
+
+
+async def cancel_planning_sprint(args: SprintIdInput) -> list[TextContent]:
+    """시작 안 한(planning) 스프린트 접기 — 비파괴(생성의 반대). 서버가 스프린트 상태로 강제:
+    planning 이 아니면 409 로 거절하고 스프린트는 그대로(진행 중 · 검토 중은 close_sprint)."""
+    try:
+        return ok(await client.post(f"/api/v2/sprints/{args.sprint_id}/cancel"))
     except Exception as exc:
         return err(exc)
 

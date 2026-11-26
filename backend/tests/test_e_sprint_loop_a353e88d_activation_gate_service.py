@@ -45,7 +45,7 @@ def _mock_session(scalar_return) -> MagicMock:
 
 def _patch_repo(sprint, activated=None):
     repo = MagicMock()
-    repo.get = AsyncMock(return_value=sprint)
+    repo.get_for_update = AsyncMock(return_value=sprint)  # story 5040: transition_sprint reads the row under FOR UPDATE
     repo.activate = AsyncMock(return_value=activated or _mock_sprint("active"))
     return patch.object(svc, "SprintRepository", return_value=repo), repo
 
@@ -78,7 +78,7 @@ async def test_gate_only_applies_to_planning_to_active():
     session.scalar = AsyncMock(side_effect=AssertionError("게이트 쿼리가 호출되면 안 됨"))
     session.commit = AsyncMock()
     repo = MagicMock()
-    repo.get = AsyncMock(return_value=sprint)
+    repo.get_for_update = AsyncMock(return_value=sprint)  # story 5040: transition_sprint reads the row under FOR UPDATE
     repo.close = AsyncMock(return_value=_mock_sprint("closed"))
     with patch.object(svc, "SprintRepository", return_value=repo):
         result = await svc.transition_sprint(session, ORG_ID, _caller(), SPRINT_ID, "closed")

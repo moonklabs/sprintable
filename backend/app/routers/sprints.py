@@ -532,6 +532,51 @@ async def close_sprint(
     return SprintResponse.model_validate(sprint)
 
 
+@router.post("/{id}/cancel", response_model=SprintResponse)
+async def cancel_planning_sprint(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SprintResponse:
+    # story 5040: 시작 안 한(planning) 스프린트만 접는다 — 생성의 반대(파괴 아님)이라 close(active|review·
+    # destructive·admin)와 별도 길. 허용 여부는 도구 이름이 아니라 «스프린트 상태»로 서버가 강제한다:
+    # status != "planning" 이면 409 + 행 불변. 접기 자체는 transition_sprint planning→closed discard
+    # 경로(velocity 0·채점 없음·overlay/human gate 대상 아님)를 그대로 써 불변식을 한 곳에 둔다.
+    from app.services.sprint import SprintTransitionError, transition_sprint
+    from app.services.member_resolver import resolve_member
+    # 행 잠금: 상태 확인(planning)과 접기(transition_sprint)가 한 트랜잭션에서 원자적이어야 한다 — 잠금 없이
+    # 읽으면 그 사이 동시 활성화로 active/review 가 된 스프린트를 transition_sprint 가 합법 전이(active→closed)로
+    # 채점 · human gate 없이 닫아 버린다. repo.get_for_update(FOR UPDATE + populate_existing: 세션에 남은 낡은 ORM
+    # 상태 덮어씀)로 잠근 «신선한» 행에서 project-scope · status 를 판정하고, commit 까지 잠금을 쥔다.
+    # activate/close 와 동형: project 접근권 검증(SEC-S8 CC) — org 내 타 project sprint 접기 차단.
+    _sprint_for_scope = await SprintRepository(db, org_id).get_for_update(id)
+    if _sprint_for_scope is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    caller = await resolve_member(auth, org_id, db, project_id=_sprint_for_scope.project_id)
+    if _sprint_for_scope.status != "planning":
+        raise HTTPException(
+            status_code=409,
+            # the person-facing sentence is the web's (it translates the code); the API says it in English plus the code (no new Korean user-facing string — story 3779 guard)
+            detail={
+                "code": "SPRINT_NOT_PLANNING",
+                "message": (
+                    f"Only never-started (planning) sprints can be folded (current status: {_sprint_for_scope.status}); "
+                    "in-progress or review sprints are closed via the close endpoint."
+                ),
+                "status": _sprint_for_scope.status,
+            },
+        )
+    try:
+        sprint = await transition_sprint(db, org_id, caller, id, "closed")
+        await db.commit()
+        await db.refresh(sprint)
+    except (SprintTransitionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
+    await _attach_org_project_slugs(db, org_id, [sprint])
+    return SprintResponse.model_validate(sprint)
+
+
 @router.post("/{id}/kickoff")
 async def kickoff_sprint(
     id: uuid.UUID,

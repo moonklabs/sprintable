@@ -264,6 +264,78 @@ async def test_close_sprint_200():
         app.dependency_overrides.clear()
 
 
+# ── cancel (story 5040: 시작 안 한 스프린트 접기 — 상태로 서버가 강제) ─────────────────
+
+async def _cancel_call(sprint_status: str):
+    """POST /{id}/cancel — repo.get 이 sprint_status 행을 돌려주게 하고 transition_sprint 호출 여부를 돌려준다."""
+    from app.services.member_resolver import ResolvedMember
+    client, session, app = await _client()
+    try:
+        caller = ResolvedMember(
+            id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=ORG_ID)
+        current = _mock_sprint(sprint_status)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = current
+        session.execute = AsyncMock(return_value=mock_result)
+        closed = _mock_sprint("closed")
+        closed.velocity = 0
+        transition = AsyncMock(return_value=closed)
+        with patch("app.services.sprint.transition_sprint", transition), \
+             patch("app.services.member_resolver.resolve_member", AsyncMock(return_value=caller)):
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/cancel")
+        return resp, transition
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_cancel_planning_sprint_folds_via_transition_closed():
+    resp, transition = await _cancel_call("planning")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "closed"
+    assert resp.json()["velocity"] == 0
+    transition.assert_awaited_once()
+    assert transition.await_args.args[-1] == "closed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["active", "review", "closed", "archived"])
+async def test_cancel_non_planning_sprint_409_and_never_transitions(status):
+    resp, transition = await _cancel_call(status)
+    assert resp.status_code == 409, resp.text
+    err = resp.json()["error"]
+    assert err["code"] == "SPRINT_NOT_PLANNING", err
+    assert err["status"] == status, err
+    assert "planning" in err["message"]
+    transition.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_cancel_reads_the_sprint_row_with_for_update_and_fresh_state():
+    """story 5040(codex BLOCKER): 상태 확인과 접기가 원자적이려면 라우트의 SELECT 가 FOR UPDATE 를 달고
+    populate_existing(낡은 ORM 상태 덮어씀)이어야 한다 — 잠금을 빼면 동시 활성화된 스프린트를 접어 버린다."""
+    from sqlalchemy.dialects import postgresql
+    from app.services.member_resolver import ResolvedMember
+    client, session, app = await _client()
+    try:
+        caller = ResolvedMember(
+            id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=ORG_ID)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_sprint("planning")
+        session.execute = AsyncMock(return_value=mock_result)
+        with patch("app.services.sprint.transition_sprint", AsyncMock(return_value=_mock_sprint("closed"))), \
+             patch("app.services.member_resolver.resolve_member", AsyncMock(return_value=caller)):
+            async with client as c:
+                resp = await c.post(f"/api/v2/sprints/{SPRINT_ID}/cancel")
+        assert resp.status_code == 200, resp.text
+        first = session.execute.await_args_list[0].args[0]
+        assert "FOR UPDATE" in str(first.compile(dialect=postgresql.dialect()))
+        assert first.get_execution_options().get("populate_existing") is True
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ── kickoff ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.anyio

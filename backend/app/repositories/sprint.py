@@ -46,6 +46,17 @@ class SprintRepository(BaseRepository[Sprint]):
         result = await self.session.execute(q)
         return list(result.scalars().all()), total
 
+    async def get_for_update(self, id: uuid.UUID) -> Sprint | None:
+        """story 5040 — org-scoped get() 와 같은 조회에 행 잠금(FOR UPDATE)을 얹고 populate_existing 으로 세션에 남은
+        낡은 ORM 상태를 덮어쓴다. 상태를 보고 바로 바꾸는 호출자(cancel)가 같은 트랜잭션에서 잠금을 commit 까지 쥔다."""
+        result = await self.session.execute(
+            select(Sprint)
+            .where(self._org_filter(), Sprint.id == id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def activate(self, id: uuid.UUID) -> Sprint:
         sprint = await self.get(id)
         if sprint is None:

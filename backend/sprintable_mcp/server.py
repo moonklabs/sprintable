@@ -142,7 +142,7 @@ from .tools.rewards import (
 )
 from .tools.sprints import (
     CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
-    activate_sprint, close_sprint, create_sprint,
+    activate_sprint, cancel_planning_sprint, close_sprint, create_sprint,
     get_velocity, list_sprints, sprint_summary, update_sprint,
 )
 from .tools.standup import (
@@ -672,7 +672,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_confirm_hypothesis",
      "[일감] 가설 확정(active) 또는 폐기(killed). active 확정은 휴먼 경로만.",
      ConfirmHypothesisInput, confirm_hypothesis),
-    # Sprints (7) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
+    # Sprints (8) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
     ("sprintable_list_sprints",
      "[일감] 스프린트 목록 조회.",
      ListSprintsInput, list_sprints),
@@ -683,8 +683,11 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 스프린트 활성화 (planning → active).",
      SprintIdInput, activate_sprint),
     ("sprintable_close_sprint",
-     "[일감] 스프린트 종료 (active → closed).",
+     "[일감] 진행 중 · 검토 중(active · review) 스프린트 종료 — 파괴적(admin/destructive 권한 필요). 시작 안 한 스프린트는 sprintable_cancel_planning_sprint.",
      SprintIdInput, close_sprint),
+    ("sprintable_cancel_planning_sprint",
+     "[일감] 시작 안 한(계획 중) 스프린트 접기 — 진행 중 · 검토 중 스프린트는 못 접음(그건 sprintable_close_sprint · admin 권한).",
+     SprintIdInput, cancel_planning_sprint),
     ("sprintable_get_velocity",
      "[일감] 스프린트 벨로시티 조회.",
      SprintIdInput, get_velocity),
