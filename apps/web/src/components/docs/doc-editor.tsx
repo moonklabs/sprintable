@@ -657,7 +657,7 @@ export function DocEditor({
           {editable && isDragging ? (
             <div
               data-testid="doc-editor-drop-overlay"
-              className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info-tint text-center"
+              className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center"
             >
               <span className="flex size-9 items-center justify-center rounded-full bg-info-tint text-foreground">
                 <Plus className="size-4" />

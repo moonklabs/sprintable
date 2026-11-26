@@ -157,12 +157,12 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
       onClick={handleOpenOrPlay}
       disabled={state === 'fetching'}
       aria-label={`${t('mediaPlay')}: ${label}`}
-      className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-foreground transition hover:bg-muted disabled:opacity-70`}
+      className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-foreground transition hover:bg-ds-surface-high disabled:opacity-70`}
     >
       {state === 'fetching' ? (
         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
       ) : (
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-background">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-background/80">
           <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
         </span>
       )}

@@ -187,7 +187,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const chips = [...detail().querySelectorAll('[data-slot="ds-chip"]')].map((x) => (x.textContent ?? '').trim());
     expect(chips).toContain('가입 화면 고치기');
     expect(chips).toContain('결제 연결');
-    expect(detail().querySelectorAll('span.bg-background.rounded-md, span.bg-ds-background')).toHaveLength(0);
+    expect(detail().querySelectorAll('span.bg-background.rounded-md, span.bg-ds-background, span.bg-ds-surface-sunk')).toHaveLength(0);
   });
 
   it('⭐상세 패널에 손으로 만든 카드 행(rounded-lg border li)이 남아 있지 않다', async () => {

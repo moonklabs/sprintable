@@ -980,7 +980,7 @@ export function FlowMapCanvas({
                       누르면 접힌다("다시 누르면 접힙니다", 유나양 규격 그대로). */}
                   {lane.pastNodes.length > 0 ? (
                     <div
-                      className="absolute rounded border border-dashed border-ds-action bg-brand/[0.03] px-2 pb-2 pt-5"
+                      className="absolute rounded border border-dashed border-ds-action bg-ds-background px-2 pb-2 pt-5"
                       style={{
                         left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP,
                         width: PAST_EXPANDED_BOX_WIDTH,

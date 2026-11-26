@@ -45,7 +45,7 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
         ) : (
           <button
             onClick={cancel}
-            className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+            className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-ds-surface-high"
           >
             ⏹ {t('cancel')}
           </button>

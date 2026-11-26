@@ -65,7 +65,7 @@ export function HypothesisDeclarationSection({
   }
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-ds-line-control bg-primary/[0.02] p-3">
+    <div className="space-y-2.5 rounded-xl border border-ds-line-control bg-ds-background p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           🎯 {t('declareSectionTitle')} <span className="text-destructive">*</span>

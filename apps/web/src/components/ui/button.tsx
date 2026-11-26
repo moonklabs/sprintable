@@ -17,7 +17,7 @@ const buttonVariants = cva(
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-ds-surface-sunk dark:hover:bg-ds-surface-sunk",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-muted aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-ds-surface-high aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-ds-surface-high",
         // story #2419 — rest 상태 bg-destructive-tint 위 text-destructive는 3.97(AA 4.5 미달).

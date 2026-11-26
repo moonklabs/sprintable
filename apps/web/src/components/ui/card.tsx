@@ -17,7 +17,7 @@ export const cardVariants = cva('border text-card-foreground', {
       // shadow-sm 제거·hairline(기존 border-border)만으로 경계. glass는 §2 C행에서
       // "정책 검토"로 별도 보류된 축(glass-panel.tsx 소비처 2곳·이 PR 범위 밖)이라 무변경.
       solid: 'border-border bg-card',
-      glass: 'border-border bg-card shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card',
+      glass: 'border-border bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88',
       subtle: 'border-border bg-ds-background',
       plain: 'border-border bg-card',
     },

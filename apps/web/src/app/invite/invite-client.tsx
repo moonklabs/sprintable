@@ -361,7 +361,7 @@ function Frame({ children }: { children: React.ReactNode }) {
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,_var(--brand)_/_0.08,_transparent_60%)]"
       />
-      <div className="relative w-full max-w-md space-y-8 rounded-2xl border border-border bg-background p-6 shadow-xl shadow-foreground/[0.02] backdrop-blur sm:p-8">
+      <div className="relative w-full max-w-md space-y-8 rounded-2xl border border-border bg-background/95 p-6 shadow-xl shadow-foreground/[0.02] backdrop-blur sm:p-8">
         <div className="flex justify-center animate-in fade-in duration-500">
           <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-10" wordmarkClassName="h-4" />
         </div>

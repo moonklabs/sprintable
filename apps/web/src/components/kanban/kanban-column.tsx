@@ -273,7 +273,7 @@ export function KanbanColumn({
       </div>
 
       {!collapsed && composing ? (
-        <div className="mb-2 rounded-xl border border-ds-line-control bg-background p-2">
+        <div className="mb-2 rounded-xl border border-ds-line-control bg-background/50 p-2">
           <Input
             autoFocus
             value={draftTitle}

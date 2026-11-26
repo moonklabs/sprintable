@@ -31,7 +31,7 @@ async function mountAndGetRoot(node: React.ReactNode): Promise<{ el: HTMLElement
 // PR 범위 밖(§2 C행) — shadow-sm 그대로 유지.
 const ORIGINAL_SECTION_CARD_CLASSES = 'rounded-lg border border-border bg-card text-card-foreground';
 const ORIGINAL_GLASS_PANEL_CLASSES =
-  'rounded-lg border border-border bg-card text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card';
+  'rounded-lg border border-border bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88';
 
 describe('cardVariants (story #2877)', () => {
   it('surface=solid·radius=card가 SectionCard 원본 클래스 집합과 정확히 일치한다', () => {
