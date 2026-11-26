@@ -37,7 +37,7 @@ export function EvidenceStrip({ hypotheses }: { hypotheses: RetroHypothesisResul
           <span className="tabular-nums">{measuring}</span>
         </span>
       ) : null}
-      <span className="ml-auto text-[10px] text-muted-foreground">{t('evidenceStripMore')}</span>
+      <span className="ml-auto text-xs text-muted-foreground">{t('evidenceStripMore')}</span>
     </div>
   );
 }

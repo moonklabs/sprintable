@@ -83,11 +83,11 @@ export function StorageSourceUsageList({ links, compact = false }: StorageSource
               <Icon className="size-3" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] font-semibold text-foreground">{title}</span>
+              <span className="block truncate text-xs font-semibold text-foreground">{title}</span>
               {subtitle ? (
                 <span
                   className={cn(
-                    'mt-0.5 block text-[11px] text-muted-foreground',
+                    'mt-0.5 block text-xs text-muted-foreground',
                     compact ? 'truncate' : '',
                   )}
                 >

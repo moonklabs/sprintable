@@ -766,7 +766,7 @@ export default function RetroSessionPage() {
                 </div>
               ) : sprintOutcome ? (
                 <div className="space-y-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('linkedSprintOutcome')}</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('linkedSprintOutcome')}</p>
                   <OutcomeResultCard
                     status={sprintOutcome.status}
                     hypothesis={sprintOutcome.hypothesis}

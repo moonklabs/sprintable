@@ -576,19 +576,19 @@
      2레이어(crisp 근접+soft 확산)·현행 shadow-lg보다 tighter·softer. 오버레이 소비 시 항상
      1px hairline(`--proof-line-strong`, PR-4에서 오버레이 컴포넌트와 함께 신설 예정) 동반 —
      그림자만으론 엣지가 흐리다는 게 doc §1.2의 명시 규칙. */
-  --elev-overlay: 0 1px 2px rgba(20, 21, 15, .05), 0 10px 30px -8px rgba(20, 21, 15, .22);
+  --elev-overlay: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 
   /* story #2990 §4 fast-follow(유나 확定 2026-08-24) — 인라인 카드(문서 흐름 안, 예:
      Workcell Evidence 셀) 전용 elevation. --elev-overlay(오버레이 전용, 위 §1.2 규칙)를
      재사용하면 "셀이 팝오버처럼 분리"되는 의미 혼용이라 신설. overlay보다 약한 단일 강도 —
      오프셋/블러/스프레드 40~50%·불투명도 ~59%로 축소(같은 carbon-tint, 2레이어 구조 유지). */
-  --elev-card: 0 1px 2px rgba(20, 21, 15, .04), 0 4px 14px -4px rgba(20, 21, 15, .13);
+  --elev-card: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 
   /* story #3049(2984-S1, doc diff-axis-2984-color-to-material-inventory §4) — CountBadge·
      VerificationStamp 전용 엠보스 inset(시안 0bead718/3df21f43 `.badge-count`/`.stamp`
      box-shadow 그대로 토큰화). 인라인 표면 hairline+elevation 위에 "눌린 도장/새김" 물성을
      더하는 2차 레이어 — elev-card/overlay(뜬 표면용)와 별개, 절대 함께 안 쓴다. */
-  --elev-inset: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -1px 0 rgba(20, 21, 15, .05);
+  --elev-inset: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 
   /* story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4 §③~⑤) — 컷코너(clip-path 사선)
      전면 폐지. "빼기"(헤어라인+옅은 그림자)가 질감으로 안 읽힌다는 질책 → "더하기"(그레인·
@@ -803,17 +803,17 @@
   --proof-red-soft: var(--ds-failed-soft);
 
   /* story #2969 §1.2(PR-T) — 다크 오버레이 그림자(라이트 대응값의 doc §1.2 지정 다크값). */
-  --elev-overlay: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 34px -8px rgba(0, 0, 0, .62);
+  --elev-overlay: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 
   /* story #2990 §4 fast-follow — 라이트 --elev-card와 동일 축소비(오프셋/블러/스프레드
      40~50%·불투명도 ~59%)를 다크 --elev-overlay에 적용해 유도(값-SSOT 재사용, 임의 신규
      불투명도 없음). */
-  --elev-card: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px -4px rgba(0, 0, 0, .36);
+  --elev-card: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 
   /* story #3049 — 다크 엠보스 inset. 라이트의 흰색 하이라이트(rgba(255,255,255,.6))는 다크
      패널(#17191C대)에 그대로 쓰면 과도하게 튀어(carbon-tint 위반) — 라이트보다 옅은 흰색
      상단 하이라이트(0.08)로 축소, 하단 그림자는 검정 자체가 배경과 거의 안 갈려 생략. */
-  --elev-inset: inset 0 1px 0 rgba(255, 255, 255, .08);
+  --elev-inset: none; /* story 5048 T0 ③a: 키트 «그림자 0» — 옛 값은 git 이력 */
 }
 
 /* Sidebar: open triggers get active background.

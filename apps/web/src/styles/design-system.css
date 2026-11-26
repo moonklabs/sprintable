@@ -122,6 +122,14 @@
   /* 그림자 없음 — 칸은 1px 선과 면 색 차이로만 가른다(키트 규칙). 이름은 남겨 호출부 클래스(shadow-ds-popup · shadow-ds-overlay)가 그대로 «없음»을 읽는다. */
   --shadow-ds-popup: none;
   --shadow-ds-overlay: none;
+  /* story 5048 T0 ③a: Tailwind의 기본 그림자 단(xs · sm · md · lg · xl · 2xl)도 없음 — 호출부 `shadow-sm` · `shadow-lg` …가 그대로 «없음»을 읽는다(호출부 수정 0 · 키트 «그림자 0»). 떠 있는 면은 면 차이 + 1px 선. */
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
   --animate-ds-pulse: ds-pulse var(--ds-duration-pulse) cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-ds-slide-in: ds-slide-in var(--ds-duration-enter) ease-out;
   @keyframes ds-pulse {

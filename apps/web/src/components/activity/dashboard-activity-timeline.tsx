@@ -95,7 +95,7 @@ function RelativeTime({ iso, locale }: { iso: string; locale: string }) {
     const id = setInterval(compute, 60_000);
     return () => clearInterval(id);
   }, [iso, locale, displayTimezone]);
-  return <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>;
+  return <span className="shrink-0 text-xs text-muted-foreground">{label}</span>;
 }
 
 export function DashboardActivityTimeline({ projectId }: DashboardActivityTimelineProps) {
@@ -178,7 +178,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
               className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
             >
               <span
-                className={`flex size-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${avatarClass(item.actor_type)}`}
+                className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarClass(item.actor_type)}`}
                 aria-hidden="true"
               >
                 {getInitials(item.actor_name)}

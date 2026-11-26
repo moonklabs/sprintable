@@ -69,7 +69,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
         </div>
       </DialogHeader>
 
-      <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground" data-testid="recipe-legend">
+      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground" data-testid="recipe-legend">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-3.5 w-5 rounded-sm border-2 border-primary" /> {t('recipeDetailLegendLive')}
         </span>
@@ -88,28 +88,28 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
           트리오가 손코딩 카드로 잡혀 Card 프리미티브(surface="subtle")로 교체. */}
       <Card surface="subtle" radius="compact" className="px-[15px] py-3 flex items-center gap-2.5 flex-wrap" data-testid="recipe-flow-band">
         <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowRecipeLabel')}</span>
+          <span className="text-xs font-bold text-muted-foreground">{t('recipeFlowRecipeLabel')}</span>
           <span className="text-xs text-muted-foreground">{t('recipeFlowRecipeValue')}</span>
         </div>
-        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <span className="text-muted-foreground text-xs">→</span>
         <div className="bg-info-tint border border-brand rounded-lg px-2.5 py-1">
           {/* text-brand(#0.56L) on bg-info-tint 소형 텍스트=AA 4.0(<4.5, 실측) — 라벨은
               text-foreground(고대비 14.5+)로, 강조는 border-brand(비텍스트 3:1 기준 4.0+로
               충분)에만 맡긴다. */}
-          <span className="text-foreground text-[10px] font-bold block">{t('recipeFlowWorkflowLabel')}</span>
+          <span className="text-foreground text-xs font-bold block">{t('recipeFlowWorkflowLabel')}</span>
           <span className="text-foreground text-xs font-semibold">{presetName(recipe, tPreset)}</span>
         </div>
-        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <span className="text-muted-foreground text-xs">→</span>
         <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowEventLabel')}</span>
+          <span className="text-xs font-bold text-muted-foreground">{t('recipeFlowEventLabel')}</span>
           <span className="text-xs text-muted-foreground">{t('recipeFlowEventValue')}</span>
         </div>
-        <span className="text-muted-foreground text-[11.5px]">→</span>
+        <span className="text-muted-foreground text-xs">→</span>
         <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-muted-foreground">{t('recipeFlowRunLabel')}</span>
+          <span className="text-xs font-bold text-muted-foreground">{t('recipeFlowRunLabel')}</span>
           <span className="text-xs text-muted-foreground">{t('recipeFlowRunValue')}</span>
         </div>
-        <span className="ml-auto text-right max-w-[205px] text-[10.5px] text-muted-foreground">{t('recipeFlowCaption')}</span>
+        <span className="ml-auto text-right max-w-[205px] text-xs text-muted-foreground">{t('recipeFlowCaption')}</span>
       </Card>
 
       <div className="flex items-stretch gap-0 overflow-x-auto pt-6" data-testid="recipe-stepper">
@@ -125,7 +125,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
                 </div>
                 <div className="mt-2 text-xs font-semibold text-foreground">{recipeStageLabel(stage, t)}</div>
                 {meta?.role ? (
-                  <div className="mt-1 flex items-center gap-1 text-[10.5px] text-muted-foreground">
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                     <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: roleAccentVar(meta.role) }} /> {stageRoleLabel(meta.role, t)}
                   </div>
                 ) : null}
@@ -152,7 +152,7 @@ export function RecipeDetailView({ recipe, onApply, onDuplicate, titleAs = 'h3' 
                     {isLive ? t('recipeDetailGateLiveBadge') : t('recipeDetailGateBuildingBadge')}
                   </Badge>
                 </div>
-                <p className="text-[10.5px] text-muted-foreground">{gateApproverLabel(t, g.gate.approver)}</p>
+                <p className="text-xs text-muted-foreground">{gateApproverLabel(t, g.gate.approver)}</p>
               </CardBody>
             </Card>
           );

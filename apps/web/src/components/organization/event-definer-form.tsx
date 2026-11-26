@@ -57,11 +57,11 @@ export function EventDefinerForm({
                 className={`relative rounded-xl border p-3 text-left transition-colors ${state.format === value ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:bg-muted/40'}`}
               >
                 {state.format === value ? (
-                  <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">✓</span>
+                  <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">✓</span>
                 ) : null}
                 <Icon className="mb-1.5 size-5 text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">{t(`definerFormat_${value}`)}</p>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{t(`definerFormatDesc_${value}`)}</p>
+                <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{t(`definerFormatDesc_${value}`)}</p>
               </button>
             ))}
           </div>
@@ -82,11 +82,11 @@ export function EventDefinerForm({
             />
           </div>
           {keyError ? (
-            <p className="mt-1 text-[11px] text-destructive">
+            <p className="mt-1 text-xs text-destructive">
               {keyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset')}
             </p>
           ) : (
-            <p className="mt-1 text-[11px] text-muted-foreground">{t('definerKeyHint')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('definerKeyHint')}</p>
           )}
         </Section>
 
@@ -132,9 +132,9 @@ export function EventDefinerForm({
             <span className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border" />
             <div>
               <p className="text-xs font-semibold text-foreground">
-                {t('definerRoutingStakeholdersTitle')} <Badge variant="warning" className="ml-1 text-[10px]">{t('definerFollowUpBadge')}</Badge>
+                {t('definerRoutingStakeholdersTitle')} <Badge variant="warning" className="ml-1 text-xs">{t('definerFollowUpBadge')}</Badge>
               </p>
-              <p className="text-[11px] text-muted-foreground">{t('definerRoutingStakeholdersDesc')}</p>
+              <p className="text-xs text-muted-foreground">{t('definerRoutingStakeholdersDesc')}</p>
             </div>
           </div>
         </Section>
@@ -155,7 +155,7 @@ export function EventDefinerForm({
 
       {/* 실물 미리보기 */}
       <div className="lg:sticky lg:top-4 lg:self-start">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <span className="size-1.5 rounded-full bg-success shadow-[0_0_0_3px_var(--success-tint)]" />
           {t('definerPreviewLabel')}
         </div>
@@ -171,13 +171,13 @@ export function EventDefinerForm({
           {testPublishing ? '...' : t('definerTestPublishCta')}
         </Button>
         {testPublishResult ? (
-          <p className={`mt-1.5 text-[11px] font-medium ${testPublishResult.ok ? 'text-success' : 'text-destructive'}`}>
+          <p className={`mt-1.5 text-xs font-medium ${testPublishResult.ok ? 'text-success' : 'text-destructive'}`}>
             {testPublishResult.ok ? `✓ ${t('definerTestPublishSuccess')}` : testPublishResult.message}
           </p>
         ) : null}
-        <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">{t('definerPreviewNote')}</p>
+        <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{t('definerPreviewNote')}</p>
         <div className="mt-3 rounded-xl border border-dashed border-border bg-muted/40 p-3">
-          <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t('definerDerivedSummaryTitle')}</p>
+          <p className="mb-1.5 text-xs font-semibold text-muted-foreground">{t('definerDerivedSummaryTitle')}</p>
           <DerivedRow label="payload" value={Object.keys(derived.payload_schema.properties as object).join(' · ')} />
           <DerivedRow label="routing" value={state.routing === 'assign_on_publish' ? t('definerRoutingAssignTitle') : t('definerRoutingRecordTitle')} />
           <DerivedRow label="action_auth" value={derived.action_auth ? JSON.stringify(derived.action_auth) : t('definerDerivedNone')} />
@@ -190,9 +190,9 @@ export function EventDefinerForm({
 function Section({ title, badge, hint, children }: { title: string; badge?: string; hint?: string; children: React.ReactNode }) {
   return (
     <section className="rounded-2xl border border-border bg-card p-4">
-      <h2 className="flex items-center gap-1.5 text-[13px] font-bold text-foreground">
+      <h2 className="flex items-center gap-1.5 text-xs font-bold text-foreground">
         {title}
-        {badge ? <Badge variant="info" className="text-[10px]">{badge}</Badge> : null}
+        {badge ? <Badge variant="info" className="text-xs">{badge}</Badge> : null}
       </h2>
       {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
       <div className="mt-2.5">{children}</div>
@@ -201,7 +201,7 @@ function Section({ title, badge, hint, children }: { title: string; badge?: stri
 }
 
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
-  return <label htmlFor={htmlFor} className="mb-1 block text-[11px] font-semibold text-muted-foreground">{children}</label>;
+  return <label htmlFor={htmlFor} className="mb-1 block text-xs font-semibold text-muted-foreground">{children}</label>;
 }
 
 function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSelect: () => void; title: string; desc: string }) {
@@ -216,7 +216,7 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
       <span className={`mt-0.5 size-4 shrink-0 rounded-full border-2 ${selected ? 'border-primary bg-primary' : 'border-border'}`} />
       <div>
         <p className="text-xs font-semibold text-foreground">{title}</p>
-        <p className="text-[11px] text-muted-foreground">{desc}</p>
+        <p className="text-xs text-muted-foreground">{desc}</p>
       </div>
     </button>
   );
@@ -224,7 +224,7 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
 
 function DerivedRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-2 py-0.5 font-mono text-[11px] text-foreground">
+    <div className="flex gap-2 py-0.5 font-mono text-xs text-foreground">
       <i className="min-w-[70px] shrink-0 not-italic text-muted-foreground">{label}</i>
       <span className="min-w-0 break-all">{value}</span>
     </div>
@@ -261,7 +261,7 @@ function StagesSection({ stages, onChange, t }: { stages: DefinerStage[]; onChan
             <input
               value={s.slug}
               onChange={(e) => update(s.id, { slug: e.target.value })}
-              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-base lg:text-[11px] text-muted-foreground outline-none"
+              className="w-32 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-base lg:text-xs text-muted-foreground outline-none"
             />
             <button type="button" onClick={() => onChange(stages.filter((x) => x.id !== s.id))} className="shrink-0 text-muted-foreground hover:text-destructive" aria-label={t('definerRemoveRow')}>✕</button>
           </div>
@@ -274,7 +274,7 @@ function StagesSection({ stages, onChange, t }: { stages: DefinerStage[]; onChan
           + {t('definerAddStage')}
         </button>
       </div>
-      {stages.length > 0 ? <p className="mt-1.5 text-[11px] text-muted-foreground">{t('definerStagesSlugHint')}</p> : null}
+      {stages.length > 0 ? <p className="mt-1.5 text-xs text-muted-foreground">{t('definerStagesSlugHint')}</p> : null}
     </Section>
   );
 }
@@ -330,7 +330,7 @@ function FieldsSection({ fields, onChange, t }: { fields: DefinerField[]; onChan
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-left text-[11px] font-semibold text-muted-foreground">
+            <tr className="text-left text-xs font-semibold text-muted-foreground">
               <th className="w-[36%] pb-1">{t('definerFieldNameCol')}</th>
               <th className="w-[26%] pb-1">{t('definerFieldTypeCol')}</th>
               <th className="w-[22%] pb-1">{t('definerFieldRequiredCol')}</th>

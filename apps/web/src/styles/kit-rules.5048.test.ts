@@ -140,3 +140,17 @@ describe('키트 규칙 ②d — 가장 작은 글자도 16(D1 = 가) · 정의 
     }
   });
 });
+
+describe('키트 규칙 ③a — 그림자 0 · 정의 한 곳', () => {
+  const globalsCss = readFileSync(join(__dirname, '..', 'app', 'globals.css'), 'utf8');
+  it('⭐Tailwind 그림자 단 xs · sm · md · lg · xl · 2xl은 none — 호출부 `shadow-*`가 그대로 «없음»을 읽는다', () => {
+    for (const n of ['2xs', 'xs', 'sm', 'md', 'lg', 'xl', '2xl']) expect(new RegExp(`--shadow-${n}:\\s*none;`).test(themeStatic), n).toBe(true);
+  });
+  it('⭐옛 elevation 변수 셋(--elev-overlay · card · inset)은 라이트 · 다크 모두 none', () => {
+    for (const n of ['overlay', 'card', 'inset']) {
+      const all = [...globalsCss.matchAll(new RegExp(`--elev-${n}:\\s*([^;]*);`, 'g'))].map((m) => m[1]!.trim().split(' ')[0]);
+      expect(all.length, n).toBeGreaterThanOrEqual(2);
+      expect(all.every((v) => v === 'none'), `${n}: ${all.join(' | ')}`).toBe(true);
+    }
+  });
+});

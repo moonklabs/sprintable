@@ -76,7 +76,7 @@ function AgentProgressRow({ item, onDone }: { item: TodayAgentProgressItem; onDo
     <div className="flex items-center gap-3 border-t border-border px-3 py-3 first:border-t-0" data-testid="today-v3-agent-progress-row">
       <span className="size-2 shrink-0 rounded-full bg-info" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-foreground">
+        <span className="block truncate text-xs font-medium text-foreground">
           {item.workItemTitle ?? item.agentName}
         </span>
         <span className="block truncate text-xs text-muted-foreground">{item.agentName}</span>

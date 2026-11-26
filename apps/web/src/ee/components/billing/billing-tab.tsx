@@ -422,9 +422,9 @@ export function UpgradeCheckoutDialog({
             <dd className="font-semibold">{t('checkoutDialogNextBillingEveryMonth', { day: nextBillingDay })}</dd>
           </div>
         </dl>
-        <p className="text-[11px] text-muted-foreground">{t('checkoutDialogTossNote')}</p>
+        <p className="text-xs text-muted-foreground">{t('checkoutDialogTossNote')}</p>
         {/* story #2606 AC4: 결제 화면에서 환불정책 확인 가능(Toss 심사 요건) — 확인 버튼 바로 위. */}
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {t('checkoutDialogRefundPolicyPrefix')}{' '}
           <Link href="/refund-policy" target="_blank" className="underline hover:text-foreground/80">
             {t('checkoutDialogRefundPolicyLink')}
@@ -698,7 +698,7 @@ export function PackPurchaseDialog({
             <dd className="font-semibold">{t('packDialogAppliesValue')}</dd>
           </div>
         </dl>
-        <p className="text-[11px] text-muted-foreground">{t('packDialogComingSoonNote')}</p>
+        <p className="text-xs text-muted-foreground">{t('packDialogComingSoonNote')}</p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {t('packDialogCancel')}

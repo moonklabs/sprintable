@@ -32,7 +32,7 @@ interface TeamMember {
 function StageCountBadge({ count }: { count: number }) {
   const tOrg = useTranslations('organization');
   return (
-    <Badge variant="secondary" className="text-[10px]">
+    <Badge variant="secondary" className="text-xs">
       {tOrg('recipeGalleryStageCountBadge', { count })}
     </Badge>
   );
@@ -284,7 +284,7 @@ export function WorkflowTemplateGallerySection({
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <StageCountBadge count={cyclicStages(def).length} />
                   {appliedKeys.has(def.key) && (
-                    <Badge variant="success" className="text-[10px]">{_t('workflowGalleryApplied')}</Badge>
+                    <Badge variant="success" className="text-xs">{_t('workflowGalleryApplied')}</Badge>
                   )}
                 </div>
               </div>

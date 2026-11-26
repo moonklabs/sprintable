@@ -108,7 +108,7 @@ function GateSignatureCard({ item, isAdminOrOwner, onDone }: {
       <div className="mb-1.5 flex items-center gap-2">
         <Badge variant="warning" data-testid="today-v3-decision-tag">{t('tagHighRisk')}</Badge>
       </div>
-      <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
+      <p className="text-xs font-medium text-foreground">{item.workItemTitle}</p>
       {item.requestedByName ? (
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{tOrg('needsMeMetaRequestedBy', { name: item.requestedByName })}</p>
       ) : null}
@@ -169,7 +169,7 @@ function HitlAnswerCard({ item, onDone }: { item: TodayNeedsMeItem; onDone: () =
       <div className="mb-1.5 flex items-center gap-2">
         <Badge variant="info" data-testid="today-v3-decision-tag">{t('tagQuestion')}</Badge>
       </div>
-      <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
+      <p className="text-xs font-medium text-foreground">{item.workItemTitle}</p>
       {item.reason ? <p className="mt-0.5 text-xs text-muted-foreground">{item.reason}</p> : null}
       <Input
         value={responseText}
@@ -204,7 +204,7 @@ function RecipeDraftReviewCard({ item }: { item: TodayNeedsMeItem }) {
   const reviewHref = hrefForNeedsMeItem(item, flatHref);
   return (
     <Card className="p-3.5" data-testid="today-v3-decision-card">
-      <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
+      <p className="text-xs font-medium text-foreground">{item.workItemTitle}</p>
       {item.requestedByName ? (
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{tOrg('needsMeMetaRequestedBy', { name: item.requestedByName })}</p>
       ) : null}
@@ -223,7 +223,7 @@ function WorkflowStepPlaceholderCard({ item }: { item: TodayNeedsMeItem }) {
   const tOrg = useTranslations('orgBriefing');
   return (
     <Card className="p-3.5" data-testid="today-v3-decision-card">
-      <p className="text-[14.5px] font-medium text-foreground">{item.workItemTitle}</p>
+      <p className="text-xs font-medium text-foreground">{item.workItemTitle}</p>
       <div className="mt-2.5">
         <Button size="sm" disabled data-testid="today-v3-workflow-step-placeholder-action">
           {tOrg(ACTION_KEY[item.state])}
@@ -289,7 +289,7 @@ export function TodayV3Decisions({ items, count, isAdminOrOwner, onActionSuccess
           {lowRiskBulk.length > 0 ? (
             <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3.5 py-2.5" data-testid="today-v3-low-risk-row">
               <div className="flex items-center gap-2.5">
-                <span className="text-[13px] text-foreground">{t('lowRiskGroupedLine', { count: lowRiskBulk.length })}</span>
+                <span className="text-xs text-foreground">{t('lowRiskGroupedLine', { count: lowRiskBulk.length })}</span>
                 <Button
                   size="sm" variant="outline" className="ml-auto" disabled={bulkBusy}
                   onClick={runBulkApprove} data-testid="today-v3-bulk-approve-action"

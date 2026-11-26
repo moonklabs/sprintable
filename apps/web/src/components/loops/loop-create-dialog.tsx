@@ -349,7 +349,7 @@ export function LoopCreateDialog({
                 ))}
               </select>
               {selectedRecipe ? (
-                <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
+                <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-xs text-muted-foreground">
                   {presetDescription(selectedRecipe, tPreset) ? <p>{presetDescription(selectedRecipe, tPreset)}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
                     {cyclicStages(selectedRecipe).map((stage) => {
@@ -372,7 +372,7 @@ export function LoopCreateDialog({
               <span className="text-xs font-semibold text-foreground">
                 {t('createLoopGoalLabel')} <span className="text-destructive">*</span>
               </span>
-              <div className="flex overflow-hidden rounded-lg border border-border text-[10.5px] font-semibold">
+              <div className="flex overflow-hidden rounded-lg border border-border text-xs font-semibold">
                 <button
                   type="button"
                   aria-pressed={mode === 'new'}
@@ -404,7 +404,7 @@ export function LoopCreateDialog({
                         type="button"
                         onClick={() => void handleDraft()}
                         disabled={drafting}
-                        className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
                       >
                         <Sparkles className="size-3" />
                         {drafting ? t('createLoopDrafting') : t('createLoopDraftCta')}
@@ -422,7 +422,7 @@ export function LoopCreateDialog({
                     )}
                   />
                   {drafted ? (
-                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-2 py-1.5 text-[10px] text-muted-foreground">
+                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
                       <span>✦</span>
                       <span>
                         <b className="text-foreground">{t('createLoopDraftNoteTitle')}</b> {t('createLoopDraftNoteBody')}{' '}
@@ -557,7 +557,7 @@ export function LoopCreateDialog({
                   </div>
                 )}
                 {linkedHypothesis ? (
-                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px] text-foreground">
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-xs text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
                       {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}
@@ -582,7 +582,7 @@ export function LoopCreateDialog({
         </div>
 
         <DialogFooter className="items-center justify-between sm:justify-between">
-          <span className={cn('text-[11px] font-medium', goalComplete ? 'text-success' : 'text-muted-foreground')}>
+          <span className={cn('text-xs font-medium', goalComplete ? 'text-success' : 'text-muted-foreground')}>
             {goalComplete ? t('createLoopGoalComplete') : t('createLoopValidationHint')}
           </span>
           <div className="flex items-center gap-2">

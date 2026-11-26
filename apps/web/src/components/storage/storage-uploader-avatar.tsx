@@ -22,7 +22,7 @@ export function StorageUploaderAvatar({ createdBy, size = 22 }: StorageUploaderA
 
   if (!createdBy) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-[7px] py-px text-[11px] font-semibold text-muted-foreground">
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-[7px] py-px text-xs font-semibold text-muted-foreground">
         <Bot className="size-3" />
         {t('system')}
       </span>

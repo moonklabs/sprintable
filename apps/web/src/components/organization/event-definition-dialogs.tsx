@@ -286,7 +286,7 @@ export function EventFormDialog({
                 </TabsTrigger>
                 <TabsTrigger value="advanced">
                   {t('definerTabAdvanced')}
-                  {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
+                  {advancedOnly ? <Badge variant="warning" className="ml-1 text-xs">{t('definerAdvancedOnlyBadge')}</Badge> : null}
                 </TabsTrigger>
               </TabsList>
           </div>
@@ -304,7 +304,7 @@ export function EventFormDialog({
               채워져 있어 "생략"할 이유가 없다 — 사람이 지우고 빈 채로 저장하면 서버가
               422로 막는다, BE 계약 그대로 클라도 재확인). */}
           <div className="mb-3">
-            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-name">
+            <label className="mb-1 block text-xs font-semibold text-muted-foreground" htmlFor="event-name">
               {t('eventNameLabel')}
             </label>
             <Input
@@ -314,7 +314,7 @@ export function EventFormDialog({
               placeholder={t('eventNamePlaceholder')}
               className="text-base lg:text-sm"
             />
-            {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
+            {!name.trim() ? <p className="mt-1 text-xs text-muted-foreground">{t('eventNameHint')}</p> : null}
           </div>
           <TabsContent value="basic" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <EventDefinerForm
@@ -330,7 +330,7 @@ export function EventFormDialog({
           <TabsContent value="advanced" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">
+                <label className="mb-1 block text-xs font-semibold text-muted-foreground" htmlFor="event-key">
                   {t('eventKeyLabel')}
                 </label>
                 {mode === 'create' ? (
@@ -340,11 +340,11 @@ export function EventFormDialog({
                       <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-base lg:text-sm" />
                     </div>
                     {advancedKeyError ? (
-                      <p className="mt-1 text-[11px] text-destructive">
+                      <p className="mt-1 text-xs text-destructive">
                         {advancedKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset')}
                       </p>
                     ) : (
-                      <p className="mt-1 text-[11px] text-muted-foreground">{t('definerKeyHint')}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{t('definerKeyHint')}</p>
                     )}
                   </>
                 ) : (
@@ -398,7 +398,7 @@ export function EventFormDialog({
 function JsonField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div>
-      <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor={id}>{label}</label>
+      <label className="mb-1 block text-xs font-semibold text-muted-foreground" htmlFor={id}>{label}</label>
       <textarea
         id={id}
         rows={4}

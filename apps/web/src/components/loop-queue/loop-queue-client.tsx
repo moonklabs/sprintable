@@ -57,7 +57,7 @@ function QueueRow({ item, memberNames, onClaim, claiming }: {
           <CrossProjectTag label={item.crossProjectLabel} />
           <Badge variant="warning" className="shrink-0">{tCluster(KIND_BADGE_KEY[item.kind])}</Badge>
           {item.overdueDays !== null ? (
-            <span className="shrink-0 rounded-md bg-warning-tint px-2 py-0.5 text-[11px] font-semibold text-foreground">
+            <span className="shrink-0 rounded-md bg-warning-tint px-2 py-0.5 text-xs font-semibold text-foreground">
               {tCluster(KIND_DAYS_KEY[item.kind], { n: item.overdueDays })}
             </span>
           ) : null}
@@ -65,21 +65,21 @@ function QueueRow({ item, memberNames, onClaim, claiming }: {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {ownerName ? (
-          <span className="text-[11.5px] text-muted-foreground">{tq('claimedBy', { name: ownerName })}</span>
+          <span className="text-xs text-muted-foreground">{tq('claimedBy', { name: ownerName })}</span>
         ) : (
           <>
-            <span className="text-[11.5px] text-muted-foreground">{tq('unclaimed')}</span>
+            <span className="text-xs text-muted-foreground">{tq('unclaimed')}</span>
             <button
               type="button"
               disabled={claiming}
               onClick={() => onClaim(item)}
-              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-foreground transition-colors hover:bg-muted/50 disabled:opacity-50"
+              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted/50 disabled:opacity-50"
             >
               {tq('claimAction')}
             </button>
           </>
         )}
-        <Link href={item.href} className="shrink-0 text-[11.5px] font-medium text-primary">
+        <Link href={item.href} className="shrink-0 text-xs font-medium text-primary">
           {tq('judgeAction')}
         </Link>
       </div>
@@ -151,9 +151,9 @@ export function LoopQueueClient() {
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h1 className="text-base font-semibold text-foreground">{t('title')}</h1>
-          <p className="text-[11.5px] text-muted-foreground">{t('subtitle')}</p>
+          <p className="text-xs text-muted-foreground">{t('subtitle')}</p>
         </div>
-        <label className="flex shrink-0 items-center gap-2 text-[12.5px] text-foreground">
+        <label className="flex shrink-0 items-center gap-2 text-xs text-foreground">
           <input
             type="checkbox"
             checked={unclaimedOnly}
@@ -182,7 +182,7 @@ export function LoopQueueClient() {
       )}
 
       {rawItems !== null && total > 0 ? (
-        <div className="mt-3 flex items-center justify-between text-[11.5px] text-muted-foreground">
+        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
           <span>{t('pageSummary', { from: offset + 1, to: Math.min(offset + PAGE_SIZE, total), total })}</span>
           <div className="flex gap-2">
             <button

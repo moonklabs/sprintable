@@ -57,7 +57,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
           {asset ? (
             <>
               {/* Header — 고정(scroll 영역 밖) */}
-              <div id={titleId} className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
+              <div id={titleId} className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-xs font-[650] text-foreground">
                 <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive-tint text-destructive">
                   <AlertTriangle className="size-[15px]" />
                 </span>
@@ -65,7 +65,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               </div>
 
               {/* Body — usage list가 길면 이 영역만 내부 스크롤(footer는 항상 노출) */}
-              <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
+              <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-xs leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
                   name: asset.name,
                   // story #4120 — 조사를 문자열에 고정하지 않고 렌더 시점에 결정적으로 고른다
@@ -77,7 +77,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
                 {usageCount > 0 ? (
                   <>
                     {/* story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-                    <div className="mt-[10px] flex items-center gap-2 rounded-[0.5rem] bg-warning/15 px-3 py-[10px] text-[12px] font-semibold text-foreground">
+                    <div className="mt-[10px] flex items-center gap-2 rounded-[0.5rem] bg-warning/15 px-3 py-[10px] text-xs font-semibold text-foreground">
                       <Link2 className="size-[15px] shrink-0" />
                       {t('deleteImpact', { count: usageCount })}
                     </div>

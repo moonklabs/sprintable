@@ -322,8 +322,8 @@ export function MarketingRecipeApplyDialog({
           <div className="min-w-0 flex-1 break-keep">
             {heading()}
             <p className="mt-0.5 text-xs text-muted-foreground">{stageList(slot)}</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
-            {gateNote ? <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="member-gate-note">{gateNote}</p> : null}
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2StageCoverage', { count: slot.stages.length })}</p>
+            {gateNote ? <p className="mt-0.5 text-xs text-muted-foreground" data-testid="member-gate-note">{gateNote}</p> : null}
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -348,19 +348,19 @@ export function MarketingRecipeApplyDialog({
             {/* story #4114 — 3값 우선순위(failed > loaded+0건 > 없음). 연산은 필수가 아니므로
                 (#4110 crew 폴백) 아래 안내 문구가 항상 함께 "비워도 되는" 이유를 설명한다. */}
             {generationConnectorsStatus === 'failed' ? (
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-load-error">
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground" data-testid="marketing-apply-generation-connectors-load-error">
                 <span>{t('eventApplyGenerationConnectorsLoadError')}</span>
                 <Button variant="outline" size="sm" onClick={loadGenerationConnectors}>{t('eventApplyAgentsRetry')}</Button>
               </div>
             ) : generationConnectorsStatus === 'loaded' && activeGenerationConnectors.length === 0 ? (
-              <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-generation-connectors-empty">
+              <p className="mt-0.5 text-xs text-muted-foreground" data-testid="marketing-apply-generation-connectors-empty">
                 {t('eventApplyGenerationConnectorsEmpty')}{' '}
                 <Link href={flatHref('/organization/generation-connectors')} className="text-primary underline">
                   {t('eventApplyGenerationConnectorsEmptyLinkAction')}
                 </Link>
               </p>
             ) : null}
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{t('recipeApplyV2ComputeEmptyFallbackHint')}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('recipeApplyV2ComputeEmptyFallbackHint')}</p>
           </div>
           <select
             className="w-44 shrink-0 rounded-md border border-input bg-background px-2.5 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -390,20 +390,20 @@ export function MarketingRecipeApplyDialog({
           <p className="mt-0.5 text-xs text-muted-foreground">{grouped ? stageList(slot) : t('recipeApplyV2PublisherDesc')}</p>
           {/* story #4103 CHANGES-1 — 로딩 中엔 문구 없음, failed는 재시도, loaded+0건만 empty. */}
           {channelConnectionsStatus === 'failed' ? (
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-load-error">
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground" data-testid="marketing-apply-channels-load-error">
               <span>{tChannel('channelLoadFailed')}</span>
               <Button variant="outline" size="sm" onClick={loadChannelConnections}>{t('eventApplyAgentsRetry')}</Button>
             </div>
           ) : channelConnectionsStatus === 'loaded' && slotConnections.length === 0 ? (
             allowedChannels && neededChannelsPhrase(allowedChannels) ? (
-              <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-none-allowed">
+              <p className="mt-0.5 text-xs text-muted-foreground" data-testid="marketing-apply-channels-none-allowed">
                 {t('recipeApplyV2ChannelsNoneAllowed', { channels: neededChannelsPhrase(allowedChannels)! })}{' '}
                 <Link href={flatHref('/organization/channels')} className="whitespace-nowrap font-medium text-primary hover:underline">
                   {t('recipeApplyV2ChannelsConnectLink')}
                 </Link>
               </p>
             ) : (
-              <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="marketing-apply-channels-empty">
+              <p className="mt-0.5 text-xs text-muted-foreground" data-testid="marketing-apply-channels-empty">
                 {t('eventApplyChannelsEmpty')}
               </p>
             )
@@ -473,7 +473,7 @@ export function MarketingRecipeApplyDialog({
 
         {/* story #4372 — 담당자 조회 실패는 칸 목록 위 한 줄 하나로(알림 한 번 · 다시 시도). 칸마다 두면 한 번의 실패가 칸 수만큼 연달아 읽혔다(PO). */}
         {membersLoadFailed ? (
-          <div role="alert" className="flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="marketing-apply-members-load-error">
+          <div role="alert" className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="marketing-apply-members-load-error">
             <span>{t('recipeApplyV2MembersLoadFailed')}</span>
             <Button variant="outline" size="sm" onClick={refreshMembers}>{t('eventApplyAgentsRetry')}</Button>
           </div>

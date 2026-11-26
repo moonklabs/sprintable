@@ -164,21 +164,21 @@ function HypothesisCard({ hypothesis }: { hypothesis: RetroHypothesisResult }) {
           />
         </>
       ) : isMeasuring ? (
-        <p className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className="size-1.5 rounded-full border border-dashed border-muted-foreground" aria-hidden />
           {hypothesis.measure_after ? t('hMeasuringNote', { date: hypothesis.measure_after.slice(0, 10) }) : t('hMeasuringNoteNoDate')}
         </p>
       ) : null}
 
       {isFalsified ? (
-        <p className="flex items-center gap-1.5 text-[10.5px] text-info">
-          <Badge variant="info" className="text-[9.5px]">{t('hLearnBadge')}</Badge>
+        <p className="flex items-center gap-1.5 text-xs text-info">
+          <Badge variant="info" className="text-xs">{t('hLearnBadge')}</Badge>
           {t('hLearnNote')}
         </p>
       ) : null}
 
       {hypothesis.href && (isVerified || isFalsified) ? (
-        <a href={hypothesis.href} className="self-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground">
+        <a href={hypothesis.href} className="self-start text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground">
           {t('hViewLink')}
         </a>
       ) : null}
@@ -225,9 +225,9 @@ function SynthesisBlock({
                 className="flex-1"
               />
             ) : (
-              <p className="flex-1 text-[13px] leading-snug text-foreground">
+              <p className="flex-1 text-xs leading-snug text-foreground">
                 {drafts[i] ?? item.text}
-                {item.source ? <span className="ml-1.5 block text-[10px] text-muted-foreground">{item.source}</span> : null}
+                {item.source ? <span className="ml-1.5 block text-xs text-muted-foreground">{item.source}</span> : null}
               </p>
             )}
           </div>
@@ -235,7 +235,7 @@ function SynthesisBlock({
       </div>
 
       <div className="flex items-center gap-2 border-t border-border/70 pt-2.5">
-        {editing ? <p className="flex-1 text-[10px] text-muted-foreground">{t('synthesisEditHint')}</p> : <p className="flex-1 text-[10px] text-muted-foreground">{t('synthesisFooterNote')}</p>}
+        {editing ? <p className="flex-1 text-xs text-muted-foreground">{t('synthesisEditHint')}</p> : <p className="flex-1 text-xs text-muted-foreground">{t('synthesisFooterNote')}</p>}
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setEditing((v) => !v)}>
           {editing ? t('synthesisEditDone') : t('synthesisEdit')}
         </Button>
@@ -300,14 +300,14 @@ function RecommendationCard({
 
       {rec.metric_definition ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="chip" className="text-[10px]">
+          <Badge variant="chip" className="text-xs">
             {t('recMetricChip', { metric: rec.metric_definition.metric, dir: rec.metric_definition.direction === 'down' ? th('dirDown') : th('dirUp'), target: fmt(rec.metric_definition.target) })}
           </Badge>
         </div>
       ) : null}
 
       {rec.rationale ? (
-        <p className="flex items-start gap-1.5 text-[10.5px] leading-snug text-muted-foreground">
+        <p className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
           <span className="text-info" aria-hidden>{t('recWhyPrefix')}</span>
           {rec.rationale}
         </p>
@@ -315,7 +315,7 @@ function RecommendationCard({
 
       <div className="flex items-center gap-2 border-t border-border/70 pt-2.5">
         {bucket ? (
-          <span className="flex flex-1 items-center gap-1.5 text-[10px] text-muted-foreground">
+          <span className="flex flex-1 items-center gap-1.5 text-xs text-muted-foreground">
             {t('recConfidenceLabel')}
             <span className="h-1 w-9 overflow-hidden rounded-full bg-muted">
               <span className="block h-full rounded-full bg-info" style={{ width: `${barWidth}%` }} />
@@ -399,7 +399,7 @@ export function SprintCloseCockpit({
       <TallyHeader hypotheses={hypotheses} />
 
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('hypothesesSectionTitle')}</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('hypothesesSectionTitle')}</p>
         {hypotheses.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('hEmptyNone')}</p>
         ) : measuringOnly ? (
@@ -457,7 +457,7 @@ export function SprintCloseCockpit({
               </div>
             ))}
           </div>
-          <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint/30 p-2.5 text-[10.5px] leading-snug text-foreground">
+          <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint/30 p-2.5 text-xs leading-snug text-foreground">
             <span className="font-semibold text-info" aria-hidden>ⓘ</span>
             {t('hitlBanner')}
           </div>

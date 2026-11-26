@@ -79,7 +79,7 @@ function fieldTypeLabel(def: SchemaProperty, t: ReturnType<typeof useTranslation
           <Fragment key={`${i}:${String(value)}`}>
             {i > 0 ? ', ' : null}
             {/* 식별자 줄바꿈은 문자열 값만 — 숫자 · 참거짓은 원문 그대로 */}
-            <code className="rounded bg-muted px-1 font-mono text-[11px]">{typeof value === 'string' ? breakableIdentifier(value) : String(value)}</code>
+            <code className="rounded bg-muted px-1 font-mono text-xs">{typeof value === 'string' ? breakableIdentifier(value) : String(value)}</code>
           </Fragment>
         ))}
       </>
@@ -163,14 +163,14 @@ export function EventDefinitionSummary({
       </div>
 
       <div>
-        <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('eventSummaryFieldsLabel')}</p>
+        <p className="mb-1 text-xs font-semibold text-muted-foreground">{t('eventSummaryFieldsLabel')}</p>
         {fieldNames.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('eventSummaryFieldsEmpty')}</p>
         ) : (
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-muted/40 text-left text-[11px] font-semibold text-muted-foreground">
+                <tr className="bg-muted/40 text-left text-xs font-semibold text-muted-foreground">
                   <th className="px-2 py-1">{t('definerFieldNameCol')}</th>
                   <th className="px-2 py-1">{t('definerFieldTypeCol')}</th>
                   <th className="px-2 py-1">{t('definerFieldRequiredCol')}</th>
@@ -195,7 +195,7 @@ export function EventDefinitionSummary({
 
       {blockTemplate ? (
         <div>
-          <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('definerPreviewLabel')}</p>
+          <p className="mb-1 text-xs font-semibold text-muted-foreground">{t('definerPreviewLabel')}</p>
           {/* PR #4575 유나 반려 — 미리보기엔 실제 일감이 없어 `{{label.work_item_target}}`(플랫폼 프리셋 «대상»)이 ⟨missing⟩으로
               떴다. 채팅과 같은 refs 모양의 예시 스토리을 넣어 «대상 · 예시 스토리»으로 보인다. */}
           <EventBlockCard
@@ -206,7 +206,7 @@ export function EventDefinitionSummary({
       ) : null}
 
       <details>
-        <summary className="cursor-pointer text-[11px] font-semibold text-muted-foreground">{t('definerTabAdvanced')}</summary>
+        <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">{t('definerTabAdvanced')}</summary>
         <div className="mt-2 space-y-2">
           <JsonPreview label={t('eventPayloadSchemaLabel')} value={payloadSchema} />
           <JsonPreview label={t('eventRoutingLabel')} value={routing} />
@@ -229,7 +229,7 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 export function JsonPreview({ label, value }: { label: string; value: unknown }) {
   return (
     <div>
-      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
+      <p className="mb-1 text-xs font-semibold text-muted-foreground">{label}</p>
       <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs text-foreground">{JSON.stringify(value, null, 2)}</pre>
     </div>
   );

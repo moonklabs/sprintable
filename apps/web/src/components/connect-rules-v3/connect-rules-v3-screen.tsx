@@ -111,7 +111,7 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
                 <section aria-label={t('agentsSectionTitle')}>
                   <div className="mb-2.5 flex items-baseline gap-2.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('agentsSectionTitle')}</h2>
-                    <span className="text-[11px] text-muted-foreground">{t('agentsSectionHint')}</span>
+                    <span className="text-xs text-muted-foreground">{t('agentsSectionHint')}</span>
                   </div>
                   <ConnectRulesV3Agents isAdmin={isAdmin} />
                 </section>
@@ -119,7 +119,7 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
                 <section aria-label={t('channelsSectionTitle')}>
                   <div className="mb-2.5 flex items-baseline gap-2.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('channelsSectionTitle')}</h2>
-                    <span className="text-[11px] text-muted-foreground">{t('channelsSectionHint')}</span>
+                    <span className="text-xs text-muted-foreground">{t('channelsSectionHint')}</span>
                   </div>
                   <ConnectRulesV3Channels orgId={orgId} isOwnerStrict={isOwnerStrict} />
                 </section>
@@ -127,7 +127,7 @@ export function ConnectRulesV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?:
                 <section aria-label={t('rulesSectionTitle')}>
                   <div className="mb-2.5 flex items-baseline gap-2.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('rulesSectionTitle')}</h2>
-                    <span className="text-[11px] text-muted-foreground">{t('rulesSectionHint')}</span>
+                    <span className="text-xs text-muted-foreground">{t('rulesSectionHint')}</span>
                   </div>
                   <ConnectRulesV3Rules orgId={orgId} />
                 </section>
