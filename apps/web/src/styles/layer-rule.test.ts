@@ -112,9 +112,11 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   });
 
   it.each(themes)('⭐%s: 글 줄 면 위의 글자(ink · ink-2 · action-text)는 4.5:1 이상 — 새 면 위에서 옛 muted/primary 글자가 못 읽히던 사고 방지', (_name, t) => {
-    for (const row of ['rowOthers', 'rowMine', 'rowSelected'] as const) {
+    for (const row of ['rowOthers', 'rowSelected'] as const) {
       for (const ink of ['ink', 'ink-2', 'action-text']) expect(contrast(t[ink]!, t[LAYER_TOKEN[row]]!), `${ink} on ${row}`).toBeGreaterThanOrEqual(4.5);
     }
+    // story 5048 T0 ①: 내 글 줄(ds-mine)은 진한 바탕이라 그 위 글자는 ds-on-mine 세트(본문 · 둘째 · 링크)다
+    for (const ink of ['on-mine', 'on-mine-2', 'on-mine-link']) expect(contrast(t[ink]!, t[LAYER_TOKEN.rowMine]!), `${ink} on rowMine`).toBeGreaterThanOrEqual(4.5);
   });
 
   it.each(themes)('⭐%s: 보드 카드 안 글자 — 평소 카드는 ink-3(흐린 글)까지, 열린 카드는 ink-2까지 4.5:1 이상(다크에서 ink-3은 열린 카드 면 위 4.29:1이라 모자란다 — codex 4908)', (_name, t) => {

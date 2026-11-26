@@ -94,7 +94,7 @@ describe('키트 규칙 ① 크기 · 여백 — 간격 단계 · 조작 높이 
 
 describe('키트 규칙 ① 색 역할 — 글자 셋 · 면 넷 · 선 · 진한 바탕 하나(강조색 없음)', () => {
   it.each(themes)('⭐%s: 면 · 선 · 글자는 무채색(색조 없음, OKLab C < 0.01)', (_n, t) => {
-    for (const k of ['background', 'surface', 'surface-raised', 'surface-sunk', 'surface-high', 'surface-highest', 'line', 'line-strong', 'line-control', 'ink', 'ink-2', 'ink-3', 'action-soft', 'mine'])
+    for (const k of ['background', 'surface', 'surface-raised', 'surface-sunk', 'surface-high', 'surface-highest', 'line', 'line-strong', 'line-control', 'ink', 'ink-2', 'ink-3', 'action-soft', 'mine', 'on-mine', 'on-mine-2', 'on-mine-link'])
       expect(chroma(t[k]!), k).toBeLessThan(0.01);
   });
 
@@ -109,6 +109,11 @@ describe('키트 규칙 ① 색 역할 — 글자 셋 · 면 넷 · 선 · 진�
 
   it.each(themes)('⭐%s: 상태색(내 손 필요 · 성공 · 실패 · 정보)은 뜻을 나르므로 색조를 남긴다(C ≥ 0.05)', (_n, t) => {
     for (const k of ['needs-hand', 'done', 'failed', 'info']) expect(chroma(t[k]!), k).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it('⭐보낸 말풍선(mine)은 진한 바탕 — 라이트 검정 + 흰 글자 · 다크 흰 + 검정 글자(주 단추와 같은 쌍)', () => {
+    expect([light['mine'], light['on-mine']]).toEqual(['#000000', '#ffffff']);
+    expect([dark['mine'], dark['on-mine']]).toEqual(['#ffffff', '#000000']);
   });
 
   it('⭐라이트의 «패널»(내용 칸)은 흰색이고 글자 본문은 검정(키트: 면 #ffffff · 본문 #000000)', () => {

@@ -248,13 +248,13 @@ export default function ChannelPage() {
                   {!isOwn && <p className="m-0 text-ds-small text-ds-ink-2">{msg.senderName}</p>}
                   <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 ${isOwn ? `rounded-tr-sm ${LAYER.rowMine}` : `rounded-tl-sm ${LAYER.rowOthers}`}`}>
                     {msg.content && (
-                      <p className="m-0 whitespace-pre-wrap break-words text-ds-body text-ds-ink">{msg.content}</p>
+                      <p className={`m-0 whitespace-pre-wrap break-words text-ds-body ${isOwn ? 'text-ds-on-mine' : 'text-ds-ink'}`}>{msg.content}</p>
                     )}
                     {msg.fileUrl && (
                       <a
                         href={msg.fileUrl.replace('/api/v2/channel/files/', '/api/channel/files/')}
                         download
-                        className="mt-1 block text-ds-small text-ds-action-text underline"
+                        className={`mt-1 block text-ds-small underline ${isOwn ? 'text-ds-on-mine-link' : 'text-ds-action-text'}`}
                       >
                         {t('attachment')}
                       </a>

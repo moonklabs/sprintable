@@ -31,7 +31,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
 
   it('밝음 · 어둠이 같은 이름 집합을 정의한다(한쪽만 있으면 한 테마가 비어 렌더된다)', () => {
     expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
-    expect(Object.keys(light).length).toBe(30); // 28 + ds-pin · ds-on-pin(story 5048 T0 ①: 그림 위 핀 전용 중간 톤)
+    expect(Object.keys(light).length).toBe(33); // 28 + ds-pin · ds-on-pin(그림 위 핀 전용 중간 톤) + ds-on-mine · ds-on-mine-2 · ds-on-mine-link(내 글 줄이 진한 바탕이라 그 위 글자 · story 5048 T0 ①)
   });
 
   it('⭐고정폭 글자 하한: 가장 작은 mono-sm도 11px 이상(폰 11pt 하한 · 12px 미만 글자 처방)', () => {
@@ -72,6 +72,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
     ['ds-ink', 'ds-surface'], ['ds-ink', 'ds-background'], ['ds-ink', 'ds-surface-high'],
     ['ds-ink-2', 'ds-surface'], ['ds-ink-3', 'ds-surface'], ['ds-ink-3', 'ds-surface-sunk'], ['ds-ink-3', 'ds-surface-high'], ['ds-ink-3', 'ds-background'], ['ds-action-text', 'ds-background'],
     ['ds-on-action', 'ds-action'], ['ds-action-text', 'ds-surface'], ['ds-action-text', 'ds-action-soft'], ['ds-on-pin', 'ds-pin'],
+    ['ds-on-mine', 'ds-mine'], ['ds-on-mine-2', 'ds-mine'], ['ds-on-mine-link', 'ds-mine'],
     ['ds-needs-hand', 'ds-surface'], ['ds-needs-hand', 'ds-needs-hand-soft'], ['ds-on-needs-hand', 'ds-needs-hand-bar'],
     ['ds-done', 'ds-surface'], ['ds-done', 'ds-done-soft'],
     ['ds-failed', 'ds-surface'], ['ds-failed', 'ds-failed-soft'],

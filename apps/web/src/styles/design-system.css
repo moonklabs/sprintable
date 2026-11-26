@@ -28,7 +28,10 @@
   --ds-on-action: #ffffff;
   --ds-action-text: #000000;
   --ds-action-soft: #f4f4f4;
-  --ds-mine: #cccccc;
+  --ds-mine: #000000;
+  --ds-on-mine: #ffffff;
+  --ds-on-mine-2: #d4d4d4;
+  --ds-on-mine-link: #ffffff;
   --ds-needs-hand: #9a4b00;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -61,7 +64,10 @@
   --ds-on-action: #000000;
   --ds-action-text: #ffffff;
   --ds-action-soft: #363636;
-  --ds-mine: #4a4a4a;
+  --ds-mine: #ffffff;
+  --ds-on-mine: #000000;
+  --ds-on-mine-2: #454545;
+  --ds-on-mine-link: #000000;
   --ds-needs-hand: #ffb77d;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -187,6 +193,9 @@
   --color-ds-action-text: var(--ds-action-text);
   --color-ds-action-soft: var(--ds-action-soft);
   --color-ds-mine: var(--ds-mine);
+  --color-ds-on-mine: var(--ds-on-mine);
+  --color-ds-on-mine-2: var(--ds-on-mine-2);
+  --color-ds-on-mine-link: var(--ds-on-mine-link);
   --color-ds-needs-hand: var(--ds-needs-hand);
   --color-ds-needs-hand-bar: var(--ds-needs-hand-bar);
   --color-ds-on-needs-hand: var(--ds-on-needs-hand);

@@ -51,9 +51,9 @@ describe('ds 견본 화면 (AC3)', () => {
     });
   }
 
-  it('⭐토큰: 색 30종 · 글자 8단 가운데 7 · 모서리 7 · 밀도 10 · 그림자 2 이름이 코드의 이름 그대로 보인다(story 5048 T0 ①: 키트 규칙 값)', () => {
+  it('⭐토큰: 색 33종 · 글자 8단 가운데 7 · 모서리 7 · 밀도 10 · 그림자 2 이름이 코드의 이름 그대로 보인다(story 5048 T0 ①: 키트 규칙 값)', () => {
     const text = frame('light').textContent ?? '';
-    for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim', 'pin', 'on-pin']) expect(text, c).toContain(c);
+    for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim', 'pin', 'on-pin', 'on-mine', 'on-mine-2', 'on-mine-link']) expect(text, c).toContain(c);
     for (const d of ['control-sm 40', 'compact 40', 'control 40', 'touch 44', 'control-xl 48', 'row 56', 'tag 28', 'bar 64', 'head 80', 'chat-row 88']) expect(text, d).toContain(d);
     for (const r of ['tag 8', 'control 8', 'panel 8', 'pill 16', 'bubble 16', 'tail 4']) expect(text, r).toContain(r);
     for (const s of ['popup', 'overlay']) expect(text, s).toContain(s);
