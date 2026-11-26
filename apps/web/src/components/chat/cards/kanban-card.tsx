@@ -36,8 +36,8 @@ export function KanbanCardFace({ summary, onOpen }: { summary: KanbanSummary; on
   const head = (
     <>
       <EntityGlyph Icon={resolveEntityIcon('sprint')} label={title || 'sprint'} className="size-5 shrink-0 text-ds-ink-2" />
-      <span className="min-w-0 flex-1 break-words text-ds-body font-medium text-ds-ink line-clamp-2">{title}</span>
-      <span className="shrink-0 text-ds-small text-ds-ink-3">{t('kanbanTotal', { count: summary.total })}{summary.hasMore ? '+' : ''}</span>
+      <span className="min-w-0 flex-1 truncate text-ds-body font-medium text-ds-ink">{title}</span>
+      <span className="shrink-0 whitespace-nowrap text-ds-small text-ds-ink-3">{t('kanbanTotal', { count: summary.total })}{summary.hasMore ? '+' : ''}</span>
     </>
   );
   return (
@@ -47,14 +47,17 @@ export function KanbanCardFace({ summary, onOpen }: { summary: KanbanSummary; on
       ) : (
         <div className="flex min-h-ds-control w-full items-center gap-2 px-3 py-2">{head}</div>
       )}
-      <ul className="m-0 grid list-none grid-cols-5 gap-1 px-3 pb-2 pt-0" data-testid="chat-card-kanban-columns">
-        {KANBAN_COLUMNS.map((c) => (
-          <li key={c} data-column={c} className="flex min-w-0 flex-col items-start gap-0.5 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-2 py-1">
-            <span className="text-ds-small text-ds-ink-3 break-keep">{translateEntityStatus('story', c)}</span>
-            <span className="text-ds-body font-medium text-ds-ink">{summary.counts[c]}{summary.hasMore ? '+' : ''}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="@container px-3 pb-2 pt-0">
+        {/* narrow card (under 32rem of its OWN width): one wrapping line «label count · label count» — a phone-width column cannot hold five boxes without breaking the labels letter by letter; wide: five boxes */}
+        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 @lg:grid @lg:grid-cols-5 @lg:gap-1" data-testid="chat-card-kanban-columns">
+          {KANBAN_COLUMNS.map((c) => (
+            <li key={c} data-column={c} className="flex min-w-0 items-baseline gap-1 whitespace-nowrap @lg:flex-col @lg:items-start @lg:gap-0.5 @lg:whitespace-normal @lg:rounded-ds-control @lg:border @lg:border-ds-line @lg:bg-ds-surface-sunk @lg:px-2 @lg:py-1">
+              <span className="text-ds-small text-ds-ink-3 break-keep">{translateEntityStatus('story', c)}</span>
+              <span className="text-ds-body font-medium text-ds-ink">{summary.counts[c]}{summary.hasMore ? '+' : ''}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
       {summary.now.length > 0 ? (
         <div className="flex flex-col gap-1 border-t border-ds-line px-3 py-2" data-testid="chat-card-kanban-now">
           <span className="text-ds-small text-ds-ink-3">{t('kanbanNow')}</span>
