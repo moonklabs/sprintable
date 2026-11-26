@@ -58,9 +58,11 @@ async def _classify(session, prefix: str, now: datetime) -> tuple[str, uuid.UUID
         ).scalar_one_or_none()
         org_id = org_row
     if org_id is None and team_member_id is not None:
+        # `team_members` is a VIEW with one row per project an agent has — one row is enough to know the organization. Without `.limit(1)` a two-project agent's legacy key raised
+        # `MultipleResultsFound`, which `record_auth_failure` swallows: its failure was never written (557 of 6,652 keys on dev have only `team_member_id`).
         org_row = (
             await session.execute(
-                select(TeamMember.org_id).where(TeamMember.id == team_member_id)
+                select(TeamMember.org_id).where(TeamMember.id == team_member_id).limit(1)
             )
         ).scalar_one_or_none()
         org_id = org_row
