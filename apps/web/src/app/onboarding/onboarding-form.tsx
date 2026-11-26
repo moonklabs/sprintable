@@ -479,7 +479,7 @@ export function OnboardingForm({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 p-6 sm:p-8`} data-testid="onboarding-card">
+      <Card className="w-full max-w-lg space-y-6 p-6 sm:p-8" data-testid="onboarding-card">
         {/* story 5036: the straight line's strip — three steps, ds Stepper (check · ring · number + a hidden state word: never colour alone). Arrival, invites and the places that are not a browser have none. */}
         {lineIndex !== null ? (
           <div data-testid="onboarding-progress">
@@ -535,20 +535,20 @@ export function OnboardingForm({
             ) : arrival === 'account-check-failed' ? (
               <div className="space-y-3">
                 <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-account-check-failed">{t('accountCheckFailed')}</p>
-                <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-account-check-again">{t('inviteCheckAgain')}</Button>
+                <DsButton variant="secondary" size="lg" onClick={() => void arrive()} data-testid="onboarding-account-check-again">{t('inviteCheckAgain')}</DsButton>
               </div>
             ) : arrival === 'invite-check-failed' ? (
               <div className="space-y-3">
                 <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-invite-check-failed">{t('inviteCheckFailed')}</p>
-                <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-invite-check-again">{t('inviteCheckAgain')}</Button>
+                <DsButton variant="secondary" size="lg" onClick={() => void arrive()} data-testid="onboarding-invite-check-again">{t('inviteCheckAgain')}</DsButton>
               </div>
             ) : arrival === 'project-check-failed' ? (
               <div className="space-y-3">
                 <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-project-check-failed">{tl('projectCheckFailed')}</p>
-                <Button variant="outline" onClick={() => { if (orgId) { setArrival('working'); void proceedWithOrg(orgId); } }} data-testid="onboarding-project-check-again">{t('inviteCheckAgain')}</Button>
+                <DsButton variant="secondary" size="lg" onClick={() => { if (orgId) { setArrival('working'); void proceedWithOrg(orgId); } }} data-testid="onboarding-project-check-again">{t('inviteCheckAgain')}</DsButton>
               </div>
             ) : (
-              <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-arrive-retry">{tc('retry')}</Button>
+              <DsButton variant="secondary" size="lg" onClick={() => void arrive()} data-testid="onboarding-arrive-retry">{tc('retry')}</DsButton>
             )}
           </div>
         )}

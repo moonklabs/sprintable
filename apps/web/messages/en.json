@@ -1800,7 +1800,7 @@
     "inviteCheckAgain": "Check again",
     "projectSubtitleNoOrg": "Create your first project.",
     "advanced": {
-      "lead": "Connect the Claude Code or Codex already on this computer, no app. One press makes the agent and copies the command to paste in a terminal.",
+      "lead": "One press makes the agent and copies the command to paste in a terminal.",
       "prereqTitle": "You need this first",
       "prereqBody": "Claude Code or Codex must be installed on this computer and signed in. If neither is, you can install one with a command below.",
       "prereqApp": "The web cannot see what is installed or signed in. Open the Mac app and it checks once.",
@@ -1861,7 +1861,7 @@
       "branchNewBody": "Pick a role and the default guidance goes in on its own; it runs right away in the app's terminal.",
       "openAppNew": "Make it in the app",
       "branchMoveTitle": "Move one you already use",
-      "branchMoveBody": "Bring the Claude Code or Codex agent you use on this Mac over as it is.",
+      "branchMoveBody": "Bring the Claude Code or Codex agent you already use into the app as it is.",
       "openAppMove": "Move it in the app",
       "notMacReason": "Only the Mac app is available for now. Sign in with this account on a Mac to use it.",
       "branchKeyTitle": "Connect directly with an API key",

@@ -1800,7 +1800,7 @@
     "inviteCheckAgain": "다시 확인",
     "projectSubtitleNoOrg": "첫 프로젝트를 만들어 보세요.",
     "advanced": {
-      "lead": "앱 없이 이 컴퓨터의 Claude Code나 Codex를 바로 연결해요. 버튼 한 번으로 에이전트를 만들고, 터미널에 붙여넣을 명령을 복사해 드려요.",
+      "lead": "버튼 한 번으로 에이전트를 만들고, 터미널에 붙여넣을 명령을 복사해 드려요.",
       "prereqTitle": "먼저 필요해요",
       "prereqBody": "Claude Code나 Codex 중 하나가 이 컴퓨터에 설치돼 있고 로그인돼 있어야 해요. 없으면 아래 명령으로 설치할 수 있어요.",
       "prereqApp": "설치했는지 · 로그인했는지는 웹에서 볼 수 없어요. Mac 앱을 열면 앱이 한 번 확인해 줘요.",
@@ -1861,7 +1861,7 @@
       "branchNewBody": "역할을 고르면 기본 안내가 자동으로 들어가고, 앱 안 터미널에서 바로 실행돼요.",
       "openAppNew": "앱에서 새로 만들기",
       "branchMoveTitle": "쓰던 에이전트 옮기기",
-      "branchMoveBody": "이 Mac에서 쓰던 Claude Code · Codex 에이전트를 그대로 가져와요.",
+      "branchMoveBody": "쓰던 Claude Code · Codex 에이전트를 그대로 앱으로 가져와요.",
       "openAppMove": "앱에서 옮기기",
       "notMacReason": "지금은 Mac 앱만 있어요. Mac에서 이 계정으로 로그인하면 쓸 수 있어요.",
       "branchKeyTitle": "API 키로 직접 연결",
