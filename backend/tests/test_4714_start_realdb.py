@@ -758,9 +758,11 @@ async def test_19_the_narrowing_waits_for_a_move_that_holds_the_device_row_and_j
                     if blocked:
                         break
                     await asyncio.sleep(0.05)
+                # (story 5025 C1 · PO 11-26: `pg_stat_activity.query` is cut at `track_activity_query_size` = 1024 bytes and the row's column list grew by three, so a re-read's text can end before its `FOR UPDATE`. A SELECT
+                # WITHOUT a lock never waits on another transaction's row lock (MVCC) — a SELECT that IS blocked by the mover's lock is the locking re-read, cut or not; a long `UPDATE desktop_setups …` waiting there does NOT pass: it must be a SELECT)
                 # the statement that waits on the mover is the RE-READ of the device row (SELECT … FOR UPDATE): that is the lock under test — without it the PUT goes on, reads
                 # the old members, and only its later UPDATE waits (a different statement)
-                assert blocked and all("FOR UPDATE" in q.upper() and "desktop_setups" in q.lower() for q in blocked), f"the re-read did not wait on the moving row: {blocked or 'no wait seen'}"
+                assert blocked and all(q.lstrip().upper().startswith("SELECT") and "desktop_setups" in q.lower() and (len(q) >= 1000 or "FOR UPDATE" in q.upper()) for q in blocked), f"the re-read did not wait on the moving row: {blocked or 'no wait seen'}"
                 await mover.commit()  # the move lands
                 r = await asyncio.wait_for(put, 120)  # bounded: a PUT that does not come back after the move lands is a failure, not a hang
             finally:
