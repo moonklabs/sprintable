@@ -684,6 +684,10 @@ async def _handle_send_message(
         sender_id=None,
         content=delivered_content,
         thread_id=None,
+        # story 5030: this task room holds ONE member — the agent the task is for — and the line is addressed to it. An agent in a group room receives only the words that call it
+        # (channel_router), and this line calls nobody, so without the mark the webhook fallback (which asks the router again for its addressees) would find none and the task would
+        # never be delivered. Server-made, so named here like the addressees of a published event notice (`msg_metadata['delivery']`).
+        msg_metadata={"delivery": {"member_ids": [str(member_id)]}},
         # story #4632: the write's own moment (clock_timestamp), not the request's app-clock `now` taken before the transaction
         created_at=func.clock_timestamp(),
     ))
