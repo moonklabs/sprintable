@@ -22,8 +22,10 @@ export const SHOWCASE_WIDTHS = { narrow: 390, wide: 1440 } as const;
 
 /** the membership card on a local stand-in: «넣기» / «빼기» flip the picture the way the real writes do (a clean 201 / 2xx), and touch nothing */
 function ShowcaseDeploy({ name }: { name: string }) {
-  const [summary, setSummary] = useState<DeploySummary>({ name, active: true, access: 'granted', recordId: 'sample-record' });
-  const done = (applied: DeployWrite['applied']) => { if (applied) setSummary((s) => ({ ...s, ...applied })); };
+  // only what the two buttons change lives in state; the NAME is the prop's, read at every render (the showcase's «긴 글» / «기본» toggle changes it while this card stays mounted)
+  const [picture, setPicture] = useState<Pick<DeploySummary, 'access' | 'recordId'>>({ access: 'granted', recordId: 'sample-record' });
+  const summary: DeploySummary = { name, active: true, ...picture };
+  const done = (applied: DeployWrite['applied']) => { if (applied) setPicture(applied); };
   const actions = {
     place: async (): Promise<DeployWrite> => ({ result: 'ok', applied: { access: 'granted', recordId: 'sample-record' } }),
     takeOut: async (): Promise<DeployWrite> => ({ result: 'ok', applied: { access: 'none', recordId: null } }),

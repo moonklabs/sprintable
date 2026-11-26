@@ -67,6 +67,29 @@ describe('every kind of card has its states in the showcase (PO: «카드마다 
     expect(container.textContent).toContain('이 프로젝트에 들어 있어요');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+  it('the membership card follows the toggle: «긴 글» gives the long name and «기본» the short one again — while the card stays on screen (PO, dev 11-26: it stayed as first drawn)', async () => {
+    await act(async () => { btn('프로젝트 소속').click(); });
+    expect(container.textContent).toContain('오르테가'); expect(container.textContent).not.toContain('아주 긴 제목이');
+    await act(async () => { btn('긴 글').click(); });
+    expect(container.textContent).toContain('아주 긴 제목이'); expect(container.textContent).not.toContain('오르테가');
+    await act(async () => { btn('기본').click(); });
+    expect(container.textContent).toContain('오르테가'); expect(container.textContent).not.toContain('아주 긴 제목이');
+    // and the other way: arriving from «긴 글» shows the long name, «기본» then the short one
+    await act(async () => { btn('객체').click(); });
+    await act(async () => { btn('긴 글').click(); });
+    await act(async () => { btn('프로젝트 소속').click(); });
+    expect(container.textContent).toContain('아주 긴 제목이');
+    await act(async () => { btn('기본').click(); });
+    expect(container.textContent).toContain('오르테가'); expect(container.textContent).not.toContain('아주 긴 제목이');
+  });
+  it('what the two buttons changed is kept when the name toggles (a press is not forgotten by «긴 글»)', async () => {
+    await act(async () => { btn('프로젝트 소속').click(); });
+    await act(async () => { btn('이 프로젝트에서 빼기').click(); });
+    await act(async () => { btn('빼기').click(); });
+    for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { btn('긴 글').click(); });
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요');
+  });
   it('the refused card (what a viewer who CAN read the object sees) names the agent and who can see it; «볼 수 없음» is the plain «찾을 수 없어요» line (what everyone else sees)', async () => {
     await act(async () => { btn('거절').click(); });
     expect(container.textContent).toContain('보여 주려던 에이전트'); expect(container.textContent).toContain('볼 수 있는 에이전트');
