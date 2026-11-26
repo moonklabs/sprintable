@@ -109,6 +109,16 @@ describe('entity card — read for the viewer', () => {
     expect(calls).toEqual([`/api/goals/${ID}`]);
     expect(container.textContent).toContain('목표 이름');
   });
+  it('a doc or an artifact whose preview answers 200 with a body that is not `{ data }` is «error» (retry), never a ready card that shows the reference', async () => {
+    for (const kind of ['doc', 'artifact']) {
+      for (const body of [{}, [], { data: null }, { data: [1] }]) {
+        stubFetch(() => json(200, body));
+        await show({ kind, ref: ID });
+        expect(frame()!.dataset.cardState, `${kind} ${JSON.stringify(body)}`).toBe('error');
+        expect(container.textContent).not.toContain(ID);
+      }
+    }
+  });
   it('the click opens the SIDE PANEL (the second tier) with this object as the target · no panel around = no button, just the card', async () => {
     stubFetch(() => json(200, { data: { title: '열 장', status: 'done' } }));
     const open = vi.fn();

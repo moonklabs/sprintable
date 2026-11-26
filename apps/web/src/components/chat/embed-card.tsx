@@ -142,8 +142,10 @@ export async function fetchEntityCardSummary(kind: string, id: string): Promise<
   if (kind === 'doc' || kind === 'artifact') {
     const res = await fetchWithAuth(`${kind === 'doc' ? '/api/docs/preview?q=' : '/api/visual-artifacts/preview?id='}${encodeURIComponent(id)}`);
     if (!res.ok) throw new EntitySummaryError(res.status);
-    const json = (await res.json()) as { data?: { title?: unknown } };
-    return { title: textOrNull(json.data?.title), status: null };
+    // the preview's one shape is `{ data: {...} }` — a 200 with any other body is a retryable fault, never a «ready» card that shows the reference (the first review of PR 5940)
+    const data = ((await res.json()) as { data?: unknown }).data;
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new EntitySummaryError(502);
+    return { title: textOrNull((data as { title?: unknown }).title), status: null };
   }
   const url = ENTITY_API[kind]?.(id);
   if (!url) throw new EntitySummaryError(404);
