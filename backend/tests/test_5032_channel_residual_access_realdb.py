@@ -600,7 +600,7 @@ async def test_11_an_a2a_task_is_handed_back_only_while_its_agent_can_read_the_t
         assert "error" not in got or got["error"] is None, got
         assert "the agent's answer" in str(got["result"]), "control: while the agent has the room's project the task is handed back"
         listed = await rpc("ListTasks", {})
-        assert listed["result"]["tasks"], "control: and listed"
+        assert listed["result"]["tasks"] and listed["result"]["totalSize"] == 1, "control: and listed"
 
         # the agent loses the room's project (it keeps another one, so it still resolves)
         access = (await _q(w, "SELECT id FROM project_access WHERE project_id = :p AND member_id = :m", p=pid, m=agent))[0][0]
@@ -612,6 +612,7 @@ async def test_11_an_a2a_task_is_handed_back_only_while_its_agent_can_read_the_t
         assert "the agent's answer" not in str(got)
         listed = await rpc("ListTasks", {})
         assert listed["result"]["tasks"] == [] and "the agent's answer" not in str(listed)
+        assert listed["result"]["totalSize"] == 0, "the count of a list leaked how many tasks of unreadable rooms there are"
     finally:
         await _close(engine, w)
 
@@ -629,5 +630,108 @@ async def test_12_deleting_the_account_takes_the_persons_seats_out_of_every_chan
         assert r.status_code == 200, r.text
         assert seat not in await _participants(w, chan), "the deleted account's seat stayed in the project channel"
         assert await _participants(w, chan), "control: the others are still seated"
+    finally:
+        await _close(engine, w)
+
+
+async def test_13_a_replayed_send_message_does_not_hand_back_a_task_whose_room_the_agent_can_no_longer_read():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        other = await _project(w, ot, org, "Agent's other project")
+        agent, _key = await _add_agent(w, org, ot, pid)
+        r = await w.client.post(f"/api/v2/projects/{other}/access", headers=_H(ot), json={"member_id": str(agent)})
+        assert r.status_code == 201, r.text
+
+        async def send():
+            r = await w.client.post(
+                f"/api/v2/a2a/members/{agent}/rpc", headers=_H(ot),
+                json={"jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+                      "params": {"message": {"messageId": "m-replay-1", "role": "ROLE_USER", "parts": [{"text": "please do it"}]}}},
+            )
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        first = await send()
+        assert first.get("error") is None, first
+        ctx = uuid.UUID(first["result"]["task"]["contextId"])
+        again = await send()
+        assert again.get("error") is None and again["result"]["task"]["id"] == first["result"]["task"]["id"], "control: the same message id replays the same task"
+        room_project = (await _q(w, "SELECT project_id FROM conversations WHERE id = :c", c=ctx))[0][0]
+        access = (await _q(w, "SELECT id FROM project_access WHERE project_id = :p AND member_id = :m", p=room_project, m=agent))[0][0]
+        r = await w.client.delete(f"/api/v2/projects/{room_project}/access/{access}", headers=_H(ot))
+        assert r.status_code == 200, r.text
+
+        gone = await send()
+        assert gone["error"] and gone["error"]["code"] == -32001, gone
+        assert gone.get("result") is None
+    finally:
+        await _close(engine, w)
+
+
+# ── a person with a seat in the organization and no `members` anchor (grant-only) ───────────────────────────
+
+
+async def _grant_only_person(w, org, ot, pid):
+    """a person whose only identity is the org seat (no `members` row — the legacy shape): given the project through the grant route; returns (user id, seat id, tokens)."""
+    uid, seat, tokens = await _add_person(w, org, ot, pid)
+    await w.sql("UPDATE project_access SET member_id = NULL WHERE org_member_id = :s", s=seat)
+    await w.sql("DELETE FROM members WHERE id = :s", s=seat)
+    assert not await _q(w, "SELECT 1 FROM members WHERE id = :s", s=seat)
+    return uid, seat, tokens
+
+
+async def test_14_a_grant_only_person_with_the_project_reads_the_channel_and_without_it_does_not():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        uid, seat, tokens = await _grant_only_person(w, org, ot, pid)
+        assert seat in await _participants(w, chan)
+        assert await _reads(w, _H(tokens), chan) == (200, 200), "a person who holds the project through the org seat alone was refused its channel"
+        mid, got, _m = await _say(w, ot, chan, "to the grant-only person")
+        reach, decided = await _delivery_side(w, chan, mid)
+        assert seat in reach, "…and was left out of its delivery"
+        # the access goes (behind the unseat's back): the same person is closed
+        await w.sql("DELETE FROM project_access WHERE org_member_id = :s", s=seat)
+        assert await _reads(w, _H(tokens), chan) == (404, 403)
+        mid2, _g, _m = await _say(w, ot, chan, "after")
+        reach2, decided2 = await _delivery_side(w, chan, mid2)
+        assert seat not in reach2 and seat not in decided2
+    finally:
+        await _close(engine, w)
+
+
+async def test_15_deleting_the_account_of_a_grant_only_person_takes_their_seat_out_of_the_channel_too():
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        uid, seat, tokens = await _grant_only_person(w, org, ot, pid)
+        assert seat in await _participants(w, chan)
+        r = await w.delete(tokens)
+        assert r.status_code == 200, r.text
+        assert seat not in await _participants(w, chan), "the account deletion missed a seat that has no `members` anchor"
+    finally:
+        await _close(engine, w)
+
+
+async def test_16_a_prompt_line_that_finishes_after_the_access_went_is_not_written_into_the_channel():
+    from app.services.desktop_commands import _write_prompt_line
+
+    engine, w = await _world()
+    try:
+        org, ot, pid, chan = await _owner_and_channel(w)
+        uid, seat, tokens = await _add_person(w, org, ot, pid)
+        agent, _key = await _add_agent(w, org, ot, pid)
+
+        async def write(sender):
+            async with w.Session() as s:
+                await _write_prompt_line(s, org_id=org, conversation_id=chan, sender_id=sender, agent_id=agent, text="do the thing", command_id=uuid.uuid4())
+                await s.commit()
+            return (await _q(w, "SELECT count(*) FROM conversation_messages WHERE conversation_id = :c AND sender_id = :s AND jsonb_exists(metadata, 'remote_prompt')", c=chan, s=sender))[0][0]
+
+        assert await write(seat) == 1, "control: a holder's line is written"
+        await w.sql("DELETE FROM project_access WHERE org_member_id = :s", s=seat)
+        await w.sql("DELETE FROM conversation_participants WHERE conversation_id = :c AND member_id = :s", c=chan, s=seat)
+        assert await write(seat) == 1, "the person lost the project: nothing more of theirs was written into the channel"
     finally:
         await _close(engine, w)

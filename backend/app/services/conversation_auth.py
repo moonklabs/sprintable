@@ -144,7 +144,15 @@ def channel_project_valid(conv_id_col, *, caller_member_id: uuid.UUID, org_id: u
 
     ch = aliased(Conversation)
     cm = aliased(Member)
-    access_id = func.coalesce(select(cm.user_id).where(cm.id == caller_member_id).scalar_subquery(), literal(caller_member_id))
+    # the id access is asked with: the member's user (a person's `members` anchor), else — a grant-only person has only the org seat, whose id IS their member id — the seat's user, else the id itself (an agent)
+    from app.models.project import OrgMember
+
+    om = aliased(OrgMember)
+    access_id = func.coalesce(
+        select(cm.user_id).where(cm.id == caller_member_id).scalar_subquery(),
+        select(om.user_id).where(om.id == caller_member_id, om.deleted_at.is_(None)).scalar_subquery(),
+        literal(caller_member_id),
+    )
     is_channel = select(1).where(ch.id == conv_id_col, ch.is_project_channel.is_(True)).exists()
     holds_project = (
         select(1)
@@ -176,10 +184,20 @@ async def members_holding_channel_project(db, *, is_project_channel: bool, proje
     # one access question per member (a channel has a handful): `_project_access_predicate` nests its EXISTS branches two levels deep, and SQLAlchemy auto-correlates only to the
     # immediately enclosing SELECT, so a single statement correlated on the member rows makes the inner branches cross-join `members` (measured: every member passed). A set-based
     # version needs `_project_access_predicate` reshaped with explicit `.correlate()` — left as a follow-up.
+    from app.models.project import OrgMember
+
     rows = (await db.execute(
         select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(member_ids), Member.org_id == org_id)
     )).all()
-    return {mid for mid, access_id in rows if await has_project_access(db, access_id, project_id, org_id)}
+    ids = {mid: access_id for mid, access_id in rows}
+    # a grant-only person has the org seat and no `members` anchor: the seat's id is their member id, access is asked with the seat's user (as `has_project_access` knows them)
+    for mid, uid in (await db.execute(
+        select(OrgMember.id, OrgMember.user_id).where(
+            OrgMember.id.in_(member_ids - set(ids)), OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None),
+        )
+    )).all():
+        ids[mid] = uid
+    return {mid for mid, access_id in ids.items() if await has_project_access(db, access_id, project_id, org_id)}
 
 
 async def members_holding_rooms_channel_project(db, conversation_id: uuid.UUID, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:

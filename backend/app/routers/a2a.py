@@ -627,6 +627,8 @@ async def _handle_send_message(
         # 멱등 재생 경로 — 락 보유 중 재확인해 이미 커밋된 task를 찾았으니 Conversation/Message/
         # webhook/Event/wake_agent/새 A2ATask 그 무엇도 만들지 않고 그대로 반환한다(AC3:
         # 중복 실행 지시 0).
+        if not await _task_room_readable(session, existing_task, member_org_id):   # story #5032 (C2): a replayed answer is the task's room words too
+            raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
         return {"task": _task_to_dict(existing_task)}
 
     # E-A2A-EXT project-context(profile, opt-in): 클라가 A2A-Extensions 헤더로 이 URI를
@@ -734,6 +736,8 @@ async def _handle_send_message(
             )
         )).scalar_one_or_none()
         if winner is not None:
+            if not await _task_room_readable(session, winner, member_org_id):   # story #5032 (C2): same as the replay above
+                raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
             return {"task": _task_to_dict(winner)}
         raise
     await session.commit()
@@ -973,6 +977,25 @@ async def _handle_list_tasks(
     if list_params.status is not None:
         conditions.append(A2ATask.state == list_params.status)
 
+    # story #5032 (C2): only tasks whose room the agent can still READ (the canonical judge, in SQL — so the page, the token and `totalSize` all count the same set)
+    from sqlalchemy import or_
+
+    from app.services.conversation_auth import conversation_readable_predicate
+    from app.services.project_auth import project_access_valid_correlated
+
+    conditions.append(
+        select(Conversation.id).where(
+            Conversation.id == A2ATask.context_id, Conversation.org_id == member.org_id,
+            conversation_readable_predicate(
+                Conversation.id, caller_member_id=member.id, org_id=member.org_id, admin_bypass_eligible=False,
+                agent_project_valid=or_(
+                    Conversation.project_id.is_(None),
+                    project_access_valid_correlated(Conversation.project_id, caller_id=member.id, org_id=member.org_id),
+                ),
+            ),
+        ).exists()
+    )
+
     total_size = (await session.execute(
         select(func.count()).select_from(A2ATask).where(*conditions)
     )).scalar_one()
@@ -982,11 +1005,8 @@ async def _handle_list_tasks(
         .offset(offset).limit(page_size)
     )
     tasks = result.scalars().all()
-    fetched = len(tasks)
-    # story #5032 (C2): a task whose room the agent can no longer read is not listed (its history · artifacts carry the room's words)
-    tasks = [t for t in tasks if await _task_room_readable(session, t, member.org_id)]
 
-    next_offset = offset + fetched
+    next_offset = offset + len(tasks)
     next_page_token = str(next_offset) if next_offset < total_size else ""
 
     return {
