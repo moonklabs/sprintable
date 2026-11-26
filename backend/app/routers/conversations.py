@@ -720,26 +720,39 @@ DELIVERY_DECISION_KEY = "delivery_decision"
 
 
 async def _delivery_decision_of(
-    db: AsyncSession, conversation_id: uuid.UUID, sender_id: uuid.UUID, delivered_ids: set[uuid.UUID],
+    db: AsyncSession, org_id: uuid.UUID, sender_id: uuid.UUID,
+    participant_ids: set[uuid.UUID], routed_ids: set[uuid.UUID], held_back_ids: set[uuid.UUID],
 ) -> dict:
-    """story 5032 (C2) — {"agents_delivered": [id…], "agents_not_delivered": [id…], "humans_delivered": n} for one sent line, from the participant rows (the sender left out) and the ids the send really
-    delivers to (`delivered_ids` — the router's decisions minus what the send then withholds). An agent is told apart by the anchor row (`members.type`) — the same truth the router asks; whoever is not an
-    agent is a person, and people are only counted (who they are is never carried). No reason is carried for an agent that was not delivered (muted · «only when called» · chain cap · a block · no project access
-    NOW in a channel — the router already leaves those out of its decisions, so they land here as «not delivered» with no extra rule) and no name (the screen finds it from the participant list by id)."""
-    from app.models.member import Member
+    """story 5032 (C2) — {"agents_delivered": [id…], "agents_not_delivered": [id…], "humans_delivered": n} for one sent line, built on what the ROUTER saw, not on a fresh read of the room:
 
-    participant_ids = set((await db.execute(
-        select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
-    )).scalars().all()) - {sender_id}
+      · `routed_ids` = the member ids of the router's decisions — already canonical (an old human alias resolved), in this org, living and (in a project's channel) holding the project; `held_back_ids` = who the
+        send then holds back (agents its runtime cannot take a command · a server command already run · people who blocked the sender). delivered = routed − held back − the sender.
+      · people are COUNTED from those delivered ids, never matched against the raw participant rows (a participant stored under an old alias id would otherwise never equal the router's canonical id and the
+        count would fall short) — and never named. Whoever is delivered and is not an agent is a person.
+      · agents are the only ones that need the participant rows (an agent the router left out is in no decision): `participant_ids` is the rows the pre-check read right after routing (the same savepoint — a
+        participant added or removed in the instant between the two reads can be missing from «not delivered» for that one line; the delivered side always comes from the router itself). The ids of those rows are
+        raw, so they are narrowed to AGENTS OF THIS ORGANIZATION THAT ARE NOT DELETED (`members.org_id` · `deleted_at IS NULL` — the same rows the `team_members` view hands the router): a row left by another
+        organization or by a deleted agent is never reported (its id would otherwise be shown to the sender for the first time and kept on the line). An agent that is inactive or lost the room's project is
+        kept: the router leaves it out of its decisions (an agent without the project is cut from a room that has one), so it lands in «not delivered» with no further rule — it IS in the room.
+      · no reason and no name is carried (muted · «only when called» · chain cap · a block · no project — the screen finds the name from the participant list by id).
+    The sender (under its alias id too) is in none of the lists."""
+    from app.models.member import Member
+    from app.services.member_resolver import canonicalize_member_ids
+
+    sender_ids = {sender_id} | set((await canonicalize_member_ids({sender_id}, db)).values())
+    delivered = routed_ids - held_back_ids - sender_ids
+    candidates = (participant_ids | routed_ids) - sender_ids
     agent_ids: set[uuid.UUID] = set()
-    if participant_ids:
+    if candidates:
         agent_ids = set((await db.execute(
-            select(Member.id).where(Member.id.in_(participant_ids), Member.type == "agent")
+            select(Member.id).where(
+                Member.id.in_(candidates), Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
+            )
         )).scalars().all())
     return {
-        "agents_delivered": sorted(str(i) for i in agent_ids & delivered_ids),
-        "agents_not_delivered": sorted(str(i) for i in agent_ids - delivered_ids),
-        "humans_delivered": len((participant_ids - agent_ids) & delivered_ids),
+        "agents_delivered": sorted(str(i) for i in agent_ids & delivered),
+        "agents_not_delivered": sorted(str(i) for i in agent_ids - delivered),
+        "humans_delivered": len(delivered - agent_ids),
     }
 
 
@@ -3547,6 +3560,7 @@ async def send_message_core(
     decisions: list = []
     discord_exclude_ids: set[uuid.UUID] = set()
     preference_excluded_ids: set[uuid.UUID] = set()
+    router_participants: set[uuid.UUID] = set()  # story 5032: the participant rows the pre-check read right after routing — the decision report reuses them (no second read)
     router_decided = False  # story 5032: True only when the whole pre-check ran — a failed one leaves `decisions` empty, and an unknown decision is never reported as «nobody gets it»
     try:
         async with db.begin_nested():
@@ -3562,6 +3576,7 @@ async def send_message_core(
             preference_excluded_ids = {
                 pid for pid in _participant_rows if pid != sender.id and pid not in decided_ids
             }
+            router_participants = set(_participant_rows)
             router_decided = True
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
@@ -3642,8 +3657,8 @@ async def send_message_core(
         try:
             async with db.begin_nested():
                 delivery_decision = await _delivery_decision_of(
-                    db, conversation_id, sender.id,
-                    {d.member_id for d in decisions} - blocked_agent_ids - user_blocker_ids,
+                    db, org_id, sender.id, router_participants,
+                    {d.member_id for d in decisions}, blocked_agent_ids | user_blocker_ids,
                 )
             msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_DECISION_KEY: delivery_decision}
         except Exception:

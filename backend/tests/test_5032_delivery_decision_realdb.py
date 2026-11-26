@@ -404,3 +404,154 @@ async def test_11_the_shape_is_closed_ids_as_strings_and_the_sender_is_in_none_o
         assert alone.json()[KEY] == _decision(), alone.json()
     finally:
         await engine.dispose()
+
+
+# ── the report rests on what the router saw (codex 8555c7136: other-organization / deleted rows · alias people · one snapshot) ──
+
+
+async def _plant_participant(Session, conv, member_id) -> None:
+    """a participant row put in by hand (the table has no member foreign key — a legacy row, a bridge mapping, a road that skipped the org check)."""
+    from app.models.conversation import ConversationParticipant
+
+    async with Session() as s:
+        s.add(ConversationParticipant(conversation_id=conv, member_id=member_id))
+        await s.commit()
+
+
+async def test_12_an_agent_row_of_another_organization_is_never_reported():
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session)
+        async with Session() as s:
+            other_org = await _make_org(s)
+            other_project = await _make_project(s, other_org.id)
+            stranger = await _make_agent_member(s, other_org.id, other_project.id)
+        await _plant_participant(Session, conv, stranger)
+        from app.main import app
+
+        sent = await _as(app, Session, humans[0][1], org, _say(conv, "who is in here", mentioned_ids=[str(stranger)]))
+        assert sent.status_code == 201, sent.text
+        assert sent.json()[KEY] == _decision(agents_not_delivered=bots, humans=1), sent.json()
+        assert str(stranger) not in str(sent.json()[KEY])
+        row = _row_of(await _list(app, Session, humans[0][1], org, conv), sent.json()["data"]["id"])
+        assert str(stranger) not in str(row[KEY]), row  # nor kept on the line for the sender's later reads
+    finally:
+        await engine.dispose()
+
+
+async def test_13_a_deleted_agent_is_never_reported():
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session)
+        from sqlalchemy import text
+
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET deleted_at = now() WHERE id = :m"), {"m": bots[0]})
+            await s.commit()
+        from app.main import app
+
+        sent = await _as(app, Session, humans[0][1], org, _say(conv, "after the agent was deleted"))
+        assert sent.status_code == 201, sent.text
+        assert sent.json()[KEY] == _decision(agents_not_delivered=[bots[1]], humans=1), sent.json()
+        assert str(bots[0]) not in str(sent.json()[KEY])
+    finally:
+        await engine.dispose()
+
+
+async def test_14_a_person_stored_under_an_old_alias_id_is_counted_as_delivered():
+    """a participant row under the legacy id of a person (`member_identity_aliases`): the router resolves it to the canonical id and decides for THAT id, so the report counts from the decisions —
+    matched against the raw row it never equals and the count fell short (and an org_member with no `members` anchor is a person too)."""
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session, people=2, agents=1)
+        (_sender, sender_user), (aliased, _aliased_user) = humans
+        from sqlalchemy import text
+
+        legacy = uuid.uuid4()
+        async with Session() as s:
+            await s.execute(text("DELETE FROM conversation_participants WHERE conversation_id = :c AND member_id = :m"), {"c": conv, "m": aliased})
+            await s.execute(
+                text("INSERT INTO member_identity_aliases (alias_id, member_id, org_id, alias_source) VALUES (:a, :m, :o, 'human_team_member')"),
+                {"a": legacy, "m": aliased, "o": org},
+            )
+            await s.commit()
+        await _plant_participant(Session, conv, legacy)
+        from app.main import app
+
+        sent = await _as(app, Session, sender_user, org, _say(conv, "to the person under the old id"))
+        assert sent.status_code == 201, sent.text
+        assert sent.json()[KEY] == _decision(agents_not_delivered=bots, humans=1), sent.json()
+        assert str(legacy) not in str(sent.json()[KEY]) and str(aliased) not in str(sent.json()[KEY])
+    finally:
+        await engine.dispose()
+
+
+async def test_15_a_person_with_only_an_org_member_row_is_counted():
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session, people=1, agents=1)
+        from app.models.project import OrgMember
+        from app.models.user import User
+
+        grant_only = uuid.uuid4()
+        uid = uuid.uuid4()
+        async with Session() as s:
+            s.add(User(id=uid, email=f"go-{uid.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            s.add(OrgMember(id=grant_only, org_id=org, user_id=uid, role="member"))  # no `members` anchor, no project access
+            await s.commit()
+        await _plant_participant(Session, conv, grant_only)
+        from app.main import app
+
+        sent = await _as(app, Session, humans[0][1], org, _say(conv, "to a grant-only person"))
+        assert sent.status_code == 201, sent.text
+        assert sent.json()[KEY] == _decision(agents_not_delivered=bots, humans=1), sent.json()
+    finally:
+        await engine.dispose()
+
+
+async def test_16_an_inactive_agent_follows_the_routers_own_rule():
+    """an inactive agent no longer holds the room's project (`has_project_access` asks `is_active`), so the router cuts it from a room that has one: it is in the room, called, and NOT delivered — reported as such
+    (the same line as an agent that lost the project), while an active agent called in the same line is delivered."""
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session)
+        from sqlalchemy import text
+
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET is_active = false WHERE id = :m"), {"m": bots[0]})
+            await s.commit()
+        from app.main import app
+
+        sent = await _as(app, Session, humans[0][1], org, _say(conv, "both called", mentioned_ids=[str(bots[0]), str(bots[1])]))
+        assert sent.status_code == 201, sent.text
+        assert sent.json()[KEY] == _decision(agents_delivered=[bots[1]], agents_not_delivered=[bots[0]], humans=1), sent.json()
+    finally:
+        await engine.dispose()
+
+
+async def test_17_an_agent_the_router_delivered_is_reported_even_if_the_participant_read_lagged_behind():
+    """the delivered side always comes from the router itself: an agent in its decisions that the participant snapshot does not hold (added in the instant between the two reads) is still «delivered»,
+    and the sender is taken out under its alias id too."""
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session, people=1, agents=2)
+        from sqlalchemy import text
+
+        from app.routers.conversations import _delivery_decision_of
+
+        legacy_sender = uuid.uuid4()
+        async with Session() as s:
+            await s.execute(
+                text("INSERT INTO member_identity_aliases (alias_id, member_id, org_id, alias_source) VALUES (:a, :m, :o, 'human_team_member')"),
+                {"a": legacy_sender, "m": humans[0][0], "o": org},
+            )
+            await s.commit()
+            got = await _delivery_decision_of(s, org, humans[0][0], {bots[1], legacy_sender}, {bots[0], humans[0][0]}, set())
+        # the sender is in the router's ids under its own id and in the snapshot under the alias: in no list
+        assert got == _decision(agents_delivered=[bots[0]], agents_not_delivered=[bots[1]], humans=0), got
+        async with Session() as s:
+            again = await _delivery_decision_of(s, org, legacy_sender, {bots[1]}, {bots[0], humans[0][0]}, set())
+        assert again == _decision(agents_delivered=[bots[0]], agents_not_delivered=[bots[1]], humans=0), again  # a sender that comes in by the alias id is taken out as its canonical member
+    finally:
+        await engine.dispose()
