@@ -443,7 +443,7 @@ async def post_presence(
 
 
 @router.get("/relay/capabilities")
-async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """The computer's pull, whenever it (re)connects: the WHOLE current set of what each of its pinned phones may do with each agent — signed now (`{envelope: {v, kid, p, sig}, server_time}`). The host replaces what it holds with it.
     Once in ten seconds per computer (counted per VERIFIED device): over it, 429 + `Retry-After` — a host that is refused waits and asks again (never reads it as «no capability»). 404 `capability_not_available` on a server with no signing
     key: a host sees an older server."""
@@ -457,11 +457,11 @@ async def get_capabilities(setup: DesktopSetup = Depends(_device), db: AsyncSess
     if out is None:
         raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
     await db.commit()
-    return out
+    return JSONResponse(content=out, headers={"Cache-Control": "no-store, private"})  # (codex: one computer's set is never kept by a shared cache)
 
 
 @router.get("/relay/attest-keys")
-async def get_attest_keys(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+async def get_attest_keys(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     """The keys a host checks capability sets with — for a computer that was paired BEFORE the server had a key (the first receipt: only when the host has pinned none). `{attest_keys: [{kid, public_key}], rotations: […], server_time}`;
     `rotations` are envelopes signed by a RETIRED key that hand the host on to the current one. 404 on a server with no signing key (an older server)."""
     from app.services import capability_set
@@ -469,7 +469,7 @@ async def get_attest_keys(setup: DesktopSetup = Depends(_device), db: AsyncSessi
     keys = capability_set.attest_keys()
     if not keys:
         raise HTTPException(status_code=404, detail={"code": "capability_not_available", "message": "this server does not sign capabilities"})
-    return {"attest_keys": keys, "rotations": capability_set.rotations(), "server_time": capability_set.server_time()}
+    return JSONResponse(content={"attest_keys": keys, "rotations": capability_set.rotations(), "server_time": capability_set.server_time()}, headers={"Cache-Control": "no-store, private"})
 
 
 class _RejectionEntry(BaseModel):

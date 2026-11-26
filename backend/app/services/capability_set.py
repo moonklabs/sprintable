@@ -200,6 +200,9 @@ async def build_envelope(db: AsyncSession, setup: DesktopSetup, caps: list[dict]
     current, _ = _load_keys()
     if current is None:
         return None
+    # the computer's row is locked FIRST (a lock this transaction already holds is held again for nothing), and only then are the facts read and the serial taken — so a set's serial is in the order the changes COMMITTED:
+    # a pull that read the facts before an unpair committed can never be handed a serial above the push that carries the unpair (codex: a stale set with a newer serial would bring a removed capability back)
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup.id).with_for_update())
     if caps is None:
         caps = await compute_caps(db, setup)
     now = datetime.now(timezone.utc)

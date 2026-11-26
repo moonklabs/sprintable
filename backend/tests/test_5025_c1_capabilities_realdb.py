@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.rate_limit import reset_person_limits
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     PLAIN,
     _addresses,
@@ -273,6 +274,48 @@ async def test_when_people_are_mixed_only_a_proved_key_is_in_the_set_and_one_per
         assert all(e["phone_key_id"] != unproved_id for e in mixed)
 
 
+
+async def test_a_key_that_belongs_to_another_organization_is_never_in_the_set(world, key):
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1k2")
+        a, a_id = await _phone(c)
+        b, b_id = await _phone(c)
+        await _pin(c, token, a, b)
+        await _sql(f"UPDATE remote_devices SET org_id = '{ORG2}' WHERE id = '{b_id}'")  # a key that moved to another organization keeps its pairing row until the next snapshot
+        payload = _verify((await _pull(c, token)).json()["envelope"], key[1])
+        assert {e["phone_key_id"] for e in payload["caps"]} == {a_id}
+
+
+async def test_the_actions_are_exactly_what_can_command_and_can_view_say_for_each_person_and_agent(world, key):
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services.desktop_commands import can_view
+
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1k3")
+        plain_phone, plain_pid = await _phone(c, who=PLAIN)
+        await _pin(c, token, plain_phone)
+        payload = _verify((await _pull(c, token)).json()["envelope"], key[1])
+        got = {e["agent_member_id"]: e["actions"] for e in payload["caps"] if e["phone_key_id"] == plain_pid}
+        async with async_session_factory() as s:
+            for a in device["agents"]:
+                readable = await can_view(s, user_id=PLAIN, org_id=ORG, agent_id=uuid.UUID(a["member_id"]))
+                actions = got.get(a["member_id"], [])
+                assert ("read" in actions) == readable, (a["member_id"], actions, readable)
+                assert "control" not in actions  # a plain org member: not the owner/admin, not the agent's owner, not the confirmer
+
+
+async def test_many_phones_come_out_in_one_fixed_order_whatever_order_they_were_made_in(world, key):
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1k4")
+        await _plain_member()
+        phones = [await _phone(c, who=OWNER) for _ in range(3)] + [await _phone(c, who=PLAIN) for _ in range(3)]  # (three phones a person at most)
+        await _pin(c, token, *[p for p, _ in phones])
+        caps = _verify((await _pull(c, token)).json()["envelope"], key[1])["caps"]
+        keys = [(e["phone_key_id"], e["agent_member_id"]) for e in caps]
+        assert len(keys) >= 6 and keys == sorted(keys)  # the owner's three phones alone are six entries, in id order whatever order they came from the database
+
 # ── serial · epoch ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def test_the_serial_only_goes_up_and_is_never_below_the_clock_so_a_restored_database_cannot_hand_out_an_old_one(world, key):
@@ -303,6 +346,30 @@ async def test_the_epoch_is_the_servers_own_setting_and_is_in_every_set(world, k
         reset_person_limits()
         assert _verify((await _pull(c, token)).json()["envelope"], key[1])["epoch"] == 7
 
+
+
+async def test_the_computers_row_is_locked_before_the_facts_are_read_so_serials_follow_the_order_of_commits(world, key, monkeypatch):
+    """codex: a pull that read the facts before an unpair committed must not be handed a serial above the push that carries the unpair. The row is locked first; the facts are read under that lock."""
+    from app.services import capability_set
+
+    async with _client() as c:
+        device, token, agent, setup_id = await _computer(c, "d4424 mac 5025c1m2")
+        real = capability_set.compute_caps
+        seen: dict = {}
+
+        async def watching(db, setup):
+            try:
+                await _sql(f"SELECT id FROM desktop_setups WHERE id = '{setup_id}' FOR UPDATE NOWAIT")  # from ANOTHER connection: it fails exactly when the row is locked
+                seen["locked"] = False
+            except Exception:  # noqa: BLE001
+                seen["locked"] = True
+            return await real(db, setup)
+
+        monkeypatch.setattr(capability_set, "compute_caps", watching)
+        r = await _pull(c, token)
+        assert r.status_code == 200 and seen == {"locked": True}
+        assert r.headers["cache-control"] == "no-store, private"  # one computer's set is never kept by a shared cache
+        assert (await c.get(KEYS, headers=_tok(token))).headers["cache-control"] == "no-store, private"
 
 # ── pull · push ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
