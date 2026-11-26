@@ -153,7 +153,9 @@ test.describe('the consent line on a phone (390 × 844)', () => {
     await page.touchscreen.tap(lb.x + lb.width * 0.6, lb.y + lb.height / 2); // the words, not the box
     await expect(box).toHaveAttribute('aria-checked', 'true');
     expect(context.pages()).toHaveLength(1);
-    await page.touchscreen.tap(lb.x + lb.width * 0.6, lb.y + lb.height / 2);
+    // story 5048 T0 ①: ticking removes the «accept the terms» reason line, the card is centred in the screen and moves up (28 px measured) — read the label's place again, a stale point would land on the privacy link
+    const lb2 = (await page.locator('[data-testid="register-consent"] label').boundingBox())!;
+    await page.touchscreen.tap(lb2.x + lb2.width * 0.6, lb2.y + lb2.height / 2);
     await expect(box).toHaveAttribute('aria-checked', 'false');
     const popup = page.waitForEvent('popup');
     await page.locator('[data-testid="register-consent"]').getByRole('link', { name: '이용약관' }).tap();

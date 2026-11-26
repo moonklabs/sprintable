@@ -18,7 +18,7 @@ afterEach(async () => {
 const card = () => container.querySelector('[data-slot="ds-card"]') as HTMLElement;
 
 describe('ds Card', () => {
-  it('기본: 올린 면 + 헤어라인 + 모서리 4 · 그림자 없음', async () => {
+  it('기본: 올린 면 + 헤어라인 + 모서리 8(`rounded-ds-control`) · 그림자 없음', async () => {
     await act(async () => { root.render(<Card>내용</Card>); });
     expect(card().className).toContain('bg-ds-surface');
     expect(card().className).toContain('border-ds-line');

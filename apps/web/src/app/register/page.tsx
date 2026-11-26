@@ -149,9 +149,9 @@ export default function RegisterPage() {
   const showRules = passwordTouched && password.length > 0;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ds-background px-4 py-4 sm:gap-8 sm:py-8">
-      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-ds-line bg-ds-surface p-4 shadow-lg sm:space-y-6 sm:p-8">
-        <div className="flex flex-col items-center gap-3 text-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ds-background px-4 py-2 sm:gap-8 sm:py-8">
+      <div className="w-full max-w-sm space-y-2 rounded-2xl border border-ds-line bg-ds-surface p-4 shadow-lg sm:space-y-6 sm:p-8">
+        <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
           <SprintableLogo
             variant="stacked"
             className="text-foreground"
@@ -222,7 +222,7 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <div className="space-y-3" data-testid="register-email-form">
+        <div className="space-y-2 sm:space-y-3" data-testid="register-email-form">
           {needsSetupCode && (
             <div className="space-y-1" data-testid="register-setup-code">
               <Input

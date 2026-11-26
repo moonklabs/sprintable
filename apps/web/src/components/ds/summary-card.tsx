@@ -24,7 +24,7 @@ function isEmptyValue(v: ReactNode): boolean {
 }
 
 /**
- * UI-3(a9d56577) SummaryCard — 요약 옆 칸: 제목 + «이름 / 값» 항목 목록(`dl`). `lg` 이상은 카드(면 `surface` · 헤어라인 · 모서리 4), 그 아래는 카드 껍데기 없이 항목이 칩 줄로 접힌다
+ * UI-3(a9d56577) SummaryCard — 요약 옆 칸: 제목 + «이름 / 값» 항목 목록(`dl`). `lg` 이상은 카드(면 `surface` · 헤어라인 · 모서리 8), 그 아래는 카드 껍데기 없이 항목이 칩 줄로 접힌다
  * (칩마다 «이름 값»이 글로 함께 읽힌다 — 색에 뜻을 싣지 않는다). 보이기만 하는 부품이라 눌림 · 초점이 없다.
  */
 export function SummaryCard({ title, items, emptyText, emptyLabel, className, ...props }: SummaryCardProps) {

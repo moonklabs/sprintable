@@ -200,7 +200,7 @@ for (const scr of SCREENS) {
         expect(m.sendSlot, 'the send button is a ds Button (before: the old ui/button)').toBe('ds-button');
         expect(m.inputSlot, 'the box is the ds Input (before: the old ui/input)').toBe('ds-input');
         if (scr.touch) expect(Math.min(m.sendH, m.sendW), 'a phone press is ≥ 44').toBeGreaterThanOrEqual(43.5);
-        else expect(m.sendH, 'ds Button md is 28').toBe(28);
+        else expect(m.sendH, 'ds Button md is 40 (story 5048 T0 ①: one control height)').toBe(40);
       });
     });
   }

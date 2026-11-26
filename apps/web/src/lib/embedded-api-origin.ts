@@ -60,6 +60,15 @@ export function isServerHost(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
+ * story 5025 (found on the VM round) — LOCAL MODE: the desktop app's own loopback server — embedded, and no public address. A workspace SERVER HOST is embedded too, but it is the middle server
+ * a phone relays through and it serves several people and computers: the screens that say «there is no phone relay / no remote control to switch / one computer only» are for local mode, never for it.
+ * The ONE name for «embedded && !isServerHost()» (the sibling phone-relay pages spell it out; the authenticated layout hands this to every client component as `useEmbeddedServer()`).
+ */
+export function isLocalModeServer(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isEmbeddedServer(env) && !isServerHost(env);
+}
+
+/**
  * story 5024 (AC4) — the server host's own public address as a person types it (`https://team.example.com` — the same rules as `publicHostOf`), or null when this is not a server host. A SERVER component asks (and hands the string down as a
  * prop): the screens that tell a person which address to give `sprintable-host pair --server` fill it in from here — never from the browser's location (a proxy or a rewrite could make that another name).
  */

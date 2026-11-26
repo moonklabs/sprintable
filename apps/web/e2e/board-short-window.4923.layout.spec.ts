@@ -169,7 +169,7 @@ test('[SID:4923] positive control: with the three low-window paddings taken off,
   const m = await measure(page);
   expect(m.frameH, 'frame as on dev').toBe(206);
   const q = m.cols.find((c) => c.id === 'queued')!;
-  expect(q.boxH).toBe(69);
+  expect(q.boxH).toBe(63); // story 5048 T0 ①: dev measured 69 with the 28–32 px head; the head is one 40 px row now (+6) — the first card is still cut without the low-window paddings
   expect(q.cardH).toBe(78);
   expect(q.cardWholeInBox).toBe(false);
 });

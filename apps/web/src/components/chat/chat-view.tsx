@@ -25,6 +25,7 @@ import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
 import { ReadingPanelProvider } from './reading-panel-context';
+import { readingPanelLayout } from './reading-panel-layout';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
@@ -301,7 +302,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 훅이 반환하는 객체 자체는 매 렌더 새 참조라 그대로 deps에 넣으면 콜백 메모이제이션이
   // 무의미해진다(exhaustive-deps도 "readingPanel 전체"를 요구해 그 무의미함을 강제) — 여기서
   // 바로 구조분해해 안정 참조(각 함수는 훅 내부 useCallback([])로 고정)만 아래에서 쓴다.
-  const { stack: readingPanelStack, isOpenRef: activeReadingPanelRef, open: openReadingPanelStack, close: closeReadingPanelStack, navigateTo: navigateReadingPanelTo } = useReadingPanelStack();
+  const { stack: readingPanelStack, isOpenRef: activeReadingPanelRef, open: openReadingPanelStack, close: closeReadingPanelStack, navigateTo: navigateReadingPanelTo, expanded: readingPanelExpanded, toggleExpanded: toggleReadingPanelExpanded } = useReadingPanelStack();
 
   // story #2921 S6 — layout.tsx의 리스트 레일에 "지금 ReadingPanel이 열려 있는지"를 끌어올린다
   // (xl 미만에서 rail 자동 접힘 판단에 필요, 이 컴포넌트만 아는 상태라 layout.tsx가 직접 볼 수
@@ -995,6 +996,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 헤더) ThreadPanel처럼 별도 상단 "뒤로" 바를 새로 만들지 않는다.
   const isMobileReadingView = readingPanelStack.length > 0;
   const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
+  // story 5034 (C4): how the chat and the reading panel share the row — the normal rule is the shell lane's (unchanged), the expanded mode (the whole window, chat beside) is the card story's
+  const panelLayout = readingPanelLayout({ expanded: readingPanelExpanded, railMode, isMobileReadingView });
 
   const unconnectedAgentParticipants = filterUnconnectedAgentParticipants(participants, currentTeamMemberId);
 
@@ -1029,7 +1032,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
-        <div className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`} {...roomDrop.handlers}>
+        <div className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`} style={panelLayout.chatStyle} {...roomDrop.handlers}>
           {/* story 4946 — the drop guide while a file is over the room (the storage screen's own guide: the same dashed panel, no new part) */}
           {roomDrop.dragging ? (
             <div data-testid="room-drop-overlay" role="status" className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-ds-panel border-2 border-dashed border-ds-action bg-ds-action-soft/80 text-ds-body font-semibold text-ds-action-text">
@@ -1327,9 +1330,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             // story #2921 S6(유나 확定④) — rail이 접힌/오버레이 상태(xl 미만+reading 열림)에선
             // clamp 대신 480px 고정(Pedro 산수: main 544 보장은 reading=480 전제). xl↑나
             // reading 닫힘(=railMode 'normal')은 기존 clamp(480,40vw,720) 그대로.
-            style={isMobileReadingView ? undefined : { width: railMode === 'normal' ? 'clamp(480px, 40vw, 720px)' : '480px', flexShrink: 0 }}
+            style={panelLayout.panelStyle}
           >
-            <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} />
+            <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} expanded={readingPanelExpanded} onToggleExpanded={toggleReadingPanelExpanded} />
           </div>
         )}
       </div>

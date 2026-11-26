@@ -108,7 +108,7 @@ for (const c of CASES) {
           expect(m.bannerLeft).toBeGreaterThanOrEqual(m.colLeft);
           expect(m.bannerRight).toBeLessThanOrEqual(m.colRight);
           expect(m.overflowX).toBe(false);
-          expect(m.lines, 'at most five lines even with a long room name on a phone').toBeLessThanOrEqual(5);
+          expect(m.lines, 'at most six lines even with a long room name on a phone (story 5048 T0 ①: the kit text is 16/24 — it was five at 13/20; a Linux font is wider still)').toBeLessThanOrEqual(6);
           const dir = process.env['NOTICE_SHOT_DIR'];
           if (dir) await page.screenshot({ path: path.join(dir, `notice-${c.vp.width}-${room.length > 20 ? 'longname' : 'short'}-${dark ? 'dark' : 'light'}.png`) });
           info.annotations.push({ type: 'numbers', description: JSON.stringify({ lines: m.lines, gap: m.gapToComposer, h: m.bannerH }) });

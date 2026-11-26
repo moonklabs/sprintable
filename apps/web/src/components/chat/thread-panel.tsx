@@ -239,7 +239,7 @@ export function ThreadPanel({
           최상단 세그먼트와 같은 문법). tint는 유나양 확定(2026-08-21) — chat_message는
           의도적 무색(§2263 C-7)이고 메시지는 5계열 어느 의미도 아니라 둘 다 중립 muted bg
           하나로 통일, 구분은 색이 아니라 아이콘+텍스트 weight로만(아래). */}
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-2" data-testid="thread-head">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-0.5" data-testid="thread-head">
         {/* the phone's way back to the room: a thread is a full screen there */}
         <IconButton icon="arrow_back" label={t('title')} onClick={onClose} className="-ml-1 lg:hidden" data-testid="thread-back" />
         <h2 className="m-0 text-ds-body font-semibold text-ds-ink">{t('threadLabel')}</h2>

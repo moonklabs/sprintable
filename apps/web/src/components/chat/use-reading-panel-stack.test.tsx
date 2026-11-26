@@ -91,4 +91,28 @@ describe('useReadingPanelStack — story #2904 동역학 ②history entry "닫�
     await act(async () => { latestApi!.open(entity('b', 'B')); });
     expect(pushStateSpy).toHaveBeenCalledTimes(1);
   });
+
+  // story 5034 (C4) — the third tier: the panel as the whole window (chat beside)
+  it('expanded: 처음엔 꺼져 있고, toggleExpanded가 켜고 끈다 · 패널 안에서 대상을 더 열거나 브레드크럼으로 돌아가도 유지된다', async () => {
+    await act(async () => { root.render(<Harness />); });
+    expect(latestApi!.expanded).toBe(false);
+    await act(async () => { latestApi!.open(entity('a', 'A')); });
+    await act(async () => { latestApi!.toggleExpanded(); });
+    expect(latestApi!.expanded).toBe(true);
+    await act(async () => { latestApi!.open(entity('b', 'B')); });
+    await act(async () => { latestApi!.navigateTo(0); });
+    expect(latestApi!.expanded).toBe(true);
+    await act(async () => { latestApi!.toggleExpanded(); });
+    expect(latestApi!.expanded).toBe(false);
+  });
+
+  it('expanded: 패널을 닫으면 반드시 꺼진다 — 다음에 여는 패널은 옆 패널로 시작한다(넓은 채로 열리지 않는다)', async () => {
+    await act(async () => { root.render(<Harness />); });
+    await act(async () => { latestApi!.open(entity('a', 'A')); });
+    await act(async () => { latestApi!.toggleExpanded(); });
+    await act(async () => { latestApi!.close(); });
+    expect(latestApi!.expanded).toBe(false);
+    await act(async () => { latestApi!.open(entity('b', 'B')); });
+    expect(latestApi!.expanded).toBe(false);
+  });
 });

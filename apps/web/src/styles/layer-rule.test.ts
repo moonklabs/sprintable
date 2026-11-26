@@ -53,6 +53,14 @@ function contrast(a: string, b: string): number {
 }
 
 const themes: Array<[string, Record<string, string>]> = [['라이트', block(':root')], ['다크', block('.dark')]];
+/** 둘 다 무채색인 쌍(키트 결 — story 5048 T0 ①): 색조가 없으니 «채도차» 조항은 성립하지 않는다 → 밝기차로 지킨다(layers.ts neutralChroma) */
+const bothNeutral = (a: string, b: string) => chroma(a) < LAYER_MIN_STEP.neutralChroma && chroma(b) < LAYER_MIN_STEP.neutralChroma;
+/** 열린 카드 ↔ 글 줄: 색조가 있는 쌍은 채도차 ≥ 0.01, 무채색 쌍은 밝기차 ≥ 0.02 */
+function selectedVsOthers(t: Record<string, string>) {
+  const sel = t[LAYER_TOKEN.rowSelected]!; const oth = t[LAYER_TOKEN.rowOthers]!;
+  if (bothNeutral(sel, oth)) expect(Math.abs(lightness(sel) - lightness(oth))).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersLightnessNeutral);
+  else expect(chroma(sel) - chroma(oth)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
+}
 const step = (t: Record<string, string>, from: keyof typeof LAYER_TOKEN, to: keyof typeof LAYER_TOKEN) => Math.abs(lightness(t[LAYER_TOKEN[to]]!) - lightness(t[LAYER_TOKEN[from]]!));
 
 // 4909 AC3 (가설 칸 1단계) — the goal screen is ONE reading area on the PAGE layer; its cards (the hypotheses card included) are the content layer one step above. The old hypotheses card (`bg-muted/20`) measured −.018 / −.004
@@ -94,20 +102,21 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 
-  it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(밝기는 거의 같아 왼쪽 막대와 함께 가른다)', (_name, t) => {
+  it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(무채색 쌍은 밝기차 ≥ 0.02 · 왼쪽 막대와 함께 가른다)', (_name, t) => {
     expect(step(t, 'panel', 'rowSelected')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedOnPanel);
-    expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
+    selectedVsOthers(t);
   });
 
-  it('⭐옛 문제 재현 가드: «바탕 ↔ 떠 있는 면»처럼 면 차이로 가르지 않는 쌍(0.009)이 층 표에 이웃으로 들어오지 않는다', () => {
-    // 라이트에서 바탕과 떠 있는 면의 밝기차는 0.009(선생님 지적의 뿌리) — 그래서 떠 있는 것은 면이 아니라 그림자 + 경계로 가른다고 표에 적었다.
-    expect(step(themes[0]![1], 'page', 'floating')).toBeLessThan(LAYER_MIN_STEP.panelOverPage);
+  it.each(themes)('⭐%s: 떠 있는 면(raised)은 그림자가 없으므로(키트 규칙) 바탕과 면 차이로 갈린다 — 바탕 → 떠 있는 면 ≥ 0.03(옛 값은 라이트 0.009라 그림자 + 경계에 기댔다)', (_name, t) => {
+    expect(step(t, 'page', 'floating')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
   });
 
   it.each(themes)('⭐%s: 글 줄 면 위의 글자(ink · ink-2 · action-text)는 4.5:1 이상 — 새 면 위에서 옛 muted/primary 글자가 못 읽히던 사고 방지', (_name, t) => {
-    for (const row of ['rowOthers', 'rowMine', 'rowSelected'] as const) {
+    for (const row of ['rowOthers', 'rowSelected'] as const) {
       for (const ink of ['ink', 'ink-2', 'action-text']) expect(contrast(t[ink]!, t[LAYER_TOKEN[row]]!), `${ink} on ${row}`).toBeGreaterThanOrEqual(4.5);
     }
+    // story 5048 T0 ①: 내 글 줄(ds-mine)은 진한 바탕이라 그 위 글자는 ds-on-mine 세트(본문 · 둘째 · 링크)다
+    for (const ink of ['on-mine', 'on-mine-2', 'on-mine-link']) expect(contrast(t[ink]!, t[LAYER_TOKEN.rowMine]!), `${ink} on rowMine`).toBeGreaterThanOrEqual(4.5);
   });
 
   it.each(themes)('⭐%s: 보드 카드 안 글자 — 평소 카드는 ink-3(흐린 글)까지, 열린 카드는 ink-2까지 4.5:1 이상(다크에서 ink-3은 열린 카드 면 위 4.29:1이라 모자란다 — codex 4908)', (_name, t) => {
@@ -126,11 +135,11 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     for (const key of Object.keys(LAYER) as Array<keyof typeof LAYER>) expect(LAYER[key]).toBe(`bg-ds-${LAYER_TOKEN[key]}`);
   });
 
-  it.each(themes)('⭐%s: 내 글 ↔ 남의 글은 색조만이 아니라 밝기(ΔL ≥ 0.05)와 채도(ΔC ≥ 0.03) 둘 다 갈린다(연보라 ↔ 연회색 사고 11-12)', (_name, t) => {
+  it.each(themes)('⭐%s: 내 글 ↔ 남의 글은 색조만이 아니라 밝기(ΔL ≥ 0.05)와 채도(ΔC ≥ 0.03) 둘 다 갈린다 — 둘 다 무채색이면 밝기만(연보라 ↔ 연회색 사고 11-12 · 색조 쌍은 그대로)', (_name, t) => {
     const mine = t[LAYER_TOKEN.rowMine]!;
     const others = t[LAYER_TOKEN.rowOthers]!;
     expect(Math.abs(lightness(mine) - lightness(others))).toBeGreaterThanOrEqual(LAYER_MIN_STEP.mineVsOthersLightness);
-    expect(chroma(mine) - chroma(others)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.mineVsOthersChroma);
+    if (!bothNeutral(mine, others)) expect(chroma(mine) - chroma(others)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.mineVsOthersChroma); // 무채색 쌍은 위 밝기차가 지킨다(5048 T0 ①)
   });
 
   // 4913(UI-R5) 한 쪽 틀 — 틀 부품이 이 층 표를 «그대로» 쓴다: 쪽 바탕 = page(셸이 한 번 칠한다 — 틀은 안 칠함), 패널(Card) = panel, 행 안 펼침 = rowOthers, 입력칸 = field. 부품이 다른 면을 쓰면 아래가 빨개진다.
@@ -231,10 +240,10 @@ describe('화면 층 규칙 — 바탕(page) 위 말풍선 · 입력칸 (4916)',
     expect(step(t, 'page', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPage);
   });
 
-  it.each(themes)('⭐%s: 값을 옮긴 뒤에도 옛 선은 그대로 — 내용 칸 → 입력칸 ≥ 0.05 · 카드 면 → 우물 ≥ 0.03 · 열린 카드 ↔ 글 줄 채도차 ≥ 0.01', (_name, t) => {
+  it.each(themes)('⭐%s: 값을 옮긴 뒤에도 옛 선은 그대로 — 내용 칸 → 입력칸 ≥ 0.05 · 카드 면 → 우물 ≥ 0.03 · 열린 카드 ↔ 글 줄 채도차 ≥ 0.01(무채색 쌍은 밝기차 ≥ 0.02)', (_name, t) => {
     expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
     expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
-    expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
+    selectedVsOthers(t);
   });
 
   it('⭐옛 값(라이트 남의 글 #eaeef4)은 바탕 위에서 문턱 아래였다 — 이 시험이 그 값에선 빨개진다(재현 가드)', () => {

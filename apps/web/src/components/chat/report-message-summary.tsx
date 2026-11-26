@@ -45,7 +45,7 @@ export function ReportMessageSummary({
             type="button"
             onClick={() => setExpanded(false)}
             data-copy-ui=""
-            className="mt-1 text-editorial-meta font-medium text-primary hover:underline"
+            className={`mt-1 text-editorial-meta font-medium hover:underline ${isMine ? 'text-ds-on-mine-link' : 'text-primary'}`}
           >
             {t('reportCollapse')}
           </button>
@@ -62,8 +62,15 @@ export function ReportMessageSummary({
       ? 'bg-success'
       : density.verdictTone === 'destructive'
         ? 'bg-destructive'
-        : 'bg-muted-foreground'
+        : isMine ? 'bg-ds-on-mine-2' : 'bg-muted-foreground'
     : null;
+  // story 5048 T0 ①: this card sits on the own-message face (dark in light · white in dark) — the fixed ink / brand colours below would not read there, so own cards use the on-mine set
+  const evidenceLabelClass = isMine ? 'text-ds-on-mine-2' : 'text-ds-ink-2';
+  const nextBoxClass = isMine ? 'border-ds-on-mine-2' : 'border-brand/15 bg-brand/10';
+  const nextArrowClass = isMine ? 'text-ds-on-mine' : 'text-brand-text';
+  const nextLabelClass = isMine ? 'text-ds-on-mine' : 'text-primary';
+  const nextTextClass = isMine ? 'text-ds-on-mine' : 'text-foreground';
+  const viewFullClass = isMine ? 'text-ds-on-mine-link' : 'text-primary';
 
   return (
     // story 4855 — the folded card shows a SUMMARY of the message: copying the whole message takes the source, not these lines (data-copy-source)
@@ -74,7 +81,7 @@ export function ReportMessageSummary({
         // story #5c29454b — 판정 dot(그래픽 신호, 텍스트는 계속 중립)을 chip 앞에 붙인다.
         <div className="mb-1.5 flex items-center gap-1.5">
           {verdictDotClass ? <span className={`size-1.5 shrink-0 rounded-full ${verdictDotClass}`} aria-hidden /> : null}
-          <MaterialChip>{density.kicker}</MaterialChip>
+          <MaterialChip className={isMine ? 'border-ds-on-mine-2 text-ds-on-mine-2' : undefined}>{density.kicker}</MaterialChip>
         </div>
       ) : null}
       <p className={`mb-1.5 text-sm font-medium leading-relaxed [overflow-wrap:anywhere] ${density.kicker ? '' : 'mt-0'}`}>
@@ -82,7 +89,7 @@ export function ReportMessageSummary({
       </p>
       {density.topLevelItems.length > 0 ? (
         <>
-          <p className="mb-1 mt-2.5 text-micro font-bold uppercase tracking-wide text-ds-ink-2">
+          <p className={`mb-1 mt-2.5 text-micro font-bold uppercase tracking-wide ${evidenceLabelClass}`}>
             {t('reportEvidenceLabel')}
           </p>
           <ul className="mb-1.5 flex flex-col gap-0.5">
@@ -95,11 +102,11 @@ export function ReportMessageSummary({
       {density.nextAction ? (
         // story #5c29454b — 「다음 행동」 존. 원문에 명시적 구분자(다음:/→ 다음/Next:)가
         // 있을 때만 뜬다(no-fiction — 지어낸 다음 행동 금지, computeReportDensity 참조).
-        <div className="mt-2.5 flex gap-2 rounded-lg border border-brand/15 bg-brand/10 px-2.5 py-2">
-          <span className="font-bold text-brand" aria-hidden>→</span>
+        <div className={`mt-2.5 flex gap-2 rounded-lg border px-2.5 py-2 ${nextBoxClass}`}>
+          <span className={`font-bold ${nextArrowClass}`} aria-hidden>→</span>
           <p className="[overflow-wrap:anywhere]">
-            <span className="font-semibold text-primary">{t('reportNextActionLabel')}</span>
-            <span className="text-xs text-foreground"> {density.nextAction}</span>
+            <span className={`font-semibold ${nextLabelClass}`}>{t('reportNextActionLabel')}</span>
+            <span className={`text-xs ${nextTextClass}`}> {density.nextAction}</span>
           </p>
         </div>
       ) : null}
@@ -107,7 +114,7 @@ export function ReportMessageSummary({
         type="button"
         onClick={() => setExpanded(true)}
         data-copy-ui=""
-        className="mt-1.5 text-editorial-meta font-semibold text-primary hover:underline"
+        className={`mt-1.5 text-editorial-meta font-semibold hover:underline ${viewFullClass}`}
       >
         {t('reportViewFull')}
       </button>

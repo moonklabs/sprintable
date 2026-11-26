@@ -57,7 +57,7 @@ export type MenuItemProps = Omit<MenuPrimitive.Item.Props, 'className' | 'childr
   variant?: 'default' | 'danger';
 };
 
-/** 항목 한 칸 — 높이 32(폰 44). 키보드로 닿으면 안쪽 링 2px `action`(바탕 색 변화만으로 «지금 여기»를 말하지 않는다). 비활성 = `ink-3`. */
+/** 항목 한 칸 — 높이 40(폰 44 · story 5048 T0 ①: 조작 높이 40 하나). 키보드로 닿으면 안쪽 링 2px `action`(바탕 색 변화만으로 «지금 여기»를 말하지 않는다). 비활성 = `ink-3`. */
 export function MenuItem({ className, children, icon, shortcut, variant = 'default', ...props }: MenuItemProps) {
   return (
     <MenuPrimitive.Item

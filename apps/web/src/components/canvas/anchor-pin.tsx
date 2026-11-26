@@ -26,13 +26,14 @@ export function AnchorPin({ number, state, active, onClick, className, style, re
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       style={style}
-      // 4910 — ds 토큰. 핀은 «그림 위»에 서므로(임의의 색 위) 채움이 흰 · 검은 그림 둘 다에서 3:1 이상이어야 하고(action: 라이트 5.95 / 3.53 · 다크 3.17 / 6.63),
-      // 가운데 톤 그림에서도 갈리게 채움 둘레에 2px 면 색 고리(ring-ds-surface)를 둔다 — 숫자 글(on-action)은 채움 위 4.5:1 이상. 값은 styles/pin-contrast.4910.test.ts가 지킨다.
+      // 4910 — ds 토큰. 핀은 «그림 위»에 서므로(임의의 색 위) 채움이 흰 · 검은 그림 둘 다에서 3:1 이상이어야 한다.
+      // story 5048 T0 ①: 주 행동색이 검정 · 흰이 되면 한쪽 그림에서 사라지므로, 핀은 «어느 그림 위에서도 4.5:1 안팎»인 가운데 톤 전용 토큰(ds-pin #767676 · 글자 ds-on-pin 흰)을 쓴다.
+      // 가운데 톤 그림에서도 갈리게 채움 둘레에 2px 면 색 고리(ring-ds-surface)를 둔다 — 숫자 글은 채움 위 4.5:1 이상. 값은 styles/pin-contrast.4910.test.tsx가 지킨다.
       className={cn(
         'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none text-ds-mono-md font-bold transition-transform',
-        state === 'open' && 'bg-ds-action text-ds-on-action ring-2 ring-ds-surface',
+        state === 'open' && 'bg-ds-pin text-ds-on-pin ring-2 ring-ds-surface',
         state === 'resolved' && 'border-2 border-ds-line-control bg-ds-surface text-ds-ink-3',
-        state === 'draft' && 'animate-pulse border-2 border-dashed border-ds-action bg-ds-action-soft text-ds-action-text',
+        state === 'draft' && 'animate-pulse border-2 border-dashed border-ds-pin bg-ds-action-soft text-ds-action-text',
         active && 'outline-2 outline-offset-2 outline-ds-action',
         onClick && 'hover:scale-110',
         className,

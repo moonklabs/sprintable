@@ -88,7 +88,7 @@ async function mountBarAndHome() {
   await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); });
 }
 
-const railBadge = () => container.querySelector('[data-rail-item="org-briefing"] [data-testid="rail-badge"]')?.textContent ?? null;
+const railBadge = () => container.querySelector('[data-rail-item="depth1-home"] [data-testid="rail-badge"]')?.textContent ?? null;
 const headerLineN = () => /손 필요 (\d+)/.exec(container.querySelector('[data-testid="home-header-line"]')?.textContent ?? '')?.[1] ?? null;
 const needsRows = () => [...container.querySelectorAll('[data-testid="home-section-needs-hand"] [data-row-key]')].map((e) => e.getAttribute('data-row-key'));
 

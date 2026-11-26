@@ -357,7 +357,8 @@
      자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신
      `.proof-surface`(story #7d7634ee, 옛 `.proof-cut` 컷코너 폐지 후 계승)를 쓴다(적용
      표면 목록=doc proofline-system-layer-2969 §1.4가 원 정본, 재질은 doc ea94dac4가 갱신). */
-  --radius: 0.25rem;
+  /* story 5048 T0 ①(선생님 11-26 «키트 결 그대로» · 모서리 단계 8): 0.25rem → 0.5rem(8px). 일반 `rounded-lg` = 8, `rounded-md` = 6.4, `rounded-xl` = 11.2 — 아직 ds 이름(`rounded-ds-*`)으로 안 옮긴 부품이 한 값으로 따라온다. */
+  --radius: 0.5rem;
   /* story #2917: sidebar도 --card/--primary/--muted/--border/--ring과 같은 값을 거울처럼
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
   --sidebar: var(--proof-panel);
@@ -1094,7 +1095,7 @@
 @layer components {
   .dashboard-shell-root {
     --shell-inset: 0.5rem;
-    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
+    --shell-chrome-h: calc(4rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   .dashboard-shell-root[data-topbar-hidden] {
     --shell-chrome-h: calc(2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
