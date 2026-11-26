@@ -21,6 +21,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 const PRESENCE_WORD: Record<PresenceStatus, string> = { online: 'presenceOnline', idle: 'presenceIdle', offline: 'presenceOffline' };
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
+import { IconButton } from '@/components/ds/icon-button';
 import { ROOM_MUTED_EVENT } from '@/components/chat/room-muted-event';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -74,6 +75,8 @@ interface ConversationMeta {
   // mention search work in — not the project the person happens to be looking at: opening a room no longer switches the current project. null = the room has none;
   // undefined = the answer did not say (an older response without the field): not the same as «none», so nothing is asked and nothing is guessed.
   projectId: string | null | undefined;
+  // story 5032 (C2) — this room is its project's channel (one per project): its head says «사람 N · 부를 수 있는 에이전트 N» and has a settings cog. false = a one-to-one / group room (an older server never says).
+  isProjectChannel: boolean;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -170,7 +173,7 @@ export default function ConversationPage() {
       if (!res.ok) { setMetaFailedFor(forId); return; }
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
-        free_response?: boolean; circuit_breaker?: AgentsPausedState | null; project_id?: string | null;
+        free_response?: boolean; circuit_breaker?: AgentsPausedState | null; project_id?: string | null; is_project_channel?: boolean | null;
       };
       if (conversationIdRef.current !== forId) return;
       setMeta({
@@ -183,6 +186,7 @@ export default function ConversationPage() {
         freeResponse: conv.free_response ?? false,
         agentsPaused: conv.circuit_breaker ?? null,
         projectId: conv.project_id,
+        isProjectChannel: conv.is_project_channel === true,
       });
       setMetaFailedFor((f) => (f === forId ? null : f));
     } catch { if (conversationIdRef.current === forId) setMetaFailedFor(forId); }
@@ -333,8 +337,15 @@ export default function ConversationPage() {
 
   // story 4887 (UI-4 screen PR · the approved layout B3) — the room head: name · tag · one line of facts · a chip per participant (an agent's chip says how it is connected, from the presence the page already polls)
   const roomProjectName = meta?.projectId ? (projectMemberships.find((m) => m.projectId === meta.projectId)?.projectName ?? null) : null;
-  const headTag = meta ? (meta.projectId ? t('roomTagProject') : meta.type === 'dm' ? t('dmSection') : t('groupSection')) : null;
-  const headSubline = meta ? [roomProjectName, t('roomHeadPeople', { count: meta.participants.length })].filter(Boolean).join(' · ') : null;
+  const headTag = meta ? (meta.isProjectChannel ? t('roomTagChannel') : meta.projectId ? t('roomTagProject') : meta.type === 'dm' ? t('dmSection') : t('groupSection')) : null;
+  // story 5032 (C2): a channel's head says who is in it at a glance — «사람 N · 부를 수 있는 에이전트 N» (the people are the humans in the room, the agents are the ones that can be called here)
+  const channelPeople = meta ? meta.participants.filter((p) => p.type !== 'agent').length : 0;
+  const channelAgents = meta ? meta.participants.filter((p) => p.type === 'agent').length : 0;
+  const headSubline = meta
+    ? (meta.isProjectChannel
+      ? t('roomHeadChannelFacts', { people: channelPeople, agents: channelAgents })
+      : [roomProjectName, t('roomHeadPeople', { count: meta.participants.length })].filter(Boolean).join(' · '))
+    : null;
   const HEAD_CHIP_MAX = 8;
   const headChips = (meta?.participants ?? []).slice(0, HEAD_CHIP_MAX).map((p) => {
     const name = participantDisplayLabel(p, tc);
@@ -382,6 +393,10 @@ export default function ConversationPage() {
   );
   const headTrailing = meta ? (
     <>
+      {/* story 5032 (C2): the channel's settings cog — the channel's delivery settings (who gets every word) are the same dialog the «⋯» menu opens for any room */}
+      {meta.isProjectChannel ? (
+        <IconButton icon="settings" label={t('roomChannelSettings')} data-testid="room-head-channel-settings" onClick={() => setShowDeliveryContract(true)} />
+      ) : null}
       {/* per-대화 알림 mute (270c87e6): the muted STATE stays visible — a person must see a room is muted without opening anything (story 4887 · P3-a) */}
       {meta.muted ? (
         <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" role="status" data-testid="room-muted-indicator">
