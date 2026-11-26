@@ -36,6 +36,7 @@ from tests.test_1994_backlink_api_realdb import (
     _make_conversation,
     _make_human_member,
     _make_org,
+    _make_org_owner,
     _make_project,
     _session_factory,
     _setup_app_agent,
@@ -555,3 +556,164 @@ async def test_17_an_agent_the_router_delivered_is_reported_even_if_the_particip
         assert again == _decision(agents_delivered=[bots[0]], agents_not_delivered=[bots[1]], humans=0), again  # a sender that comes in by the alias id is taken out as its canonical member
     finally:
         await engine.dispose()
+
+
+# ── the stored key never leaves by any road but the sender's own read (PO: «look first») ──────────────────────────────────────────────
+
+
+async def _tables_holding(Session, needle: str) -> set[str]:
+    """every base table of the schema that holds `needle` in any row's text — the whole-database answer to «where else did the key get written»."""
+    from sqlalchemy import text
+
+    async with Session() as s:
+        names = (await s.execute(text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"))).scalars().all()
+        hits = set()
+        for n in names:
+            found = (await s.execute(text(f'SELECT 1 FROM "{n}" t WHERE t::text LIKE :p LIMIT 1'), {"p": f"%{needle}%"})).first()
+            if found:
+                hits.add(n)
+    return hits
+
+
+async def test_18_the_key_is_stored_on_the_line_only_and_no_other_reader_or_copy_of_the_line_carries_it(monkeypatch):
+    """the fact first: the key IS in the column (`conversation_messages.metadata`) — so what keeps it from a recipient or an observer is the read paths, each pinned here. Read paths: the recipients' list · single ·
+    replies · their live frames (a person's and an agent's connection) · an observer (an organization owner who is not in the room: the admin read) · the events / bell / activity / webhook-delivery rows (a whole-database
+    scan: no table but the line itself holds the key) · the webhook job's arguments."""
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session, people=3, agents=1)
+        (sender, sender_user), (other, other_user), (third, third_user) = humans
+        async with Session() as s:
+            owner_id, owner_user = await _make_org_owner(s, org)
+        from sqlalchemy import text
+
+        import app.services.conversation_webhook as cw
+        from app.main import app
+
+        calls: list[dict] = []
+
+        async def _capture(**kw):
+            calls.append(kw)
+
+        monkeypatch.setattr(cw, "deliver_conversation_message_webhook", _capture)
+        conns = {m: _open_connections(m) for m in (sender, other, third, bots[0])}
+        try:
+            sent = await _as(app, Session, sender_user, org, _say(conv, "to the room", client_nonce="n-18"))
+            assert sent.status_code == 201, sent.text
+            msg_id = sent.json()["data"]["id"]
+            assert sent.json()[KEY] == _decision(agents_not_delivered=bots, humans=2)
+            assert "data" in sent.json() and KEY not in sent.json()["data"]  # the answer's message copy has no key — it rides at the top level
+            frames = {m: _frames(q, msg_id) for m, q in conns.items()}
+        finally:
+            _close_connections(sender, other, third, bots[0])
+
+        # 1 · the key is stored on the line (and so the readers below are what hide it)
+        async with Session() as s:
+            stored = (await s.execute(text("SELECT metadata -> 'delivery_decision' FROM conversation_messages WHERE id = :i"), {"i": msg_id})).scalar_one()
+        assert stored == _decision(agents_not_delivered=bots, humans=2), stored
+        # 2 · only the sender's own live frame has it; a person's and an agent's connection of someone else do not
+        assert [f.get(KEY) for f in frames[sender]] == [_decision(agents_not_delivered=bots, humans=2)]
+        for who in (other, third, bots[0]):
+            assert all(KEY not in f for f in frames[who]), (who, frames[who])
+        # 3 · recipients and the observer read the line by every route: no key
+        await _as(app, Session, sender_user, org, _say(conv, "a reply", thread_id=msg_id))
+        for user in (other_user, third_user, owner_user):
+            async def reads(c):
+                return (await c.get(f"/api/v2/conversations/{conv}/messages"),
+                        await c.get(f"/api/v2/conversations/{conv}/messages/{msg_id}"),
+                        await c.get(f"/api/v2/conversations/{conv}/messages/{msg_id}/replies"))
+            listing, single, replies = await _as(app, Session, user, org, reads)
+            if user is not owner_user:  # a room participant reads all three; the organization owner who is not in the room is turned away by the participant gate (403) — either way no key
+                assert (listing.status_code, single.status_code, replies.status_code) == (200, 200, 200), (listing.text, single.text, replies.text)
+            assert KEY not in listing.text and KEY not in single.text and KEY not in replies.text, "the key left by a read of someone who is not the sender"
+        # 4 · the bot reads (an agent's own key)
+        assert KEY not in (await _as(app, Session, bots[0], org, lambda c: c.get(f"/api/v2/conversations/{conv}/messages"), agent=True)).text
+        # 5 · nothing else was written with it: events · activity · bell · webhook deliveries · … (every table but the line)
+        assert await _tables_holding(Session, KEY) == {"conversation_messages"}
+        # 6 · the webhook job is handed fields, not the line's metadata
+        assert calls and all(KEY not in repr(c) for c in calls), calls
+    finally:
+        await engine.dispose()
+
+
+async def test_19_a_deleted_line_serves_no_decision_even_to_its_sender():
+    engine, Session = await _session_factory()
+    try:
+        org, conv, humans, bots = await _room(Session)
+        (_sender, sender_user) = humans[0]
+        from app.main import app
+
+        sent = await _as(app, Session, sender_user, org, _say(conv, "to be taken back"))
+        msg_id = sent.json()["data"]["id"]
+        assert _row_of(await _list(app, Session, sender_user, org, conv), msg_id)[KEY]  # alive: the sender has it
+        gone = await _as(app, Session, sender_user, org, lambda c: c.delete(f"/api/v2/conversations/{conv}/messages/{msg_id}"))
+        assert gone.status_code == 200, gone.text
+        tomb = _row_of(await _list(app, Session, sender_user, org, conv), msg_id)
+        assert tomb["deleted_at"] is not None and KEY not in tomb, tomb
+        single = await _as(app, Session, sender_user, org, lambda c: c.get(f"/api/v2/conversations/{conv}/messages/{msg_id}"))
+        assert KEY not in single.text, single.text
+    finally:
+        await engine.dispose()
+
+
+def test_20_no_code_path_dumps_or_copies_the_whole_metadata_column():
+    """the audit of «who serialises or copies `msg_metadata` whole», kept as a ratchet: every use of the column in `app/` is a KEYED read (`["k"]` · `.get("k")`), a write, a merge into the same line, or one of the few
+    named exceptions; every new row's metadata is a literal the code builds (never another row's); no ORM line is dumped by `jsonable_encoder` / `_mapping` / `__table__` / `asdict`; raw SQL reads `metadata ->` only.
+    A new road that sends the stored `delivery_decision` / `delivery_withheld` out (they are the sender's alone) fails here and must go through `_msg_payload`'s sender rule or filter them."""
+    import ast
+    import re
+    from pathlib import Path
+
+    import app as app_pkg
+
+    root = Path(app_pkg.__file__).parent
+    bad: list[str] = []
+    merge_files = {"routers/conversations.py", "services/approval_delivery.py"}  # `{**(msg.msg_metadata or {}), K: v}` onto the SAME line / `**existing_root.msg_metadata` back onto the SAME row
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        src = path.read_text()
+        tree = ast.parse(src)
+        parent: dict[int, ast.AST] = {}
+        for p in ast.walk(tree):
+            for c in ast.iter_child_nodes(p):
+                parent[id(c)] = p
+        for node in ast.walk(tree):
+            # new rows: the metadata of a `ConversationMessage(...)` is built here, never taken from another row
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "ConversationMessage":
+                for kw in node.keywords:
+                    if kw.arg == "msg_metadata":
+                        v = kw.value
+                        ok = isinstance(v, (ast.Dict, ast.Constant)) or (isinstance(v, ast.Name) and v.id == "msg_metadata_val") \
+                            or (isinstance(v, ast.Call) and getattr(v.func, "id", "") == "_combined_msg_metadata")
+                        if not ok:
+                            bad.append(f"{rel}:{node.lineno} a new line takes its metadata from {ast.dump(v)[:60]}")
+            if not (isinstance(node, ast.Attribute) and node.attr == "msg_metadata"):
+                continue
+            if isinstance(node.ctx, ast.Store):
+                continue
+            p = parent[id(node)]
+            while isinstance(p, ast.BoolOp):  # `(x.msg_metadata or {})`
+                node, p = p, parent[id(p)]
+            if isinstance(p, ast.Subscript) and p.value is node:
+                continue  # ["key"]
+            if isinstance(p, ast.Attribute) and p.attr == "get":
+                call = parent[id(p)]
+                if isinstance(call, ast.Call) and call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+                    continue  # .get("key")
+            if isinstance(p, ast.Attribute) and p.attr == "label" and rel == "services/backlinks.py":
+                continue  # the select of the column whose `event` key alone is read
+            if isinstance(p, ast.Dict) and rel in merge_files and any(k is None and v is node for k, v in zip(p.keys, p.values)):
+                continue
+            if isinstance(p, ast.UnaryOp) and isinstance(p.op, ast.Not):
+                continue  # `not x.msg_metadata`
+            if isinstance(p, ast.Call) and getattr(p.func, "id", "") == "isinstance":
+                continue
+            if isinstance(p, ast.Call) and getattr(p.func, "id", "") == "_chat_message_event_summary" and rel == "services/backlinks.py":
+                continue  # reads `.get("event")` only
+            bad.append(f"{rel}:{node.lineno} reads the whole stored metadata")
+        if "ConversationMessage" in src:
+            for m in re.finditer(r"jsonable_encoder\(|\._mapping\b|ConversationMessage\.__table__\b|\basdict\(", src):
+                bad.append(f"{rel} dumps a row whole near offset {m.start()}")
+        for m in re.finditer(r"conversation_messages\.metadata(?!\s*->)", src):
+            bad.append(f"{rel} raw SQL reads the whole metadata column near offset {m.start()}")
+    assert not bad, "\n".join(bad)
