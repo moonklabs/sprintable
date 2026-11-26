@@ -135,7 +135,7 @@ const TRUST_BORDER_CLASS: Record<ProofState, string> = {
   blue: 'border-ds-action', amber: 'border-ds-needs-hand-bar', green: 'border-ds-done', red: 'border-ds-failed',
 };
 const TRUST_RING_CLASS: Record<ProofState, string> = {
-  blue: 'ring-ds-action/20', amber: 'ring-ds-needs-hand-bar/20', green: 'ring-ds-done/20', red: 'ring-ds-failed/20',
+  blue: 'ring-ds-action/20', amber: 'ring-ds-needs-hand-bar/20', green: 'ring-ds-done', red: 'ring-ds-failed',
 };
 
 // 4908 — 왼쪽 레일(단계 색 = 그 단계의 신뢰 상태). 공용 Proofline은 게이트 화면과 같이 쓰는 옛 팔레트라 여기서는 ds 색으로 직접 그린다.

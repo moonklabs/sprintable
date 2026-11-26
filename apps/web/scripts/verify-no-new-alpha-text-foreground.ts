@@ -73,29 +73,13 @@ function walk(dir: string, out: string[]): void {
 // triage 필요) — 신규 재유입·증가만 막고 기존 개수는 그대로 얼린다. 값은 **그 file::token
 // 조합이 정확히 몇 번 나오는지**(카디르 QA 지적 — Set 존재 여부가 아니라 개수로 pin).
 export const GRANDFATHER_BASELINE = new Map<string, number>([
-  ['app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::text-foreground/80', 1],
-  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::text-foreground/90', 1],
-  ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::text-foreground/80', 2],
-  ['app/invite/accept/invite-accept-client.tsx::text-foreground/70', 1],
-  ['app/invite/accept/invite-accept-client.tsx::text-foreground/85', 3],
-  ['app/invite/invite-client.tsx::text-foreground/80', 2], // story #4017 CHANGES 2 — page.tsx(서버 래퍼)/invite-client.tsx(client) 분리로 자리 이동.
   // story 4669: app/register/page.tsx::text-foreground/80 (1) left the list — the Google link became the brand button (solid)
   // story 4891: app/login/page.tsx::text-foreground/60 (2) and /80 (2) left the list — the terms line, the divider and the Google link are ds tokens / the ds Button now (solid)
-  ['components/cage/gate-line-context.tsx::text-foreground/90', 1],
-  ['components/cage/stuck-handoff-detail.tsx::text-foreground/80', 1],
-  ['components/cage/stuck-handoff-detail.tsx::text-foreground/85', 1],
-  ['components/cage/stuck-handoff-detail.tsx::text-foreground/90', 1],
-  ['components/docs/doc-breadcrumb.tsx::text-foreground/70', 1],
   ['components/docs/doc-content-renderer.tsx::text-foreground/92', 1],
-  ['components/docs/extensions/embed-node.tsx::text-foreground/80', 1],
-  ['components/docs/policy-doc-browser.tsx::text-foreground/88', 2],
-  ['components/meetings/audio-recorder.tsx::text-foreground/80', 1],
   ['components/nav/notification-bell.tsx::text-foreground/70', 1],
-  ['components/release-notes/whats-new-button.tsx::text-foreground/70', 1],
-  ['components/standup/standup-board-card.tsx::text-foreground/90', 3],
-  ['components/standup/standup-feedback-dialog.tsx::text-foreground/90', 4],
-  ['components/standup/standup-history-section.tsx::text-foreground/80', 1],
-  ['ee/components/billing/billing-tab.tsx::text-foreground/80', 1],
+  // story 5048 ③b-1: the other 19 entries left the list — alpha text colours became opaque tokens (foreground ≥85 → text-foreground · 60–84 → ds-ink-2). Two stay on purpose:
+  //  · doc-content-renderer 92 — the doc body's deliberate dark dimming (story 2967 · its own bodyEmphasis prop) has no opaque token; → the ③d ratchet baseline
+  //  · nav/notification-bell 70 — Min's C1 file (boundary)
 ]);
 
 export interface BaselineDrift {

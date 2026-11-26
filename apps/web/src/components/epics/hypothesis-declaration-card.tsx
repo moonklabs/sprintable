@@ -183,7 +183,7 @@ export function HypothesisDeclarationCard({
             onChange={(e) => onChange({ ...value, statement: e.target.value, drafted: false })}
             onBlur={() => void fetchPrecedents()}
             placeholder={t('declareStatementPlaceholder')}
-            className={cn('min-h-0 bg-background dark:bg-background', value.drafted && 'border-primary/40')}
+            className={cn('min-h-0 bg-background dark:bg-background', value.drafted && 'border-ds-line-control')}
           />
           {value.drafted ? (
             <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-micro text-muted-foreground">
@@ -331,7 +331,7 @@ export function HypothesisDeclarationCard({
                   })}
                   className={cn(
                     'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                    value.linkedHypothesisId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-primary/40',
+                    value.linkedHypothesisId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                   )}
                 >
                   {h.statement}
@@ -340,7 +340,7 @@ export function HypothesisDeclarationCard({
             </div>
           )}
           {value.linkedPreview ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-editorial-meta">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-ds-line-control bg-primary/5 p-2 text-editorial-meta">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
               <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>

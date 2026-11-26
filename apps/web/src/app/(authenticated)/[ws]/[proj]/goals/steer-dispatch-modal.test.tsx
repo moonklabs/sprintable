@@ -59,7 +59,7 @@ describe('SteerDispatchModal — story #3053 에이전트 선택 헤어라인(so
     await act(async () => { agentBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(agentBtn?.className).toContain('bg-transparent');
     expect(agentBtn?.className).not.toContain('bg-proof-blue-soft');
-    expect(agentBtn?.className).toContain('border-proof-blue/40');
+    expect(agentBtn?.className).toContain('border-proof-blue');
   });
 });
 

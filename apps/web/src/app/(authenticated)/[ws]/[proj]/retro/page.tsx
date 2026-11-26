@@ -168,7 +168,7 @@ export default function RetroPage() {
       <div className="focus-inset flex flex-col gap-0">
         {/* Create new session — toggle via TopBar button */}
         {showCreateForm && (
-          <div className="flex-shrink-0 border-b border-border/80 px-4 py-4">
+          <div className="flex-shrink-0 border-b border-border px-4 py-4">
             <div className="flex flex-wrap gap-2">
               <Input
                 id="retro-title-input"

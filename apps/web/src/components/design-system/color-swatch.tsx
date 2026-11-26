@@ -12,7 +12,7 @@ export function ColorSwatch({ token }: { token: ColorToken }) {
   return (
     <div className="flex items-center gap-3">
       <div
-        className="size-8 shrink-0 rounded border border-border/60"
+        className="size-8 shrink-0 rounded border border-border"
         style={{ background: `var(${token.cssVar})` }}
       />
       <div className="min-w-0 flex-1">

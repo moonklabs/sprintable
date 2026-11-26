@@ -45,7 +45,7 @@ describe('StoryCard — 로드맵 PR-A L1(floating 팝업 elev-overlay)', () => 
 describe('StoryCard — story #3049(agent 아바타 헤어라인, soft-fill 폐지)', () => {
   it('agent assignee 아바타가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', () => {
     const markup = render(makeStory(), [{ id: 'a1', name: '에이전트군', type: 'agent' }]);
-    expect(markup).toContain('border-proof-blue/30');
+    expect(markup).toContain('border-proof-blue');
     expect(markup).not.toContain('bg-proof-blue-soft');
     expect(markup).not.toContain('border-accent-claim');
     expect(markup).not.toContain('bg-accent-claim/10');

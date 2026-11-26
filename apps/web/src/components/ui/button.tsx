@@ -9,7 +9,7 @@ const buttonVariants = cva(
   // story #2969 §2 PR-1(doc proofline-system-layer-2969) — focus 링을 시트론으로(버튼 시그니처,
   // 이 컴포넌트 한정 — 전역 --ring/proof-blue는 무변경). radius는 PR-T(#2969 PR-T)의
   // --radius 토큰 하향(0.625rem→0.25rem)을 그대로 상속(rounded-md=calc 파생, 이 파일 무편집).
-  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive dark:aria-invalid:border-destructive dark:aria-invalid:ring-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -27,7 +27,7 @@ const buttonVariants = cva(
         // 통일. --foreground·--destructive-tint 둘 다 테마별 값이라 dark: 짝이 필요 없다. hover
         // 진해짐("눌릴 것 같다")은 새 알파 대신 brightness-95 — StatusBadge(interactive) 관례 동형.
         destructive:
-          "bg-destructive-tint text-foreground hover:brightness-95 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:focus-visible:ring-destructive",
+          "bg-destructive-tint text-foreground hover:brightness-95 focus-visible:border-destructive focus-visible:ring-destructive dark:focus-visible:ring-destructive",
         link: "text-primary underline-offset-4 hover:underline",
         // story #2969 §2 PR-1 — shadow-sm 제거(§1.2: 인라인 표면은 그림자 대신 라인/색).
         // 이 자리는 "색"으로 대응 — hover:bg-primary/90(기존)이 이미 그 축을 맡고 있어

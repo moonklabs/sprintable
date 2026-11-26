@@ -87,7 +87,7 @@ interface KanbanBoardProps {
 
 // story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
 // story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420 · 데스크톱 폭 lg 이상만 — 폰 가로 보기는 그대로)에서 · story 4945: 한계를 520 → 600으로(맥 앱 웹 영역 539에서 열이 카드 2장뿐이었다 — 같은 간격 토큰만, 새 모양 0) 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
-const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:[@media(max-height:600px)]:min-h-9 lg:[@media(max-height:600px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border px-4 py-1.5 lg:[@media(max-height:600px)]:min-h-9 lg:[@media(max-height:600px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
 
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
@@ -1599,8 +1599,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedSprintId
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
+                      ? 'border-ds-line-control bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
                   <span className="max-w-20 truncate">
@@ -1658,8 +1658,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedEpicId
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
+                      ? 'border-ds-line-control bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
                   <span className="max-w-20 truncate">
@@ -1717,8 +1717,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedAssigneeId
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
+                      ? 'border-ds-line-control bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
                   <span className="max-w-20 truncate">
@@ -1803,8 +1803,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     variant="ghost"
                     className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                       selectedLabelIds.length > 0
-                        ? 'border-primary/40 bg-primary/10 text-primary'
-                        : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
+                        ? 'border-ds-line-control bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                     }`}
                   >
                     <span className="max-w-20 truncate">
@@ -1883,7 +1883,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           )}
 
           {/* Board/List toggle */}
-          <div className="flex items-center overflow-hidden rounded-md border border-border/60">
+          <div className="flex items-center overflow-hidden rounded-md border border-border">
             <Button
               type="button"
               variant="ghost"
@@ -1923,7 +1923,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
               그 시각 어휘만 인라인 차용, 신규 발명 아님). list 뷰에선 숨김(trust axis는 board
               렌더 전용, 이번 슬라이스 스코프). */}
           {viewMode === 'board' && (
-            <div className="flex items-center gap-3 border-b border-border/60" role="tablist" aria-label={t('trustAxisView')}>
+            <div className="flex items-center gap-3 border-b border-border" role="tablist" aria-label={t('trustAxisView')}>
               <Button
                 type="button"
                 variant="ghost"
@@ -1981,7 +1981,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           // 임시 브리지(클릭 시 클래식으로 강제 전환)는 신호를 받을 컬럼이 없을 때만 필요했던
           // 처방이라 여기서 제거 — 축 전환 자체가 없으니 유나 #3378 design 판정이 지적한
           // "전환 시각 큐 부재"도 함께 소멸(전환이 안 일어나므로 큐가 지킬 대상이 없음).
-          <div className="shrink-0 border-b border-border/60 px-6 py-4">
+          <div className="shrink-0 border-b border-border px-6 py-4">
             <EmptyState
               icon={<Workflow className="size-8" />}
               title={t('boardEmptyTitle')}
@@ -2185,7 +2185,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
 
       {/* Load more — story #4307: 다시 불러오는 동안엔 옛 커서라 숨긴다. */}
       {!refetching && (nextCursor || epicsNextCursor) ? (
-        <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border/80 p-2">
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border p-2">
           {nextCursor ? (
             <Button
               variant="glass"

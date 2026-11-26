@@ -230,8 +230,8 @@ describe('일반 링크 카드 면 = 첨부 카드와 같은 subtle 면([SID:433
     const surfaceOnly = cardVariants({ surface: 'subtle', radius: 'compact' }).split(/\s+/).filter((cls) => !cls.startsWith('text-'));
     expect(surfaceOnly.length).toBeGreaterThan(0);
     for (const cls of surfaceOnly) expect(a.classList.contains(cls), `${cls} · ${a.className}`).toBe(true);
-    // 예전 손코딩 `rounded-xl border border-border bg-muted/20` — rounded-xl · border는 subtle 면에도 있어 가르는 표지는 이 둘.
-    for (const cls of ['border-border', 'bg-muted/20']) expect(a.classList.contains(cls), `손코딩 ${cls}`).toBe(false);
+    // 예전 손코딩 `rounded-xl border border-border bg-muted/20` — rounded-xl · border는 subtle 면에도 있고, ③b-1(5048) 뒤엔 subtle의 선도 같은 `border-border`(불투명)라 가르는 표지는 `bg-muted/20` 하나(재기준화: 선 표지 제외 — 면 클래스 전부 포함 단언이 위에서 그대로 지킴).
+    for (const cls of ['bg-muted/20']) expect(a.classList.contains(cls), `손코딩 ${cls}`).toBe(false);
     await render('<div data-type="fileAttachment" data-filename="a.txt" data-size="3" data-asset-id="as-1"></div>');
     const button = container.querySelector('[data-type="fileAttachment"] button') as HTMLElement;
     const surface = cardVariants({ surface: 'subtle', radius: 'compact' }).split(/\s+/);

@@ -84,7 +84,7 @@ export function TrustSeal(props: TrustSealProps) {
   }
 
   return (
-    <span className={cn('inline-flex shrink-0 items-center text-success/85', props.className)} title={t('provenCompletion')}>
+    <span className={cn('inline-flex shrink-0 items-center text-success', props.className)} title={t('provenCompletion')}>
       <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
     </span>
   );

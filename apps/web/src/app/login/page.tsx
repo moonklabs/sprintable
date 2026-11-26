@@ -284,7 +284,7 @@ export default function LoginPage() {
         )}
 
         <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
-          <Link href="/forgot-password" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
+          <Link href="/forgot-password" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-ds-ink-2">
             {t('forgotPassword')}
           </Link>
         </p>
@@ -295,7 +295,7 @@ export default function LoginPage() {
               "회원가입"으로 넘어가는 순간 버려짐). OAuth 버튼들(위)과 동일 패턴으로 전파. */}
           <Link
             href={nextParam ? `/register?next=${encodeURIComponent(nextParam)}` : '/register'}
-            className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85"
+            className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-ds-ink-2"
           >
             {t('signUp')}
           </Link>

@@ -84,7 +84,7 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
               human={{ name: '', role: '' }}
             />
           ) : (
-            <div className="border border-dashed border-proof-blue/40 px-3 py-2">
+            <div className="border border-dashed border-proof-blue px-3 py-2">
               <div className="text-editorial-ui font-bold text-proof-blue">{t('trustRailOutcomePending')}</div>
               {measureAfter ? <div className="mt-0.5 font-mono text-editorial-meta text-muted-foreground">{t('outcomeAwaitingMeasure')} · {fmtScheduled(measureAfter)}</div> : null}
             </div>

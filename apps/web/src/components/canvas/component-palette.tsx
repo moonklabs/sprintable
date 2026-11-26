@@ -23,7 +23,7 @@ export function ComponentPalette({ onAdd, disabled, className }: ComponentPalett
             type="button"
             disabled={disabled}
             onClick={() => onAdd(type)}
-            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-left text-editorial-meta text-foreground hover:border-primary/40 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-left text-editorial-meta text-foreground hover:border-ds-line-control hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             {type}
           </button>

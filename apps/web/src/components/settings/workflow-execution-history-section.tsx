@@ -106,7 +106,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                   {logs.map((log) => (
                     <Fragment key={log.id}>
                       <tr
-                        className="border-b border-border/50 cursor-pointer hover:bg-muted/30"
+                        className="border-b border-border cursor-pointer hover:bg-muted/30"
                         onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                       >
                         <td className="py-2 pr-4 text-muted-foreground whitespace-nowrap">
@@ -122,7 +122,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
                         </td>
                       </tr>
                       {expandedId === log.id && log.error_message ? (
-                        <tr className="border-b border-border/50 bg-destructive-tint">
+                        <tr className="border-b border-border bg-destructive-tint">
                           <td colSpan={5} className="px-2 py-2 text-xs text-foreground">
                             {log.error_message}
                           </td>

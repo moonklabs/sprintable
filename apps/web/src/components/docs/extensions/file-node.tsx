@@ -173,7 +173,7 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
           contentEditable={false}
           onClick={() => void handleDownload()}
           disabled={downloading}
-          className="flex-shrink-0 rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:border-info/40 hover:text-info disabled:opacity-60"
+          className="flex-shrink-0 rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:border-info hover:text-info disabled:opacity-60"
           aria-label={t('attachDownload')}
         >
           {downloading ? (

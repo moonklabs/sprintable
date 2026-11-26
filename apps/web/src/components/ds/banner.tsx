@@ -8,11 +8,11 @@ import { IconButton } from './icon-button';
 
 const TONES = {
   /** 안내 · AI 표시 — 부분 로드 «불러온 N건 안에서만» 같은 중립 안내. */
-  info: { icon: 'info', box: 'border-ds-info/40 bg-ds-info-soft', iconColor: 'text-ds-info', role: 'status' },
+  info: { icon: 'info', box: 'border-ds-info bg-ds-info-soft', iconColor: 'text-ds-info', role: 'status' },
   /** 사람이 지금 할 일 — 왼쪽 막대 + touch_app(색만으로 뜻을 싣지 않는다). 막대는 `soft` 바탕 위라 `needs-hand-bar`(2.82:1)가 아니라 글 색 `needs-hand`(5.5:1)를 쓴다. */
   'needs-hand': { icon: 'touch_app', box: 'border-ds-needs-hand-bar/40 bg-ds-needs-hand-soft border-l-4 border-l-ds-needs-hand', iconColor: 'text-ds-needs-hand', role: 'status' },
   /** 이미 실패했거나 막힘. */
-  failed: { icon: 'error', box: 'border-ds-failed/40 bg-ds-failed-soft', iconColor: 'text-ds-failed', role: 'alert' },
+  failed: { icon: 'error', box: 'border-ds-failed bg-ds-failed-soft', iconColor: 'text-ds-failed', role: 'alert' },
   /** 그 밖의 주의 문구 — 색 없이 중립 면 + warning 아이콘(새 호박 색을 만들지 않는다). */
   note: { icon: 'warning', box: 'border-ds-line bg-ds-surface-high', iconColor: 'text-ds-ink-2', role: 'status' },
 } as const satisfies Record<string, { icon: IconName; box: string; iconColor: string; role: 'status' | 'alert' }>;

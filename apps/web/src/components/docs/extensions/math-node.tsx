@@ -61,7 +61,7 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         </div>
 
         {/* LaTeX editor — visible when selected */}
-        <pre className={`border-t border-border/50 p-4 text-xs leading-6 text-foreground font-mono ${showEdit ? '' : 'hidden'}`}>
+        <pre className={`border-t border-border p-4 text-xs leading-6 text-foreground font-mono ${showEdit ? '' : 'hidden'}`}>
           <NodeViewContent />
         </pre>
 

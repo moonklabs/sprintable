@@ -81,7 +81,7 @@ describe('Avatar — story #2887 S2g', () => {
     });
     const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '에이전트');
     expect(badge).toBeTruthy();
-    expect(badge?.className).toContain('border-proof-blue/40');
+    expect(badge?.className).toContain('border-proof-blue');
     expect(badge?.className).not.toContain('bg-proof-blue-soft');
     expect(badge?.className).not.toContain('accent-claim');
   });
@@ -314,7 +314,7 @@ describe('Avatar — story #3092 2단계 커넥터 hover 툴팁', () => {
 });
 
 // story #3092(3단계, 규격 v3 doc cd8983c4) — 코너 배지 3단 폴백 사다리(아이콘/이니셜/"Agent"
-// 텍스트). "Agent" 텍스트 배지는 옛 사각 배지(border-proof-blue/40)로, 아이콘/이니셜은
+// 텍스트). "Agent" 텍스트 배지는 옛 사각 배지(border-proof-blue)로, 아이콘/이니셜은
 // 신규 원형 디스크(rounded-full, ring-2 ring-background)로 서로 다른 마크업이라 구조로
 // 판별한다.
 describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {

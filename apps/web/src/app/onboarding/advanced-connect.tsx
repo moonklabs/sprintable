@@ -340,7 +340,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
 
           {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning. The box is a destructive tint (bg-destructive-tint), so the textarea inside keeps an opaque face (the part is transparent · dark:bg-input/30) */}
           {copyFailedLine ? (
-            <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
+            <div className="space-y-1.5 rounded-md border border-destructive bg-destructive-tint p-3">
               <p role="alert" className="break-keep text-xs text-foreground">{t('copyFailed')}</p>
               {rawShownFor === copyFailedLine ? (
                 <Textarea
@@ -379,7 +379,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
               </div>
             ) : null}
             {rail.verified ? (
-              <div role="status" aria-live="polite" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground" data-testid="advanced-verified">
+              <div role="status" aria-live="polite" className="rounded-md border border-success bg-success/10 px-3 py-2.5 text-sm text-foreground" data-testid="advanced-verified">
                 {rail.firstCallAt
                   ? tOnb.rich('verifiedBannerAt', { t: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })
                   : tOnb('verifiedBanner')}

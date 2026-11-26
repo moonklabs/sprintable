@@ -859,7 +859,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
   const destinationLabel = draft.account_label || `${draft.channel}(${draft.account_id})`;
 
   return (
-    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-editorial-meta">
+    <div className="mt-1.5 space-y-1.5 rounded border border-border p-2 text-editorial-meta">
       <p className="text-muted-foreground">
         {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
       </p>
@@ -929,7 +929,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
     ? draft.account_label || `${draft.channel}(${draft.account_id ?? ''})`
     : null;
   return (
-    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-editorial-meta" data-testid="linked-site-draft">
+    <div className="mt-1.5 space-y-1.5 rounded border border-border p-2 text-editorial-meta" data-testid="linked-site-draft">
       {destinationLabel ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>

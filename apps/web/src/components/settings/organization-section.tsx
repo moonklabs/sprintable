@@ -75,7 +75,7 @@ export function OrganizationSection({ orgInfo, role, name, onNameChange, onSave,
 export function OrgDangerSection({ onOpenDelete }: { onOpenDelete: () => void }) {
   const t = useTranslations('settings');
   return (
-    <SettingsSection title={<span className="text-ds-failed">{t('dangerZone')}</span>} description={t('orgDeleteWarning')} className="border-ds-failed/40">
+    <SettingsSection title={<span className="text-ds-failed">{t('dangerZone')}</span>} description={t('orgDeleteWarning')} className="border-ds-failed">
       <Button variant="danger" onClick={onOpenDelete}>{t('orgDeleteTitle')}</Button>
     </SettingsSection>
   );

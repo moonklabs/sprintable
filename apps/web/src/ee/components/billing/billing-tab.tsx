@@ -426,7 +426,7 @@ export function UpgradeCheckoutDialog({
         {/* story #2606 AC4: 결제 화면에서 환불정책 확인 가능(Toss 심사 요건) — 확인 버튼 바로 위. */}
         <p className="text-xs text-muted-foreground">
           {t('checkoutDialogRefundPolicyPrefix')}{' '}
-          <Link href="/refund-policy" target="_blank" className="underline hover:text-foreground/80">
+          <Link href="/refund-policy" target="_blank" className="underline hover:text-ds-ink-2">
             {t('checkoutDialogRefundPolicyLink')}
           </Link>
           {t('checkoutDialogRefundPolicySuffix')}

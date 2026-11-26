@@ -54,11 +54,11 @@ export default async function TermsPage() {
         </div>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          <Link href="/privacy" className="text-brand-text hover:text-brand-text/85">개인정보처리방침</Link>
+          <Link href="/privacy" className="text-brand-text hover:text-ds-ink-2">개인정보처리방침</Link>
           {' · '}
-          <Link href="/refund-policy" className="text-brand-text hover:text-brand-text/85">환불정책</Link>
+          <Link href="/refund-policy" className="text-brand-text hover:text-ds-ink-2">환불정책</Link>
           {' · '}
-          <Link href="/register" className="text-brand-text hover:text-brand-text/85">회원가입으로 돌아가기</Link>
+          <Link href="/register" className="text-brand-text hover:text-ds-ink-2">회원가입으로 돌아가기</Link>
         </p>
 
         <div className="mt-4 text-center text-xs text-muted-foreground">

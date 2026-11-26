@@ -247,19 +247,19 @@ export function StandupFeedbackDialog({
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-success">{t('doneLabel')}</div>
-                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.done && 'text-muted-foreground')}>
+                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.done && 'text-muted-foreground')}>
                   {entry.done || t('emptySection')}
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-info">{t('planLabel')}</div>
-                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.plan && 'text-muted-foreground')}>
+                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.plan && 'text-muted-foreground')}>
                   {entry.plan || t('emptySection')}
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockersLabel')}</div>
-                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.blockers && 'text-muted-foreground')}>
+                <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.blockers && 'text-muted-foreground')}>
                   {entry.blockers || t('emptySection')}
                 </p>
               </div>
@@ -365,7 +365,7 @@ export function StandupFeedbackDialog({
                         </div>
                       ) : (
                         <>
-                          <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/90">{item.feedback_text}</p>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{item.feedback_text}</p>
                           {isAuthor ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button variant="outline" size="sm" onClick={() => startEditFeedback(item)}>{t('editFeedback')}</Button>

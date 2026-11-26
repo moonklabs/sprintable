@@ -114,7 +114,7 @@ function MergeableItemCard({
       {...(canMerge ? draggable.attributes : {})}
       className={cn(
         'rounded-lg border bg-background p-2.5 transition',
-        droppable.isOver ? 'border-primary ring-1 ring-primary' : 'border-border/60',
+        droppable.isOver ? 'border-primary ring-1 ring-primary' : 'border-border',
         canMerge && 'cursor-grab touch-none active:cursor-grabbing',
       )}
     >
@@ -139,7 +139,7 @@ function MergeableItemCard({
       </div>
 
       {childItems.length > 0 ? (
-        <div className="mt-2 space-y-1.5 border-t border-border/50 pt-2">
+        <div className="mt-2 space-y-1.5 border-t border-border pt-2">
           <Badge variant="chip">{t('mergedCount', { count: childItems.length })}</Badge>
           {childItems.map((child) => (
             <div key={child.id} className="flex items-center justify-between gap-2 pl-1 text-xs text-muted-foreground">
@@ -701,7 +701,7 @@ export default function RetroSessionPage() {
         {/* E-SPRINT-LOOP FE(5feac498) — 셸(stepper 프레임)은 항상 렌더(핸드오프 §4①). session
             도착 전엔 중립 skeleton 칩(어느 단계인지 아직 모름)·도착 후 실제 상태로 hydrate. */}
         {session && currentStage ? (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-3">
             {STAGE_ORDER.map((stage, index) => {
               const currentIndex = STAGE_ORDER.indexOf(currentStage);
               const isActive = stage === currentStage;
@@ -720,7 +720,7 @@ export default function RetroSessionPage() {
             })}
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-6 py-3">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-3">
             {STAGE_ORDER.map((stage) => <Skeleton key={stage} className="h-5 w-14 rounded-md" />)}
           </div>
         )}
@@ -818,7 +818,7 @@ export default function RetroSessionPage() {
                             </div>
 
                             {canAddItems ? (
-                              <div className="space-y-2 border-t border-border/60 pt-3">
+                              <div className="space-y-2 border-t border-border pt-3">
                                 {addItemError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{addItemError}</p> : null}
                                 <OperatorTextarea
                                   value={newItemText[category]}
@@ -882,7 +882,7 @@ export default function RetroSessionPage() {
                         return (
                           // [SID:4311 PR 2 · 유나 390 실측] 담당 칩(nowrap)에 꼬리가 붙으면 폭이 커져 제목이 한두 글자씩 여러 줄로 깨졌다 → 줄 넘김 허용:
                           // 제목이 12rem보다 좁아지면 칩이 제목 아래 줄로 내려간다(칩은 nowrap 그대로 · 꼬리 온전) · 넓은 화면은 한 줄 그대로.
-                          <div key={action.id} data-testid="retro-action-row" className="flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-border/60 bg-background px-3 py-2">
+                          <div key={action.id} data-testid="retro-action-row" className="flex flex-wrap items-start gap-x-2 gap-y-1 rounded-lg border border-border bg-background px-3 py-2">
                             <button
                               type="button"
                               role="checkbox"
@@ -914,7 +914,7 @@ export default function RetroSessionPage() {
                   )}
 
                   {canAddActions ? (
-                    <div className="space-y-2 border-t border-border/60 pt-3">
+                    <div className="space-y-2 border-t border-border pt-3">
                       {addActionError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{addActionError}</p> : null}
                       <div className="flex flex-wrap gap-2">
                         <OperatorInput

@@ -35,7 +35,7 @@ function NodeBox({ node, selectedId, onSelect }: { node: ResolvedNode; selectedI
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'block w-full rounded-md border p-2 text-left text-xs transition-colors',
-        selected ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+        selected ? 'border-primary ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
       )}
     >
       <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{node.type}</span>

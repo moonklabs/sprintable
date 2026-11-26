@@ -206,7 +206,7 @@ export function Avatar({
         // story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
         // 폐지) 채택. border는 이미 있었으니 배경/텍스트색만 교체(단일 정의 재사용).
         <span
-          className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
+          className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue font-bold', AGENT_MARK_FILL_CLASS)}
           style={{ fontSize: Math.max(7, Math.round(textBadgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
           {t('agent')}

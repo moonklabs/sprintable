@@ -416,7 +416,7 @@ export default function EpicDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive-tint transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-destructive px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive-tint transition-colors"
                 aria-label={t('deleteGoal')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -470,7 +470,7 @@ export default function EpicDetailPage() {
                 : epic.outcome_status === 'unmeasurable' ? t('outcomeCapsuleUnmeasurable')
                 : t('outcomeCapsuleUnmeasuredYet')}
             </div>
-            <div className="mt-2 text-editorial-ui leading-snug text-foreground/80">
+            <div className="mt-2 text-editorial-ui leading-snug text-ds-ink-2">
               {epic.success_criteria?.trim() ? epic.success_criteria.split('\n')[0] : t('outcomeCapsuleNoCriteria')}
               {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, displayTimezone)}` : ''}
             </div>

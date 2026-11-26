@@ -12,7 +12,7 @@ export function AccountDangerSection({ onOpenDelete }: { onOpenDelete: () => voi
     <SettingsSection
       title={<span className="text-ds-failed">{t('dangerZone')}</span>}
       description={t('dangerDescription')}
-      className="border-ds-failed/40"
+      className="border-ds-failed"
       id="account-danger"
     >
       <p className="text-ds-body text-ds-ink">{t('deleteAccountDesc')}</p>

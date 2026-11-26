@@ -53,11 +53,11 @@ function HypothesisCard({
       }}
       className={cn(
         // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
-        'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-[var(--elev-card)]',
+        'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-ds-action hover:shadow-[var(--elev-card)]',
         dim && 'opacity-60',
         // story #2543 — 방금 심은 가설(guided 생성 직후) 하이라이트. mockup .hcard.new와
         // 같은 결(브랜드 링 + 배지) — 가설 반증에 빨강을 못 쓰는 규율과 무관한 순수 강조색.
-        justPlanted && 'border-primary ring-2 ring-primary/20',
+        justPlanted && 'border-primary ring-2 ring-ds-line-control',
       )}
     >
       <div className="flex items-center gap-2">
@@ -214,7 +214,7 @@ export function HypothesisEarthLayer({
               // story #2543 — 첫 성공 화면(SSOT ae75a8ff 3화면 중 마지막). 방금 심은 가설이
               // 이 렌더에서 이미 지구층 measuring 그리드에 있으므로(reload 완료), 배너는
               // 그 위에 「생겼다」를 한 번 확인시켜주는 정직한 확인 신호일 뿐이다.
-              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-info/30 bg-info/10 px-4 py-3">
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-info bg-info/10 px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{t('guidedSuccessTitle')}</p>
                   <p className="text-xs text-muted-foreground">{t('guidedSuccessSubtitle')}</p>

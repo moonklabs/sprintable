@@ -237,7 +237,7 @@ export function WorkflowTemplateGallerySection({
         </SectionCardHeader>
         <SectionCardBody>
           <div
-            className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-sm text-foreground"
+            className="flex items-center justify-between gap-2 rounded-md border border-destructive bg-destructive-tint px-3 py-2 text-sm text-foreground"
             data-testid="workflow-gallery-load-error"
           >
             <span>{_t('workflowGalleryLoadFailed')}</span>
@@ -272,7 +272,7 @@ export function WorkflowTemplateGallerySection({
               aria-pressed={selected?.id === def.id}
               disabled={loadingBindings}
               // story #3010(로드맵 P3, L1) — 선택 가능한 인라인 카드는 --elev-card.
-              className={`rounded-lg border p-4 text-left transition hover:border-primary/60 hover:shadow-[var(--elev-card)] disabled:opacity-60 ${
+              className={`rounded-lg border p-4 text-left transition hover:border-ds-action hover:shadow-[var(--elev-card)] disabled:opacity-60 ${
                 selected?.id === def.id ? 'border-primary bg-primary/5' : 'border-border bg-background'
               }`}
             >

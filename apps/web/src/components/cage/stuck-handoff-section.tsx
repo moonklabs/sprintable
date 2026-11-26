@@ -147,7 +147,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
             {t('withdrawn')}
           </div>
         ) : withdraw === 'confirming' ? (
-          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive-tint p-2">
+          <div className="space-y-1.5 rounded-md border border-destructive bg-destructive-tint p-2">
             <p className="text-editorial-meta text-foreground">{t('withdrawIrreversibleWarning')}</p>
             <div className="flex gap-1.5">
               {/* story #3869(AC1) — 이 버튼은 withdraw==='confirming'에서만 렌더되고, 그
@@ -156,7 +156,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
               <Button variant="quiet" className="flex-1 text-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
-              <Button variant="quiet" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
+              <Button variant="quiet" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive" onClick={() => void handleWithdraw()}>
                 <XCircle className="size-3.5 shrink-0" />
                 {t('withdrawConfirm')}
               </Button>

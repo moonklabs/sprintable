@@ -175,11 +175,11 @@ export default function RegisterPage() {
             label={<span id={consentIds.prefix}>{t('tosPrefix')}</span>}
             className="pr-1 text-ds-small text-ds-ink-3"
           />
-          <Link id={consentIds.terms} href="/terms" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
+          <Link id={consentIds.terms} href="/terms" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-ds-ink-2">
             {t('termsOfService')}
           </Link>
           <span id={consentIds.and}>{t('and')}</span>
-          <Link id={consentIds.privacy} href="/privacy" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
+          <Link id={consentIds.privacy} href="/privacy" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-ds-ink-2">
             {t('privacyPolicy')}
           </Link>
         </div>
@@ -305,7 +305,7 @@ export default function RegisterPage() {
 
         <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
           <span>{t('alreadyHaveAccount')}</span>
-          <Link href="/login" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
+          <Link href="/login" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-ds-ink-2">
             {t('signIn')}
           </Link>
         </p>

@@ -47,7 +47,7 @@ function ApproverRow({ status, blocking, name, memberId }: ApproverRowProps) {
   return (
     <div className="flex items-center gap-1.5 text-editorial-meta">
       <Icon className={`size-3 shrink-0 ${view.cls}`} />
-      <RowName className="text-foreground/90" label={name} id={memberId} />
+      <RowName className="text-foreground" label={name} id={memberId} />
       {blocking ? (
         // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
         <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-micro font-medium uppercase text-foreground">

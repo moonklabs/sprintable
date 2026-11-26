@@ -490,7 +490,7 @@ export function DocContentRenderer({
       if (!latex.trim()) return;
       void renderKatex(latex, true, mathRenderFailedLabel).then(({ html: katexHtml, error }) => {
         if (error) {
-          block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive-tint p-3 text-xs text-foreground font-mono">${escapeHtmlText(error)}</div>`;
+          block.innerHTML = `<div class="rounded-lg border border-destructive bg-destructive-tint p-3 text-xs text-foreground font-mono">${escapeHtmlText(error)}</div>`;
         } else {
           // story #2165: 긴 수식도 코드와 같은 성격(가로로 잘리면 사용자가 잘린 줄 모름) — 예외.
           block.innerHTML = `<div class="flex justify-center overflow-x-auto scrollbar-visible py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
@@ -1151,7 +1151,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
     return [
       '<div data-doc-code-shell="true">',
       '<div data-doc-code-actions="true">',
-      `<button type="button" data-doc-copy-button="true" class="transition hover:border-brand/35 hover:text-foreground">${escapeHtmlText(codeCopyLabel)}</button>`,
+      `<button type="button" data-doc-copy-button="true" class="transition hover:border-ds-line-control hover:text-foreground">${escapeHtmlText(codeCopyLabel)}</button>`,
       '</div>',
       `<pre>${inner}</pre>`,
       '</div>',

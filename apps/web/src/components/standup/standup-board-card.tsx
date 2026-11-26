@@ -37,7 +37,7 @@ export function StandupBoardCard({
 
   return (
     // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
-    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-[var(--elev-card)]', isCurrentUser && 'ring-1 ring-brand/40')}>
+    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-[var(--elev-card)]', isCurrentUser && 'ring-1 ring-ds-line-control')}>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
         <div className="min-w-0 flex-1 space-y-1">
@@ -65,20 +65,20 @@ export function StandupBoardCard({
           <>
             <div className="space-y-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-success">{t('doneLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm', entry.done ? 'text-foreground/90' : 'text-muted-foreground')}>
+              <p className={cn('whitespace-pre-wrap text-sm', entry.done ? 'text-foreground' : 'text-muted-foreground')}>
                 {entry.done || t('emptySection')}
               </p>
             </div>
             <div className="space-y-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-brand-text">{t('planLabel')}</div>
-              <p className={cn('whitespace-pre-wrap text-sm', entry.plan ? 'text-foreground/90' : 'text-muted-foreground')}>
+              <p className={cn('whitespace-pre-wrap text-sm', entry.plan ? 'text-foreground' : 'text-muted-foreground')}>
                 {entry.plan || t('emptySection')}
               </p>
             </div>
             {entry.blockers ? (
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockersLabel')}</div>
-                <p className="whitespace-pre-wrap text-sm text-foreground/90">
+                <p className="whitespace-pre-wrap text-sm text-foreground">
                   {entry.blockers}
                 </p>
               </div>
@@ -95,7 +95,7 @@ export function StandupBoardCard({
       </div>
 
       {/* Footer */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {approveCount > 0 ? <Badge variant="success">{t('feedbackApproveCount', { count: approveCount })}</Badge> : null}
           {requestCount > 0 ? <Badge variant="destructive">{t('feedbackRequestChangesCount', { count: requestCount })}</Badge> : null}

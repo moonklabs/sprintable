@@ -3,7 +3,7 @@
  * (블로그 포스트·채널 포스트·성과 보드)이 열 압착으로 한글 세로 쪼개짐·잘림 나던 것의
  * 공용 처방. 열 정의 하나로 두 폭을 그린다: ≥1024(`lg`)는 현행 `<table>` 마크업 그대로
  * (1440 스냅샷 무변 = 회귀 0) · <1024는 카드 리스트(캘린더 카드 선례,
- * `channel-post-card.tsx`와 동형 토큰 — 시안이 적은 `border-border/80 bg-card rounded-lg`는
+ * `channel-post-card.tsx`와 동형 토큰 — 시안이 적은 `border-border bg-card rounded-lg`는
  * 실 코드와 달라 실 코드 쪽을 따름).
  *
  * 🚨전환은 CSS 브레이크포인트로만(표·카드 둘 다 항상 DOM에 있고 Tailwind `lg:` 토글) —

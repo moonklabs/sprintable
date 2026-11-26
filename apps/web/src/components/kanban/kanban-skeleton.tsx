@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 function KanbanToolbarSkeleton() {
   return (
-    <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border/80 px-4">
+    <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex items-center gap-1">
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-6 w-16" />

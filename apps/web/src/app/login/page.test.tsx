@@ -188,7 +188,7 @@ describe('story #4318 — 로그인 화면 링크 글자는 brand-text(밝은 7.
     for (const a of links) {
       const cls = a.className.split(/\s+/);
       expect(cls).toContain('text-brand-text');
-      expect(cls).toContain('hover:text-brand-text/85');
+      expect(cls).toContain('hover:text-ds-ink-2');
       expect(cls).not.toContain('text-brand');
     }
   });

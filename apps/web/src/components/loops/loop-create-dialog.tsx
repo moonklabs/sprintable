@@ -418,7 +418,7 @@ export function LoopCreateDialog({
                     placeholder={t('createLoopStatementPlaceholder')}
                     className={cn(
                       'w-full resize-y rounded-xl border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary',
-                      drafted ? 'border-primary/40' : 'border-border',
+                      drafted ? 'border-ds-line-control' : 'border-border',
                     )}
                   />
                   {drafted ? (
@@ -548,7 +548,7 @@ export function LoopCreateDialog({
                         onClick={() => setLinkedId(h.id)}
                         className={cn(
                           'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                          linkedId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-primary/40',
+                          linkedId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                         )}
                       >
                         {h.statement}
@@ -557,7 +557,7 @@ export function LoopCreateDialog({
                   </div>
                 )}
                 {linkedHypothesis ? (
-                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-2 text-xs text-foreground">
+                  <div className="rounded-lg border border-ds-line-control bg-primary/5 p-2 text-xs text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
                       {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}

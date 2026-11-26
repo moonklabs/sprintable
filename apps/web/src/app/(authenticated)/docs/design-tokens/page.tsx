@@ -71,7 +71,7 @@ export default function DesignTokensPage() {
               Brand swatches resolved inside a scoped{' '}
               <code className="rounded bg-muted px-1 font-mono text-xs">.dark</code> container.
             </p>
-            <div className="dark rounded-xl border border-border/60 bg-background p-6">
+            <div className="dark rounded-xl border border-border bg-background p-6">
               <p className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Brand — dark mode
               </p>
@@ -79,7 +79,7 @@ export default function DesignTokensPage() {
                 {brandGroup.tokens.map((token) => (
                   <div key={token.cssVar} className="flex items-center gap-3">
                     <div
-                      className="size-8 shrink-0 rounded border border-border/60"
+                      className="size-8 shrink-0 rounded border border-border"
                       style={{ background: `var(${token.cssVar})` }}
                     />
                     <div className="min-w-0 flex-1">

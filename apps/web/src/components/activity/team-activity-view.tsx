@@ -383,7 +383,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 정규화됨 pill + 캡션 바 (팀활동 탭만 — 시각/의미 차별화 생명선) */}
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/80 bg-muted/40 px-[22px] py-[11px]">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/40 px-[22px] py-[11px]">
           <span
             className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-info"
             style={{
@@ -397,7 +397,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
         </div>
 
         {/* 필터바 (감사 로그 필터바 톤 정합 — actor·object·verb·time range·AC③) */}
-        <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
+        <div className="flex-shrink-0 border-b border-border px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
               <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />

@@ -132,7 +132,7 @@ export function KanbanColumn({
   // AC1: WIP 초과 시 빨간 강조
   // 4908 — 열 면은 «내용 칸 층»(LAYER.panel)이 기본이다. WIP 초과(붉은 면) · 놓을 수 있는 열(녹색 테두리)은 같은 속성을 다른 값으로 덮어야 해서(Tailwind 생성 순서상 클래스 두 개가 겹치면 뒤쪽이 이긴다) 면 · 테두리를 한 곳에서 하나만 고른다.
   const colClass = wipExceeded
-    ? 'border-transparent bg-destructive-tint ring-1 ring-destructive/30'
+    ? 'border-transparent bg-destructive-tint ring-1 ring-destructive'
     : isOver && isValidTarget
       ? `${LAYER.panel} border-ds-line ring-1 ring-ds-action`
       : isValidTarget
@@ -273,7 +273,7 @@ export function KanbanColumn({
       </div>
 
       {!collapsed && composing ? (
-        <div className="mb-2 rounded-xl border border-primary/30 bg-background/50 p-2">
+        <div className="mb-2 rounded-xl border border-ds-line-control bg-background/50 p-2">
           <Input
             autoFocus
             value={draftTitle}

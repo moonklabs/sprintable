@@ -532,7 +532,7 @@ export function ApprovalsQueue() {
   const hasPerm = perm.shown.length > 0;
   const loadErrorBlock = (
     <div
-      className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
+      className="rounded-xl border border-dashed border-destructive bg-destructive-tint px-4 py-5 text-center"
       data-testid="gate-inbox-load-error"
     >
       <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
@@ -559,7 +559,7 @@ export function ApprovalsQueue() {
   const renderItemCard = (item: GateInboxItem, index: number) => {
         if (isHitl(item)) {
           return (
-            <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
+            <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info bg-info/5 px-4 py-3">
               <div className="flex w-full flex-wrap items-center gap-1.5">
                 <Badge variant="chip">{t('hitlRequestBadge')}</Badge>
                 <span className="ml-auto shrink-0 text-micro text-muted-foreground">{formatAge(item.created_at, t)}</span>
@@ -568,7 +568,7 @@ export function ApprovalsQueue() {
               <p className="line-clamp-2 text-editorial-meta text-muted-foreground">{item.prompt}</p>
               {gateErrors[item.id] ? (
                 <p
-                  className="rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
+                  className="rounded-lg border border-destructive bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
                   role="alert"
                   aria-live="assertive"
                   data-testid="hitl-resolve-error"
@@ -584,7 +584,7 @@ export function ApprovalsQueue() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+                    className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
                     aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateReject') })}
@@ -892,7 +892,7 @@ export function ApprovalsQueue() {
             ) : null}
             {gateErrors[gate.id] ? (
               <p
-                className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
+                className="mt-2 rounded-lg border border-destructive bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
                 role="alert"
                 aria-live="assertive"
               >
@@ -915,7 +915,7 @@ export function ApprovalsQueue() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
+                  className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive sm:order-1 sm:flex-none"
                   disabled={disabled}
                   onClick={rejectOnClick}
                   aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigReject') })}

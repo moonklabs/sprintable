@@ -784,7 +784,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-foreground' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info bg-info/8 text-foreground' : 'border-border bg-muted/50 text-muted-foreground'}`}>
             {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>

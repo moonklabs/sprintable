@@ -45,7 +45,7 @@ export default function IntegrationsPage() {
       <p className="mt-1 text-xs text-muted-foreground">{t('integrationsDescription')}</p>
 
       {banner === 'success' ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 p-2.5 text-xs">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-success bg-success/5 p-2.5 text-xs">
           <CheckCircle2 className="size-4 shrink-0 text-success" />
           <span className="flex-1 text-foreground">{t('ghBannerSuccess')}</span>
           <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>
