@@ -545,6 +545,7 @@ export default function ConversationPage() {
           conversationId={conversation_id}
           agents={meta.participants.filter((p) => p.type === 'agent').map((p) => ({ member_id: p.member_id, name: p.name ?? null, avatar_url: p.avatar_url ?? null, runtime_type: p.runtime_type ?? null }))}
           canEditAgents={canEditChannelAgents}
+          roomFreeResponse={meta.freeResponse}
           onClose={() => setShowChannelSettings(false)}
           onOpenMyNotifications={() => { setShowChannelSettings(false); setDeliveryFromCog(true); setShowDeliveryContract(true); }}
           returnFocusRef={channelCogRef}

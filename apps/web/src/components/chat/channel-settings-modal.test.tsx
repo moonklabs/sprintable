@@ -31,11 +31,11 @@ function stub(prefs: Record<string, ReturnType<typeof pref>[]>, putOk = true, pu
   vi.stubGlobal('fetch', fetchMock);
 }
 
-async function mount(agents: ChannelAgent[], canEdit = true, onOpenMy = () => {}) {
+async function mount(agents: ChannelAgent[], canEdit = true, onOpenMy = () => {}, roomFreeResponse = false) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <ChannelSettingsModal conversationId={CONV} agents={agents} canEditAgents={canEdit} onClose={() => {}} onOpenMyNotifications={onOpenMy} />
+        <ChannelSettingsModal conversationId={CONV} agents={agents} canEditAgents={canEdit} roomFreeResponse={roomFreeResponse} onClose={() => {}} onOpenMyNotifications={onOpenMy} />
       </NextIntlClientProvider>,
     );
   });
@@ -100,5 +100,53 @@ describe('ChannelSettingsModal (story 5032)', () => {
     expect(document.querySelector('[data-testid="channel-receive-all-empty"]')).not.toBeNull();
     await act(async () => { (document.querySelector('[data-testid="channel-open-my-notifications"]') as HTMLButtonElement).click(); });
     expect(opened).toBe(1);
+  });
+});
+
+describe('ChannelSettingsModal — codex round 1 (story 5032)', () => {
+  it('⭐ the room-wide «receive every word» switch is ON → every agent shows on, locked, with the line that says why (a per-agent off would not take effect)', async () => {
+    stub({ 'ag-1': [pref('mentions')] });
+    await mount([A, B], true, () => {}, true);
+    expect(document.querySelector('[data-testid="channel-receive-all-room-wide"]')).not.toBeNull(); // reverted → an «off» that does nothing
+    for (const r of rows()) {
+      expect(switchOf(r).getAttribute('aria-checked')).toBe('true');
+      expect(switchOf(r).hasAttribute('data-disabled') || switchOf(r).getAttribute('aria-disabled') === 'true' || (switchOf(r) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  it('⭐ a FAILED read is not «off»: the row stays locked and says it could not be read', async () => {
+    fetchMock = vi.fn(async () => ({ ok: false, status: 403, json: async () => null }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount([A]);
+    const row = rows()[0]!;
+    expect(row.querySelector('[role="alert"]')?.textContent).toBe('설정을 불러오지 못했어요.');
+    expect(switchOf(row).hasAttribute('data-disabled') || switchOf(row).getAttribute('aria-disabled') === 'true' || (switchOf(row) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('⭐ a parent that hands over a NEW agents array on every render does not make the window read again', async () => {
+    stub({});
+    const make = () => [{ ...A }, { ...B }];
+    const view = (agents: ChannelAgent[]) => (
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <ChannelSettingsModal conversationId={CONV} agents={agents} canEditAgents onClose={() => {}} onOpenMyNotifications={() => {}} />
+      </NextIntlClientProvider>
+    );
+    await act(async () => { root.render(view(make())); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const reads = () => fetchMock.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method !== 'PUT').length;
+    const before = reads();
+    expect(before).toBe(2);
+    await act(async () => { root.render(view(make())); });
+    await act(async () => { root.render(view(make())); });
+    for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
+    expect(reads()).toBe(before); // reverted (the effect depending on the array) → 6 reads
+  });
+
+  it('a saved switch keeps the value the person chose (the save, not an older read, has the last word)', async () => {
+    stub({});
+    await mount([A]);
+    await act(async () => { switchOf(rows()[0]!).click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(switchOf(rows()[0]!).getAttribute('aria-checked')).toBe('true');
   });
 });

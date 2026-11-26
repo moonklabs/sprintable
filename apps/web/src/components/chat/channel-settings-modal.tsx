@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -27,42 +27,50 @@ export interface ChannelSettingsModalProps {
   agents: ChannelAgent[];
   /** only an organization owner / admin may read or change another member's level (the server's rule) */
   canEditAgents: boolean;
+  /** the room-wide «free response» switch is ON (the room's delivery window): the delivery rule then lifts EVERY agent of the room from «only when called» to «every word» — a per-agent «off» would not take effect, so the switches are shown as on, locked, with a line saying why */
+  roomFreeResponse?: boolean;
   onClose: () => void;
   /** opens the room's own delivery window («내 알림 설정») */
   onOpenMyNotifications: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-type RowState = { on: boolean; loading: boolean; saving: boolean; error: string | null };
+type RowState = { on: boolean; loading: boolean; saving: boolean; error: string | null; unreadable?: boolean };
 
-export function ChannelSettingsModal({ conversationId, agents, canEditAgents, onClose, onOpenMyNotifications, returnFocusRef }: ChannelSettingsModalProps) {
+export function ChannelSettingsModal({ conversationId, agents, canEditAgents, roomFreeResponse = false, onClose, onOpenMyNotifications, returnFocusRef }: ChannelSettingsModalProps) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const [rows, setRows] = useState<Record<string, RowState>>(() => Object.fromEntries(agents.map((a) => [a.member_id, { on: false, loading: canEditAgents, saving: false, error: null }])));
 
   const patch = useCallback((id: string, next: Partial<RowState>) => setRows((r) => ({ ...r, [id]: { ...(r[id] ?? { on: false, loading: false, saving: false, error: null }), ...next } })), []);
 
-  // read each agent's own level for this channel (one read per agent — a channel has a handful)
+  // the agents as an id list: a parent that hands over a NEW array every render must not make this window read again (and overwrite a switch the person just changed)
+  const agentIds = agents.map((a) => a.member_id);
+  const agentKey = agentIds.join(',');
+  const savingRef = useRef<Set<string>>(new Set());
+
+  // read each agent's own level for this channel (one read per agent — a channel has a handful). A failed read is NOT «off»: the row stays locked and says it could not be read.
   useEffect(() => {
     if (!canEditAgents) return;
     let cancelled = false;
-    for (const a of agents) {
-      fetchWithAuth(`/api/notification-preferences?member_id=${encodeURIComponent(a.member_id)}`)
-        .then((r) => (r.ok ? r.json() : null))
+    for (const id of agentKey ? agentKey.split(',') : []) {
+      fetchWithAuth(`/api/notification-preferences?member_id=${encodeURIComponent(id)}`)
+        .then((r) => { if (!r.ok) throw new Error('read failed'); return r.json(); })
         .then((json: { data?: { data?: PreferenceItem[] } | PreferenceItem[] } | null) => {
-          if (cancelled) return;
+          if (cancelled || savingRef.current.has(id)) return; // a switch being saved keeps the person's value, not the server's older one
           const list = !json ? [] : Array.isArray(json.data) ? json.data : (json.data as { data?: PreferenceItem[] } | undefined)?.data ?? [];
           const mine = list.find((p) => p.scope_type === 'conversation' && p.scope_id === conversationId && p.channel === EDITED_CHANNEL);
-          patch(a.member_id, { on: mine?.level === 'all', loading: false });
+          patch(id, { on: mine?.level === 'all', loading: false, unreadable: false, error: null });
         })
-        .catch(() => { if (!cancelled) patch(a.member_id, { loading: false, error: t('channelSettingsLoadFailed') }); });
+        .catch(() => { if (!cancelled) patch(id, { loading: false, unreadable: true, error: t('channelSettingsLoadFailed') }); });
     }
     return () => { cancelled = true; };
-  }, [agents, canEditAgents, conversationId, patch, t]);
+  }, [agentKey, canEditAgents, conversationId, patch, t]);
 
   const toggle = async (agentId: string) => {
     const prev = rows[agentId]?.on ?? false;
     const next = !prev;
+    savingRef.current.add(agentId);
     patch(agentId, { on: next, saving: true, error: null });
     try {
       const res = await fetchWithAuth('/api/notification-preferences', {
@@ -79,9 +87,11 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, on
         patch(agentId, { on: prev, saving: false, error: backendMsg && res.status >= 400 && res.status < 500 ? backendMsg : t('channelSettingsSaveFailed') });
         return;
       }
-      patch(agentId, { saving: false });
+      patch(agentId, { on: next, saving: false });
     } catch {
       patch(agentId, { on: prev, saving: false, error: t('channelSettingsSaveFailed') });
+    } finally {
+      savingRef.current.delete(agentId);
     }
   };
 
@@ -99,6 +109,7 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, on
           <section aria-labelledby="channel-receive-all-h" data-testid="channel-receive-all">
             <h3 id="channel-receive-all-h" className="text-xs font-medium text-foreground">{t('channelReceiveAllTitle')}</h3>
             <p className="mt-1 text-editorial-meta text-muted-foreground">{t('channelReceiveAllHint')}</p>
+            {canEditAgents && roomFreeResponse ? <p className="mt-1 text-editorial-meta text-foreground" data-testid="channel-receive-all-room-wide">{t('channelReceiveAllRoomWide')}</p> : null}
             {!canEditAgents ? (
               <p className="mt-2 text-editorial-meta text-muted-foreground" data-testid="channel-receive-all-admin-only">{t('channelReceiveAllAdminOnly')}</p>
             ) : agents.length === 0 ? (
@@ -113,17 +124,17 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, on
                       <Card className="px-3 py-2">
                       <div className="flex items-center justify-between gap-3">
                         <span className="flex min-w-0 items-center gap-2">
-                          <Avatar name={a.name ?? null} label={name} avatarUrl={a.avatar_url ?? null} actorType="agent" size={24} runtimeType={a.runtime_type ?? null} />
+                          <Avatar name={a.name ?? null} label={name} avatarUrl={a.avatar_url ?? null} actorType="agent" size={24} runtimeType={a.runtime_type ?? null} decorative />
                           <span className="min-w-0 truncate text-xs font-medium text-foreground">{name}</span>
                         </span>
                         <Switch
-                          checked={row.on}
-                          disabled={row.loading || row.saving}
+                          checked={row.on || roomFreeResponse}
+                          disabled={row.loading || row.saving || row.unreadable || roomFreeResponse}
                           onCheckedChange={() => void toggle(a.member_id)}
                           aria-label={t('channelReceiveAllSwitch', { name })}
                         />
                       </div>
-                      {row.on ? <p className="mt-1 text-editorial-meta text-muted-foreground" data-testid="channel-receive-all-token-note">{t('channelReceiveAllTokenNote')}</p> : null}
+                      {row.on || roomFreeResponse ? <p className="mt-1 text-editorial-meta text-muted-foreground" data-testid="channel-receive-all-token-note">{t('channelReceiveAllTokenNote')}</p> : null}
                       {row.error ? <p role="alert" className="mt-1 text-xs text-destructive">{row.error}</p> : null}
                       </Card>
                     </li>

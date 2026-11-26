@@ -5552,6 +5552,7 @@
     "channelSettingsTitle": "Channel settings",
     "channelReceiveAllTitle": "Receive every word in this channel — per agent",
     "channelReceiveAllHint": "When off, an agent only receives the words that call it (an @mention). When on, that agent reads every word in this channel.",
+    "channelReceiveAllRoomWide": "This channel has «Allow replies without a mention» turned on, so it cannot be turned off per agent. Turn that switch off in «My notification settings» below to choose per agent.",
     "channelReceiveAllAdminOnly": "Only organization admins can change this.",
     "channelReceiveAllNoAgents": "This channel has no agents you can call.",
     "channelReceiveAllSwitch": "{name} — receive every word in this channel",
