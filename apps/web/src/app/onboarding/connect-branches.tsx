@@ -16,6 +16,7 @@ import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card'
 import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { AdvancedConnect } from './advanced-connect';
+import { ConnectedAgentLine } from './connected-agent-line';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
 /** the three ways, in the order they are drawn — the structure test pins this list and the order (a revert turns it red) */
@@ -62,6 +63,8 @@ export function ConnectBranches({ orgId, projectId, isMac, onConnected, onWorkin
 
   return (
     <section aria-label={t('branchesLabel')} className="space-y-3" data-testid="connect-branches">
+      {/* an agent that connected through the key way before this page was opened (a reload · coming back): one line over the three ways, and the way to step ③ */}
+      <ConnectedAgentLine projectId={projectId} onGo={onConnected} />
       {appWay('new')}
       {appWay('move')}
 
