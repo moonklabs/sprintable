@@ -71,6 +71,28 @@ describe('one refused card, two viewers', () => {
     }
     expect(seen[0]).toBe(seen[1]);
   });
+  it('a viewer who cannot read the object gets the ordinary hidden card BYTE FOR BYTE — nothing in the page (a test id, a class) says this card was a refused one; loading and error frames too', async () => {
+    for (const kind of ['story', 'kanban']) {
+      const object = (s: number) => json(s);
+      stub({ object: object(404) }); await show(refused({ kind })); const asRefused = container.innerHTML;
+      stub({ object: object(404) }); await show({ kind, ref: ID }); const ordinary = container.innerHTML;
+      expect(asRefused, kind).toBe(ordinary);
+      expect(asRefused).not.toContain('refused');
+    }
+    stub({ object: json(503) }); await show(refused()); const e1 = container.innerHTML;
+    stub({ object: json(503) }); await show({ kind: 'story', ref: ID }); expect(e1).toBe(container.innerHTML);
+  });
+  it('a viewer who can read the object can OPEN it in the side panel (the card is not a dead end)', async () => {
+    stub();
+    const open = vi.fn();
+    await act(async () => { root.render(null); });
+    const { ReadingPanelProvider } = await import('../reading-panel-context');
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ReadingPanelProvider value={{ open, close: () => {}, navigateTo: () => {} }}><ChatCard card={refused()} /></ReadingPanelProvider></NextIntlClientProvider>); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { (container.querySelector('button') as HTMLButtonElement).click(); });
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open.mock.calls[0]![0]).toMatchObject({ kind: 'entity', entityType: 'story', entityId: ID, title: '결제 화면 고치기' });
+  });
   it('the SAME message draws two different cards for two viewers (the object readable → the refusal story; not readable → «찾을 수 없어요»)', async () => {
     stub(); await show(refused()); const a = container.textContent;
     stub({ object: json(404) }); await show(refused()); const b = container.textContent;

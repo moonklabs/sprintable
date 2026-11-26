@@ -1,7 +1,9 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { fetchEntityCardSummary } from '@/components/chat/embed-card';
+import { fetchEntityCardSummary, getEntityHref } from '@/components/chat/embed-card';
+import { useReadingPanel } from '@/components/chat/reading-panel-context';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
 import { CardFrame } from './card-frame';
 import { EntityCardFace } from './entity-card';
@@ -43,13 +45,20 @@ async function loadRefused(kind: EntityCardKind | 'kanban', ref: string, agentId
 
 export function RefusedCard({ kind, refId, agentId }: { kind: EntityCardKind | 'kanban'; refId: string; agentId: string }) {
   const t = useTranslations('chats');
+  const flatHref = useFlatHref();
+  const panel = useReadingPanel();
   const { read, retry } = useCardRead(`refused:${kind}:${refId}:${agentId}`, () => loadRefused(kind, refId, agentId));
-  if (read.state !== 'ready') return <CardFrame state={read.state} onRetry={retry} data-testid="chat-card-refused" />;
+  // every state that is not «the viewer can read it» is EXACTLY the ordinary card's frame (same test id, same markup): nothing in the page tells a viewer who cannot read the object that this card was a refused one
+  if (read.state !== 'ready') return <CardFrame state={read.state} onRetry={retry} data-testid={`chat-card-${kind}`} />;
   const r = read.value;
+  const entity = kind === 'kanban' ? 'sprint' : kind;
+  // 대상-프로젝트: 카드에는 «종류 + 참조» 둘뿐이라 대상의 프로젝트를 모른다 — 이 주소는 옆 패널 아래쪽 «전체 보기» 폴백이고, 열린 미리보기가 응답의 자기 프로젝트로 다시 싣는다(EmbedCard와 같은 이유)
+  const href = getEntityHref(entity, refId, flatHref);
+  const open = panel ? () => panel.open({ kind: 'entity', entityType: entity, entityId: refId, title: r.title, status: r.status, href }) : undefined;
   const shown = r.seers.slice(0, NAMES_MAX);
   return (
     <div className="flex min-w-0 flex-col gap-1.5" data-testid="chat-card-refused">
-      <EntityCardFace kind={kind === 'kanban' ? 'sprint' : kind} title={r.title ?? refId} statusLabel={null} />
+      <EntityCardFace kind={entity} title={r.title ?? refId} statusLabel={null} onOpen={open} />
       <div className="flex min-w-0 flex-col gap-0.5 px-1 text-ds-small text-ds-ink-2">
         {r.agentName ? <p className="m-0 break-words">{t('refusedWho', { name: r.agentName })}</p> : null}
         <p className="m-0 break-words">{t('refusedNote')}</p>
