@@ -14,17 +14,19 @@ export type CardSummaryState =
   | { state: 'error' };
 
 export function useCardSummary(kind: string, ref: string): { summary: CardSummaryState; retry: () => void } {
-  const [summary, setSummary] = useState<CardSummaryState>({ state: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const key = `${kind}:${ref}:${attempt}`;
+  // the answer is kept WITH the read it belongs to: a different card (or a retry) has no answer yet, so «loading» is derived — nothing sets state synchronously inside the effect
+  const [done, setDone] = useState<{ key: string; value: Exclude<CardSummaryState, { state: 'loading' }> } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setSummary({ state: 'loading' });
     fetchEntityCardSummary(kind, ref).then(
-      (r) => { if (!cancelled) setSummary({ state: 'ready', title: r.title, status: r.status }); },
-      (e: unknown) => { if (!cancelled) setSummary(e instanceof EntitySummaryError && (e.status === 404 || e.status === 403) ? { state: 'hidden' } : { state: 'error' }); },
+      (r) => { if (!cancelled) setDone({ key, value: { state: 'ready', title: r.title, status: r.status } }); },
+      (e: unknown) => { if (!cancelled) setDone({ key, value: e instanceof EntitySummaryError && (e.status === 404 || e.status === 403) ? { state: 'hidden' } : { state: 'error' } }); },
     );
     return () => { cancelled = true; };
-  }, [kind, ref, attempt]);
+  }, [kind, ref, key]);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const summary: CardSummaryState = done && done.key === key ? done.value : { state: 'loading' };
   return { summary, retry };
 }

@@ -24,9 +24,9 @@ export function EntityCard({ kind, refId }: { kind: EntityCardKind; refId: strin
 
   const title = summary.title ?? refId;
   const statusLabel = summary.status ? translateEntityStatus(kind, summary.status) : null;
-  const open = panel
-    ? () => panel.open({ kind: 'entity', entityType: kind, entityId: refId, title: summary.title, status: summary.status, href: getEntityHref(kind, refId, flatHref) })
-    : undefined;
+  // 대상-프로젝트: 카드에는 «종류 + 참조» 둘뿐이라 대상의 프로젝트를 모른다 — 이 주소는 옆 패널 아래쪽 «전체 보기» 폴백이고, 열린 미리보기가 응답의 자기 프로젝트로 다시 싣는다(embed-card의 EmbedCard와 같은 이유)
+  const href = getEntityHref(kind, refId, flatHref);
+  const open = panel ? () => panel.open({ kind: 'entity', entityType: kind, entityId: refId, title: summary.title, status: summary.status, href }) : undefined;
   return <EntityCardFace kind={kind} title={title} statusLabel={statusLabel} onOpen={open} />;
 }
 

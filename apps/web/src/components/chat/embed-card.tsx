@@ -149,8 +149,10 @@ export async function fetchEntityCardSummary(kind: string, id: string): Promise<
   if (!url) throw new EntitySummaryError(404);
   const res = await fetchWithAuth(url);
   if (!res.ok) throw new EntitySummaryError(res.status);
-  const json = (await res.json()) as { data?: Record<string, unknown> } & Record<string, unknown>;
-  const d = (json.data ?? json) as Record<string, unknown>;
+  // the BFF's one shape is `{ data: {...} }` — read that and nothing else (a body that is not it is a fault worth a «try again», never a guessed card)
+  const body = ((await res.json()) as { data?: unknown }).data;
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new EntitySummaryError(502);
+  const d = body as Record<string, unknown>;
   return { title: textOrNull(d.title) ?? textOrNull(d.name) ?? textOrNull(d.statement), status: textOrNull(d.status) };
 }
 

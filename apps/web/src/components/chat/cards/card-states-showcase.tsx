@@ -11,32 +11,23 @@ import { EntityCardFace } from './entity-card';
  * desktop width (1440). It draws the same parts a message does (CardFrame · EntityCardFace) with fixed example words — no reads. Shown on /design-system.
  */
 type Shown = 'ready' | 'loading' | 'empty' | 'error' | 'hidden' | 'long';
-const SHOWN: readonly Shown[] = ['ready', 'loading', 'empty', 'error', 'hidden', 'long'];
 export const SHOWCASE_WIDTHS = { narrow: 390, wide: 1440 } as const;
 
 export function CardStatesShowcase() {
   const t = useTranslations('chats');
   const [shown, setShown] = useState<Shown>('ready');
   const [wide, setWide] = useState(false);
-  // (literal key calls — the dead-key scan reads those)
-  const stateLabel = (s: Shown): string => {
-    switch (s) {
-      case 'ready': return t('cardStateReady');
-      case 'loading': return t('cardStateLoading');
-      case 'empty': return t('cardStateEmpty');
-      case 'error': return t('cardStateError');
-      case 'hidden': return t('cardStateHidden');
-      case 'long': return t('cardStateLong');
-    }
-  };
   const frameState: CardFrameState = shown === 'long' ? 'ready' : shown;
   return (
     <section data-testid="chat-card-states-showcase" className="mt-6 min-w-0">
       <h2 className="m-0 mb-2 text-ds-card-title font-semibold text-ds-ink">{t('cardShowcaseTitle')}</h2>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        {SHOWN.map((s) => (
-          <Button key={s} size="md" variant={shown === s ? 'primary' : 'secondary'} aria-pressed={shown === s} onClick={() => setShown(s)}>{stateLabel(s)}</Button>
-        ))}
+        <Button size="md" variant={shown === 'ready' ? 'primary' : 'secondary'} aria-pressed={shown === 'ready'} onClick={() => setShown('ready')}>{t('cardStateReady')}</Button>
+        <Button size="md" variant={shown === 'loading' ? 'primary' : 'secondary'} aria-pressed={shown === 'loading'} onClick={() => setShown('loading')}>{t('cardStateLoading')}</Button>
+        <Button size="md" variant={shown === 'empty' ? 'primary' : 'secondary'} aria-pressed={shown === 'empty'} onClick={() => setShown('empty')}>{t('cardStateEmpty')}</Button>
+        <Button size="md" variant={shown === 'error' ? 'primary' : 'secondary'} aria-pressed={shown === 'error'} onClick={() => setShown('error')}>{t('cardStateError')}</Button>
+        <Button size="md" variant={shown === 'hidden' ? 'primary' : 'secondary'} aria-pressed={shown === 'hidden'} onClick={() => setShown('hidden')}>{t('cardStateHidden')}</Button>
+        <Button size="md" variant={shown === 'long' ? 'primary' : 'secondary'} aria-pressed={shown === 'long'} onClick={() => setShown('long')}>{t('cardStateLong')}</Button>
         <Button size="md" variant={wide ? 'secondary' : 'primary'} aria-pressed={!wide} onClick={() => setWide(false)}>{t('cardWidthNarrow')}</Button>
         <Button size="md" variant={wide ? 'primary' : 'secondary'} aria-pressed={wide} onClick={() => setWide(true)}>{t('cardWidthWide')}</Button>
       </div>
