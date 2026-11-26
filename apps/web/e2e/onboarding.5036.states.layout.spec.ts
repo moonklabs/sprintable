@@ -165,6 +165,13 @@ async function clean(page: Page, label: string, phone: boolean) {
   }
 }
 
+/** a short step keeps its card at the TOP of a phone (no floating in the middle of a tall empty screen) and stays centred from the desktop width (Two-Pass 11-26) */
+async function cardPlace(page: Page, phone: boolean, label: string) {
+  const box = (await card(page).boundingBox())!;
+  if (phone) expect(box.y, `${label}: the card floats ${Math.round(box.y)} px below the top of a phone`).toBeLessThanOrEqual(40);
+  else expect(box.y, `${label}: the card is not centred on the desktop (top ${Math.round(box.y)} px)`).toBeGreaterThan(100);
+}
+
 const LONG_NAME = 'Maximilian-Alexander-von-Hohenzollern'; // 37 letters, no space to break at (+ «의 조직» / «\'s organization»)
 const LONG_PROJECT = '가나다라마바사아자차카타파하'.repeat(9); // 126 syllables, no space
 
@@ -181,6 +188,7 @@ for (const width of [1440, 390]) {
       expect(await stepStates(page)).toEqual(['current', 'upcoming', 'upcoming']);
       await expect(page.getByTestId('onboarding-project-name')).toHaveValue('내 프로젝트');
       await clean(page, 'project default', phone);
+      await cardPlace(page, phone, 'project default');
       await shot(page, card(page), `5036-1-project-default-${tag}`);
     });
 
@@ -237,7 +245,26 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('connect-branch-move')).toBeVisible();
       await expect(page.getByTestId('connect-branch-key')).toBeVisible();
       await clean(page, 'connect default', phone);
+      // the prerequisite note of the key way is read at the kit's small size, not at 12 px (Two-Pass 11-26): no text of it under 14 px
+      const noteSizes = await page.getByTestId('advanced-prereq').locator('p').evaluateAll((els) => els.map((e) => parseFloat(getComputedStyle(e).fontSize)));
+      expect(Math.min(...noteSizes), `the prerequisite note is drawn under 14 px: ${noteSizes.join(' · ')}`).toBeGreaterThanOrEqual(14);
+      await expect(page.getByTestId('connect-branches-connected')).toHaveCount(0); // no agent is verified → no line (nothing is asserted that is not known)
       await shot(page, card(page), `5036-2-connect-default-${tag}`);
+    });
+
+    test(`② connect · an agent connected before the page was opened (the line over the three ways) · ${tag}`, async ({ page }) => {
+      const verified = { data: { verified: true, rail: [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'done' }, { state: 'mcp_reachable', status: 'done' }, { state: 'verified', status: 'done' }] } };
+      await open(page, { width, api: { 'GET /api/team-members': { data: [{ id: 'agent-7', name: LONG_NAME }] }, 'GET /api/agents/agent-7/verification-status': verified } });
+      await expect(page.getByTestId('connect-branches-connected')).toBeVisible();
+      await expect(page.getByTestId('connect-branches-connected-name')).toHaveText(LONG_NAME);
+      // the line stands OVER the three ways, which are all still there
+      const line = (await page.getByTestId('connect-branches-connected').boundingBox())!;
+      const first = (await page.getByTestId('connect-branch-new').boundingBox())!;
+      expect(line.y + line.height, 'the line is above the first way').toBeLessThanOrEqual(first.y + 1);
+      for (const id of ['connect-branch-new', 'connect-branch-move', 'connect-branch-key']) await expect(page.getByTestId(id)).toBeVisible();
+      expect(await stepStates(page)).toEqual(['done', 'current', 'upcoming']); // still step ②: the line is a way on, not a jump
+      await clean(page, 'connect connected-before', phone);
+      await shot(page, card(page), `5036-2-connect-connected-before-${tag}`);
     });
 
     test(`② connect · loading (the key way is making the agent) · ${tag}`, async ({ page }) => {
@@ -285,6 +312,7 @@ for (const width of [1440, 390]) {
       expect(await stepStates(page)).toEqual(['done', 'done', 'current']);
       await expect(page.getByTestId('onboarding-first-chat-start')).toHaveText('첫 지시 보내기');
       await clean(page, 'chat default', phone);
+      await cardPlace(page, phone, 'chat default');
       await shot(page, card(page), `5036-3-chat-default-${tag}`);
     });
 

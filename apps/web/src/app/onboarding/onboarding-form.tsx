@@ -507,7 +507,8 @@ export function OnboardingForm({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    // a phone keeps the card at the top (a short step — ① · ③ — no longer floats in the middle of a tall empty screen); from the desktop width it stays centred
+    <div className="flex min-h-screen items-start justify-center bg-background px-4 py-6 lg:items-center lg:py-0">
       <Card className="w-full max-w-lg space-y-6 p-6 sm:p-8" data-testid="onboarding-card">
         {/* story 5036: the straight line's strip — three steps, ds Stepper (check · ring · number + a hidden state word: never colour alone). Arrival, invites and the places that are not a browser have none. */}
         {lineIndex !== null ? (

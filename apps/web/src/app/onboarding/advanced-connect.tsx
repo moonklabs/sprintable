@@ -250,8 +250,8 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
   const pressShown = phase !== 'ready' || revoked;
   const prereqBlock = (
     <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3" data-testid="advanced-prereq">
-      <p className="break-keep text-xs font-medium text-foreground">{t('prereqTitle')}</p>
-      <p className="break-keep text-xs text-muted-foreground">{t('prereqBody')}</p>
+      <p className="break-keep text-ds-small font-medium text-foreground">{t('prereqTitle')}</p>
+      <p className="break-keep text-ds-small text-muted-foreground">{t('prereqBody')}</p>
       <ul className="space-y-1">
         {MANUAL_CONNECT_RUNTIME_IDS.map((rt, i) => (
           <li key={rt} className="space-y-1.5" data-testid={`advanced-install-${rt}`}>
@@ -269,14 +269,12 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
           </li>
         ))}
       </ul>
-      <p className="break-keep text-xs text-muted-foreground" data-testid="advanced-prereq-app">{t('prereqApp')}</p>
+      <p className="break-keep text-ds-small text-muted-foreground" data-testid="advanced-prereq-app">{t('prereqApp')}</p>
     </div>
   );
 
   return (
     <div className="space-y-3" data-testid="advanced-connect">
-      <p className="break-keep text-xs text-muted-foreground">{t('lead')}</p>
-
       {phase !== 'ready' || revoked ? (
         <div className="space-y-1.5">
           <Button
