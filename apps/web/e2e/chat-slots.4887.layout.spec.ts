@@ -174,6 +174,27 @@ for (const width of [256, 300, 320]) { // 256 = the kit's thread slot from xl (s
   });
 }
 
+// ── story 5031 (C1 2b): the reading panel is a fixed slot from lg up (it was a 50/50 split with the room: `isMobileReadingView` was true whenever a panel was open) and full screen on a phone ──
+test('[SID:5031] the reading panel: 40vw clamped to 480–720 on a desktop (1440 → 576 · 1600 → 640 · 2200 → 720), the whole width on a phone (390)', async ({ page }) => {
+  const view = read('components/chat/chat-view.tsx');
+  const m = /className="(motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden flex-1 lg:w-\(--reading-w\)[^"]*)"/.exec(view);
+  expect(m, 'the reading panel wrapper classes are in chat-view.tsx').not.toBeNull();
+  const w = /'--reading-w': railMode === 'normal' \? '([^']+)'/.exec(view)?.[1];
+  expect(w, 'the width variable is in chat-view.tsx').toBe('clamp(480px, 40vw, 720px)');
+  const roomClass = slotClasses().mainOpen; // the room column's own classes while a right panel is open (hidden on a phone, from lg a flex column)
+  const sheet = await css([m![1]!, roomClass, 'flex', 'flex min-h-0 flex-1 overflow-hidden'].join(' ').split(/\s+/).filter(Boolean));
+  const measure = async (vw: number) => {
+    await page.setViewportSize({ width: vw, height: 700 });
+    await page.setContent(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${sheet}</style></head><body style="margin:0"><div class="flex min-h-0 flex-1 overflow-hidden" style="width:${vw}px;height:600px"><div id="room" class="${roomClass}"></div><div id="reading" class="${m![1]}" style="--reading-w:${w}"></div></div></body></html>`);
+    return { reading: await page.locator('#reading').evaluate((e) => Math.round(e.getBoundingClientRect().width)), room: await page.locator('#room').evaluate((e) => Math.round(e.getBoundingClientRect().width)) };
+  };
+  expect((await measure(1440)).reading, '1440').toBe(576); // reverted (isMobileReadingView → flex-1) → half of the width
+  expect((await measure(1600)).reading, '1600').toBe(640);
+  expect((await measure(2200)).reading, '2200').toBe(720);
+  const phone = await measure(390);
+  expect(phone.reading, 'a phone: the panel takes the whole width').toBe(390); // the room is hidden by its own class on a phone
+});
+
 // ── the composer's popovers inside the narrower thread slot ──────────────────────────────────────────────────────────────────────────────────
 for (const width of [300, 320]) {
   test(`[SID:4887] the real thread panel at ${width} px: the command list and the storage picker open INSIDE the slot (the panel clips what leaves it)`, async ({ page }) => {
