@@ -88,7 +88,8 @@ describe('every kind of card has its states in the showcase (PO: «카드마다 
     await act(async () => { btn('빼기').click(); });
     for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
     await act(async () => { btn('긴 글').click(); });
-    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요');
+    expect(container.textContent).toContain('이 프로젝트에 들어 있지 않아요'); // the press is kept …
+    expect(container.textContent).toContain('아주 긴 제목이'); expect(container.textContent).not.toContain('오르테가'); // … and the name followed the toggle (the old code showed the first name here)
   });
   it('the refused card (what a viewer who CAN read the object sees) names the agent and who can see it; «볼 수 없음» is the plain «찾을 수 없어요» line (what everyone else sees)', async () => {
     await act(async () => { btn('거절').click(); });
