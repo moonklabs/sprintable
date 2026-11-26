@@ -136,3 +136,58 @@ async def test_cancel_cross_project_blocked_no_mutation():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("flip_to", ["active", "review"])
+async def test_cancel_waits_on_concurrent_flip_then_409_row_untouched(flip_to):
+    """codex BLOCKER 회귀 — 두 세션: A 가 행을 FOR UPDATE 로 쥐고 planning→active/review 로 바꾸는 동안 B 의 cancel 은
+    잠금에서 기다리고, A 가 commit 한 뒤 «신선한» 행을 보고 409 를 돌려준다(잠금이 없으면 낡은 planning 을 보고 접어 버림)."""
+    import asyncio
+
+    from sqlalchemy import select
+    from app.main import app
+    from app.models.pm import Sprint
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_a = await _seed_sprint(s, seeded["org_id"], seeded["project_a_id"], "planning", velocity=None)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+
+        holder = Session()
+        try:
+            # A: 행 잠금을 쥔다(아직 planning · 미커밋).
+            locked = (await holder.execute(
+                select(Sprint).where(Sprint.id == sprint_a).with_for_update()
+            )).scalar_one()
+            assert locked.status == "planning"
+
+            client = _client_for(app)
+            try:
+                cancel_task = asyncio.create_task(client.post(f"/api/v2/sprints/{sprint_a}/cancel"))
+                # B 가 잠금에서 막혀 있어야 한다(끝나면 안 됨).
+                done, _ = await asyncio.wait({cancel_task}, timeout=1.5)
+                assert not done, "cancel 이 행 잠금을 기다리지 않고 끝남(FOR UPDATE 없음)"
+
+                # A: 동시 활성화/검토 전환을 커밋 → 잠금 해제.
+                locked.status = flip_to
+                locked.velocity = 11
+                await holder.commit()
+
+                resp = await asyncio.wait_for(cancel_task, timeout=15)
+            finally:
+                await client.aclose()
+        finally:
+            await holder.close()
+
+        assert resp.status_code == 409, resp.text
+        reloaded = await _reload(Session, sprint_a)
+        assert reloaded.status == flip_to, "동시 전환된 스프린트는 접히면 안 됨"
+        assert reloaded.velocity == 11, "velocity 가 0 으로 덮이면 안 됨"
+        assert reloaded.outcome_status == "n_a"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

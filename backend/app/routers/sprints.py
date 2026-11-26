@@ -545,8 +545,12 @@ async def cancel_planning_sprint(
     # 경로(velocity 0·채점 없음·overlay/human gate 대상 아님)를 그대로 써 불변식을 한 곳에 둔다.
     from app.services.sprint import SprintTransitionError, transition_sprint
     from app.services.member_resolver import resolve_member
+    # 행 잠금: 상태 확인(planning)과 접기(transition_sprint)가 한 트랜잭션에서 원자적이어야 한다 — 잠금 없이
+    # 읽으면 그 사이 동시 활성화로 active/review 가 된 스프린트를 transition_sprint 가 합법 전이(active→closed)로
+    # 채점 · human gate 없이 닫아 버린다. repo.get_for_update(FOR UPDATE + populate_existing: 세션에 남은 낡은 ORM
+    # 상태 덮어씀)로 잠근 «신선한» 행에서 project-scope · status 를 판정하고, commit 까지 잠금을 쥔다.
     # activate/close 와 동형: project 접근권 검증(SEC-S8 CC) — org 내 타 project sprint 접기 차단.
-    _sprint_for_scope = await SprintRepository(db, org_id).get(id)
+    _sprint_for_scope = await SprintRepository(db, org_id).get_for_update(id)
     if _sprint_for_scope is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
     caller = await resolve_member(auth, org_id, db, project_id=_sprint_for_scope.project_id)

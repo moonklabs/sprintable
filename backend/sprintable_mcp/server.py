@@ -672,7 +672,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_confirm_hypothesis",
      "[일감] 가설 확정(active) 또는 폐기(killed). active 확정은 휴먼 경로만.",
      ConfirmHypothesisInput, confirm_hypothesis),
-    # Sprints (7) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
+    # Sprints (8) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
     ("sprintable_list_sprints",
      "[일감] 스프린트 목록 조회.",
      ListSprintsInput, list_sprints),
