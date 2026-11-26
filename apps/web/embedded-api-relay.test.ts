@@ -475,6 +475,8 @@ describe('the MCP door at the same name (SPRINTABLE_MCP_ORIGIN)', () => {
           setTimeout(() => res.end('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"last":true}}\n\n'), 2500);
           return;
         }
+        // like the real door: no `Authorization: Bearer <key>` on a /mcp POST → 401 with a Bearer challenge (the relay adds no key of its own and takes none away)
+        if (!/^bearer\s+\S+/i.test(String(req.headers['authorization'] ?? ''))) { res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' }); res.end('{"error":{"code":"unauthorized"}}'); return; }
         res.writeHead(200, { 'Content-Type': 'application/json', 'X-Echo-Host': String(req.headers['host']) });
         res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { bodyLength: body.length } }));
       });
@@ -545,6 +547,18 @@ describe('the MCP door at the same name (SPRINTABLE_MCP_ORIGIN)', () => {
     expect(first.data).toContain('"first":true');
     expect(first.ms, 'the first event comes long before the response ends (2.5 s)').toBeLessThan(800);
     expect(first.encoding).toBeUndefined();
+  });
+
+  it('a request WITHOUT a key is answered by the MCP door as it would answer a local caller — a 401 and its challenge come back; the relay adds no credential (no cookie or other header becomes a key) and a malformed one is refused too', async () => {
+    const mcp = await mcpDoor();
+    process.env['SPRINTABLE_MCP_ORIGIN'] = `http://127.0.0.1:${mcp.port}`;
+    const d = await door(['relay', 'guard']);
+    for (const extra of ['', 'Cookie: sprintable_session=abc; token=zzz\r\n', 'Authorization: Basic dXNlcjpwYXNz\r\n', 'Authorization: Bearer\r\n']) {
+      const out = await raw(d.port, post(d.port, '/mcp', '{}', extra));
+      expect(status(out), JSON.stringify(extra)).toBe('401'); expect(out.toLowerCase()).toContain('www-authenticate: bearer');
+    }
+    expect(mcp.seen).toHaveLength(4); // all four reached the MCP door (it is the one that refuses) …
+    for (const s_ of mcp.seen) expect(s_.headers['authorization'] === undefined || !/^bearer\s+\S+/i.test(String(s_.headers['authorization']))).toBe(true); // … and none of them carried a key that was not the client's
   });
 
   it('without SPRINTABLE_MCP_ORIGIN `/mcp` goes to Next as before (a desktop app\'s own server never relays it) — the MCP door is not reached', async () => {
