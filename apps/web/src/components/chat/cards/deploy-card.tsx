@@ -41,7 +41,7 @@ export function DeployCard({ agentId }: { agentId: string }) {
 
 type Phase = { kind: 'idle' } | { kind: 'confirm' } | { kind: 'busy' } | { kind: 'error'; why: Exclude<DeployWriteResult, 'ok'> };
 
-export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged }: { summary: DeploySummary; canAct: boolean; projectId: string | null; agentId: string; onChanged: (next: DeployWrite['applied']) => void }) {
+export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged, actions }: { summary: DeploySummary; canAct: boolean; projectId: string | null; agentId: string; onChanged: (next: DeployWrite['applied']) => void; /** the two writes — the real project-access calls by default; the state showcase passes local stand-ins (no network) */ actions?: { place: () => Promise<DeployWrite>; takeOut: () => Promise<DeployWrite> } }) {
   const t = useTranslations('chats');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const busy = phase.kind === 'busy';
@@ -64,7 +64,7 @@ export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged 
         {buttons && phase.kind !== 'confirm' ? (
           <div className="flex flex-wrap items-center gap-2">
             {summary.access === 'none' && summary.active ? (
-              <Button variant="primary" loading={busy} disabled={busy} onClick={() => void act(() => placeAgent(projectId!, agentId))}>{t('deployAllow')}</Button>
+              <Button variant="primary" loading={busy} disabled={busy} onClick={() => void act(actions?.place ?? (() => placeAgent(projectId!, agentId)))}>{t('deployAllow')}</Button>
             ) : null}
             {summary.access === 'granted' && summary.recordId ? (
               <Button variant="secondary" disabled={busy} onClick={() => setPhase({ kind: 'confirm' })}>{t('deployRevoke')}</Button>
@@ -75,7 +75,7 @@ export function DeployCardFace({ summary, canAct, projectId, agentId, onChanged 
           <div className="flex flex-col gap-2" role="group" aria-label={t('deployRevoke')}>
             <p className="m-0 text-ds-small text-ds-ink-2">{t('deployRevokeAsk')}</p>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="danger" onClick={() => void act(() => takeAgentOut(projectId!, summary.recordId!))}>{t('deployRevokeYes')}</Button>
+              <Button variant="danger" onClick={() => void act(actions?.takeOut ?? (() => takeAgentOut(projectId!, summary.recordId!)))}>{t('deployRevokeYes')}</Button>
               <Button variant="quiet" onClick={() => setPhase({ kind: 'idle' })}>{t('deployRevokeNo')}</Button>
             </div>
           </div>

@@ -44,7 +44,6 @@ async function loadRefused(kind: EntityCardKind | 'kanban', ref: string, agentId
 }
 
 export function RefusedCard({ kind, refId, agentId }: { kind: EntityCardKind | 'kanban'; refId: string; agentId: string }) {
-  const t = useTranslations('chats');
   const flatHref = useFlatHref();
   const panel = useReadingPanel();
   const { read, retry } = useCardRead(`refused:${kind}:${refId}:${agentId}`, () => loadRefused(kind, refId, agentId));
@@ -55,14 +54,20 @@ export function RefusedCard({ kind, refId, agentId }: { kind: EntityCardKind | '
   // 대상-프로젝트: 카드에는 «종류 + 참조» 둘뿐이라 대상의 프로젝트를 모른다 — 이 주소는 옆 패널 아래쪽 «전체 보기» 폴백이고, 열린 미리보기가 응답의 자기 프로젝트로 다시 싣는다(EmbedCard와 같은 이유)
   const href = getEntityHref(entity, refId, flatHref);
   const open = panel ? () => panel.open({ kind: 'entity', entityType: entity, entityId: refId, title: r.title, status: r.status, href }) : undefined;
-  const shown = r.seers.slice(0, NAMES_MAX);
+  return <RefusedCardFace kind={entity} title={r.title ?? refId} agentName={r.agentName} seers={r.seers} onOpen={open} />;
+}
+
+/** the drawn refusal (no reads) — what a viewer who CAN read the object sees; also what the state showcase draws */
+export function RefusedCardFace({ kind, title, agentName, seers, onOpen }: { kind: EntityCardKind; title: string; agentName: string | null; seers: string[]; onOpen?: () => void }) {
+  const t = useTranslations('chats');
+  const shown = seers.slice(0, NAMES_MAX);
   return (
     <div className="flex min-w-0 flex-col gap-1.5" data-testid="chat-card-refused">
-      <EntityCardFace kind={entity} title={r.title ?? refId} statusLabel={null} onOpen={open} />
+      <EntityCardFace kind={kind} title={title} statusLabel={null} onOpen={onOpen} />
       <div className="flex min-w-0 flex-col gap-0.5 px-1 text-ds-small text-ds-ink-2">
-        {r.agentName ? <p className="m-0 break-words">{t('refusedWho', { name: r.agentName })}</p> : null}
+        {agentName ? <p className="m-0 break-words">{t('refusedWho', { name: agentName })}</p> : null}
         <p className="m-0 break-words">{t('refusedNote')}</p>
-        {shown.length > 0 ? <p className="m-0 break-words" data-testid="chat-card-refused-seers">{t('refusedSeers', { names: shown.join(' · ') })}{r.seers.length > shown.length ? ' …' : ''}</p> : <p className="m-0 break-words">{t('refusedNoSeers')}</p>}
+        {shown.length > 0 ? <p className="m-0 break-words" data-testid="chat-card-refused-seers">{t('refusedSeers', { names: shown.join(' · ') })}{seers.length > shown.length ? ' …' : ''}</p> : <p className="m-0 break-words">{t('refusedNoSeers')}</p>}
       </div>
     </div>
   );
