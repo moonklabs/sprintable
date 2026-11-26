@@ -138,14 +138,14 @@ const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v.tr
  * story 5034 (C4) — the title and status of an entity AS THE VIEWER may read it: one read through the viewer's own session (the server decides, the card never does).
  * A kind with no read of its own here (a gate · kanban · deploy — their own parts) is «not found», never a made-up card.
  */
-export async function fetchEntityCardSummary(kind: string, id: string): Promise<{ title: string | null; status: string | null }> {
+export async function fetchEntityCardSummary(kind: string, id: string): Promise<{ title: string | null; status: string | null; projectId: string | null }> {
   if (kind === 'doc' || kind === 'artifact') {
     const res = await fetchWithAuth(`${kind === 'doc' ? '/api/docs/preview?q=' : '/api/visual-artifacts/preview?id='}${encodeURIComponent(id)}`);
     if (!res.ok) throw new EntitySummaryError(res.status);
     // the preview's one shape is `{ data: {...} }` — a 200 with any other body is a retryable fault, never a «ready» card that shows the reference (the first review of PR 5940)
     const data = ((await res.json()) as { data?: unknown }).data;
     if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new EntitySummaryError(502);
-    return { title: textOrNull((data as { title?: unknown }).title), status: null };
+    return { title: textOrNull((data as { title?: unknown }).title), status: null, projectId: textOrNull((data as { projectId?: unknown }).projectId) };
   }
   const url = ENTITY_API[kind]?.(id);
   if (!url) throw new EntitySummaryError(404);
@@ -155,7 +155,7 @@ export async function fetchEntityCardSummary(kind: string, id: string): Promise<
   const body = ((await res.json()) as { data?: unknown }).data;
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new EntitySummaryError(502);
   const d = body as Record<string, unknown>;
-  return { title: textOrNull(d.title) ?? textOrNull(d.name) ?? textOrNull(d.statement), status: textOrNull(d.status) };
+  return { title: textOrNull(d.title) ?? textOrNull(d.name) ?? textOrNull(d.statement), status: textOrNull(d.status), projectId: textOrNull(d.project_id) };
 }
 
 // story #2614 AC2 — 멘션 합성 가능 8타입(story/doc/epic/task/sprint/artifact/hypothesis/

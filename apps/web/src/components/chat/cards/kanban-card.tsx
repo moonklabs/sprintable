@@ -51,7 +51,7 @@ export function KanbanCardFace({ summary, onOpen }: { summary: KanbanSummary; on
         {KANBAN_COLUMNS.map((c) => (
           <li key={c} data-column={c} className="flex min-w-0 flex-col items-start gap-0.5 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-2 py-1">
             <span className="text-ds-small text-ds-ink-3 break-keep">{translateEntityStatus('story', c)}</span>
-            <span className="text-ds-body font-medium text-ds-ink">{summary.counts[c]}</span>
+            <span className="text-ds-body font-medium text-ds-ink">{summary.counts[c]}{summary.hasMore ? '+' : ''}</span>
           </li>
         ))}
       </ul>
