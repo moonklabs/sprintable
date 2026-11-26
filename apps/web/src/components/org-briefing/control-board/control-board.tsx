@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { DndContext, KeyboardSensor, MouseSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, KeyboardSensor, MouseSensor, useDraggable, useDroppable, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core';
 import { Avatar } from '@/components/ds/avatar';
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
@@ -124,6 +124,48 @@ function DropZone({ id, canWrite, className, children, testId }: { id: string; c
   return <div ref={setNodeRef} className={cn(className, isOver && 'ring-2 ring-inset ring-ds-action')} data-testid={testId} data-drop-id={id}>{children}</div>;
 }
 
+/** the NAME of a drop place for a sentence: the lane's own title, or the project's name — an unknown place says nothing (never its id) */
+export function dropPlaceName(dropId: string, projectsById: ReadonlyMap<string, BoardProject>, benchTitle: string): string {
+  if (dropId === BENCH_ID) return benchTitle;
+  if (!dropId.startsWith('channel:')) return ''; // only a «channel:<id>» is a project — any other string is not a place
+  return projectsById.get(dropId.slice('channel:'.length))?.name ?? '';
+}
+
+/**
+ * The words a screen reader says while a face is dragged (codex-found on dev, story 5033 follow-up): dnd-kit's own defaults put the raw ids into the sentence («…dropped over droppable area channel:<project id>») and the instructions are English only.
+ * Here every sentence names the AGENT and the PLACE by their names, in the page's language. A drag id is `<where>::<agentId>` and a drop id is `bench` / `channel:<projectId>` — the ids never reach a sentence.
+ */
+export function buildDragAnnouncements(o: {
+  t: (key: 'dragStartAnnounce' | 'dragOverAnnounce' | 'dragOverNowhereAnnounce' | 'dragEndAnnounce' | 'dragEndNowhereAnnounce' | 'dragCancelAnnounce', values: { name: string; target?: string }) => string;
+  /** the agent's name; '' = the agent is not on the board any more (the builder then says the generic word) */
+  agentName: (agentId: string) => string;
+  /** the place's name; '' = not a place of this board */
+  placeName: (dropId: string) => string;
+  /** «the agent» — said when the dragged face left the board mid-drag */
+  agentFallback: string;
+}): Announcements {
+  const parts = (activeId: string | number) => {
+    const [where = '', agentId = ''] = String(activeId).split('::');
+    return { name: o.agentName(agentId) || o.agentFallback, from: { agentId, projectId: where === BENCH_ID ? null : where } };
+  };
+  return {
+    onDragStart: ({ active }) => o.t('dragStartAnnounce', { name: parts(active.id).name }),
+    // «over» nothing (or over something that is not a place) CLEARS the earlier «over Alpha» — dnd-kit keeps the last sentence when a callback returns nothing
+    onDragOver: ({ active, over }) => {
+      const { name } = parts(active.id);
+      const place = over ? o.placeName(String(over.id)) : '';
+      return place ? o.t('dragOverAnnounce', { name, target: place }) : o.t('dragOverNowhereAnnounce', { name });
+    },
+    // «dropped» only when the drop CHANGES something (the very rule the drop uses: `resolveDrop`) — dropped where it already is / nowhere = «nothing changed»
+    onDragEnd: ({ active, over }) => {
+      const { name, from } = parts(active.id);
+      const place = over ? o.placeName(String(over.id)) : '';
+      return place && resolveDrop(from, String(over!.id)) ? o.t('dragEndAnnounce', { name, target: place }) : o.t('dragEndNowhereAnnounce', { name });
+    },
+    onDragCancel: ({ active }) => o.t('dragCancelAnnounce', { name: parts(active.id).name }),
+  };
+}
+
 export interface ControlBoardViewProps {
   model: ReturnType<typeof deriveControlBoard>;
   projects: BoardProject[];
@@ -139,6 +181,23 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
   const t = useTranslations('orgBriefing');
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
   const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const agentNames = useMemo(() => new Map([...model.channels.flatMap((c) => c.faces), ...model.bench].map((f) => [f.agentId, f.name])), [model]);
+  const accessibility = useMemo(() => ({
+    announcements: buildDragAnnouncements({
+      t: (key, values) => ({
+        dragStartAnnounce: () => t('dragStartAnnounce', values),
+        dragOverAnnounce: () => t('dragOverAnnounce', values),
+        dragOverNowhereAnnounce: () => t('dragOverNowhereAnnounce', values),
+        dragEndAnnounce: () => t('dragEndAnnounce', values),
+        dragEndNowhereAnnounce: () => t('dragEndNowhereAnnounce', values),
+        dragCancelAnnounce: () => t('dragCancelAnnounce', values),
+      })[key](),
+      agentName: (id) => agentNames.get(id) ?? '',
+      placeName: (dropId) => dropPlaceName(dropId, byId, t('benchTitle')),
+      agentFallback: t('dragAgentFallback'),
+    }),
+    screenReaderInstructions: { draggable: t('dragInstructions') },
+  }), [t, agentNames, byId]);
   const onDragEnd = (e: DragEndEvent) => {
     const from = e.active.data.current as { agentId: string; projectId: string | null } | undefined;
     if (!from) return;
@@ -163,7 +222,7 @@ export function ControlBoardView({ model, projects, filterProjectId, onFilter, a
           {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </NativeSelect>
       </div>
-      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+      <DndContext sensors={sensors} onDragEnd={onDragEnd} accessibility={accessibility}>
         <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="control-channels">
           {model.channels.length === 0 ? <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('boardNoProjects')}</p> : null}
           {model.channels.map((c) => (
