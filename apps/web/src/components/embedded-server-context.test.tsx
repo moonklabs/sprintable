@@ -36,8 +36,8 @@ describe('[SID:4832] where it comes from', () => {
   const src = (...p: string[]) => readFileSync(path.resolve(__dirname, '..', ...p), 'utf8');
   it('the layout reads the server marker and hands it to the shell; the shell provides it around its whole tree (a dropped hand is a red test)', () => {
     const layout = src('app', '(authenticated)', 'layout.tsx');
-    expect(layout).toContain('embedded={isEmbeddedServer()}');
-    expect(layout).toContain("import { isEmbeddedServer } from '@/lib/embedded-api-origin';");
+    expect(layout).toContain('embedded={isLocalModeServer()}'); // story 5025: LOCAL MODE (a server host is not «the app's own server») — see layout-embedded-context.5025.test.ts
+    expect(layout).toContain("import { isLocalModeServer } from '@/lib/embedded-api-origin';");
     const shell = src('app', 'dashboard', 'dashboard-shell.tsx');
     expect(shell).toContain('embedded = false,');
     expect(shell).toMatch(/<EmbeddedServerProvider embedded=\{embedded\}>\n\s*<DashboardCtx\.Provider/);
