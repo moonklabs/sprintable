@@ -2994,7 +2994,8 @@ async def show_card(
     is posted as the agent's message (201). If it cannot — or the object does not exist, which is NOT told apart — a REFUSED card (`refused_for` = this agent) is posted instead, so each person in the room sees
     it by THEIR rights (the web: a viewer who can see the object is told which agents can; one who cannot sees «not found»), and the agent itself gets the same 404 «Target not found» either way (no list, no hint).
     Only an agent key may call this (a person shows a thing by writing its link)."""
-    from app.services.chat_card import TOOL_KINDS, normalize_card, resolver_kind
+    from app.services.chat_card import TOOL_KINDS, card_text, normalize_card, resolver_kind
+    from app.services.org_locale import resolve_org_locale
     from app.services.project_auth import has_project_access
     from app.services.reference_registry import PROJECT_ID_RESOLVERS
 
@@ -3009,7 +3010,7 @@ async def show_card(
     posted = {**card} if visible else {**card, "refused_for": str(agent_id)}
     out = await send_message_core(
         conversation_id,
-        SendMessageRequest(content=(body.note or "").strip() or card["kind"], mentioned_ids=[], card=posted),
+        SendMessageRequest(content=(body.note or "").strip() or card_text(card["kind"], refused=not visible, locale=await resolve_org_locale(db, org_id)), mentioned_ids=[], card=posted),
         background_tasks, db=db, auth=auth, org_id=org_id,
     )
     if not visible:

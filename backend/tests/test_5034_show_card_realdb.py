@@ -45,6 +45,12 @@ async def _cards(Session, room):
     return [(r[0], (r[1] or {}).get("card")) for r in rows if (r[1] or {}).get("card")]
 
 
+async def _texts(Session, room):
+    async with Session() as s:
+        rows = (await s.execute(text("SELECT content, metadata FROM conversation_messages WHERE conversation_id = :c ORDER BY created_at"), {"c": room})).all()
+    return [r[0] for r in rows if (r[1] or {}).get("card")]
+
+
 def _url(room):
     return f"/api/v2/conversations/{room}/card"
 
@@ -57,9 +63,14 @@ async def test_an_agent_shows_an_object_of_its_project_and_it_is_posted_as_its_c
         assert r.status_code == 201, r.text
         cards = await _cards(Session, w.r_human)
         assert cards == [(w.g_p, {"kind": "story", "ref": str(sid)})], cards  # the agent's own message · two words only
+        assert await _texts(Session, w.r_human) == ["the story we talked about"]  # the agent's own sentence is kept
         listed = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages")
         rows = listed.json().get("data") or listed.json()
         assert [m["card"] for m in rows if m["card"]] == [{"kind": "story", "ref": str(sid)}]
+        r2 = await _as(Session, w, "agent_participant", "POST", _url(w.r_human), {"kind": "story", "ref": str(sid)})
+        assert r2.status_code == 201, r2.text
+        plain = (await _texts(Session, w.r_human))[-1]
+        assert plain != "story" and str(sid) not in plain and len(plain.split()) >= 2, plain  # no note → a line a first-time reader understands, not the bare kind word
     finally:
         await engine.dispose()
 
@@ -80,6 +91,9 @@ async def test_an_object_the_agent_cannot_see_and_one_that_does_not_exist_get_th
         for (sender, card), ref in zip(cards, (other_project, missing)):
             assert sender == w.g_p
             assert card == {"kind": "story", "ref": str(ref), "refused_for": str(w.g_p)}, card  # the same SHAPE either way — an agent reading the room learns nothing more
+        texts = await _texts(Session, w.r_human)
+        assert len(texts) == 2 and texts[0] == texts[1], texts  # the same LINE either way
+        assert texts[0] != "story" and all(str(x) not in texts[0] for x in (other_project, missing, w.g_p)), texts  # words, naming no object and no agent
     finally:
         await engine.dispose()
 
