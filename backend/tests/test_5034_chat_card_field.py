@@ -139,3 +139,33 @@ class TestRefusedFor:
         assert set(TOOL_KINDS) == {"story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "kanban"}
         assert set(TOOL_KINDS) <= set(CARD_KINDS)
         assert resolver_kind("kanban") == "sprint" and resolver_kind("story") == "story"
+
+
+class TestRunBackgroundQuietly:
+    @pytest.mark.anyio
+    async def test_a_failing_task_is_logged_the_next_one_still_runs_and_each_runs_once(self, caplog):
+        from fastapi import BackgroundTasks
+
+        from app.routers.conversations import _run_background_tasks_quietly
+
+        ran: list[str] = []
+
+        async def boom():
+            ran.append("boom")
+            raise RuntimeError("db fault")
+
+        async def after():
+            ran.append("after")
+
+        bt = BackgroundTasks()
+        bt.add_task(boom)
+        bt.add_task(after)
+        await _run_background_tasks_quietly(bt)  # does not raise
+        assert ran == ["boom", "after"]
+        assert bt.tasks == []  # emptied: the framework would not run them a second time
+        await _run_background_tasks_quietly(bt)
+        assert ran == ["boom", "after"]
+
+    @pytest.fixture
+    def anyio_backend(self):
+        return "asyncio"

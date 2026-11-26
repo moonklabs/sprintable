@@ -2939,6 +2939,18 @@ class ShowCardRequest(BaseModel):
 _SHOW_CARD_NOT_FOUND = "Target not found"
 
 
+async def _run_background_tasks_quietly(background_tasks: BackgroundTasks) -> None:
+    """Run what the message road queued for after the response (live delivery · «agent replied» marks) NOW — an exception answer drops them. A task that fails is logged and the next one still runs: the agent's
+    answer must stay the one 404 (never a 500 that tells it something went wrong around its refused card), and the tasks are run once (the list is emptied)."""
+    tasks = list(background_tasks.tasks)
+    background_tasks.tasks.clear()
+    for task in tasks:
+        try:
+            await task()
+        except Exception:  # noqa: BLE001 — logged below; the refusal answer does not depend on it
+            logger.warning("show_card: a background task of the refused card failed", exc_info=True)
+
+
 @router.post("/{conversation_id}/card", status_code=201)
 async def show_card(
     conversation_id: uuid.UUID,
@@ -2975,7 +2987,7 @@ async def show_card(
     if not visible:
         # the refused card is posted (and committed by the message road) — its live delivery (an exception answer drops the response's background work) is run here; the agent's own answer is the one 404,
         # the same for «missing» and «not yours»
-        await background_tasks()
+        await _run_background_tasks_quietly(background_tasks)
         raise HTTPException(status_code=404, detail=_SHOW_CARD_NOT_FOUND)
     return out
 
