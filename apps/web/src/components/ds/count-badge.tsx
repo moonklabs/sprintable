@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
  * 한 방에 둘 다 있으면 호출부가 배지를 둘 그린다(호박 먼저). 99를 넘으면 «99+».
  */
 export const countBadgeVariants = cva(
-  'inline-grid h-4 min-w-4.5 shrink-0 place-items-center rounded-ds-tag px-1 font-mono text-ds-mono-sm font-semibold',
+  'inline-grid h-6 min-w-6 shrink-0 place-items-center rounded-ds-tag px-ds-2 font-mono text-ds-mono-sm font-medium', // story 5048 T0 ②a(키트): 글자 Medium · 칸 24(14/21 글자가 들어가는 가장 작은 칸)
   {
     variants: {
       kind: {

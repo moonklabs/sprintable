@@ -19,7 +19,7 @@ afterEach(async () => {
 const btn = () => container.querySelector('[data-slot="ds-button"]') as HTMLElement;
 
 describe('ds Button', () => {
-  it('변형 넷이 서로 다른 모양: 주 = action 면 · 보조 = line-control 윤곽 · 조용 = 투명 · 위험 = failed 윤곽', async () => {
+  it('변형 넷이 서로 다른 모양: 주 = action 면 · 보조 = 옅은 회색 채움(윤곽 없음) · 조용 = 투명 · 위험 = failed 윤곽', async () => {
     const cls: Record<string, string> = {};
     for (const v of ['primary', 'secondary', 'quiet', 'danger'] as const) {
       await act(async () => { root.render(<Button variant={v}>확인</Button>); });
@@ -27,16 +27,17 @@ describe('ds Button', () => {
     }
     expect(cls.primary).toContain('bg-ds-action');
     expect(cls.primary).toContain('text-ds-on-action');
-    expect(cls.secondary).toContain('border-ds-line-control');
+    expect(cls.secondary).toContain('bg-ds-surface-sunk'); // story 5048 ②a: 키트 보조 단추 = 채움
+    expect(cls.secondary).toContain('border-transparent');
     expect(cls.quiet).toContain('border-transparent');
     expect(cls.danger).toContain('border-ds-failed');
     expect(cls.danger).toContain('text-ds-failed');
     expect(new Set(Object.values(cls)).size).toBe(4);
   });
 
-  it('기본은 보조 · 크기 28(md) / 36(lg)', async () => {
+  it('기본은 보조 · 크기 40(md · lg 같음)', async () => {
     await act(async () => { root.render(<Button>기본</Button>); });
-    expect(btn().className).toContain('border-ds-line-control');
+    expect(btn().className).toContain('bg-ds-surface-sunk');
     expect(btn().className).toContain('h-ds-control-sm');
     await act(async () => { root.render(<Button size="lg">큰</Button>); });
     expect(btn().className).toContain('h-ds-control');

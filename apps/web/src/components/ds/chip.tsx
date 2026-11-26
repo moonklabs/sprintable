@@ -13,7 +13,7 @@ import { Icon, type IconName } from './icon';
  * 경계는 항상 중립 `ds-line`(뜻 색은 글과 옅은 바탕에만) — 색만으로 뜻을 싣지 않게 점 · 아이콘 · 글이 함께 간다.
  */
 export const chipVariants = cva(
-  'inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ds-tag border border-ds-line px-1.5 text-ds-mono-md tabular-nums',
+  'inline-flex h-ds-tag shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ds-tag border border-ds-line px-ds-3 text-ds-mono-md tabular-nums', // story 5048 T0 ②a(키트): 태그 높이 28 · 좌우 12
   {
     variants: {
       tone: {
@@ -60,7 +60,7 @@ export function Tag({ className, children, ...props }: HTMLAttributes<HTMLSpanEl
   return (
     <span
       data-slot="ds-tag"
-      className={cn('inline-flex shrink-0 items-center rounded-ds-tag border border-ds-line bg-ds-surface-high px-1 font-mono text-ds-mono-sm tracking-wider text-ds-ink-3', className)}
+      className={cn('inline-flex shrink-0 items-center rounded-ds-tag border border-ds-line bg-ds-surface-high px-ds-2 font-mono text-ds-mono-sm tracking-wider text-ds-ink-3', className)}
       {...props}
     >
       {children}

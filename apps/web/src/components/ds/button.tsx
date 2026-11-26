@@ -14,7 +14,7 @@ import { Icon } from './icon';
  */
 export const buttonVariants = cva(
   [
-    'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-ds-control border font-semibold',
+    'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-ds-control border font-medium', // story 5048 T0 ②a(키트): 단추 글자는 16 Medium(500)
     'transition-[filter,background-color] duration-(--ds-duration-fast) motion-reduce:transition-none outline-none',
     'focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background',
     `active:brightness-90 disabled:pointer-events-none disabled:brightness-100 ${DISABLED_FACE}`,
@@ -26,13 +26,13 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary: 'border-ds-action bg-ds-action text-ds-on-action hover:brightness-95',
-        secondary: 'border-ds-line-control bg-transparent text-ds-ink hover:bg-ds-surface-high',
+        secondary: 'border-transparent bg-ds-surface-sunk text-ds-ink hover:bg-ds-surface-high', // 키트: 보조 단추 = 옅은 회색 채움(윤곽 없음)
         quiet: 'border-transparent bg-transparent text-ds-ink-2 hover:bg-ds-surface-high hover:text-ds-ink',
         danger: 'border-ds-failed bg-transparent text-ds-failed hover:bg-ds-failed-soft',
       },
       size: {
-        md: 'h-ds-control-sm px-3 text-ds-small',
-        lg: 'h-ds-control px-4 text-ds-body',
+        md: 'h-ds-control-sm px-ds-4 text-ds-body', // 좌우 여백 16 · 글자 16/24 Medium(키트) — md · lg가 같은 모양(높이 40 하나)
+        lg: 'h-ds-control px-ds-4 text-ds-body',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },

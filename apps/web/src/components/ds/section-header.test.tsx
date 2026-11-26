@@ -58,7 +58,7 @@ describe('ds SectionHeader', () => {
     expect(row.className).not.toMatch(/(^|\s)px-\d/);
     expect(b.className).toContain('w-full');
     expect(b.className).toContain('flex-1');
-    expect(b.className).toContain('px-3');
+    expect(b.className).toContain('px-ds-4'); // story 5048 ②a: Button md의 좌우 여백 16
     expect(row.className).toContain('items-stretch');
     // 오른쪽 보조는 단추 «밖»이라 따로 눌린다(접기가 같이 안 눌린다).
     const trailing = [...row.children].find((c) => c.textContent === '3') as HTMLElement;

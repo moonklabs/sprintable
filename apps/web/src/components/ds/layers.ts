@@ -9,8 +9,8 @@
  *                                          바탕 → 글 줄 (4916)  −0.052 / +0.096                ≥ 0.05 — 대화 방은 내용 칸 판을 따로 깔지 않고 바탕(page) 위에 말풍선만 선다
  *   내 글 줄       ds-mine                내용 칸 → 글 줄     −0.152 / +0.124                ≥ 0.09 · 바탕 → 글 줄 −0.122 / +0.161 ≥ 0.09 · 남의 글과 밝기차 0.070 / 0.065(≥ 0.05) + 채도차 0.056 / 0.050(≥ 0.03)
  *   열린 카드      ds-action-soft         내용 칸 → 열린 카드 −0.048 / +0.080                ≥ 0.03 · 같은 줄 층 글 줄과 채도차 0.011 / 0.031(≥ 0.01) — 면만으로 가르지 않고 왼쪽 막대(ds-action)를 함께 둔다(4908)
- *   입력칸         ds-surface-sunk        내용 칸 → 입력칸    −0.064 / −0.073                ≥ 0.05 (+ line-control 경계)
- *                                          바탕 → 입력칸 (4916)  −0.034 / −0.036                ≥ 0.03 — 채팅 입력칸은 바탕 위에 서고, 경계(line-control 3:1)가 함께 가르므로 면차는 «바탕 → 내용 칸»과 같은 0.03
+ *   입력칸         ds-surface             story 5048 T0 ②a(키트: 흰 칸 + 선 · PO D4): 면은 내용 칸과 «같은 면» — 면 차이가 아니라 line-control 경계(3:1)가 가른다(내용 칸 · 바탕 · 글 줄 위 모두 ≥ 3:1).
+ *                                          바탕 → 입력칸 (4916)  = 바탕 → 내용 칸            ≥ 0.03 — 채팅 입력칸은 바탕 위에 선다
  *   그림 우물      ds-surface-highest     글 줄/카드 면 → 우물  +0.044 / +0.044 (더 어둡게)   ≥ 0.03 — 카드 안 썸네일 칸(산출물 · 스토리지 격자, 4910)
  *   떠 있는 것     ds-surface-raised      (story 5048 T0 ①: 그림자 없음) 면 차이 + 1px 선으로 가른다 — 바탕 → 떠 있는 면 ≥ 0.03
  * 라이트는 «내용 칸이 바탕보다 밝고 글 줄 · 입력칸이 어둡게 들어가는» 꼴, 다크는 «글 줄이 올라오고 입력칸이 들어가는» 꼴이다 — 부호가 달라도 차이의 크기가 선을 지킨다.
@@ -22,7 +22,7 @@ export const LAYER = {
   rowOthers: 'bg-ds-surface-high',
   rowMine: 'bg-ds-mine',
   rowSelected: 'bg-ds-action-soft',
-  field: 'bg-ds-surface-sunk',
+  field: 'bg-ds-surface',
   /** 4910 — 카드(`rowOthers` 면) 안의 썸네일 칸: 면보다 한 단 더 들어가 그림 가장자리가 갈린다. */
   well: 'bg-ds-surface-highest',
   floating: 'bg-ds-surface-raised',
@@ -35,7 +35,7 @@ export const LAYER_TOKEN = {
   rowOthers: 'surface-high',
   rowMine: 'mine',
   rowSelected: 'action-soft',
-  field: 'surface-sunk',
+  field: 'surface',
   well: 'surface-highest',
   floating: 'surface-raised',
 } as const satisfies Record<keyof typeof LAYER, string>;
@@ -48,11 +48,11 @@ export const LAYER_MIN_STEP = {
   /** 내 글과 남의 글 사이: 밝기차(OKLab L)와 채도차(OKLab C) — 연보라와 연회색이 나란히 서면 색조만으로는 안 갈린다(PO 11-12). */
   mineVsOthersLightness: 0.05,
   mineVsOthersChroma: 0.03,
-  fieldOnPanel: 0.05,
+  /** story 5048 T0 ②a: 입력칸은 내용 칸과 같은 면이라 면 차이 대신 경계 — line-control이 입력칸이 서는 면(내용 칸 · 바탕 · 글 줄) 위에서 비글자 3:1 이상. */
+  fieldBoundary: 3,
   /** 4916 — 대화 방은 바탕(page) 위에 말풍선 · 입력칸이 선다(방 안에 따로 까는 판 0): 남의 글 · 내 글은 내용 칸 위와 같은 선, 입력칸은 경계가 함께 가르므로 바탕 → 내용 칸과 같은 0.03. */
   rowOthersOnPage: 0.05,
   rowMineOnPage: 0.09,
-  fieldOnPage: 0.03,
   /** 열린 카드(4908): 내용 칸과의 밝기차, 그리고 같은 줄 층(남의 글 줄)과의 채도차 — 밝기는 거의 같아 채도 + 왼쪽 막대로 갈린다. */
   rowSelectedOnPanel: 0.03,
   rowSelectedVsOthersChroma: 0.01,
