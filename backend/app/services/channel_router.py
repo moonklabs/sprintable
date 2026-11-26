@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -86,11 +86,19 @@ async def route_message(
     default level="mentions"(과거는 이 경우도 "all"이었다 — PO 소급 확定: 원 고통이 기존
     그룹챗에 있어 소급 없이는 반쪽 해법). human이거나 DM이면 기존과 동일 default="all".
 
-    ⛔핫픽스(2026-08-13, 선생님 직접 지시): 위 mentions 기본계약은 `settings.
-    agent_group_default_mentions`(기본 False)로 게이트된다 — free_response 오버라이드가
-    실 사용에서 안 먹는 게 규명 전에 팀 전체 A2A 통신을 막아, 규명·수리 전까지 소급 off로
-    되돌렸다(#2603 원 의도는 유효·재상륙은 opt-in). 플래그 False면 이 분기는 완전히
-    스킵되고 agent group도 기존처럼 default="all"이 된다.
+    ⛔핫픽스(2026-08-13, 선생님 직접 지시)는 위 기본계약을 `settings.agent_group_default_mentions`
+    (기본 False)로 껐다 — 팀 통신이 불균일하게 막혔는데 까닭이 규명 전이었다. story 5030이 까닭을
+    걷고 기본을 다시 켰다(기본 True · 이 값은 비상 스위치 — False면 agent group도 default="all").
+    까닭: 에이전트 생성 때 «global/sse/all» 설정 행을 **명시로 심어** 두었고(notification_preference_defaults),
+    아래 판정은 명시 행을 기본보다 앞세우므로 심은 행이 있는 에이전트는 그룹에서도 모든 말을 받았다 —
+    행이 없는 에이전트(심기 前 경로)만 mentions 기본에 걸려 «일부만 막히는» 불균일이 났다. 이제 심기를
+    멈췄고(행 없음 = 제품 기본) 심은 값은 마이그레이션 0501이 «심은 그대로 · 건드린 흔적 없음»이 증명된
+    행만 걷었다. 에이전트별 «이 채널 모든 말 받기»는 대화·프로젝트 범위 all 행이 기본보다 앞선다.
+
+    **기본(mentions) 경로의 에이전트가 받는 것**: ① 부른 말(mentioned_ids) ② 서버가 발행한 이벤트 알림 중 자기를
+    «받을 사람»으로 명시한 것(msg_metadata['delivery'] — events.py가 라우팅 결과로 채운다, 멘션 이벤트·벨을 더하지
+    않는 서버 전용 표지) ③ 자기가 이미 말한 스레드의 답글(story 5030 — 스레드 뿌리 글·다른 답글의 발신자가 자기)
+    ④ free_response 방의 모든 말. 방의 다른 에이전트는 0.
 
     **free_response 대화 오버라이드**(AC2 옵트아웃): `conversation.free_response=true`면
     이 대화 한정으로 level="mentions"인 recipient는 "all"로 완화된다 — 단 명시 "mute"는
@@ -222,6 +230,13 @@ async def route_message(
                 _ek = _ev.get("event_key")
                 event_key = _ek if isinstance(_ek, str) and _ek else None
 
+        # story 5030: the addressees a SERVER-published notice named (msg_metadata['delivery']['member_ids'], set only by the publisher — see SendMessageRequest.delivery_member_ids).
+        addressed_ids: set[str] = set()
+        if isinstance(_meta, dict):
+            _delivery = _meta.get("delivery")
+            if isinstance(_delivery, dict) and isinstance(_delivery.get("member_ids"), list):
+                addressed_ids = {str(i) for i in _delivery["member_ids"]}
+
         scope_type_order: list[tuple[str, uuid.UUID | str | None]] = []
         if msg.thread_id:
             scope_type_order.append(("thread", msg.thread_id))
@@ -246,6 +261,25 @@ async def route_message(
             key_id = p.event_key if p.scope_type == "event_key" else p.scope_id
             pref_map.setdefault(p.member_id, {})[(p.scope_type, key_id)] = p
 
+        # story 5030: «에이전트가 든 스레드» — 이 메시지가 스레드 답글이고 그 수신 에이전트가 같은 스레드(뿌리 글 ·
+        # 다른 답글)에서 이미 말했으면, 부르지 않았어도 그 스레드의 이어짐이라 받는다. 기본(mentions) 경로의
+        # 에이전트에게만 쓰이고, 명시 설정(대화 · 스레드 범위 mentions 등)은 그대로 존중한다. 스레드 답글이 아니거나
+        # 에이전트 수신자가 없으면 쿼리 0.
+        thread_member_ids: set[uuid.UUID] = set()
+        if msg.thread_id is not None:
+            _agent_recipient_ids = [r for r in recipient_ids if member_type_map.get(r) == "agent"]
+            if _agent_recipient_ids:
+                thread_member_ids = set((await db.execute(
+                    select(ConversationMessage.sender_id).where(
+                        ConversationMessage.conversation_id == msg.conversation_id,
+                        ConversationMessage.sender_id.in_(_agent_recipient_ids),
+                        or_(
+                            ConversationMessage.id == msg.thread_id,
+                            ConversationMessage.thread_id == msg.thread_id,
+                        ),
+                    ).distinct()
+                )).scalars().all())
+
         # 6. 수신자별 라우팅 결정 — sender_type 분기 없음(위 docstring, story #2603 P0).
         decisions: list[DeliveryDecision] = []
         for rid in recipient_ids:
@@ -262,16 +296,16 @@ async def route_message(
                     break
 
             channel = pref.channel if pref else "sse"
+            from_group_default = False  # story 5030: 이 수신자의 level이 «에이전트 그룹 기본»에서 왔는가(명시 설정이 아니라)
             if pref is not None:
                 level = pref.level
                 reason = f"preference scope={matched_scope}"
             elif recipient_type == "agent" and conv_type != "dm" and settings.agent_group_default_mentions:
                 # story #2603 P0: 에이전트 그룹챗 기본계약(소급 적용, PO 확定) — 위 docstring.
-                # 핫픽스(2026-08-13): free_response 오버라이드 규명 전까지 기본 off로 되돌림
-                # (settings.agent_group_default_mentions) — 팀 전체 통신 차단이 근본원인 규명보다
-                # 급했다(선생님 직접 지시). 규명·수리 후 opt-in 재활성 대상.
+                # story 5030: 8-13 핫픽스가 끈 기본을 코드 기본으로 다시 켰다(settings는 비상 스위치만).
                 level = "mentions"
                 reason = "agent group default: mentions"
+                from_group_default = True
             else:
                 level = "all"
                 reason = "default: all"
@@ -294,7 +328,14 @@ async def route_message(
             # 이미 채워 저장하므로(story #2646로 은퇴한 @handle 텍스트 파싱 union은 제외됨),
             # 이 체크는 그대로 재사용된다.
             if level == "mentions":
-                if not (msg.mentioned_ids and rid in msg.mentioned_ids):
+                _mentioned = bool(msg.mentioned_ids and rid in msg.mentioned_ids)
+                if not _mentioned and from_group_default and str(rid) in addressed_ids:
+                    reason = f"{reason} + addressed by its publisher"
+                    _mentioned = True
+                if not _mentioned and from_group_default and rid in thread_member_ids:
+                    reason = f"{reason} + thread member"
+                    _mentioned = True
+                if not _mentioned:
                     logger.info(
                         "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
                         rid, msg.conversation_id, "mentions level, not mentioned",
