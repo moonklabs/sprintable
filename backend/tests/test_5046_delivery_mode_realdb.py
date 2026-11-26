@@ -234,6 +234,37 @@ async def test_the_report_adds_its_line_beside_the_senders_delivery_decision_and
         await engine.dispose()
 
 
+async def test_the_delivery_log_is_the_senders_alone_while_the_mode_is_every_readers():
+    """like story 5032's delivery_decision: the line under the sender's bubble is the SENDER's — a recipient, an observer and an agent never get `delivery_log`; `delivery_mode` is what the agent's host must read, so every reader has it"""
+    engine, Session, w = await _world()
+    try:
+        _r, msg = await _send(Session, w, w.r_human, delivery_mode="after_turn")
+        assert (await _as(Session, w, "agent_participant", "POST", _report(w.r_human, msg), {"via": "turn"})).status_code == 200
+        async def read_as(caller):
+            r = await _as(Session, w, caller, "GET", _msgs(w.r_human))
+            assert r.status_code == 200, (caller, r.text)
+            return next(m for m in (r.json().get("data") or r.json()) if m["id"] == str(msg))
+        sender = await read_as("participant")
+        assert sender["delivery_mode"] == "after_turn" and list(sender["delivery_log"]) == [str(w.g_p)]
+        for other in ("agent_participant",):  # the recipient agent itself
+            seen = await read_as(other)
+            assert seen["delivery_mode"] == "after_turn" and "delivery_log" not in seen, (other, seen)
+        # another person in the room (h_b) — read through the same route with that person's session
+        from app.main import app
+        from tests.test_4846_org_chat_rooms_realdb import _client_for, _setup_app_human
+        await _setup_app_human(app, Session, w.u_b, w.org)
+        try:
+            async with _client_for(app) as c:
+                r = await c.get(_msgs(w.r_human))
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+        peer = next(m for m in (r.json().get("data") or r.json()) if m["id"] == str(msg))
+        assert peer["delivery_mode"] == "after_turn" and "delivery_log" not in peer, peer
+    finally:
+        await engine.dispose()
+
+
 async def test_a_deleted_message_is_not_reported_on_and_serves_no_line():
     engine, Session, w = await _world()
     try:

@@ -704,7 +704,7 @@ def _msg_payload(
     # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
     # (an approval's resolution note, an event's payload…) that the tombstone (`content = ""`) did not clear. The keys stay, empty (the shape is the same).
     if msg.deleted_at is None:
-        payload.update(_delivery_timing_payload(msg))
+        payload.update(_delivery_timing_payload(msg, viewer_member_id))
     _cards = (_approval_payload, _event_payload, _server_command_payload, _card_payload)
     for _card in _cards:
         _fields = _card(msg)
@@ -914,9 +914,10 @@ def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
     return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
 
 
-def _delivery_timing_payload(msg: "ConversationMessage") -> dict:
+def _delivery_timing_payload(msg: "ConversationMessage", viewer_member_id: uuid.UUID | None = None) -> dict:
     """story 5046 (C13): the sender's choice of WHEN a working agent gets this message, and the server's record of when it did. Additive and sparse — a message sent the old way (`now`, nothing reported) carries NO new key:
-    `delivery_mode: "after_turn"` only when the sender chose it · `delivery_log: {agent_member_id: {via, at}}` once an agent's host has reported how the message went into its turn (`report_message_delivery`).
+    `delivery_mode: "after_turn"` only when the sender chose it (every reader — the agent's host needs it) · `delivery_log: {agent_member_id: {via, at}}` once an agent's host has reported how the message went into its turn
+    (`report_message_delivery`) — the SENDER's reads only, like story 5032's `delivery_decision` (the line under the sender's bubble): no recipient and no observer gets the key.
     `__dict__`-only read like the other metadata payloads (no lazy load inside the sync serializer)."""
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     if not isinstance(meta, dict):
@@ -926,7 +927,7 @@ def _delivery_timing_payload(msg: "ConversationMessage") -> dict:
     if isinstance(delivery, dict) and delivery.get("mode") == "after_turn":
         out["delivery_mode"] = "after_turn"
     log = meta.get(DELIVERY_LOG_KEY)
-    if isinstance(log, dict):
+    if isinstance(log, dict) and viewer_member_id is not None and msg.sender_id == viewer_member_id:
         clean = {
             str(k): {"via": v["via"], "at": v["at"]}
             for k, v in log.items()
