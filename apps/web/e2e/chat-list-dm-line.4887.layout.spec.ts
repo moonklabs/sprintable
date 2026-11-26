@@ -124,7 +124,7 @@ test('[SID:4887] the agent DM titled with the agent\'s name has no name on the l
   expect(g.textCut, `the computer's name is cut (text ${g.textW}px of ${g.fullW}px, chip ${g.chipW}px, line ${g.lineW}px)`).toBe(false);
   expect(g.chipInsideLine, 'the chip ends inside the line').toBe(true);
   expect(g.lineOverflow, 'the line does not run past its column').toBe(false);
-  expect(g.colW, 'the measured text column is the real one (dev measured 179 px before story 5048 ②c; the 40 px avatar takes 4 px more → ~175)').toBeGreaterThan(150);
+  expect(g.colW, 'the measured text column is the real one (dev measured 179 px before story 5048 ②c; the avatar stays 36 px)').toBeGreaterThan(150);
   expect(g.colW).toBeLessThan(210);
 });
 
