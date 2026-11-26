@@ -874,7 +874,7 @@ export function ChatBubble({
                 <div className="mt-0.5 font-mono text-ds-body text-ds-ink-2 [&_p]:mb-0">
                   <ChatMarkdown
                     content={args}
-                    isMine={isMine}
+                    isMine={false} /* story 5048 T0 ①: the args sit on the command Card's own (light) face, not on the own-message face — the on-mine colours would be white on white */
                     references={message.references}
                     entityStatusByKey={entityStatusByKey}
                     onOpenReadingPanel={onOpenReadingPanel}
@@ -891,7 +891,7 @@ export function ChatBubble({
                 refs={eventTarget?.refs as Record<string, unknown> | undefined}
                 definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
                 eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
-                renderWords={(words) => <ChatMarkdown content={words} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
+                renderWords={(words) => <ChatMarkdown content={words} isMine={false} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
               />
             </div>
           ) : noVisibleText ? (
