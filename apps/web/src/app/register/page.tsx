@@ -310,7 +310,7 @@ export default function RegisterPage() {
           </Link>
         </p>
       </div>
-      <LegalFooter />
+      <LegalFooter linksFirst />
     </div>
   );
 }

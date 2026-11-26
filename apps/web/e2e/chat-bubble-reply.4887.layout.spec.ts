@@ -62,7 +62,7 @@ async function scene(browser: Browser, o: { touch: boolean; mine: boolean; width
   const icon = '<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>';
   const row = (n: '' | '2') => `<div id="row${n}" class="${c.row}${o.mine ? 'flex-row-reverse' : 'flex-row'}${n ? ' mt-0.5' : ''}">
         ${o.continuation || n ? '<div class="w-7 flex-shrink-0"></div>' : '<div class="h-7 w-7 flex-shrink-0 rounded-full bg-info/15"></div>'}
-        <div id="col${n}" class="${c.column}${side}"${o.withReply ? ' style="--reply-cap:128px"' : ''}>
+        <div id="col${n}" class="${c.column}${side}"${o.withReply ? ' style="--reply-cap:144px"' : ''}>
           ${o.withReply ? `<button id="reply${n}" type="button" aria-label="reply" class="${replyCls}">${icon}</button>` : ''}
           <div id="text${n}" class="${textCls}">${o.text ?? '짧은 글'} <a id="link${n}" href="#x">링크</a></div>
           <span id="meta${n}" class="${meta}"${o.withReply ? ' style="--reply-room:36px"' : ''}><time id="time${n}" class="${c.metaTime}">오전 07:33</time>${o.withMenu ? `<button id="more${n}" type="button" aria-label="more" class="${moreCls}">${icon}</button>` : ''}${o.withReply && o.withMenu ? `<button id="replyT${n}" type="button" aria-label="reply (touch)" class="${replyTCls}">${icon}</button>` : ''}</span>
@@ -196,7 +196,7 @@ for (const mine of [false, true]) {
 
 for (const mine of [false, true]) {
   const who = mine ? 'my' : 'their';
-  for (const width of [500, 700]) {
+  for (const width of [560, 700]) { // story 5048 T0 ②d: 500 → 560 — the reply cap is 144 now, so the 72% rule holds from a row of 144/0.28 ≈ 515 px up
     test(`[SID:4887] mouse ${width} · ${who} full-width bubble: a wide window keeps the usual 72% (the width cap changes nothing there)`, async ({ browser }) => {
       const s = await scene(browser, { touch: false, mine, width, withReply: true, text: LONG, continuation: true });
       const row = (await s.box('#row'))!; const col = (await s.box('#col'))!;
@@ -208,7 +208,7 @@ for (const mine of [false, true]) {
     test(`[SID:4887] mouse ${width} · ${who} full-width bubble: a narrow window gives the bubble less than 72% so the reply button and the hover time beside it fit`, async ({ browser }) => {
       const s = await scene(browser, { touch: false, mine, width, withReply: true, text: LONG, continuation: true });
       const row = (await s.box('#row'))!; const col = (await s.box('#col'))!;
-      expect(col.width, `column ${Math.round(col.width)} ≤ row ${Math.round(row.width)} − 128`).toBeLessThanOrEqual(row.width - 128 + 1); // reverted (no cap) → 72%
+      expect(col.width, `column ${Math.round(col.width)} ≤ row ${Math.round(row.width)} − 144`).toBeLessThanOrEqual(row.width - 144 + 1); // reverted (no cap) → 72%
       expect(col.width, 'and the bubble is still wide enough to read').toBeGreaterThan(100);
       await s.context.close();
     });

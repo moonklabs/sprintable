@@ -94,13 +94,22 @@ export function BusinessInfoList({ className = '' }: { className?: string }) {
  * 비로그인 클러스터(로그인·가입·legal 페이지) 하단 푸터.
  * 사업자정보 + 법적 문서 링크를 가운데 정렬로 묶는다.
  */
-export function LegalFooter({ className = '' }: { className?: string }) {
+export function LegalFooter({ className = '', linksFirst = false }: { className?: string; /** story 5048 T0 ②d: the policy links stand FIRST and the business-info block under them — on a phone's one-screen sign-up page the 16 px business info may scroll below the fold, the links and the form do not */ linksFirst?: boolean }) {
   return (
     <footer
       className={`w-full max-w-xl px-4 text-center text-xs text-muted-foreground ${className}`}
     >
-      <BusinessInfoBlock className="justify-center" />
-      <LegalLinks className="mt-1 justify-center sm:mt-2" />
+      {linksFirst ? (
+        <>
+          <LegalLinks className="justify-center" />
+          <BusinessInfoBlock className="mt-1 justify-center sm:mt-2" />
+        </>
+      ) : (
+        <>
+          <BusinessInfoBlock className="justify-center" />
+          <LegalLinks className="mt-1 justify-center sm:mt-2" />
+        </>
+      )}
     </footer>
   );
 }

@@ -77,6 +77,8 @@ const where = (page: Page) => page.evaluate(() => {
   const top = (sel: string) => { const e = document.querySelector(sel) as HTMLElement | null; if (!e) return null; const r = e.getBoundingClientRect(); return { top: Math.round(r.top + scrollY), bottom: Math.round(r.bottom + scrollY) }; };
   return {
     terms: top('label'), google: top('[data-testid="register-google"]'), form: top('[data-testid="register-email-form"]'), submit: top('[data-testid="register-submit"]'),
+    // story 5048 T0 ②d: the policy links (the footer's nav) — the business-info block under them may sit below the fold at 16 px
+    links: top('footer nav'),
     foldButton: !!document.querySelector('[data-testid="register-email-open"]'),
     // only what is DRAWN counts (a hidden form is not «on the screen»)
     inputs: [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"]')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; }).length,
@@ -98,7 +100,8 @@ test.describe('on a phone (390 × 844)', () => {
     expect(m.submitDrawn, 'the sign-up button is drawn').toBe(true);
     // reverted (the e-mail form folded again) → the fields are not here, and the submit is not drawn at all
     expect(m.submit!.bottom, `the sign-up button ends at ${m.submit!.bottom}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh);
-    expect(m.docH, 'the page does not need a scroll').toBeLessThanOrEqual(m.vh + 1);
+    // story 5048 T0 ②d: «no scroll» becomes «the form, the button and the policy links need no scroll» — the 16 px business-info lines (the kit's smallest text) stand under the links and may scroll in
+    expect(m.links!.bottom, `the policy links end at ${m.links!.bottom}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh);
     expect(m.overflowX).toBe(false);
   });
 
@@ -171,7 +174,7 @@ test.describe('the same one screen in English (390 × 844)', () => {
     await open(page, 390, 844, 'en');
     const m = await where(page);
     expect(m.submit!.bottom, `the sign-up button ends at ${m.submit!.bottom}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh);
-    expect(m.docH, `the page is ${m.docH}px on a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh + 1);
+    expect(m.links!.bottom, `the policy links end at ${m.links!.bottom}px of a ${m.vh}px screen (story 5048 ②d: the business-info lines under them may scroll)`).toBeLessThanOrEqual(m.vh);
     expect(m.overflowX).toBe(false);
   });
 
@@ -180,7 +183,7 @@ test.describe('the same one screen in English (390 × 844)', () => {
     for (const locale of ['en', 'ko'] as const) {
       await open(page, 390, 844, locale);
       // the page fills the screen (min-h-screen), so its own height says nothing — the content's extent is what counts: the footer's bottom edge + the page's bottom padding
-      const content = await page.evaluate(() => { const root = document.querySelector('[data-testid="register-consent"]')!.closest('.min-h-screen') as HTMLElement; const last = root.lastElementChild as HTMLElement; return Math.round(last.getBoundingClientRect().bottom + scrollY + parseFloat(getComputedStyle(root).paddingBottom)); });
+      const content = await page.evaluate(() => { const root = document.querySelector('[data-testid="register-consent"]')!.closest('.min-h-screen') as HTMLElement; const last = root.querySelector('footer nav') as HTMLElement; return Math.round(last.getBoundingClientRect().bottom + scrollY); /* story 5048 ②d: the policy links (the business info under them may scroll) */ });
       const m = await where(page);
       expect(content, `${locale}: the content ends at ${content}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh - 8); // story 5048 T0 ②d: was 24 — the footer's business-info lines are 16 px now (the kit's smallest text), so the one screen keeps 8 px instead of 24; the page itself must still fit (no scroll) — the hard rule above
     }
