@@ -532,6 +532,43 @@ async def close_sprint(
     return SprintResponse.model_validate(sprint)
 
 
+@router.post("/{id}/cancel", response_model=SprintResponse)
+async def cancel_planning_sprint(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> SprintResponse:
+    # story 5040: 시작 안 한(planning) 스프린트만 접는다 — 생성의 반대(파괴 아님)이라 close(active|review·
+    # destructive·admin)와 별도 길. 허용 여부는 도구 이름이 아니라 «스프린트 상태»로 서버가 강제한다:
+    # status != "planning" 이면 409 + 행 불변. 접기 자체는 transition_sprint planning→closed discard
+    # 경로(velocity 0·채점 없음·overlay/human gate 대상 아님)를 그대로 써 불변식을 한 곳에 둔다.
+    from app.services.sprint import SprintTransitionError, transition_sprint
+    from app.services.member_resolver import resolve_member
+    # activate/close 와 동형: project 접근권 검증(SEC-S8 CC) — org 내 타 project sprint 접기 차단.
+    _sprint_for_scope = await SprintRepository(db, org_id).get(id)
+    if _sprint_for_scope is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    caller = await resolve_member(auth, org_id, db, project_id=_sprint_for_scope.project_id)
+    if _sprint_for_scope.status != "planning":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"시작 안 한(planning) 스프린트만 접을 수 있습니다 (현재 상태: {_sprint_for_scope.status}). "
+                "Only never-started (planning) sprints can be folded; "
+                "in-progress or review sprints are closed via the close endpoint."
+            ),
+        )
+    try:
+        sprint = await transition_sprint(db, org_id, caller, id, "closed")
+        await db.commit()
+        await db.refresh(sprint)
+    except (SprintTransitionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
+    await _attach_org_project_slugs(db, org_id, [sprint])
+    return SprintResponse.model_validate(sprint)
+
+
 @router.post("/{id}/kickoff")
 async def kickoff_sprint(
     id: uuid.UUID,

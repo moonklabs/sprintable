@@ -482,7 +482,11 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
     "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",  # story #4536
-    "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
+    "sprintable_close_sprint",
+    # story 5040: 시작 안 한(planning) 스프린트 접기 — «생성의 반대»라 비파괴(이름에 close_sprint/delete 없음 →
+    # is_destructive False·"sprint" 키워드로 sprints 그룹). 허용 여부는 서버가 스프린트 상태로 강제(POST /cancel → 409).
+    "sprintable_cancel_planning_sprint",
+    "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_meeting",
     # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트

@@ -106,6 +106,46 @@ def test_tool_group_mapping_examples():
     # 회귀 가드). "artifact" substring 매칭으로 create_artifact/edit_artifact/delete_spec_pin과
     # 동일 "canvas" 그룹.
     assert by_tool["sprintable_delete_artifact"] == "canvas"
+    # story 5040: 시작 안 한 스프린트 접기 — admin 이 아닌 일반 sprints 그룹(ALL_TOOL_NAMES 누락 시 KeyError).
+    assert by_tool["sprintable_cancel_planning_sprint"] == "sprints"
+
+
+# ── story 5040: cancel_planning_sprint 는 비파괴 · close_sprint 는 그대로 파괴적 ──────────────
+
+@pytest.mark.parametrize("module_path", ["app.services.mcp_toolset", "sprintable_mcp.toolset"])
+def test_cancel_planning_sprint_non_destructive_close_sprint_still_blocked(module_path):
+    """backend SSOT 와 vendored 사본 둘 다 — 기본(빈) · 레거시(read/write) 키는 cancel 허용 · close 차단,
+    admin/destructive 스코프는 둘 다 허용, 그룹 명시 키는 sprints 그룹 보유 때만 cancel 허용."""
+    import importlib
+
+    m = importlib.import_module(module_path)
+    cancel, close = "sprintable_cancel_planning_sprint", "sprintable_close_sprint"
+
+    assert m.tool_group(cancel) == "sprints"
+    assert m.is_destructive(cancel) is False
+    assert m.is_destructive(close) is True
+
+    for scope in (None, [], ["read", "write"], ["write"]):
+        assert m.is_tool_allowed(cancel, scope) is True, scope
+        assert m.is_tool_allowed(close, scope) is False, scope
+
+    # (["admin"] 단독은 그룹 명시 키로 취급돼 sprints 그룹이 없어 close 도 막힘 — 기존 동작이라 여기선 안 건드림)
+    for scope in (["destructive"], ["sprints", "destructive"], ["sprints", "admin"], ["read", "write", "destructive"]):
+        assert m.is_tool_allowed(cancel, scope) is True, scope
+        assert m.is_tool_allowed(close, scope) is True, scope
+
+    # 그룹 명시 키 — 도구 이름이 아니라 그룹 스코프가 여전히 적용된다.
+    assert m.is_tool_allowed(cancel, ["sprints"]) is True
+    assert m.is_tool_allowed(close, ["sprints"]) is False
+    assert m.is_tool_allowed(cancel, ["docs"]) is False
+
+
+def test_cancel_planning_sprint_in_manifest_for_default_key():
+    from app.services.mcp_toolset import resolve_manifest
+
+    m = resolve_manifest(["read", "write"], list(ALL_TOOL_NAMES))
+    assert "sprintable_cancel_planning_sprint" in m["allowed_tools"]
+    assert "sprintable_close_sprint" in m["denied_tools"]
 
 
 # ── 엔드포인트 admin 게이트 ────────────────────────────────────────────────────

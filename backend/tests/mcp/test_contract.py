@@ -38,10 +38,12 @@ EXPECTED_TOOLS = {
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
-    # sprints (7) — E-SECURITY SEC-S8(확장): delete_sprint 의도적 제거(에이전트 hard-delete 차단)
+    # sprints (8) — E-SECURITY SEC-S8(확장): delete_sprint 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
     "sprintable_update_sprint",
+    # story 5040: 시작 안 한(planning) 스프린트 접기 — 비파괴 신규 길(close_sprint 는 destructive 유지)
+    "sprintable_cancel_planning_sprint",
     # docs (6) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단). story #2668:
     # submit_for_approval 추가(결재 상신 발견 축).
     "sprintable_list_docs", "sprintable_get_doc", "sprintable_search_docs",
@@ -172,7 +174,7 @@ def test_total_tool_count():
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
     # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
     # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
-    assert len(_TOOLS) == 146  # story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    assert len(_TOOLS) == 147  # story 5040: sprintable_cancel_planning_sprint 146→147 · story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():
