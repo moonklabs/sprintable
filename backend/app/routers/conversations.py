@@ -694,6 +694,11 @@ def _msg_payload(
     withheld = _meta.get(DELIVERY_WITHHELD_KEY) if isinstance(_meta, dict) else None
     if withheld and viewer_member_id is not None and msg.sender_id == viewer_member_id:
         payload["delivery_withheld"] = withheld
+    # story 5032 (C2) — what the server DECIDED about who receives this line (agents by id · people as a count), shown under the sender's bubble. The sender's reads only (list · single · replies · the
+    # send answer's own echo); no recipient and no observer gets the key at all. Machine fields only — the screen words it. A tombstone serves none.
+    decision = _meta.get(DELIVERY_DECISION_KEY) if isinstance(_meta, dict) else None
+    if isinstance(decision, dict) and viewer_member_id is not None and msg.sender_id == viewer_member_id and msg.deleted_at is None:
+        payload[DELIVERY_DECISION_KEY] = decision
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
     # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
@@ -710,6 +715,45 @@ _ACTIVATION_KINDS = frozenset({"request", "handoff", "result", "ack"})
 # story #4430 — a message a block kept from some participants: the metadata key on the sent line, and the closed reason.
 DELIVERY_WITHHELD_KEY = "delivery_withheld"
 DELIVERY_WITHHELD_REASON_BLOCKED = "recipient_blocked_sender"
+# story 5032 (C2) — the delivery the router actually decided, kept on the sent line for the sender's later reads (metadata key = the payload key = the send answer's key).
+DELIVERY_DECISION_KEY = "delivery_decision"
+
+
+async def _delivery_decision_of(
+    db: AsyncSession, org_id: uuid.UUID, sender_id: uuid.UUID,
+    participant_ids: set[uuid.UUID], routed_ids: set[uuid.UUID], held_back_ids: set[uuid.UUID],
+) -> dict:
+    """story 5032 (C2) — {"agents_delivered": [id…], "agents_not_delivered": [id…], "humans_delivered": n} for one sent line, built on what the ROUTER saw, not on a fresh read of the room:
+
+      · `routed_ids` = the member ids of the router's decisions — already canonical (an old human alias resolved), in this org, living and (in a project's channel) holding the project; `held_back_ids` = who the
+        send then holds back (agents its runtime cannot take a command · a server command already run · people who blocked the sender). delivered = routed − held back − the sender.
+      · people are COUNTED from those delivered ids, never matched against the raw participant rows (a participant stored under an old alias id would otherwise never equal the router's canonical id and the
+        count would fall short) — and never named. Whoever is delivered and is not an agent is a person.
+      · agents are the only ones that need the participant rows (an agent the router left out is in no decision): `participant_ids` is the rows the pre-check read right after routing (the same savepoint — a
+        participant added or removed in the instant between the two reads can be missing from «not delivered» for that one line; the delivered side always comes from the router itself). The ids of those rows are
+        raw, so they are narrowed to AGENTS OF THIS ORGANIZATION THAT ARE NOT DELETED (`members.org_id` · `deleted_at IS NULL` — the same rows the `team_members` view hands the router): a row left by another
+        organization or by a deleted agent is never reported (its id would otherwise be shown to the sender for the first time and kept on the line). An agent that is inactive or lost the room's project is
+        kept: the router leaves it out of its decisions (an agent without the project is cut from a room that has one), so it lands in «not delivered» with no further rule — it IS in the room.
+      · no reason and no name is carried (muted · «only when called» · chain cap · a block · no project — the screen finds the name from the participant list by id).
+    The sender (under its alias id too) is in none of the lists."""
+    from app.models.member import Member
+    from app.services.member_resolver import canonicalize_member_ids
+
+    sender_ids = {sender_id} | set((await canonicalize_member_ids({sender_id}, db)).values())
+    delivered = routed_ids - held_back_ids - sender_ids
+    candidates = (participant_ids | routed_ids) - sender_ids
+    agent_ids: set[uuid.UUID] = set()
+    if candidates:
+        agent_ids = set((await db.execute(
+            select(Member.id).where(
+                Member.id.in_(candidates), Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
+            )
+        )).scalars().all())
+    return {
+        "agents_delivered": sorted(str(i) for i in agent_ids & delivered),
+        "agents_not_delivered": sorted(str(i) for i in agent_ids - delivered),
+        "humans_delivered": len(delivered - agent_ids),
+    }
 
 
 def _activation_meta(req: "SendMessageRequest") -> dict | None:
@@ -3516,6 +3560,8 @@ async def send_message_core(
     decisions: list = []
     discord_exclude_ids: set[uuid.UUID] = set()
     preference_excluded_ids: set[uuid.UUID] = set()
+    router_participants: set[uuid.UUID] = set()  # story 5032: the participant rows the pre-check read right after routing — the decision report reuses them (no second read)
+    router_decided = False  # story 5032: True only when the whole pre-check ran — a failed one leaves `decisions` empty, and an unknown decision is never reported as «nobody gets it»
     try:
         async with db.begin_nested():
             from app.services.channel_router import ChannelRouterError, route_message as _route
@@ -3530,6 +3576,8 @@ async def send_message_core(
             preference_excluded_ids = {
                 pid for pid in _participant_rows if pid != sender.id and pid not in decided_ids
             }
+            router_participants = set(_participant_rows)
+            router_decided = True
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
@@ -3600,6 +3648,22 @@ async def send_message_core(
                 "conversation_type": "dm" if len(_others) == 1 else "group",
             }
             msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_WITHHELD_KEY: withheld_delivery}
+
+    # story 5032 (C2) — what this line is delivered to, as the server decided it: the router's decisions less the agents the send then holds back (`blocked_agent_ids`: a command the runtime cannot take · a server
+    # command already run) and the people who blocked the sender. Reported to the sender only (the send answer · the sender's later reads — kept in metadata beside `delivery_withheld`, merged, never over it).
+    # A report only: nothing above or below reads it. Not reported at all when the router did not decide (pre-check failed) or the read here fails.
+    delivery_decision: dict | None = None
+    if router_decided:
+        try:
+            async with db.begin_nested():
+                delivery_decision = await _delivery_decision_of(
+                    db, org_id, sender.id, router_participants,
+                    {d.member_id for d in decisions}, blocked_agent_ids | user_blocker_ids,
+                )
+            msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_DECISION_KEY: delivery_decision}
+        except Exception:
+            delivery_decision = None
+            logger.warning("delivery_decision compute failed message_id=%s — not reported", msg.id, exc_info=True)
 
     # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청
     # 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제 webhook delivery 가 **같은 snapshot**을
@@ -4083,6 +4147,9 @@ async def send_message_core(
     # story #4430 — the participants a block kept this message from (a count · a closed reason); absent when none.
     if withheld_delivery:
         response["delivery"] = withheld_delivery
+    # story 5032 (C2): the delivery the server decided (a separate key from `delivery`, which is only the blocked count); absent when it did not decide.
+    if delivery_decision is not None:
+        response[DELIVERY_DECISION_KEY] = delivery_decision
     # story #4761 (D3): the agents this message reaches only when someone makes them look (no webhook · no live stream) — machine
     # fields only (the screen words it); to the sender only, it is the answer to the send and nothing a reader gets.
     if agents_to_wake and sender.type != "agent":

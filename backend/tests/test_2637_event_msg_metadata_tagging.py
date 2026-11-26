@@ -198,6 +198,11 @@ async def test_regular_chat_message_has_no_event_metadata():
             msg = (await s.execute(
                 select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(resp["data"]["id"]))
             )).scalar_one()
-            assert msg.msg_metadata is None
+            # purpose: a plain chat line carries NO tag of any card / event kind. It is no longer `None`: since story 5032 the send keeps the router's delivery decision on the line (`delivery_decision`) for
+            # the SENDER's later reads — the only key allowed here; every read path hides it from anyone else (pinned in test_5032_delivery_decision_realdb.py), so nothing a recipient sees changed.
+            stored = msg.msg_metadata or {}
+            assert not (set(stored) - {"delivery_decision"}), stored
+            for tag in ("event", "card", "activation", "approval_target", "server_command", "work_item", "delivery"):
+                assert tag not in stored, (tag, stored)
     finally:
         await engine.dispose()
