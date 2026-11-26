@@ -15,13 +15,15 @@ export function NewChannelDialogHost({ onClose }: { onClose: () => void }) {
     projects: ctx.projectMemberships ?? [],
     currentProjectId: ctx.projectId ?? undefined,
   });
-  const opened = useRef(false);
   const setOpen = s.setCreateProjectOpen;
+  const askedOpen = useRef(false); // the open request was made (once, on mount)
+  const seenOpen = useRef(false); // the dialog has been seen open — only a close AFTER that is a real close (the first render is still «closed»)
   useEffect(() => {
-    if (!opened.current) { opened.current = true; setOpen(true); }
+    if (!askedOpen.current) { askedOpen.current = true; setOpen(true); }
   }, [setOpen]);
   useEffect(() => {
-    if (opened.current && !s.createProjectOpen && !s.creating) onClose();
+    if (s.createProjectOpen) { seenOpen.current = true; return; }
+    if (seenOpen.current && !s.creating) onClose();
   }, [s.createProjectOpen, s.creating, onClose]);
   return <CreateProjectDialog s={s} variant="channel" idPrefix="chat-channel" />;
 }

@@ -101,6 +101,19 @@ describe('[SID:5032] ConversationPage — the channel head', () => {
     expect(document.body.textContent).toContain(koMessages.chats.deliveryContractTitle);
   });
 
+  it('⭐ the delivery dialog the cog opened gives focus back to the cog (not to the «⋯» menu)', async () => {
+    stubFetch(true); await mount();
+    const cog = q('room-head-channel-settings') as HTMLButtonElement;
+    await act(async () => { cog.focus(); cog.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain(koMessages.chats.deliveryContractTitle);
+    const closeBtn = [...document.querySelectorAll('button')].find((b) => /닫기|취소/.test(b.textContent ?? '')) as HTMLButtonElement | undefined;
+    expect(closeBtn, 'the dialog has a close/cancel button').toBeTruthy();
+    await act(async () => { closeBtn!.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(document.activeElement === cog, 'focus is back on the cog').toBe(true);
+  });
+
   it('⭐ a one-to-one / group room keeps its own head: no channel tag, no cog, the old «N명» line', async () => {
     stubFetch(false); await mount();
     expect(q('room-head-tag')?.textContent).not.toBe('채널');

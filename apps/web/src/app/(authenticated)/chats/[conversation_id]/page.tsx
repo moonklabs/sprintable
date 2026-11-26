@@ -138,6 +138,8 @@ export default function ConversationPage() {
   useEffect(() => { conversationIdRef.current = conversation_id; }, [conversation_id]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
+  const channelCogRef = useRef<HTMLButtonElement>(null); // story 5032 (C2): the channel head's cog — where focus returns when the cog opened the settings dialog
+  const [deliveryFromCog, setDeliveryFromCog] = useState(false);
   const headMenuTriggerRef = useRef<HTMLButtonElement>(null); // the «⋯» button: where focus returns after the notification-settings window closes (the menu item that opened it is gone)
   // story 4977 (B3-3): the «기록» sheet of an agent's DM — also for a room whose session is over. It is open for ONE room (the room's id, not a bare flag): a page reused for another room opens nothing by itself
   const [recordsOpenFor, setRecordsOpenFor] = useState<string | null>(null);
@@ -395,7 +397,7 @@ export default function ConversationPage() {
     <>
       {/* story 5032 (C2): the channel's settings cog — the channel's delivery settings (who gets every word) are the same dialog the «⋯» menu opens for any room */}
       {meta.isProjectChannel ? (
-        <IconButton icon="settings" label={t('roomChannelSettings')} data-testid="room-head-channel-settings" onClick={() => setShowDeliveryContract(true)} />
+        <IconButton ref={channelCogRef} icon="settings" label={t('roomChannelSettings')} data-testid="room-head-channel-settings" onClick={() => { setDeliveryFromCog(true); setShowDeliveryContract(true); }} />
       ) : null}
       {/* per-대화 알림 mute (270c87e6): the muted STATE stays visible — a person must see a room is muted without opening anything (story 4887 · P3-a) */}
       {meta.muted ? (
@@ -428,7 +430,7 @@ export default function ConversationPage() {
             </DropdownMenuItem>
           ) : null}
           {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
-          <DropdownMenuItem onClick={() => setShowDeliveryContract(true)} data-testid="room-head-settings">
+          <DropdownMenuItem onClick={() => { setDeliveryFromCog(false); setShowDeliveryContract(true); }} data-testid="room-head-settings">
             <Icon name="settings" size={16} className="text-muted-foreground" />
             {t('deliveryContractTitle')}
           </DropdownMenuItem>
@@ -538,7 +540,7 @@ export default function ConversationPage() {
           conversationType={meta.type}
           freeResponse={meta.freeResponse}
           onClose={() => setShowDeliveryContract(false)}
-          returnFocusRef={headMenuTriggerRef}
+          returnFocusRef={deliveryFromCog ? channelCogRef : headMenuTriggerRef}
           onFreeResponseChange={(next) => setMeta((m) => (m ? { ...m, freeResponse: next } : m))}
         />
       )}

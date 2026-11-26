@@ -955,7 +955,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
   const projectLabelOf = (c: ConversationItem): string | undefined => {
     if (c.project_id === undefined) return undefined;
-    if (c.project_id === null) return t('roomNoProject'); // a room without a project is the odd one: it always says so
+    if (c.project_id === null) return undefined; // story 5032 (C2 · PO 11-26): to a person a project IS a channel — a room with none carries no «프로젝트 없음» mark (the row keeps at most one chip)
     // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
     // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
     // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
@@ -1017,6 +1017,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     loadError, agentLoadError, retryActiveList,
   ]);
 
+  // story 5032 (C2): the «채널» head with «+ 새 채널» — drawn with the groups and, when there is no room at all, above the empty state (a person with nothing yet can still start the first channel)
+  const channelsHeader = (
+    <SectionHeader
+      level={3}
+      title={<span id="chat-list-channels-h">{t('channelsSection')}</span>}
+      count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-channels-count">{grouped.channels.length}</span>}
+      trailing={canStartRoom ? <IconButton icon="add" label={t('newChannel')} data-testid="chat-list-new-channel" onClick={() => setChannelDialogOpen(true)} /> : undefined}
+    />
+  );
+
   const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
       <p className="text-sm text-muted-foreground">{tc('loading')}</p>
@@ -1049,20 +1059,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>}
       </div>
     ) : (
-      <div className="flex h-full items-center justify-center">
-        <ChatListEmptyState />
+      <div className="flex h-full flex-col">
+        <section aria-labelledby="chat-list-channels-h" data-testid="chat-list-channels">{channelsHeader}</section>
+        <div className="flex flex-1 items-center justify-center">
+          <ChatListEmptyState />
+        </div>
       </div>
     )
   ) : (
     <div className="space-y-1" onKeyDown={moveBetweenRooms}>
       {/* story 5032 (C2) — TWO groups: the projects' channels (named by the project · «+ 새 채널» = a new project), then the one-to-one / group rooms. The server marks a channel `is_project_channel`; a room it does not mark (an older server too) stays in the second group in the server's order. */}
       <section aria-labelledby="chat-list-channels-h" data-testid="chat-list-channels">
-        <SectionHeader
-          level={3}
-          title={<span id="chat-list-channels-h">{t('channelsSection')}</span>}
-          count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-channels-count">{grouped.channels.length}</span>}
-          trailing={canStartRoom ? <IconButton icon="add" label={t('newChannel')} data-testid="chat-list-new-channel" onClick={() => setChannelDialogOpen(true)} /> : undefined}
-        />
+        {channelsHeader}
         {grouped.channels.length === 0 ? <p className="px-4 py-2 text-ds-small text-ds-ink-3" data-testid="chat-list-channels-empty">{t('channelsEmpty')}</p> : grouped.channels.map((conv) => (
           <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
         ))}

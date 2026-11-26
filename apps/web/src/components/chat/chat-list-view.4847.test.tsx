@@ -126,21 +126,22 @@ describe('ChatListView — 조직 안 모든 방 한 목록(story 4847 AC1)', ()
     for (const title of ['에이 방', '비 방', '프로젝트 없는 방']) expect(container.textContent).toContain(title);
   });
 
-  it('⭐방마다 프로젝트 이름이 붙고, 프로젝트 없는 방은 «프로젝트 없음»이다', async () => {
+  it('⭐방마다 프로젝트 이름이 붙고, 프로젝트 없는 방에는 표식이 없다(story 5032 · 사람에겐 프로젝트 = 채널)', async () => {
     stubOrgServer();
     await mount();
     const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
-    expect(labels).toHaveLength(3);
-    expect(labels).toEqual(expect.arrayContaining([A.projectName, B.projectName, koMessages.chats.roomNoProject]));
+    expect(labels).toHaveLength(2);
+    expect(labels).toEqual(expect.arrayContaining([A.projectName, B.projectName]));
+    expect(labels).not.toContain(koMessages.chats.roomNoProject); // reverted → a «프로젝트 없음» line on the project-less room
   });
 
   // story 4887 (UI-4 P2-a) — with ONE known project every row of that project would say the same name; the line (the row's fourth) is spared there. Everything else keeps the name: it is information.
-  it('4887 ⭐ a person with ONE project gets no project line on a room of that project — the project-less room still says «프로젝트 없음»', async () => {
+  it('4887 ⭐ a person with ONE project gets no project line on a room of that project — and the project-less room has no mark either (story 5032)', async () => {
     useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
     stubOrgServer([N1, A1]);
     await mount();
     const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
-    expect(labels).toEqual([koMessages.chats.roomNoProject]);
+    expect(labels).toEqual([]);
     expect(container.textContent).toContain('에이 방');
   });
 

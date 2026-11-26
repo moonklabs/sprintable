@@ -107,6 +107,15 @@ describe('[SID:5032] ChatListView — two groups', () => {
 
 // the teacher's rule (11-26 09:29Z, C2): talking about project B in a room of project A never opens a «switch to B?» popup or a suggestion — and there is none in the chat code today (measured). This pins the absence:
 // no chat module detects · infers · suggests a project from what is said.
+describe('[SID:5032] ChatListView — an empty list can still start the first channel', () => {
+  it('⭐ with no room at all the channels head and «+ 새 채널» are above the empty state (codex round 1 MEDIUM)', async () => {
+    await mount([]);
+    expect(q('chat-list-channels')).not.toBeNull();
+    expect(q('chat-list-new-channel')).not.toBeNull();
+    expect(q('chat-list-room-group')).toBeNull();
+  });
+});
+
 describe('[SID:5032] no project-detection popup in the chat code', () => {
   it('no non-test file under components/chat names a project detector or a project suggestion', () => {
     const dir = __dirname;

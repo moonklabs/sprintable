@@ -57,11 +57,11 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(probe().dataset.chip).toBe('true');
   });
 
-  it('⭐«대화»(/chats) 로딩 — 제목 = 대화 제목 · 칩 표시', async () => {
+  it('⭐«대화»(/chats) 로딩 — 상단바엔 글자 없이 칩만(목록 머리가 «대화 N»을 이미 말한다 · story 5032) · 칩 표시', async () => {
     const { default: Loading } = await import('@/app/(authenticated)/chats/loading');
     nav.pathname = '/chats';
     await render(<Loading />);
-    expect(probe().textContent).toBe(koMessages.chats.title);
+    expect(probe().textContent).toBe(''); // reverted → «대화» twice (bar + list head)
     expect(probe().dataset.chip).toBe('true');
   });
 
@@ -214,7 +214,7 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     const { default: Loading } = await import('@/app/(authenticated)/chats/loading');
     nav.pathname = '/chats';
     await render(<Loading />);
-    expect(probe().textContent).toBe(koMessages.chats.title);
+    expect(probe().dataset.chip).toBe('true'); // the chat list's bar is the chip alone now (story 5032)
     await render(null);
     expect(probe().textContent).toBe('');
   });
