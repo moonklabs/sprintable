@@ -1477,6 +1477,8 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #5032 — true for the room a project owns as its channel (one per project); every other room false
+    is_project_channel: bool = False
     # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
     # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
     circuit_breaker: "CircuitBreakerState | None" = None
@@ -1966,6 +1968,7 @@ async def list_conversations(
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
             "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
+            "is_project_channel": bool(conv.is_project_channel),  # story #5032 — same value as the single GET
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
@@ -2222,6 +2225,7 @@ async def get_conversation(
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         free_response=conv.free_response,
+        is_project_channel=bool(conv.is_project_channel),
     )
     resp.muted = caller_row is not None and caller_row.muted_at is not None
     if caller_row is not None:

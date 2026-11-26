@@ -220,6 +220,12 @@ async def create_project_access(
         )
     if body.member_id is None:
         session.add(record)
+        await session.flush()
+        # story #5032 (C2): a person who gains the project joins its channel room too (an agent already did, inside `grant_agent_project_access`)
+        if record.member_id is not None:
+            from app.services.project_channel import seat_in_project_channel_quietly
+
+            await seat_in_project_channel_quietly(session, project_id=project_id, member_id=record.member_id)
     await session.commit()
     await session.refresh(record)
     return ProjectAccessResponse.model_validate(record)
@@ -266,7 +272,14 @@ async def delete_project_access(
             )
         )
 
+    revoked_member_id = record.member_id
     await session.delete(record)
+    await session.flush()
+    # story #5032 (C2): whoever loses the project (a person or an agent) leaves its channel room
+    if revoked_member_id is not None:
+        from app.services.project_channel import unseat_from_project_channel_quietly
+
+        await unseat_from_project_channel_quietly(session, project_id=project_id, member_id=revoked_member_id)
     await session.commit()
     return {"ok": True}
 

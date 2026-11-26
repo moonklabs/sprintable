@@ -54,6 +54,9 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     # mute는 이걸로 안 뒤집힘 — channel_router.py 참조). 기본 false(무회귀).
     # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).
     free_response: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # story #5032 (migration 0502 · PO decision): the one room a project owns as its «project channel». It stays `type='group'` (no new type value — delivery, permission and list
+    # code tell dm from group); this mark is all that tells it apart. At most one per project (partial unique index uq_conversations_project_channel).
+    is_project_channel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     participants: Mapped[list["ConversationParticipant"]] = relationship(
         "ConversationParticipant", back_populates="conversation", lazy="select"

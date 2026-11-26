@@ -84,4 +84,9 @@ async def grant_agent_project_access(
 
     await ensure_agent_project_profile(session, member_id=member_id, project_id=project_id)
     await session.flush()
+    # story #5032 (C2): the agent joins the project's channel room (set up first when the project has none yet) — in every path that grants (the access route · the
+    # desktop move). Never fails the grant (a savepoint inside; a channel that could not be updated is logged, the grant stands).
+    from app.services.project_channel import seat_in_project_channel_quietly
+
+    await seat_in_project_channel_quietly(session, project_id=project_id, member_id=member_id)
     return record
