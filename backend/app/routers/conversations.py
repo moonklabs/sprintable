@@ -3831,10 +3831,12 @@ async def send_message_core(
             # 같은 결로 여기서도 뺀다(새 쿼리 없음, caller의 값 재사용).
             agent_ids -= {str(bid) for bid in user_blocker_ids}
 
-            # story 5030 — this broadcast sent the raw words to EVERY agent participant, whatever the router decided: with «an agent in a group room receives only the words that call it» the SSE
-            # event was withheld but an agent holding a websocket room still got every word (and an explicit `mute` did not hold either). The participants the router left out of this message's
-            # decisions (`preference_excluded_ids`, computed above) are taken out here too. Router failed → the set is empty → nothing is taken out (as for the SSE events: fail open).
-            agent_ids -= {str(pid) for pid in preference_excluded_ids}
+            # story 5030 — this broadcast sent the raw words to EVERY agent participant's room, whatever the router decided: with «an agent in a group room receives only the words that call
+            # it» the SSE event was withheld but an agent holding a websocket room still got every word (and an explicit `mute` did not hold either). The room is the agent's but its sockets are
+            # the agent's own AND the people who may read the conversation (test_4775) — so the participants the router left out of this message's decisions (`preference_excluded_ids`,
+            # computed above) get their room broadcast with the AGENT-KEY sockets skipped; the people in it still read the line. Router failed → the set is empty → nothing is withheld
+            # (as for the SSE events: fail open).
+            withheld_agent_ids = {str(pid) for pid in preference_excluded_ids}
 
             if agent_ids:
                 ws_payload = json.dumps({
@@ -3845,10 +3847,10 @@ async def send_message_core(
                     "content": msg.content,
                     "ts": msg.created_at.isoformat(),
                 })
-                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload) -> None:
+                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload, withheld: set[str] = withheld_agent_ids) -> None:
                     for aid in ids:
                         if aid in _rooms:
-                            await _broadcast(aid, payload, conversation_id=conversation_id)
+                            await _broadcast(aid, payload, conversation_id=conversation_id, skip_agent_key_sockets=aid in withheld)
 
                 if after_commit is None:
                     await _ws_send()
