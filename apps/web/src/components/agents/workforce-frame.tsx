@@ -63,7 +63,8 @@ function AllViewsNav({ active, testId, children }: { active: AllViewKey | null; 
     <div className="flex items-center gap-3" data-testid={testId}>
       {children}
       <div className="min-w-0 flex-1">
-      <TabNav aria-label={ta('allViewsLabel')}>
+      {/* the five links WRAP onto a second line when they do not fit (story 5035 follow-up · PO's Two-Pass on 390: the strip scrolled sideways and was cut at «접근» with nothing saying there was more) — every link is whole and one press away */}
+      <TabNav aria-label={ta('allViewsLabel')} className="flex-wrap overflow-x-visible pr-0 [mask-image:none]">
         {views.map((v) => (
           <TabNavLink key={v.key} asChild active={v.key === active}>
             <Link href={flatHref(v.path)} data-all-view={v.key}>

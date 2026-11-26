@@ -449,6 +449,24 @@ describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
   };
   const selected = () => triggers().find((b) => b.getAttribute('aria-selected') === 'true')?.textContent ?? null;
 
+  it('⭐«커맨드 미지원»은 속성이라 오류 색이 아니다 — claude-code(미지원)의 칩은 중립(실패 빨강 아님) · 아이콘도 ✕가 아니다 (C5 Two-Pass)', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    const chip = container.querySelector('[data-testid="agent-detail-card-runtime"] [data-slot="ds-chip"], [data-testid="agent-detail-card-runtime"] span.inline-flex') as HTMLElement | null;
+    expect(chip?.textContent).toContain('커맨드 미지원');
+    expect(chip?.className).toContain('bg-ds-surface-high');
+    expect(chip?.className).not.toContain('failed');
+    const icon = chip?.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(icon, 'a dash, not the failure cross').toMatch(/minus/);
+    expect(icon).not.toMatch(/-x\b|x-circle|circle-x/);
+  });
+  it('⭐미인식 런타임 값(registry 밖)은 그대로 실패 색 — 속성이 아니라 «모르는 값»이다', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'internal-beta' } });
+    await mount();
+    const chip = container.querySelector('[data-testid="agent-detail-card-runtime"] span.inline-flex') as HTMLElement | null;
+    expect(chip?.className).toContain('failed');
+  });
+
   it('⭐일반 에이전트(관리자): 구역 탭 다섯이 이 순서로 서고 첫 구역은 «실행 환경»', async () => {
     stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
     await mount();
