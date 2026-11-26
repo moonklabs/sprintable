@@ -3388,6 +3388,10 @@ async def _publish_registry_event_core(
             context=routing_context,
         ),
         mentioned_ids=list(escalation_ids),
+        # story 5030 — an event notice is ADDRESSED: whoever the routing chose (escalation and broadcast legs) is named so that an agent in a group room, which receives only the words
+        # that call it (channel_router), still receives the notice that is its work (`preset.gate.verdict` to a requester, `preset.work.status_changed` to the assignees). They are named
+        # in `delivery_member_ids`, not called by `mentioned_ids`: a call adds a second event (the mention) and a bell line for each, and the escalation leg alone was ever called.
+        delivery_member_ids=list(escalation_ids | broadcast_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
     send_auth = auth

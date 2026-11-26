@@ -724,6 +724,12 @@ def _card_meta(req: "SendMessageRequest") -> dict | None:
     return {"card": card} if card else None
 
 
+def _delivery_meta(req: "SendMessageRequest") -> dict | None:
+    """story 5030 — req.delivery_member_ids → msg_metadata['delivery']['member_ids'] (strings). Read by channel_router only; no client payload carries it."""
+    ids = getattr(req, "delivery_member_ids", None)
+    return {"delivery": {"member_ids": [str(i) for i in ids]}} if ids else None
+
+
 def _work_item_meta(req: "SendMessageRequest") -> dict | None:
     """story #3828(UX-v3·대화·BE 1) — req.work_item({type, id}) → msg_metadata['work_item'].
     approval_target(approval_delivery.py)과 같은 namespace 패턴이지만 그쪽은 send_message()를
@@ -754,6 +760,9 @@ def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
     cd = _card_meta(req)
     if cd:
         merged.update(cd)
+    dl = _delivery_meta(req)
+    if dl:
+        merged.update(dl)
     return merged or None
 
 
@@ -1574,6 +1583,10 @@ class SendMessageRequest(BaseModel):
     # story 5034 (C4): the card of a message the SERVER chose to draw as a part of the web's catalogue — `{kind, ref}` only (services/chat_card.py). Server-only like `event_context`: the public route's body
     # model (HttpSendMessageRequest) refuses any value with 422; the server's own in-process callers (the «show it» tool, step 4) set it. An unknown kind or a reference that is not a UUID is refused at once.
     card: dict | None = None
+    # story 5030 — the members a SERVER-published notice is FOR (the routing of `publish_registry_event` chose them). An agent in a group room receives only the words that call it
+    # (channel_router); a notice is not a call — calling its agents by `mentioned_ids` would add a second event (the mention) and a bell line for each, so the publisher names its
+    # addressees here instead: stored in `msg_metadata['delivery']` (never sent to a client) and read by the router as «addressed». Server only — see HttpSendMessageRequest.
+    delivery_member_ids: list[uuid.UUID] | None = None
     # story #3828(UX-v3·대화·BE 1) — 이 메시지가 어느 work_item(story·doc 등) 얘기인지
     # 선택 태그. Pydantic 하위모델 자체가 형식 검증(type 누락·id가 UUID 아님 → 422) —
     # 없으면 완전 무변(approval_target과는 별도 namespace, _work_item_meta 참고).
@@ -1616,6 +1629,16 @@ class HttpSendMessageRequest(SendMessageRequest):
     def _card_is_server_only(cls, v: object) -> None:
         if v is not None:
             raise ValueError("card is set by the server only (it is the chat card the server drew this message as); it cannot be sent to this endpoint")
+        return None
+
+    # story 5030 — likewise server only: a caller of the public route could otherwise name itself «addressed» and be delivered every word of a room it is only in.
+    delivery_member_ids: None = Field(default=None, description="Set by the server only (the members a published notice is for). Sending a value is refused with 422.")
+
+    @field_validator("delivery_member_ids", mode="before")
+    @classmethod
+    def _delivery_member_ids_is_server_only(cls, v: object) -> None:
+        if v is not None:
+            raise ValueError("delivery_member_ids is set by the server only (the addressees of a notice the server published); it cannot be sent to this endpoint")
         return None
 
     @field_validator("event_context", mode="before")
@@ -3874,6 +3897,13 @@ async def send_message_core(
             # 같은 결로 여기서도 뺀다(새 쿼리 없음, caller의 값 재사용).
             agent_ids -= {str(bid) for bid in user_blocker_ids}
 
+            # story 5030 — this broadcast sent the raw words to EVERY agent participant's room, whatever the router decided: with «an agent in a group room receives only the words that call
+            # it» the SSE event was withheld but an agent holding a websocket room still got every word (and an explicit `mute` did not hold either). The room is the agent's but its sockets are
+            # the agent's own AND the people who may read the conversation (test_4775) — so the participants the router left out of this message's decisions (`preference_excluded_ids`,
+            # computed above) get their room broadcast with the AGENT'S OWN sockets skipped; the people in it still read the line. Router failed → the set is empty → nothing is withheld
+            # (as for the SSE events: fail open).
+            withheld_agent_ids = {str(pid) for pid in preference_excluded_ids}
+
             if agent_ids:
                 ws_payload = json.dumps({
                     "id": str(msg.id),
@@ -3883,10 +3913,13 @@ async def send_message_core(
                     "content": msg.content,
                     "ts": msg.created_at.isoformat(),
                 })
-                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload) -> None:
+                async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload, withheld: set[str] = withheld_agent_ids) -> None:
                     for aid in ids:
                         if aid in _rooms:
-                            await _broadcast(aid, payload, conversation_id=conversation_id)
+                            if aid in withheld:
+                                await _broadcast(aid, payload, conversation_id=conversation_id, skip_own_sockets=True)
+                            else:  # unchanged call for everyone the router delivered to
+                                await _broadcast(aid, payload, conversation_id=conversation_id)
 
                 if after_commit is None:
                     await _ws_send()

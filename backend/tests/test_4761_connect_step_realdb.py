@@ -335,13 +335,16 @@ async def _dm_with_agent(Session):
     return org.id, human_user, agent, conv
 
 
-async def _send(Session, org_id, human_user, conv, text="안녕"):
+async def _send(Session, org_id, human_user, conv, text="안녕", mentioned=()):
     from app.main import app
 
+    body = {"content": text}
+    if mentioned:  # story 5030: an agent in a group room receives only the words that call it
+        body["mentioned_ids"] = [str(m) for m in mentioned]
     await _setup_app_human(app, Session, human_user, org_id)
     try:
         async with _client_for(app) as client:
-            return await client.post(f"/api/v2/conversations/{conv}/messages", json={"content": text})
+            return await client.post(f"/api/v2/conversations/{conv}/messages", json=body)
     finally:
         app.dependency_overrides.clear()
 
@@ -417,7 +420,7 @@ async def test_13_in_a_group_only_the_agent_that_is_not_reached_is_listed():
             silent = await _make_agent_member(s, org.id, project.id)
             conv = await _make_conversation(s, org.id, project.id, [human_id, reached, silent], human_id, conv_type="group")
         await _live_session(Session, reached, age_s=3)
-        r = await _send(Session, org.id, human_user, conv)
+        r = await _send(Session, org.id, human_user, conv, mentioned=[reached, silent])  # the person calls both agents of the group
         assert r.status_code == 201, r.text
         assert [x["member_id"] for x in r.json()["agent_wake"]["required"]] == [str(silent)]
         assert await _working(conv) == [str(reached)]

@@ -42,8 +42,10 @@ async def _as(Session, w, caller, method, path, json_body=None):
         app.dependency_overrides.clear()
 
 
-async def _say(Session, w, caller, conv_id, content):
-    r = await _as(Session, w, caller, "POST", f"/api/v2/conversations/{conv_id}/messages", {"content": content, "mentioned_ids": []})
+async def _say(Session, w, caller, conv_id, content, mentioned=()):
+    # story 5030: an agent in a group room receives only the words that call it. The tests that check WHICH agent a word is delivered to (the project cut)
+    # call their agents by name, so the cut is what decides — not the default «only the called».
+    r = await _as(Session, w, caller, "POST", f"/api/v2/conversations/{conv_id}/messages", {"content": content, "mentioned_ids": [str(m) for m in mentioned]})
     assert r.status_code == 201, r.text
     return r
 
@@ -94,7 +96,7 @@ async def test_the_activity_follows_the_same_read_rule_as_the_room_an_agents_onl
     engine, Session, w = await _world()
     try:
         words = f"ac14-agents-{uuid.uuid4().hex[:8]}"
-        await _say(Session, w, "agent_participant", w.r_agents, f"between agents {words}")
+        await _say(Session, w, "agent_participant", w.r_agents, f"between agents {words}", mentioned=[w.g_2])
         for caller, may in (("agent_participant", True), ("org_owner", True), ("member_outside", False), ("participant", False)):
             st, text = await _stream_text(Session, w, caller, w.p1)
             assert st == 200, (caller, st, text[:200])
@@ -211,6 +213,13 @@ async def test_a_message_is_not_delivered_to_a_participant_agent_that_has_not_th
         room = await _people_project_room(Session, w)
         for a in (lost, kept, lost_hook_agent, kept_hook_agent):
             await _put_in_room(Session, room, a)
+        # story 5030: an agent in a group room receives only the words that call it — and a CALL reaches an agent that has not the room's project too (the mention event is not cut by project), which is not
+        # what this test looks at. A free-response room lets every word through, so the PROJECT is what decides who is delivered to.
+        async with Session() as s:
+            from sqlalchemy import text as _text
+
+            await s.execute(_text("UPDATE conversations SET free_response = true WHERE id = :i"), {"i": room})
+            await s.commit()
         async with Session() as s:
             hook_lost = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=lost_hook_agent, project_id=w.p2, url="https://lost.example/hook", events=[])
             hook_kept = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=kept_hook_agent, project_id=w.p1, url="https://kept.example/hook", events=[])
@@ -238,7 +247,7 @@ async def test_a_room_without_a_project_delivers_to_its_agents_whatever_their_pr
 
         async with Session() as s:
             free = await _make_conversation(s, w.org, None, [w.h_a, w.h_b, outside], w.h_a, "group")
-        r = await _say(Session, w, "participant", free, "no project here")
+        r = await _say(Session, w, "participant", free, "no project here", mentioned=[outside])
         msg = uuid.UUID((r.json().get("data") or r.json())["id"])
         assert await _events_for(Session, msg, outside)                                       # unchanged: a room with no project asks nothing of an agent's projects
     finally:

@@ -170,9 +170,10 @@ async def test_agent_group_default_excludes_unmentioned_agent_recipient():
 
 @pytest.mark.anyio
 async def test_agent_group_default_is_all_when_mentions_flag_off():
-    """핫픽스(2026-08-13) — settings.agent_group_default_mentions 기본 False에서는 그룹챗
-    에이전트 recipient도 멘션 없이 all(사전 #2603 동작 복귀). 팀 전체 A2A 통신 차단 회피가
-    이 값의 존재 이유 — 회귀하면 다시 막힌다."""
+    """비상 스위치 — settings.agent_group_default_mentions를 False로 내리면 그룹챗 에이전트
+    recipient도 멘션 없이 all(사전 #2603 동작). story 5030 이전엔 이게 기본값이었다(8-13
+    핫픽스) — 지금 기본은 True(아래 test_agent_group_default_mentions_flag_is_on_by_default)이고
+    이 시험은 «스위치를 내리면 옛 동작»만 고정한다."""
     from app.services.channel_router import route_message
 
     sender = uuid.uuid4()
@@ -198,12 +199,21 @@ async def test_agent_group_default_is_all_when_mentions_flag_off():
         _scalars([]),
     ])
 
-    with _NOT_EXPIRED:  # _MENTIONS_ON 없음 — 기본값(False) 그대로.
+    _MENTIONS_OFF = patch("app.services.channel_router.settings.agent_group_default_mentions", False)
+    with _NOT_EXPIRED, _MENTIONS_OFF:
         decisions = await route_message(msg.id, db)
     assert len(decisions) == 1
     assert decisions[0].member_id == recipient
     assert decisions[0].level == "all"
     assert decisions[0].reason == "default: all"
+
+
+def test_agent_group_default_mentions_flag_is_on_by_default():
+    """story 5030 — 에이전트는 그룹 대화에서 «부른 말만» 받는 게 코드 기본이다. 8-13 핫픽스가 False로 껐던 값을
+    되돌리면(= 설정으로 가리면) 이 시험이 빨개진다. 배포 설정(deploy/vm/env)에 이 값을 따로 두지 않는다."""
+    from app.core.config import Settings
+
+    assert Settings.model_fields["agent_group_default_mentions"].default is True
 
 
 @pytest.mark.anyio
@@ -401,7 +411,7 @@ async def test_chain_expired_does_not_block_human_less_agent_recipient():
     msg.sender_id = sender
     msg.conversation_id = conv
     msg.thread_id = None
-    msg.mentioned_ids = []  # 무멘션 — human-less 예외(all)만으로 통과해야 한다.
+    msg.mentioned_ids = [recipient]  # story 5030: 그룹의 에이전트는 부른 말만 받는다 — 부른 말이 «연쇄 cap»에 안 막히는지가 이 시험의 몫.
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
@@ -419,7 +429,7 @@ async def test_chain_expired_does_not_block_human_less_agent_recipient():
         decisions = await route_message(msg.id, db)
     assert len(decisions) == 1, "human-less 대화에서 연쇄 cap 초과가 무멘션 agent recipient를 막으면 안 된다"
     assert decisions[0].member_id == recipient
-    assert decisions[0].level == "all"
+    assert decisions[0].level == "mentions"  # story 5030: called, so the group default (mentions) lets it through
 
 
 @pytest.mark.anyio

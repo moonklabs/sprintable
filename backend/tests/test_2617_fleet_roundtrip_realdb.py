@@ -76,6 +76,12 @@ async def test_human_less_group_chain_exceeded_still_delivers_event():
                 s, org.id, project.id, [agent_a, agent_b], created_by=agent_a, conv_type="group",
             )
             await _seed_chain_exceeding_history(s, conv_id, agent_a, agent_b, count=5)
+            # story 5030: an agent in a group room receives only the words that call it — a CALL also adds a mention event (the helper below reads exactly one), so this test keeps
+            # the word uncalled and makes the room a free-response room: what it holds is that the chain gate does not stop a delivery that the room lets through.
+            from sqlalchemy import text as _text
+
+            await s.execute(_text("UPDATE conversations SET free_response = true WHERE id = :i"), {"i": conv_id})
+            await s.commit()
 
         await _setup_app_agent(app, Session, agent_a, org.id)
         client = _client_for(app)

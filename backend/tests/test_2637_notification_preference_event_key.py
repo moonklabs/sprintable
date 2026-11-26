@@ -70,13 +70,18 @@ async def _seed_group_conversation(session, org_id, project_id, *, participant_i
     )
 
 
-async def _seed_event_tagged_message(session, conv_id, sender_id, event_key: str):
+async def _seed_event_tagged_message(session, conv_id, sender_id, event_key: str, *, addressed=()):
+    """`addressed`: story 5030 — the members the publisher named as the notice's addressees (`msg_metadata['delivery']`), as the real publisher does for its routing's recipients. An agent in a group
+    room receives only the words that call it OR a notice it is an addressee of; these tests look at the event_key MUTE, so the recipients are addressees."""
     from app.models.conversation import ConversationMessage
 
+    metadata = {"event": {"event_key": event_key, "payload": {}}}
+    if addressed:
+        metadata["delivery"] = {"member_ids": [str(m) for m in addressed]}
     msg = ConversationMessage(
         id=uuid.uuid4(), conversation_id=conv_id, sender_id=sender_id,
         content="[이벤트] " + event_key,
-        msg_metadata={"event": {"event_key": event_key, "payload": {}}},
+        msg_metadata=metadata,
     )
     session.add(msg)
     await session.commit()
@@ -113,7 +118,7 @@ async def test_event_key_mute_excludes_recipient_from_delivery_decisions():
             )
             await _seed_event_key_mute_pref(s, muter_id, "org.acme.widget.made")
 
-            msg_id = await _seed_event_tagged_message(s, conv.id, sender_id, "org.acme.widget.made")
+            msg_id = await _seed_event_tagged_message(s, conv.id, sender_id, "org.acme.widget.made", addressed={muter_id, other_id})
 
             decisions = await route_message(msg_id, s)
             decided_ids = {d.member_id for d in decisions}
@@ -142,7 +147,7 @@ async def test_event_key_mute_does_not_affect_other_event_keys():
             )
             await _seed_event_key_mute_pref(s, muter_id, "org.acme.widget.made")
 
-            other_msg_id = await _seed_event_tagged_message(s, conv.id, sender_id, "org.acme.thing.done")
+            other_msg_id = await _seed_event_tagged_message(s, conv.id, sender_id, "org.acme.thing.done", addressed={muter_id})
 
             decisions = await route_message(other_msg_id, s)
             decided_ids = {d.member_id for d in decisions}

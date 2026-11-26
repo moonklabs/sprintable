@@ -315,13 +315,13 @@ class Settings(BaseSettings):
     # 파생(충돌 시 redis 우선+ERROR)·"pg"|"redis"=명시 강제. "잘못된 상태를 표현 불가능하게"(불린 2개 대신 enum).
     realtime_backplane: str = ""
 
-    # 핫픽스(2026-08-13, 선생님 직접 지시 — 페드루 경유): story #2603 P0가 그룹(비-DM) 대화의
-    # agent recipient 기본 delivery level을 all→mentions로 바꿨는데, free_response 오버라이드
-    # 규명 전에 팀 전체 통신이 막혀(require_mention 켜고 일하는 관례가 없다) 즉시 되돌린다.
-    # 기본 off = 사전 #2603 동작(agent group도 all) — 소급 mentions는 규명·수리 후 opt-in
-    # 재활성 대상. False가 아니면(레거시 지원 없음) channel_router.py의 mentions 분기가
-    # 활성화된다(테스트에서만 True로 켜 그 분기 자체는 계속 커버).
-    agent_group_default_mentions: bool = False
+    # 그룹(비-DM) 대화에서 에이전트는 «부른 말만» 받는다(story #2603 P0의 기본계약) — 기본 ON(story 5030).
+    # 8-13 핫픽스(#3008)가 이 기본을 껐던 까닭(불균일 · 아래)을 5030이 걷었다: 에이전트 생성 때 «global/sse/all»
+    # 설정 행을 명시로 심어(notification_preference_defaults) 그 행이 이 기본보다 앞서 모든 말을 받았고(심은 행이
+    # 없는 에이전트만 막혀 «일부만 막힘»), 이벤트 알림은 부르지 않고 방에 실렸다. 이제 심기를 멈췄고 심은 값은
+    # 이관으로 걷었으며 알림은 받을 에이전트를 명시로 부른다. 이 값은 비상 스위치로만 남긴다 — False면
+    # agent group도 all(사전 #2603 동작).
+    agent_group_default_mentions: bool = True
 
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
