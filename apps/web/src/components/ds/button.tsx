@@ -31,8 +31,8 @@ export const buttonVariants = cva(
         danger: 'border-ds-failed bg-transparent text-ds-failed hover:bg-ds-failed-soft',
       },
       size: {
-        md: 'h-ds-control-sm px-ds-4 text-ds-body', // 좌우 여백 16 · 글자 16/24 Medium(키트) — md · lg가 같은 모양(높이 40 하나)
-        lg: 'h-ds-control px-ds-4 text-ds-body',
+        md: 'h-ds-control-sm px-4 text-ds-body', // 좌우 여백 16 · 글자 16/24 Medium(키트) — md · lg가 같은 모양(높이 40 하나)
+        lg: 'h-ds-control px-4 text-ds-body',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },

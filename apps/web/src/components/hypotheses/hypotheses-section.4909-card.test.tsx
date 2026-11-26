@@ -97,7 +97,7 @@ describe('HypothesesSection — 4909 가설 칸 1단계 (ds 부품 · 층)', () 
     expect(tokens(accept)).toContain('bg-ds-action'); // primary
     expect(tokens(cancel)).toEqual(expect.arrayContaining(['border-transparent', 'text-ds-ink-2'])); // quiet (secondary has a visible control border; danger the failed colour)
     expect(tokens(cancel)).not.toContain('bg-ds-action');
-    expect(tokens(cancel)).not.toContain('border-ds-line-control');
+    expect(tokens(cancel)).not.toContain('bg-ds-surface-sunk');
     expect(tokens(cancel)).not.toContain('border-ds-failed');
     expect(section().innerHTML).toContain('bg-ds-info-soft');
     expect(section().innerHTML).not.toMatch(/bg-primary\/5|border-primary\/30/);

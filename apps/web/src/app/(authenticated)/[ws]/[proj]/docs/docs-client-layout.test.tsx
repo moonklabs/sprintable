@@ -211,7 +211,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     // story 4892 — 태그 칩은 ds Button: 고른 칩 = 보조(윤곽) 변형 + aria-pressed · 안 고른 칩 = 조용 변형. 옛 proof 재질 클래스는 없다.
     expect(tagChip?.getAttribute('data-slot')).toBe('ds-button');
     expect(tagChip?.getAttribute('aria-pressed')).toBe('true');
-    expect(tagChip?.className).toContain('border-ds-line-control');
+    expect(tagChip?.className).toContain('bg-ds-surface-sunk');
     expect(tagChip?.className).not.toContain('bg-proof-blue-soft');
     expect(tagChip?.className).not.toContain('proof-surface');
 
