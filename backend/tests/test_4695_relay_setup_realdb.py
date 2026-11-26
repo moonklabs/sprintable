@@ -31,7 +31,7 @@ async def test_01_a_device_token_gets_its_own_orgs_id_and_name(world):
         body = r.json()
         assert r.status_code == 200 and (body["org_id"], body["org_name"]) == (str(ORG), name), r.text
         # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (none here)
-        assert set(body) == {"org_id", "org_name", "computer_id", "removed_phones", "removed_phones_now"} and body["computer_id"] and body["removed_phones"] == [] and body["removed_phones_now"] == [], r.text
+        assert set(body) == {"org_id", "org_name", "person_name", "computer_id", "removed_phones", "removed_phones_now"} and body["computer_id"] and body["removed_phones"] == [] and body["removed_phones_now"] == [], r.text
 
 
 async def test_02_nobody_else_is_a_device_here(world):
@@ -49,3 +49,21 @@ async def test_03_remote_control_off_is_the_same_409_as_every_device_route(world
         await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'")
         r = await c.get(SETUP, headers=_tok(device["device_token"]))
         assert r.status_code == 409, r.text
+
+
+async def test_04_the_person_who_confirmed_the_setup_is_named_for_the_pair_phone_list(world):
+    """story 5025 (AC2): `sprintable host pair-phone` on a computer several people connected lists «whose phone is this?» — each setup names the person who confirmed it (the name the people lists show). Reverted (no `person_name`): None."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 5025a")
+        want = (await _sql(fetch=f"SELECT name FROM members WHERE org_id = '{ORG}' AND user_id = '{OWNER}' AND type = 'human'"))[0][0]
+        r = await c.get(SETUP, headers=_tok(device["device_token"]))
+        assert r.status_code == 200 and want and r.json()["person_name"] == want, r.text
+
+
+async def test_05_a_person_who_left_is_not_named_like_every_connected_by_line(world):
+    """story 5025 (AC2): `person_names` names nobody who left (is_active false) — the pair-phone list shows «a person whose name is not known» for that setup, never a stale name."""
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 5025b")
+        await _sql(f"UPDATE members SET is_active = false WHERE org_id = '{ORG}' AND user_id = '{OWNER}' AND type = 'human'")
+        r = await c.get(SETUP, headers=_tok(device["device_token"]))
+        assert r.status_code == 200 and r.json()["person_name"] is None, r.text

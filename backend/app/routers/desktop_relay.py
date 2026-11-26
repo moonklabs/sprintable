@@ -228,13 +228,18 @@ async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSe
 
     from app.services import agent_permissions
     from app.services.desktop_computers import computer_index
+    from app.services.desktop_setup import person_names
 
     name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    # story 5025 (AC2): the PERSON this setup belongs to (who confirmed it) — so `sprintable host pair-phone` on a computer several people connected can list «whose phone is this?» by name instead of by an id.
+    # The name is the one the people lists show (`person_names`: a person who left — or has no name — is not named); this device's own setup only, and nothing but the name
+    who = await person_names(db, setup.org_id, {setup.confirmed_by}) if setup.confirmed_by is not None else {}
     # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (the device's one-time merge leaves them out) — and, on the same
     # grouping read, the ones of those that are NOT paired with the computer now (the device keeps these in its own record on every connect)
     removals = await agent_permissions.phone_removals(db, setup=setup)
     return {
         "org_id": str(setup.org_id), "org_name": name,
+        "person_name": who.get(setup.confirmed_by),
         "computer_id": str((await computer_index(db, setup.org_id)).get(setup.id) or ""),  # (null removed_phones: the grouping is incomplete — do not merge now)
         "removed_phones": None if removals is None else removals[0],
         "removed_phones_now": None if removals is None else removals[1],
