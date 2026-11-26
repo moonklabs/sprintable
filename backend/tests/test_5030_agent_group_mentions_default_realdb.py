@@ -318,6 +318,70 @@ async def test_the_channel_switch_api_writes_a_row_the_router_then_honours():
         await engine.dispose()
 
 
+# ── 4b ─ the websocket room follows the router ─────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.anyio
+async def test_an_agent_holding_a_websocket_room_hears_only_what_the_router_delivered():
+    """The post-commit websocket broadcast used to send the raw words to EVERY agent participant: the SSE event was withheld but an agent holding a websocket room still got every word,
+    and an explicit mute did not hold either (codex review of 5030). Real HTTP send, a fake websocket room per agent."""
+    from unittest.mock import AsyncMock
+
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.main import app
+    from app.models.project import OrgMember
+    from httpx import ASGITransport, AsyncClient
+    from tests.conftest import override_db_and_read
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            w = await _world(s)
+            h = w["m"]["H"]
+            s.add(OrgMember(id=uuid.uuid4(), org_id=w["org"].id, user_id=h.user_id, role="member"))
+            await s.commit()
+            await _pref(s, w["m"]["C"], scope_type="project", scope_id=w["project"].id, level="mute")
+
+        async def _db():
+            async with Session() as sess:
+                try:
+                    yield sess
+                    await sess.commit()
+                except Exception:
+                    await sess.rollback()
+                    raise
+
+        async def _auth():
+            return AuthContext(user_id=str(h.user_id), email="h@test", claims={"app_metadata": {"org_id": str(w["org"].id)}})
+
+        sent: list[str] = []
+
+        async def _fake_broadcast(aid, payload, conversation_id=None):
+            sent.append(aid)
+
+        rooms = {str(w["m"][n].id): object() for n in "ABC"}
+        override_db_and_read(app, _db)
+        app.dependency_overrides[get_current_user] = _auth
+        try:
+            with patch("app.routers.ws_chat._rooms", rooms), patch("app.routers.ws_chat._broadcast", AsyncMock(side_effect=_fake_broadcast)):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                    url = f"/api/v2/conversations/{w['room'].id}/messages"
+                    r = await client.post(url, json={"content": "calls nobody", "mentioned_ids": []})
+                    assert r.status_code == 201, r.text
+                    assert sent == [], f"an uncalled word reached a websocket room: {sent}"
+
+                    r = await client.post(url, json={"content": "calls B", "mentioned_ids": [str(w["m"]["B"].id)]})
+                    assert r.status_code == 201, r.text
+                    assert sent == [str(w["m"]["B"].id)], sent
+
+                    sent.clear()
+                    r = await client.post(url, json={"content": "calls C who muted the project", "mentioned_ids": [str(w["m"]["C"].id)]})
+                    assert r.status_code == 201, r.text
+                    assert str(w["m"]["C"].id) not in sent, "an explicit mute must hold on the websocket road too"
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
 # ── 5 ─ threads ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_a_reply_in_a_thread_the_agent_already_spoke_in_reaches_it_and_nobody_else():

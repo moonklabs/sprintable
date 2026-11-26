@@ -89,6 +89,14 @@ async def test_a_status_notice_calls_its_stakeholder_agent_and_reaches_that_agen
             heard = {d.member_id for d in await route_message(notice.id, s)}
             assert owner in heard, "the agent the notice is about must receive it though a group room delivers only the called words"
             assert stranger not in heard
+
+            # exactly once: one message event for the addressee and no mention event (a call would have added one — test_4451 counts one delivery per stage)
+            from app.models.event import Event
+
+            rows = (await s.execute(
+                select(Event.event_type).where(Event.source_entity_id == notice.id, Event.recipient_id == owner)
+            )).scalars().all()
+            assert rows.count("conversation.message_created") == 1 and "conversation:mention" not in rows, rows
     finally:
         await engine.dispose()
 

@@ -3831,6 +3831,11 @@ async def send_message_core(
             # 같은 결로 여기서도 뺀다(새 쿼리 없음, caller의 값 재사용).
             agent_ids -= {str(bid) for bid in user_blocker_ids}
 
+            # story 5030 — this broadcast sent the raw words to EVERY agent participant, whatever the router decided: with «an agent in a group room receives only the words that call it» the SSE
+            # event was withheld but an agent holding a websocket room still got every word (and an explicit `mute` did not hold either). The participants the router left out of this message's
+            # decisions (`preference_excluded_ids`, computed above) are taken out here too. Router failed → the set is empty → nothing is taken out (as for the SSE events: fail open).
+            agent_ids -= {str(pid) for pid in preference_excluded_ids}
+
             if agent_ids:
                 ws_payload = json.dumps({
                     "id": str(msg.id),
