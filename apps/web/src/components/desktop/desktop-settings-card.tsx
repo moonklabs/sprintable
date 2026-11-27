@@ -16,6 +16,8 @@ export function DesktopSettingsCard() {
   const t = useTranslations('desktop.appSettings');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  // the three words are read by their whole key, each written out (the dead-key scan of messages reads literal t('…') calls — a `kind.${kind}` would hide them from it)
+  const kindLabel: Record<(typeof DESKTOP_NOTICE_KINDS)[number], string> = { needs_hand: t('kind.needs_hand'), finished: t('kind.finished'), failed: t('kind.failed') };
   if (!bridge || !settings) return null; // a browser · an older app · settings not in the app's closed shape: no cell
 
   const write = async (patch: DesktopSettingsPatch) => {
@@ -36,7 +38,7 @@ export function DesktopSettingsCard() {
       <div className="space-y-2">
         <h3 className="text-ds-body font-semibold text-ds-ink-2">{t('noticesTitle')}</h3>
         <ul className="space-y-2">
-          {DESKTOP_NOTICE_KINDS.map((kind) => sw(`kind-${kind}`, t(`kind.${kind}`), settings.kinds[kind], (on) => ({ kinds: { [kind]: on } })))}
+          {DESKTOP_NOTICE_KINDS.map((kind) => sw(`kind-${kind}`, kindLabel[kind], settings.kinds[kind], (on) => ({ kinds: { [kind]: on } })))}
           {sw('thisComputerOff', t('thisComputerOff'), settings.thisComputerOff, (on) => ({ thisComputerOff: on }), t('thisComputerOffNote'))}
         </ul>
       </div>
