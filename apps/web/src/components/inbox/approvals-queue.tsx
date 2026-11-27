@@ -589,7 +589,7 @@ export function ApprovalsQueue() {
                     onClick={() => void resolveHitl(item.id, 'rejected')}
                     aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateReject') })}
                   >
-                    <XCircle className="size-3.5" />
+                    <XCircle className="size-ds-icon-md" />
                     {t('gateReject')}
                   </Button>
                   <Button
@@ -604,7 +604,7 @@ export function ApprovalsQueue() {
                     onClick={() => void resolveHitl(item.id, 'approved')}
                     aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('gateApprove') })}
                   >
-                    <CheckCircle className="size-3.5" />
+                    <CheckCircle className="size-ds-icon-md" />
                     {t('gateApprove')}
                   </Button>
                 </div>
@@ -719,7 +719,7 @@ export function ApprovalsQueue() {
               onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
               className="mt-1 flex items-center gap-1 text-ds-small font-medium text-ds-action hover:underline"
             >
-              {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              {decisionExpanded ? <ChevronUp className="size-ds-icon-sm" /> : <ChevronDown className="size-ds-icon-sm" />}
               {t(decisionExpanded ? 'decisionCollapse' : 'decisionExpand')}
             </button>
             {decisionExpanded ? (
@@ -773,9 +773,9 @@ export function ApprovalsQueue() {
                       text-foreground(반려는 원래 muted-foreground로 AA 통과·그대로 유지). */}
                   <span className="flex items-center gap-1 text-xs font-medium">
                     {resolved === 'approved' ? (
-                      <CheckCircle className="size-3.5 text-success" />
+                      <CheckCircle className="size-ds-icon-sm text-success" />
                     ) : (
-                      <XCircle className="size-3.5 text-muted-foreground" />
+                      <XCircle className="size-ds-icon-sm text-muted-foreground" />
                     )}
                     <span className={resolved === 'approved' ? 'text-foreground' : 'text-muted-foreground'}>
                       {t(resolved === 'approved' ? 'queueResolvedApproved' : 'queueResolvedRejected')}
@@ -921,7 +921,7 @@ export function ApprovalsQueue() {
                   aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigReject') })}
                 >
                   {/* story #4558 — 줄 단추도 같은 낱말 «반려»(키 sigReject · 옛 «변경 요청») · 연필(«고쳐 달라»)이 아니라 XCircle. */}
-                  <XCircle className="size-3.5" />
+                  <XCircle className="size-ds-icon-md" />
                   {t('sigReject')}
                 </Button>
                 {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
@@ -943,7 +943,7 @@ export function ApprovalsQueue() {
                 onClick={primaryOnClick}
                 aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: disabled && !isSigFlow ? t('gateApproving') : primaryLabel })}
               >
-                <CheckCircle className="size-3.5" />
+                <CheckCircle className="size-ds-icon-md" />
                 {/* story #3608(유나 §22-18 ④-2, PO 確定 2026-09-07) — "..."는 보는
                     사람에게도 아무 말을 안 한다("3번째 항목 ..."로 접근 이름이
                     끝나던 원인). 낱말("승인 중…")로 바꾸면 접근 이름은 §22-18

@@ -59,7 +59,7 @@ export function EventDefinerForm({
                 {state.format === value ? (
                   <span className="absolute right-2.5 top-2.5 flex size-4 items-center justify-center rounded-full bg-primary text-xs leading-none text-primary-foreground">✓</span>
                 ) : null}
-                <Icon className="mb-1.5 size-5 text-muted-foreground" />
+                <Icon className="mb-1.5 size-ds-icon-md text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">{t(`definerFormat_${value}`)}</p>
                 <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{t(`definerFormatDesc_${value}`)}</p>
               </button>

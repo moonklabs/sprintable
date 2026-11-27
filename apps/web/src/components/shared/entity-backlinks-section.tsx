@@ -230,7 +230,7 @@ export function EntityBacklinksSection({ entityType, entityId, className }: Enti
                 key={item.id}
                 className={`flex items-start gap-2 text-ds-small ${item.still_exists ? 'text-ds-ink' : 'text-ds-ink-3'}`}
               >
-                <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                <Icon className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <span className="[overflow-wrap:anywhere]">{label ?? item.source_id}</span>
                   {!item.still_exists && (

@@ -372,7 +372,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
             onItemHighlighted={(entry: PaletteEntry | undefined) => setHighlightedId(entry?.id ?? null)}
           >
             <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-              <Search className="size-4 shrink-0 text-muted-foreground" />
+              <Search className="size-ds-icon-sm shrink-0 text-muted-foreground" />
               <Autocomplete.Input
                 autoFocus
                 placeholder={t('placeholder')}
@@ -474,7 +474,7 @@ function NavigateRow({ item }: { item: CommandItem }) {
   const Icon = item.icon;
   return (
     <>
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <Icon className="size-ds-icon-sm shrink-0 text-muted-foreground" />
       <span className="flex-1 truncate">{item.label}</span>
       {item.shortcut ? (
         <span className="ml-auto flex items-center gap-1">
@@ -503,7 +503,7 @@ function ActionRow({ item, highlighted, dangerPillLabel }: { item: ActionCommand
   return (
     <>
       <span className={cn('flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors', highlighted ? 'bg-accent text-accent-foreground' : 'text-foreground')}>
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <Icon className="size-ds-icon-sm shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">{item.label}</span>
         {item.danger ? (
           // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -524,7 +524,7 @@ function ActionRow({ item, highlighted, dangerPillLabel }: { item: ActionCommand
 function DocRow({ doc }: { doc: DocResult }) {
   return (
     <>
-      <BookOpen className="size-4 shrink-0 text-muted-foreground" />
+      <BookOpen className="size-ds-icon-sm shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <span className="truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
         {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}

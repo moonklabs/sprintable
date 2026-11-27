@@ -339,7 +339,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
           className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-ds-surface-sunk px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
         >
           <span>{t(localWords ? 'collapsedChipLocal' : 'collapsedChip', { completed: state.completed, total: state.total })}</span>
-          <ChevronDown className="size-3.5 shrink-0" />
+          <ChevronDown className="size-ds-icon-sm shrink-0" />
           <span aria-hidden="true" data-testid="activation-chip-hit" className="absolute inset-x-0 -inset-y-2 hidden touch:block" />
         </button>
       </div>
@@ -358,7 +358,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
           // blue-soft(#EAEEFF) 배경 위에서 대비 미달(≈2.8:1<4.5·axe color-contrast 신규 위반). #2420
           // 규율(tint 위 계열색 글자는 text-foreground)·완료 여부는 CircleCheck vs Circle 모양이 전달하므로
           // 색 의존을 제거해도 신호 손실 0(색맹 접근성↑). 아이콘도 li 색 상속으로 함께 정리.
-          const icon = met ? <CircleCheck className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />;
+          const icon = met ? <CircleCheck className="size-ds-icon-sm shrink-0" /> : <Circle className="size-ds-icon-sm shrink-0" />;
           // story #3201(AC2) — "첫 지시…" 항목만 클릭 가능(해당 대화로 이동). 다른 항목은
           // 기존 그대로 비-인터랙티브 li(스코프 밖, #3196 잔존分).
           if (key === 'first_roundtrip') {
@@ -384,7 +384,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
                     'text-foreground',
                   )}
                 >
-                  {navigatingToInstruction ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : icon}
+                  {navigatingToInstruction ? <Loader2 className="size-ds-icon-sm shrink-0 animate-spin" /> : icon}
                   <span>{label}</span>
                 </Button>
                 {instructionStartError ? (
@@ -439,7 +439,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
         aria-expanded={true}
         onClick={toggleCollapse}
       >
-        <ChevronUp className="size-4" />
+        <ChevronUp className="size-ds-icon-md" />
       </Button>
     </Alert>
   );

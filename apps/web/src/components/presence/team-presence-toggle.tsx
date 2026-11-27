@@ -46,7 +46,7 @@ export function PresenceToggleButton() {
         open && 'bg-ds-surface-sunk text-foreground',
       )}
     >
-      <Users className="size-4" />
+      <Users className="size-ds-icon-md" />
       {/* story #2023 ⓑ: working 카운트 배지=L5(시스템 상태). story #3431 — 공용 배지(4890부터 ds CountBadge)로
           통합(notification-bell.tsx와 동일 정의, 이 컴포넌트가 원형이었다 — 모양·크기 무변경). */}
       {workingCount > 0 ? (

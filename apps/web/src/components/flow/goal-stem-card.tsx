@@ -163,7 +163,7 @@ export function GoalStemCard({
         <p className="text-xs text-muted-foreground">{t('nextMakerNoCandidates')}</p>
       ) : pickState.kind === 'loading' ? (
         <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden="true" />
           {t('nextMakerPickLoading')}
         </div>
       ) : pickState.kind === 'ready' ? (

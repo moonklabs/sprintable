@@ -320,7 +320,7 @@ export function NextMakerScreen({ projectId, memberMap, memberNamesLoadFailed = 
   if (state.kind === 'loading') {
     return (
       <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden="true" />
         {t('nextMakerLoading')}
       </div>
     );

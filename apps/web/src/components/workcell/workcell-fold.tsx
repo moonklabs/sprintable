@@ -47,7 +47,7 @@ export function WorkcellFold({ evidenceCount, conversationCount, ...workcell }: 
           LAYER.rowOthers,
         )}
       >
-        <ChevronRight className={cn('size-4 shrink-0 text-ds-ink-3 transition-transform duration-[140ms]', open && 'rotate-90')} aria-hidden="true" />
+        <ChevronRight className={cn('size-ds-icon-md shrink-0 text-ds-ink-3 transition-transform duration-[140ms]', open && 'rotate-90')} aria-hidden="true" />
         <span className="shrink-0 text-sm font-semibold text-ds-ink">{t('foldTitle')}</span>
         <span className="min-w-0 flex-1 text-editorial-meta text-ds-ink-2 [overflow-wrap:anywhere]" data-testid="workcell-fold-summary">{summary}</span>
         <span className="shrink-0 text-editorial-meta text-ds-action-text">{open ? t('foldCollapse') : t('foldExpand')}</span>

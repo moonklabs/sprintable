@@ -145,7 +145,7 @@ export function EmailVerifyGateCard({ gate }: { gate: Extract<VerifyGate, { kind
       </p>
       <p className="mt-1 text-ds-body text-ds-ink-3">{t('anywhere')}</p>
       <p role="status" className="mt-4 flex items-center gap-2 text-ds-small text-ds-ink-3">
-        <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t('waiting')}
+        <Loader2 className="size-ds-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />{t('waiting')}
       </p>
       <div className="mt-4">
         <Button type="button" variant="secondary" onClick={gate.sendAgain} disabled={gate.resend === 'sending'}>{t('resend')}</Button>

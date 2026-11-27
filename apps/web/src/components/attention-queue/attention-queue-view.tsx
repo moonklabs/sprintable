@@ -104,7 +104,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
         <>
           {actor}
           {navigable ? (
-            <span className={cn('inline-flex items-center gap-0.5 text-ds-small', ACTION_TONE[item.actionTone])}>{item.actionLabel}<ChevronRight className="size-3.5" aria-hidden="true" /></span>
+            <span className={cn('inline-flex items-center gap-0.5 text-ds-small', ACTION_TONE[item.actionTone])}>{item.actionLabel}<ChevronRight className="size-ds-icon-sm" aria-hidden="true" /></span>
           ) : null}
         </>
       ) : undefined}
@@ -257,7 +257,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
         <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
           {/* story #3099(DS·AA 후속) — 텍스트는 중립(ink), 색 신호는 아이콘 하나로 좁힌다(아이콘은 3:1 non-text 기준). */}
           <div className="inline-flex items-center gap-1.5 text-ds-small font-bold tracking-[0.02em] text-ds-ink">
-            <ShieldCheck className="size-3.5 text-ds-done" aria-hidden="true" />{t('allClear')}
+            <ShieldCheck className="size-ds-icon-sm text-ds-done" aria-hidden="true" />{t('allClear')}
           </div>
           <p className="text-ds-body font-semibold text-ds-ink-2">{t('emptyTitle')}</p>
           <p className="text-ds-small text-ds-ink-3">{t('emptyBody')}</p>
@@ -286,7 +286,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
             >
               <span className="size-1 rounded-full bg-ds-ink-3" aria-hidden="true" />
               <span className="flex-1 break-keep">{overflowLine}</span>
-              <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+              <ChevronRight className="size-ds-icon-sm shrink-0" aria-hidden="true" />
             </button>
           ) : overflowLine ? (
             // story #4382(까디르 메모 ①) — 스토리로 묶여 넘침이 0이어도 BE가 잘랐으면 줄이 선다(수는 «더 있을 수 있어요»).

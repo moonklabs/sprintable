@@ -52,7 +52,7 @@ function AuthFailureBadge({ info }: { info: AgentAuthFailureInfo | undefined }) 
       // variant="warning"이 이미 쓰는 관례(border-warning-border)를 그대로 맞춘다.
       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning-border bg-warning-tint px-1.5 py-0.5 text-micro font-semibold text-foreground"
     >
-      <KeyRound className="size-2.5 shrink-0" aria-hidden />
+      <KeyRound className="size-3 shrink-0" aria-hidden />
       {t('authFailureBadge')}
     </span>
   );
@@ -138,7 +138,7 @@ export function TeamPresencePanel({
             aria-label={t('panelTitle')}
             className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-ds-surface-high hover:text-foreground"
           >
-            <X className="size-4" />
+            <X className="size-ds-icon-sm" />
           </button>
         ) : null}
       </header>

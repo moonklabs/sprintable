@@ -32,7 +32,7 @@ export function SupportWidgetPanelHeader({ onClose }: { onClose: () => void }) {
         aria-label={t('closeLabel')}
         className="shrink-0 rounded-md p-1 text-background/70 hover:bg-background/10 hover:text-background"
       >
-        <X className="h-4 w-4" aria-hidden />
+        <X className="size-ds-icon-sm" aria-hidden />
       </button>
     </div>
   );
@@ -83,7 +83,7 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
         type="button"
         variant="quiet"
         onClick={() => void session.startNewConversation()}
-        iconStart={<Plus className="h-3.5 w-3.5" aria-hidden />}
+        iconStart={<Plus className="size-ds-icon-md" aria-hidden />}
       >
         {t('startNewConversation')}
       </Button>
@@ -94,7 +94,7 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
           if (open && session.conversations === null) void session.loadConversations();
         }}
       >
-        <MenuTrigger render={<Button type="button" variant="quiet" iconStart={<History className="h-3.5 w-3.5" aria-hidden />} />}>
+        <MenuTrigger render={<Button type="button" variant="quiet" iconStart={<History className="size-ds-icon-md" aria-hidden />} />}>
           {t('conversationHistory')}
         </MenuTrigger>
         <MenuContent align="end" className="w-64">
@@ -194,7 +194,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
       {session.escalationStatus === 'open' ? (
         <Banner tone="info" className="shrink-0 rounded-none border-x-0 border-t-0">
           <span className="inline-flex items-center gap-1.5">
-            <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <UserRound className="size-ds-icon-sm shrink-0" aria-hidden />
             {t('escalationOpenBanner')}
           </span>
         </Banner>
@@ -224,7 +224,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
             >
               {m.role === 'operator' ? (
                 <p className="mb-1 flex items-center gap-1 text-ds-small font-semibold text-ds-ink">
-                  <UserRound className="h-3 w-3" aria-hidden />
+                  <UserRound className="size-ds-icon-sm" aria-hidden />
                   {t('operatorSenderLabel')}
                 </p>
               ) : null}
@@ -278,7 +278,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           </Button>
         ) : null}
         <Button type="submit" variant="primary" disabled={!canSend} aria-label={t('sendLabel')}>
-          <Send className="h-3.5 w-3.5" aria-hidden />
+          <Send className="size-ds-icon-md" aria-hidden />
         </Button>
       </form>
     </>
