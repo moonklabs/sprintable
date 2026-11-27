@@ -1,0 +1,52 @@
+{
+  "_about": "The ONE order an agent's state is listed in — the web's «에이전트 상태» (Today · 홈 · 관제, apps/web/src/lib/agent-state-list.ts `stateRank`) and the desktop app's bottom strip (desktop-electron/src/ui/board.ts `sortBoard`). Both repos keep this file byte for byte the same and read the vectors below in their own tests — change one side and they turn red. Story 5038 (C8 · PO 11-27: «웹 stateRank가 기준, 띠를 맞춤»).",
+  "version": 1,
+  "order": ["limit", "error", "hand", "working", "idle", "unknown", "stopped", "never_ran"],
+  "meaning": {
+    "limit": "a usage limit the agent rests at (the web's «사용 한도» · «한도로 쉬는 중»; the strip's rows that wear those words)",
+    "error": "the session stopped with an error (and, on the strip, a row whose Sprintable tools failed)",
+    "hand": "a person's hand: a permission request · an input question · a macOS prompt · a first-screen question",
+    "working": "working",
+    "idle": "waiting for the next work · just started",
+    "unknown": "state unknown — disconnected · no news",
+    "stopped": "the session ended",
+    "never_ran": "the agent has no session yet (the web's list only)"
+  },
+  "web": {
+    "rule": "stateRank(word, limitShown, askingFirstScreen) = the index of the row's group in `order`.",
+    "vectors": [
+      { "name": "paused_limit rests at a limit", "word": "paused_limit", "limitShown": false, "askingFirstScreen": false, "group": "limit" },
+      { "name": "any word that reads as a limit (limitShown) goes first", "word": "waiting_input", "limitShown": true, "askingFirstScreen": false, "group": "limit" },
+      { "name": "error", "word": "error", "limitShown": false, "askingFirstScreen": false, "group": "error" },
+      { "name": "permission request", "word": "waiting_permission", "limitShown": false, "askingFirstScreen": false, "group": "hand" },
+      { "name": "input question", "word": "waiting_input", "limitShown": false, "askingFirstScreen": false, "group": "hand" },
+      { "name": "macOS prompt", "word": "waiting_system", "limitShown": false, "askingFirstScreen": false, "group": "hand" },
+      { "name": "first-screen question while starting", "word": "starting", "limitShown": false, "askingFirstScreen": true, "group": "hand" },
+      { "name": "working", "word": "working", "limitShown": false, "askingFirstScreen": false, "group": "working" },
+      { "name": "idle", "word": "idle", "limitShown": false, "askingFirstScreen": false, "group": "idle" },
+      { "name": "starting", "word": "starting", "limitShown": false, "askingFirstScreen": false, "group": "idle" },
+      { "name": "unknown", "word": "unknown", "limitShown": false, "askingFirstScreen": false, "group": "unknown" },
+      { "name": "unrecognized", "word": "unrecognized", "limitShown": false, "askingFirstScreen": false, "group": "unknown" },
+      { "name": "stopped", "word": "stopped", "limitShown": false, "askingFirstScreen": false, "group": "stopped" },
+      { "name": "never ran (no session)", "word": null, "limitShown": false, "askingFirstScreen": false, "group": "never_ran" }
+    ]
+  },
+  "strip": {
+    "rule": "The strip first splits its rows into its three groups («손 필요» · «일하는 중» · «그 밖» — story 4889 · 4907), then orders the rows INSIDE each group by `order`. ONE deliberate difference from the web: «연결 끊김» (unknown) stays in the strip's «손 필요» group (it has counted as a hand since 4889 — the bar's «손 필요 N» does not change), so there it sorts LAST of the group, where the web lists it after idle.",
+    "group_of": { "limit": "by its kind", "error": "hand", "hand": "hand", "working": "working", "idle": "rest", "unknown": "hand", "stopped": "rest" },
+    "kinds": { "error": "error", "waiting_permission": "hand", "waiting_system": "hand", "waiting_input": "hand", "lost": "unknown", "working": "working", "started": "idle", "waiting_work": "idle", "done": "stopped" },
+    "within_group_order": {
+      "hand": ["limit", "error", "hand", "unknown"],
+      "working": ["working"],
+      "rest": ["limit", "idle", "stopped"]
+    },
+    "vectors": [
+      { "name": "an error row sorts above a permission request", "before": "error", "after": "waiting_permission" },
+      { "name": "permission · macOS prompt · input keep their order", "before": "waiting_permission", "after": "waiting_system" },
+      { "name": "a macOS prompt before an input question", "before": "waiting_system", "after": "waiting_input" },
+      { "name": "an input question before a lost session (inside «손 필요»)", "before": "waiting_input", "after": "lost" },
+      { "name": "just started sorts with the idle ones, below «작업 중» — not with working", "before": "working", "after": "started" },
+      { "name": "waiting for work before done", "before": "waiting_work", "after": "done" }
+    ]
+  }
+}
