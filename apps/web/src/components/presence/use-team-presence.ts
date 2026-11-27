@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -71,31 +71,39 @@ export function useTeamPresence(active: boolean, orgId?: string): TeamPresenceIt
   const lastOrgIdRef = useRef(orgId);
 
   const seqRef = useRef(0);
-  const inFlightRef = useRef(false);
+  // story 5031 — every ask belongs to a GENERATION (= one organization's stretch). The guards below only ever compare asks of the SAME generation: an ask of an organization we have left can neither block the new organization's ask
+  // (the in-flight guard), nor have its answer applied, nor touch the new organization's bookkeeping when it ends (its `finally`). The generation is bumped in a layout effect — synchronously in the commit that shows the new
+  // organization, before any answer of the old one can be handled and also while the tab is hidden (no ask is started then, so a sequence number alone would not move).
+  const genRef = useRef(0);
+  const inFlightGenRef = useRef<number | null>(null); // the generation of the ask in flight (null = none)
   const pendingRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // story #2139 — in-flight 가드(②) + 레이스 가드(③). 실제 네트워크 호출은 여기서만 한다.
   const fetchPresence = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (inFlightRef.current) { pendingRef.current = true; return; }
-    inFlightRef.current = true;
+    const gen = genRef.current;
+    if (inFlightGenRef.current === gen) { pendingRef.current = true; return; }
+    inFlightGenRef.current = gen;
     const mySeq = ++seqRef.current;
     try {
       const res = await fetchWithAuth('/api/team-presence');
       if (!res.ok) return;
       const json = (await res.json()) as TeamPresenceItem[] | { data?: TeamPresenceItem[] };
       // 이 응답을 보낸 뒤에 더 최신 요청이 나갔다면(seqRef가 더 커졌다면) stale이므로 버린다.
-      if (seqRef.current === mySeq) {
+      if (seqRef.current === mySeq && genRef.current === gen) {
         setItems(Array.isArray(json) ? json : (json.data ?? []));
       }
     } catch {
       /* non-critical */
     } finally {
-      inFlightRef.current = false;
-      if (pendingRef.current) {
-        pendingRef.current = false;
-        void fetchPresence();
+      // an ask of a generation we have left must not clear the in-flight mark or start the follow-up of the NEW generation
+      if (genRef.current === gen) {
+        inFlightGenRef.current = null;
+        if (pendingRef.current) {
+          pendingRef.current = false;
+          void fetchPresence();
+        }
       }
     }
   }, []);
@@ -111,15 +119,17 @@ export function useTeamPresence(active: boolean, orgId?: string): TeamPresenceIt
     }, PRESENCE_EVENT_DEBOUNCE_MS);
   }, [fetchPresence]);
 
-  useEffect(() => {
-    if (!active || typeof window === 'undefined') return;
-    // story 5031 — an organization switch: an answer still in flight is the OLD organization's. Let the new ask through: the in-flight guard would otherwise swallow it ("already asking") and that old answer would be taken for the latest.
-    // Once the new ask goes out it takes the next sequence number, so the sequence guard drops the old answer by itself — no separate «make it stale» step (a mutation showed such a line is dead). A late-known organization is not a switch.
+  // story 5031 — an organization switch starts a new generation (see `genRef`): the ask in flight is the OLD organization's, its answer is dropped and it does not block the new ask. A late-known organization (empty at mount) is not a switch.
+  useLayoutEffect(() => {
     if (orgId && lastOrgIdRef.current && orgId !== lastOrgIdRef.current) {
-      inFlightRef.current = false;
+      genRef.current += 1;
       pendingRef.current = false;
     }
     if (orgId) lastOrgIdRef.current = orgId;
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return;
     void fetchPresence(); // 초기 스냅샷
     const onVisible = () => { if (!document.hidden) void fetchPresence(); }; // hidden 중 누락 보정
     document.addEventListener('visibilitychange', onVisible);

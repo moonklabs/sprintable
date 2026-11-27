@@ -26,13 +26,18 @@ const ROWS: Record<string, ReturnType<typeof member>[]> = {
 };
 
 /** the server answers for the organization the SESSION is in at the moment the ask LEAVES (a held ask keeps its organization's rows); `hold` makes the asks of that organization wait for `release()` */
-const server = { org: ORG_A as string, hold: null as string | null, gates: [] as Array<() => void> };
-const release = () => { const g = server.gates.splice(0); g.forEach((f) => f()); };
+const server = { org: ORG_A as string, hold: new Set<string>(), gates: [] as Array<{ org: string; open: () => void }> };
+/** opens the held asks — of one organization, or of all of them */
+const release = (org?: string) => {
+  const open = server.gates.filter((g) => !org || g.org === org);
+  server.gates = server.gates.filter((g) => !open.includes(g));
+  open.forEach((g) => g.open());
+};
 function stubServer() {
   const fetchMock = vi.fn(async (url: string) => {
     if (!String(url).startsWith('/api/team-presence')) return { ok: false, status: 404, json: async () => null };
     const asked = server.org;
-    if (server.hold === asked) await new Promise<void>((resolve) => { server.gates.push(resolve); });
+    if (server.hold.has(asked)) await new Promise<void>((resolve) => { server.gates.push({ org: asked, open: resolve }); });
     return { ok: true, json: async () => ({ data: ROWS[asked] }) };
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -54,14 +59,20 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  server.org = ORG_A; server.hold = null; server.gates = [];
+  server.org = ORG_A; server.hold = new Set(); server.gates = [];
 });
 afterEach(async () => {
   release();
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(document, 'hidden'); // back to the environment's own value
 });
+/** the tab is hidden / shown (the hook asks nothing while hidden and catches up when it is shown again) */
+function setHidden(hidden: boolean) {
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+}
+const visibilityChange = () => act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
 
 describe('useTeamPresence — 조직을 바꾸면 다시 묻는다(story 5031)', () => {
   it('⭐① 조직 A→B: 옛 숫자(3)가 그 즉시 사라지고 · 다시 묻고 · B의 숫자(2)가 뜬다', async () => {
@@ -69,7 +80,7 @@ describe('useTeamPresence — 조직을 바꾸면 다시 묻는다(story 5031)',
     await show(ORG_A); await settle();
     expect(count()).toBe('3');
     expect(asks(fetchMock)).toHaveLength(1);
-    server.org = ORG_B; server.hold = ORG_B; // the session is in B now; B's answer is held — what does the badge show meanwhile?
+    server.org = ORG_B; server.hold = new Set([ORG_B]); // the session is in B now; B's answer is held — what does the badge show meanwhile?
     await show(ORG_B);
     expect(count(), 'the old organization number is not shown while the new answer is on its way (reverted → still 3)').toBe('0');
     expect(asks(fetchMock), 'asked again (reverted → still one)').toHaveLength(2);
@@ -78,12 +89,12 @@ describe('useTeamPresence — 조직을 바꾸면 다시 묻는다(story 5031)',
   });
 
   it('⭐② 옛 조직(A)의 물음이 아직 진행 중일 때 조직이 바뀌어도 새 물음이 «이미 진행 중» 가드에 삼켜지지 않는다 · 늦게 돌아온 A의 답은 B의 숫자를 덮지 않는다', async () => {
-    server.hold = ORG_A; // A's FIRST ask hangs
+    server.hold = new Set([ORG_A]); // A's FIRST ask hangs
     const fetchMock = stubServer();
     await show(ORG_A); await settle();
     expect(asks(fetchMock)).toHaveLength(1);
     expect(count()).toBe('0');
-    server.org = ORG_B; server.hold = null; // B answers at once
+    server.org = ORG_B; server.hold = new Set(); // B answers at once
     await show(ORG_B); await settle();
     expect(asks(fetchMock), 'the new ask went out although the old one is still in flight (reverted → the guard swallowed it: one)').toHaveLength(2);
     expect(count()).toBe('2');
@@ -104,10 +115,51 @@ describe('useTeamPresence — 조직을 바꾸면 다시 묻는다(story 5031)',
   it('④ 조직을 늦게 알게 되는 경우(마운트 때 비어 있던 조직)는 «전환»이 아니다 — 이미 받은 숫자를 비우지 않는다', async () => {
     const fetchMock = stubServer();
     await show(undefined); await settle();
-    expect(count()).toBe('3'); // the first ask went out under the session's organization (A)
-    server.hold = ORG_A; // the next ask is held, so a cleared number would show as 0
+    // ASSUMPTION, not measured here: the first ask went out under the session's organization (A). This unit test has no request headers (the mock keys its answer on `server.org`); which organization a real ask carries is decided by the shell,
+    // which sets the effective organization in its render BEFORE any child effect and hands the SAME value to this hook (`dashboard-shell.tsx` — read, not run). So «the kept number is the right organization's» rests on that reading.
+    expect(count()).toBe('3');
+    server.hold = new Set([ORG_A]); // the next ask is held, so a cleared number would show as 0
     await show(ORG_A);
     expect(count(), 'a late first look is recorded, not a switch (reverted → 0)').toBe('3');
     expect(asks(fetchMock).length).toBeGreaterThanOrEqual(1);
+  });
+
+  // codex round 1 on 28e77099: the in-flight mark and the sequence number were shared by asks of different organizations.
+  it('⭐⑤ B의 물음이 진행 중일 때 옛 A의 물음이 끝나도 B의 «진행 중» 표지를 지우지 않는다 — 세 번째 물음이 나가지 않고 B의 답이 숫자가 된다', async () => {
+    server.hold = new Set([ORG_A, ORG_B]); // both organizations' asks hang until released one by one
+    const fetchMock = stubServer();
+    await show(ORG_A); await settle();
+    expect(asks(fetchMock)).toHaveLength(1); // A in flight
+    server.org = ORG_B;
+    await show(ORG_B); await settle();
+    expect(asks(fetchMock), 'B asked although A is in flight').toHaveLength(2);
+    await visibilityChange(); // a trigger while B is in flight → «ask once more when it ends», nothing goes out now
+    expect(asks(fetchMock)).toHaveLength(2);
+    await act(async () => { release(ORG_A); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }); // A ends first
+    await settle();
+    expect(asks(fetchMock), 'A\'s end must not clear B\'s in-flight mark and start a third ask while B runs (reverted → three)').toHaveLength(2);
+    expect(count(), 'A\'s answer is dropped').toBe('0');
+    await act(async () => { release(ORG_B); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await settle();
+    expect(count(), 'B\'s valid answer lands (reverted → rejected by the sequence guard: 0)').toBe('2');
+  });
+
+  it('⭐⑥ 탭이 숨겨진 채 조직이 바뀌어도(그동안 새 물음이 안 나간다) 옛 A의 늦은 답이 A의 숫자를 되살리지 않는다', async () => {
+    server.hold = new Set([ORG_A]); // A's ask is in flight
+    const fetchMock = stubServer();
+    await show(ORG_A); await settle();
+    expect(asks(fetchMock)).toHaveLength(1);
+    setHidden(true); // the tab is hidden: no ask is started now
+    server.org = ORG_B; server.hold = new Set();
+    await show(ORG_B); await settle();
+    expect(asks(fetchMock), 'nothing asked while hidden').toHaveLength(1);
+    await act(async () => { release(ORG_A); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await settle();
+    expect(count(), 'A\'s late answer never repopulates the old organization\'s number (reverted → 3)').toBe('0');
+    setHidden(false);
+    await visibilityChange(); // shown again → B asks
+    await settle();
+    expect(asks(fetchMock)).toHaveLength(2);
+    expect(count()).toBe('2');
   });
 });
