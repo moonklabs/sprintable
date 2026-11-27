@@ -6,6 +6,7 @@ credentials (see `app/services/agent_action.py`). The words here are codes — t
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -84,6 +85,37 @@ async def _load(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, req
     return req
 
 
+# what the ask is about, read from the stored call's PATH only (never the body): the card offers «열어 보기» on it. `kind` is the entity registry's word.
+_TARGET_PATHS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("story", re.compile(r"^/api/v2/stories/(?P<id>[0-9a-fA-F-]{36})$")),
+    ("task", re.compile(r"^/api/v2/tasks/(?P<id>[0-9a-fA-F-]{36})$")),
+    ("epic", re.compile(r"^/api/v2/(?:goals|epics)/(?P<id>[0-9a-fA-F-]{36})$")),
+    ("doc", re.compile(r"^/api/v2/docs/(?P<id>[0-9a-fA-F-]{36})$")),
+    ("sprint", re.compile(r"^/api/v2/sprints/(?P<id>[0-9a-fA-F-]{36})(?:/close)?$")),
+    ("artifact", re.compile(r"^/api/v2/visual-artifacts/(?P<id>[0-9a-fA-F-]{36})/pins/[0-9a-fA-F-]{36}$")),
+)
+
+
+# the kind of object each action is about — a stored path that names another kind than its action does is no target (a hand-edited row cannot make the card point somewhere else)
+_ACTION_KIND = {
+    "story.delete": "story", "task.delete": "task", "goal.delete": "epic", "doc.delete": "doc",
+    "sprint.delete": "sprint", "sprint.close": "sprint", "spec_pin.delete": "artifact",
+}
+
+
+def _target_of(snapshot: dict | None, action_key: str | None = None) -> dict | None:
+    path = (snapshot or {}).get("path")
+    if not isinstance(path, str):
+        return None
+    for kind, pattern in _TARGET_PATHS:
+        m = pattern.match(path)
+        if m:
+            if _ACTION_KIND.get(action_key or "") != kind:
+                return None
+            return {"kind": kind, "id": m.group("id").lower()}
+    return None
+
+
 async def _view(session: AsyncSession, req: HitlRequest) -> dict:
     meta = req.hitl_metadata or {}
     execution = meta.get("execution") or {}
@@ -93,6 +125,7 @@ async def _view(session: AsyncSession, req: HitlRequest) -> dict:
         "id": str(req.id),
         "state": _state(req),
         "action_key": meta.get("action_key"),
+        "target": _target_of(meta.get("snapshot"), meta.get("action_key")),
         "reversible": (svc.SPECS[meta["action_key"]].reversible if meta.get("action_key") in svc.SPECS else "no"),
         "title": req.title,
         "prompt": req.prompt,

@@ -200,7 +200,7 @@ async def test_the_press_runs_the_delete_as_the_person_and_tells_the_agent():
     from app.models.conversation import ConversationMessage
     from app.models.deletion_audit import DeletionAuditLog
     from app.models.pm import Story
-    from sqlalchemy import select
+    from sqlalchemy import select, text
 
     engine, Session = await _session_factory()
     try:
@@ -220,6 +220,16 @@ async def test_the_press_runs_the_delete_as_the_person_and_tells_the_agent():
             replies = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action_result"]["request_id"].astext == request_id))).scalars().all()
         assert len(audit) == 1 and audit[0].actor_id == d["admin_om"], "the record says the PERSON deleted it, not the agent"
         assert len(replies) == 1 and replies[0].mentioned_ids == [d["agent_id"]] and replies[0].msg_metadata["agent_action_result"]["result"] == "approved"
+        # the result line is the SERVER's (the org's «시스템 발행»), never the pressing person's own bubble
+        assert replies[0].sender_id != d["admin_om"]
+        async with Session() as s:
+            speaker_runtime = (await s.execute(text("SELECT runtime_type FROM members WHERE id = :i"), {"i": replies[0].sender_id})).scalar_one()
+        assert speaker_runtime == "system-publisher"
+        assert pressed.json()["target"] == {"kind": "story", "id": str(d["story_id"])}, "the card can say what it is about (and open it)"
+        # the agent's result line ARRIVES: the system speaker is not a participant of the DM, yet the asking agent gets its event (the activation reaches it)
+        async with Session() as s:
+            arrived = (await s.execute(text("SELECT count(*) FROM events WHERE recipient_id = :a AND CAST(payload AS text) LIKE :m"), {"a": d["agent_id"], "m": f"%{replies[0].id}%"})).scalar_one()
+        assert arrived >= 1, "the asking agent received the result line as an event"
         (req,) = await _requests(Session, d["org_id"])
         assert req.status == "approved" and req.responded_by == d["admin_om"] and req.hitl_metadata["execution"]["state"] == "executed"
 
@@ -809,6 +819,49 @@ async def test_an_action_without_arguments_stores_no_query_and_no_body():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_request_view_names_what_the_ask_is_about_from_the_path_only():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            ids = {
+                "story": (await c.delete(f"/api/v2/stories/{d['story_id']}")).json()["request_id"],
+                "task": (await c.delete(f"/api/v2/tasks/{d['task_id']}")).json()["request_id"],
+                "epic": (await c.delete(f"/api/v2/goals/{d['goal_id']}")).json()["request_id"],
+                "doc": (await c.delete(f"/api/v2/docs/{d['doc_id']}")).json()["request_id"],
+                "sprint": (await c.post(f"/api/v2/sprints/{d['sprint_id']}/close")).json()["request_id"],
+            }
+            reward = (await c.post("/api/v2/rewards", json={"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 1, "reason": "x", "granted_by": str(d["agent_id"])})).json()["request_id"]
+        await _act_as(app, Session, d["admin_user"], d["org_id"])
+        want = {"story": d["story_id"], "task": d["task_id"], "epic": d["goal_id"], "doc": d["doc_id"], "sprint": d["sprint_id"]}
+        async with _client_for(app) as c:
+            for kind, rid in ids.items():
+                view = (await c.get(f"/api/v2/agent-actions/{rid}")).json()
+                assert view["target"] == {"kind": kind, "id": str(want[kind])}, (kind, view["target"])
+            assert (await c.get(f"/api/v2/agent-actions/{reward}")).json()["target"] is None, "a grant has no page to open"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_stored_path_of_another_kind_than_its_action_is_no_target():
+    """codex pass: the target is read from the stored path only, and only when it names the kind its action is about"""
+    from app.routers.agent_actions import _target_of
+
+    story = "/api/v2/stories/0d6e953f-6d43-42c1-a87c-b023544497db"
+    assert _target_of({"path": story}, "story.delete") == {"kind": "story", "id": "0d6e953f-6d43-42c1-a87c-b023544497db"}
+    assert _target_of({"path": story}, "doc.delete") is None, "a story path under a doc action is nobody's target"
+    assert _target_of({"path": story}, None) is None
+    assert _target_of({"path": "/api/v2/rewards"}, "reward.give") is None
+    assert _target_of({"path": 7}, "story.delete") is None
 
 
 def test_text_from_elsewhere_becomes_one_plain_line():

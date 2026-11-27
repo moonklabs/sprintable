@@ -1,5 +1,6 @@
 import { EntitySummaryError } from '@/components/chat/embed-card';
 import { fetchWithAuth } from '@/lib/db/client';
+import { ENTITY_CARD_KINDS, type EntityCardKind } from './card-kinds';
 
 /**
  * story 5041 — the card of an agent's ask (a delete · a close · a grant it may not do alone): its read and its two presses. The server owns everything the card says about the ask (its words,
@@ -20,6 +21,10 @@ export interface AgentActionView {
   irreversible: boolean;
   requestedBy: string | null;
   decidedBy: string | null;
+  /** what the ask is about (read from the stored call's path by the server) — the card shows it and opens it; `null` = nothing to open (a grant) */
+  target: { kind: EntityCardKind; id: string } | null;
+  /** the action is a delete and it was done: the thing is gone, so there is nothing to open — the card says so */
+  gone: boolean;
   /** the stored call found the state changed (404 · 409 · 410 · 422) — told apart from a plain failure */
   changed: boolean;
 }
@@ -34,6 +39,10 @@ export function parseAgentAction(raw: unknown): AgentActionView | null {
   if (typeof raw.title !== 'string' || typeof raw.prompt !== 'string') return null;
   const execution = obj(raw.execution) ? raw.execution : null;
   const status = execution && typeof execution.http_status === 'number' ? execution.http_status : null;
+  const rawTarget = obj(raw.target) ? raw.target : null;
+  const target = rawTarget && typeof rawTarget.kind === 'string' && (ENTITY_CARD_KINDS as readonly string[]).includes(rawTarget.kind) && typeof rawTarget.id === 'string'
+    ? { kind: rawTarget.kind as EntityCardKind, id: rawTarget.id }
+    : null;
   return {
     id: raw.id,
     state: raw.state as AgentActionState,
@@ -42,6 +51,8 @@ export function parseAgentAction(raw: unknown): AgentActionView | null {
     irreversible: raw.reversible === 'no',
     requestedBy: nameOf(raw.requested_by),
     decidedBy: nameOf(raw.decided_by),
+    target,
+    gone: raw.state === 'executed' && typeof raw.action_key === 'string' && raw.action_key.endsWith('.delete') && target !== null,
     changed: raw.state === 'failed' && status !== null && [404, 409, 410, 422].includes(status),
   };
 }
