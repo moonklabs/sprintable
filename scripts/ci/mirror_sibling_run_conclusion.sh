@@ -12,7 +12,7 @@
 #
 # 사용법:
 #   mirror_sibling_run_conclusion.sh --job-name "<잡 표시 이름>" --head-sha <sha> \
-#     --this-run-id <이 run의 id> [--poll-interval-seconds N(기본 15)] \
+#     --this-run-id <이 run의 id> [--poll-interval-seconds N(기본 30)] \
 #     [--max-wait-seconds N(기본 1200)]
 #
 # 종료 코드: 0 = 미러 대상 잡의 결론이 success. 1 = 그 외 전부(실패·취소·진짜 run을
@@ -25,7 +25,7 @@ set -euo pipefail
 JOB_NAME=""
 HEAD_SHA=""
 THIS_RUN_ID=""
-POLL_INTERVAL_SECONDS=15
+POLL_INTERVAL_SECONDS=30
 MAX_WAIT_SECONDS=1200
 
 while [ $# -gt 0 ]; do
@@ -63,6 +63,7 @@ fi
 #     이제 매 폴링마다 같은 head_sha의 형제 run들을 다시 읽어, 대상 잡이 «보이는» 가장 오래된 형제를 골라 그 잡의 결론을 미러한다(run_id 최소 우선 전제는 그대로).
 #  ② API 일시 오류(비-JSON · 빈 응답 · 한도 403 · 네트워크)는 `set -e`로 스크립트를 죽이지 않고 «아직 안 보임(레이스)»처럼 다음 폴링에서 다시 본다.
 #     fail-closed는 그대로 — 확정 결론이 success가 아니거나 max-wait를 넘기면 exit 1. 「형제가 아직 도는 중」은 실패가 아니라 대기다.
+#  ④ 폴링 기본 간격 15 → 30초(PO 11-27): GH_TOKEN=GITHUB_TOKEN은 저장소마다 시간당 1000(엔터프라이즈 15000)을 그 저장소의 모든 실행이 나눠 쓴다 — 미러 하나가 폴링당 1+형제 수 호출이라 15초면 최악 ~900~1200으로 혼자 통을 비울 수 있었다. 부르는 곳(ci.yml 3곳)은 간격을 안 넘겨 기본값을 따라온다.
 #  ③ (codex 1회) «읽기 오류»와 «그 이름의 잡이 없음»을 구별한다 — 더 오래된 형제를 읽지 못한 폴링에서는 더 새 형제의 결론을 믿지 않고 다음 폴링을 기다린다(오래된 형제가 진짜 잡이면 그 결론이 우선).
 find_sibling_run_ids() {
   # 이 run 자신을 뺀 같은 head_sha의 CI run id들(오름차순). API 오류면 빈 문자열(호출부가 레이스로 다룸).
