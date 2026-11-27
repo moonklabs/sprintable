@@ -324,7 +324,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable, 
 
   if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
-  if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   // the setup values are only in memory (the page took them off the address): a reload that lands on THIS page puts them back first
   const reloadKeepingSetup = () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
@@ -487,7 +487,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable, 
             <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
               <Checkbox id="quick-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={starting} className="mt-0.5 size-5 self-start" />
               <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
-                <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
+                <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-ds-icon-sm shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
               </label>
             </div>
@@ -568,7 +568,7 @@ export function DesktopSetupAgent({ query, onTeam }: { query: SetupQuery; onTeam
   }, [wanted, project]);
   const fallback = <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} appRuntimeWords={query.appRuntimeWords ?? []} />;
   if (!wanted) return fallback;
-  if (!read || read.project !== project) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (!read || read.project !== project) return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   const found = gone ? undefined : read.agents?.find((a) => a.id === query.agent);
   const runtimes = usableRuntimes(query);
   if (!found || appCannotDrive(found, query.appRuntimeWords ?? []) || movableState(found, runtimes) !== 'ok') return fallback; // story 5009: an agent of a runtime this app cannot drive is the recipe page's «app outdated» row, never a quick start

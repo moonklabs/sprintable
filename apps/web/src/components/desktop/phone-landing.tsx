@@ -61,7 +61,7 @@ export function PhoneLanding({ chatsHref, next }: { chatsHref: string; next?: st
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background" data-testid="phone-landing" aria-busy="true">
-      {slow ? <Loader2 className="size-5 animate-spin text-muted-foreground" role="status" aria-label={t('loading')} data-testid="phone-landing-spinner" /> : null}
+      {slow ? <Loader2 className="size-ds-icon-md animate-spin text-muted-foreground" role="status" aria-label={t('loading')} data-testid="phone-landing-spinner" /> : null}
     </div>
   );
 }

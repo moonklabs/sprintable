@@ -166,7 +166,7 @@ function BrowserDownloadCard({ hideTitle = false, ctaVariant = 'default', ctaLab
   if (loading || (otherPlatform !== null && otherLoading)) {
     return (
       <Card className="flex items-center gap-2 p-4" data-testid="desktop-download-card">
-        <Loader2 className="size-3.5 animate-spin text-ds-ink-3" />
+        <Loader2 className="size-ds-icon-sm animate-spin text-ds-ink-3" />
         <span className="text-ds-small text-ds-ink-3">{t('loading')}</span>
       </Card>
     );

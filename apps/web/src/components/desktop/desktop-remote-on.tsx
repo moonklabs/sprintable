@@ -66,7 +66,7 @@ export function DesktopRemoteOn() {
   // the page's one promise is WHICH org the press turns on, by name beside the button: until that name is known the page does not ask
   // (a «조직: » with no name would let [켜기] be pressed without the promise — 유나 비차단 ①)
   if (!orgId || !state || !orgName) {
-    return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={tRemote('loading')} /></Card>;
+    return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={tRemote('loading')} /></Card>;
   }
 
   const backButton = then === 'pair'
@@ -123,7 +123,7 @@ export function DesktopRemoteOn() {
         {/* the org this press turns on, in full (no ellipsis · it wraps) — the session's, never one from the address */}
         <p className="text-sm font-medium [overflow-wrap:anywhere]" data-testid="remote-on-org">{t('orgLine', { org: orgName })}</p>
         <Button onClick={() => void turnOn()} aria-disabled={phase === 'working' || undefined} className="aria-disabled:pointer-events-none aria-disabled:opacity-50" data-testid="remote-on-press">
-          {phase === 'working' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+          {phase === 'working' ? <Loader2 className="size-ds-icon-md animate-spin" aria-hidden /> : null}
           {phase === 'working' ? t('turningOn') : tRemote('turnOn')}
         </Button>
         {backButton}

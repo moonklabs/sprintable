@@ -348,7 +348,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, not
       </Card>
       <div className="space-y-1">
         <Button size="lg" className="w-full whitespace-nowrap" disabled={busy || locked || reason !== null} onClick={() => void start()} data-testid="onboarding-phone-start-go">
-          {busy ? <>{standing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="onboarding-phone-standing" /> : null}{t('start.starting')}</> : t('start.action')}
+          {busy ? <>{standing ? <Loader2 className="size-ds-icon-md animate-spin" aria-hidden="true" data-testid="onboarding-phone-standing" /> : null}{t('start.starting')}</> : t('start.action')}
         </Button>
         {reason ? <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-reason">{reason}</p> : null}
       </div>
