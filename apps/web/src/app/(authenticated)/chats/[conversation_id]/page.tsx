@@ -165,16 +165,12 @@ export default function ConversationPage() {
     if (editingTitle || !focusRenameButtonAfterEdit.current) return;
     if (renameButtonRef.current) { focusRenameButtonAfterEdit.current = false; renameButtonRef.current.focus(); return; }
     if (titleButtonElRef.current) { focusRenameButtonAfterEdit.current = false; titleButtonElRef.current.focus(); return; }
-    // anywhere but a phone nothing of the rename is on screen: «⋯» (never the page body)
-    if (!isBelowLg) { focusRenameButtonAfterEdit.current = false; headMenuTriggerRef.current?.focus(); return; }
-    // a phone's title button is not mounted yet (the bar draws it next): `titleButtonRef` gives it the focus then. If it never comes (this room has no rename — a one-to-one room · still loading), «⋯» takes it: the request does not wait for ever
-    const id = setTimeout(() => {
-      if (!focusRenameButtonAfterEdit.current) return;
-      focusRenameButtonAfterEdit.current = false;
-      headMenuTriggerRef.current?.focus();
-    }, 50);
-    return () => clearTimeout(id);
-  }, [editingTitle, isBelowLg]);
+    // Is there a title button to wait for? Only in a GROUP room on a phone: the input has just closed, the bar draws the title button on its next commit (RoomBarTitle always draws its `title`), and `titleButtonRef` gives it the focus then — however long that takes, no timer.
+    if (isBelowLg && meta?.type === 'group') return;
+    // …in every other case no title button can come (a one-to-one room · a room still loading · a desktop whose pencil is not there): «⋯» now, and the request is over — a room that resolves into a group later finds nothing left to steal the focus
+    focusRenameButtonAfterEdit.current = false;
+    headMenuTriggerRef.current?.focus();
+  }, [editingTitle, isBelowLg, meta?.type]);
   const [titleDraft, setTitleDraft] = useState('');
   // story 5031 (pencil follow-up · codex): this page component is REUSED between rooms (only ChatView is keyed by the room). The name edit — the open input and its draft — belongs to the room it was started in: leaving that room closes it and DISCARDS the draft
   // (state adjusted while rendering — React's «derive from a changed prop» form, so no frame draws room B with room A's input). Not saved: a person who clicked away has already saved it (the input's blur); what is left is the browser's back / a link that

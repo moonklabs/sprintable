@@ -47,6 +47,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 let makeTree: () => React.ReactElement = () => <></>;
+const barOn = { current: true }; // a test can take the shell's bar away for a while (the phone's title button and the rename input are drawn BY the bar)
 async function mountWithBar() {
   const { default: ConversationPage } = await import('./page');
   const { TopBar } = await import('@/components/nav/top-bar');
@@ -56,11 +57,12 @@ async function mountWithBar() {
   makeTree = () => (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
       <ToastProvider><TopBarProvider pathname={`/chats/${routeId.current}`}><SidebarProvider>
-        <TopBar orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: '올리베이라 조직', orgSlug: 'acme' }]} projectId="proj-1" projectMemberships={[{ projectId: 'proj-1', projectName: '스프린터블' }]} />
+        {barOn.current ? <TopBar orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: '올리베이라 조직', orgSlug: 'acme' }]} projectId="proj-1" projectMemberships={[{ projectId: 'proj-1', projectName: '스프린터블' }]} /> : null}
         <ConversationPage />
       </SidebarProvider></TopBarProvider></ToastProvider>
     </NextIntlClientProvider>
   );
+  barOn.current = true;
   await act(async () => { root.render(makeTree()); });
   await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
 }
@@ -257,6 +259,28 @@ describe('[SID:5031 · pencil · codex] a PHONE: the focus after the rename goes
   });
 });
 
+describe('[SID:5031 · pencil · codex 3] a phone group room: the focus waits for the title button — however long the bar takes — and never goes to «⋯» by a clock', () => {
+  it('⭐the bar draws the title button LATE (the input has closed, the bar is away for 2 s): the focus lands on the title button when it appears — not on «⋯», not nowhere', async () => {
+    stubRoom('group');
+    emulateWidth(390);
+    await mountWithBar();
+    await act(async () => { titleButton()!.click(); });
+    await type(input()!, '이름');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); // there is no clock in the rule: running a long one changes nothing
+    try {
+      await act(async () => { key(input()!, 'Enter'); barOn.current = false; root.render(makeTree()); }); // Enter — and the bar (which draws the title button) is not there
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(titleButton(), 'no title button yet').toBeNull();
+      await act(async () => { barOn.current = true; root.render(makeTree()); }); // the bar is back: the title button mounts
+      await act(async () => { vi.advanceTimersByTime(2000); });
+    } finally { vi.useRealTimers(); }
+    await settle();
+    expect(titleButton()).not.toBeNull();
+    expect(document.activeElement, 'on the title button').toBe(titleButton());
+    expect(document.activeElement).not.toBe(trigger());
+  });
+});
+
 describe('[SID:5031 · pencil · codex] the opening that waits for the menu to close is cancelled when it goes stale', () => {
   const click = (el: Element) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   it('⭐the room changes before the timer fires → the input does not open on the OTHER room (it would have opened with the first room\'s draft)', async () => {
@@ -341,7 +365,7 @@ describe('[SID:5031 · pencil · codex 2] leaving a room closes the name edit of
     await act(async () => { key(input()!, 'Enter'); routeId.current = 'conv-3'; root.render(makeTree()); });
     await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
     expect(titleButton(), 'a DM has no rename button').toBeNull();
-    // straight on to a group room (before the 50 ms the phone's fallback waits for the title button — that timer would hand the focus to «⋯» of the DM by itself): its title button mounts
+    // straight on to a group room: its title button mounts
     await goTo('conv-2');
     expect(titleButton()).not.toBeNull();
     expect(document.activeElement, 'reverted → the left-over request steals the focus into this room\'s title button').not.toBe(titleButton());
