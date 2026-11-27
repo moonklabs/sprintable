@@ -135,12 +135,14 @@ async function build() {
 // the first test used to pay for the esbuild bundle + the Tailwind build inside its own 30 s (a cold, busy runner made a control run fail two tests on that alone): build once, up front, with its own room
 test.beforeAll(async () => { test.setTimeout(180_000); await build(); });
 
-type Cfg = { screen: 'home' | 'home-real' | 'settings' | 'default-shell'; win: number; wide: boolean; listColumnOpen: boolean; fill?: boolean };
+// `classic` tries to draw a room-taking (classic, 15 px) scrollbar like a Windows / Linux browser's, and `height` makes the window short so the page really overflows — the scene for «does a scrollbar move the two-column decision?».
+type Cfg = { screen: 'home' | 'home-real' | 'settings' | 'default-shell'; win: number; wide: boolean; listColumnOpen: boolean; fill?: boolean; classic?: boolean; height?: number };
+const CLASSIC_SCROLLBAR_CSS = '*::-webkit-scrollbar{width:15px;height:15px}*::-webkit-scrollbar-thumb{background:#999}*::-webkit-scrollbar-track{background:#eee}';
 async function open(page: Page, cfg: Cfg) {
   const { js, css } = await build();
-  await page.setViewportSize({ width: cfg.win, height: 900 });
+  await page.setViewportSize({ width: cfg.win, height: cfg.height ?? 900 });
   await page.unrouteAll();
-  await page.route('http://preview.test/**', async (route) => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` }));
+  await page.route('http://preview.test/**', async (route) => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style>${cfg.classic ? `<style>${CLASSIC_SCROLLBAR_CSS}</style>` : ''}</head><body style="margin:0"><div id="root"></div></body></html>` }));
   const errs: string[] = [];
   page.on('pageerror', (e) => errs.push(String(e).slice(0, 300)));
   await page.goto('about:blank');
@@ -305,13 +307,16 @@ for (const win of [THRESHOLD_WIN, 1440] as const) {
     expect(m.detailOut, 'nothing in the detail card runs past it').toEqual([]);
     expect(m.rowsScroll.every((x) => x <= 0), 'no list row scrolls sideways').toBe(true);
     expect(m.rowsOut, 'nothing in a list row runs past it').toEqual([]);
-    await page.locator('[data-row-key]').nth(1).click(); // the other row's detail (the Latin name · the signature card)
+    // the other row's detail (the Latin name · the signature card). Press the row's TITLE button, not «the middle of the row»: the middle of a row can be the row's own action link (a click there goes where the link goes — the scene is gone) — where the middle falls
+    // depends on the font's metrics (the 5c CI red: Linux's fonts put it on the link, the Mac's did not). The title button is the row's own «select» (the same as a click on the row's body).
+    await page.locator('[data-row-key]').nth(1).locator('button').first().click();
+    await expect(page.locator('[data-testid="home-detail"]'), 'the click selected the row (it did not leave the page through the row\'s link)').toHaveAttribute('data-row-key', 'gate:g2');
     m = await check();
     expect(m.detailScroll).toBeLessThanOrEqual(0);
     expect(m.detailOut).toEqual([]);
     // a row that is NOT a request (a working run — its detail is the «facts» card with the agent's long name): the section is folded by default
     await page.locator('section[aria-label="일하는 중"] button').first().click();
-    await page.locator('[data-row-key="run:r1"]').click();
+    await page.locator('[data-row-key="run:r1"] button').first().click();
     expect(await page.locator('[data-testid="home-detail-facts"]').count(), 'the facts card is the detail now').toBe(1);
     m = await check();
     expect(m.detailScroll).toBeLessThanOrEqual(0);
@@ -320,3 +325,34 @@ for (const win of [THRESHOLD_WIN, 1440] as const) {
     expect(await overflow(page)).toBe(0);
   });
 }
+
+// the 5c CI red was NOT a scrollbar (the product hides every scrollbar: `* { scrollbar-width: none }` + `*::-webkit-scrollbar { display: none }` in globals.css — a scrollbar takes no room from the shell's scroller on any platform, so the body is as wide with
+// a tall page as with a short one). Pinned here so a later «show the scrollbars» change cannot silently move the two-column threshold: a SHORT window (the page overflows and scrolls), an attempt at a classic 15 px scrollbar, the threshold ±1, and a
+// press on the second row — the decision stays the same, and nothing flips between two columns and the sheet.
+test.describe('the shell scroller takes no room for a scrollbar (a short window · a classic-scrollbar attempt)', () => {
+  const scene = (page: Page) => page.evaluate(() => {
+    const sc = document.getElementById('scroller')!;
+    const body = document.querySelector('[data-testid="home-width-probe"]')!.getBoundingClientRect();
+    return { scrollbar: sc.offsetWidth - sc.clientWidth, overflowsY: sc.scrollHeight > sc.clientHeight, bodyW: Math.round(body.width), column: document.querySelector('[data-testid="home-detail-column"]') !== null, sheet: document.querySelector('[data-testid="home-detail-sheet"]') !== null };
+  });
+  for (const classic of [false, true] as const) {
+    test(`[SID:5031] home ${THRESHOLD_WIN} in a short window${classic ? ' with a classic-scrollbar attempt' : ''}: the page scrolls, no scrollbar room is taken, two columns hold — before and after a press on the second row`, async ({ page }) => {
+      await open(page, { screen: 'home-real', win: THRESHOLD_WIN, wide: true, listColumnOpen: true, height: 520, classic });
+      const before = await scene(page);
+      console.log(`[5c home short${classic ? ' classic' : ''}] before ${JSON.stringify(before)}`);
+      expect(before.overflowsY, 'the scene really overflows (a scrollbar would have a reason to exist)').toBe(true);
+      expect(before.scrollbar, 'the shell scroller takes no room for a scrollbar').toBe(0);
+      expect(before).toMatchObject({ bodyW: HOME_TWO_COLUMN_MIN, column: true, sheet: false });
+      await page.locator('[data-row-key]').nth(1).locator('button').first().click();
+      const after = await scene(page);
+      expect(after).toMatchObject({ scrollbar: 0, bodyW: HOME_TWO_COLUMN_MIN, column: true, sheet: false });
+    });
+    test(`[SID:5031] home ${THRESHOLD_WIN - 1} in a short window${classic ? ' with a classic-scrollbar attempt' : ''}: one less is the sheet — and it stays the sheet after a press on a row (no flipping)`, async ({ page }) => {
+      await open(page, { screen: 'home-real', win: THRESHOLD_WIN - 1, wide: true, listColumnOpen: true, height: 520, classic });
+      const before = await scene(page);
+      expect(before).toMatchObject({ scrollbar: 0, bodyW: HOME_TWO_COLUMN_MIN - 1, column: false });
+      await page.locator('[data-row-key]').nth(1).locator('button').first().click();
+      expect(await scene(page)).toMatchObject({ scrollbar: 0, bodyW: HOME_TWO_COLUMN_MIN - 1, column: false });
+    });
+  }
+});
