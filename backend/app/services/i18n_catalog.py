@@ -950,10 +950,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     # story #3805 CI 정정(2026-09-11, 카디르 실측·페드루 전달) — engagement_items.py
     # PATCH 3자리(휴먼 전용 403·404·422)의 신규 한글 사용자 문장. 처음부터 카탈로그로
     # 등재(#3796/#3614·events.py와 같은 형).
-    "engagement_items.patch_human_only": {
-        "ko": "반응 항목의 배정·상태 변경은 휴먼 멤버만 가능해요.",
-        "en": "Only human members can change engagement item assignment or status",
-    },
     "engagement_items.not_found": {
         "ko": "반응 항목을 찾을 수 없어요",
         "en": "Engagement item not found",
@@ -1148,10 +1144,6 @@ _CATALOG: dict[str, dict[str, str]] = {
     },
     # story #3813(Phase3·3-4 PR2, 페드루 PO 確定 2026-09-12) — 뉴스레터 발송
     # 요청 API 사용자 문구(ads_boost.* 형제와 동형 어조, newsletter_send.py 라우터).
-    "newsletter_send.create_human_only": {
-        "ko": "뉴스레터 발송 요청은 휴먼 멤버만 가능해요(에이전트는 초안 작성만).",
-        "en": "Only human members can request a newsletter send (agents may only draft).",
-    },
     "newsletter_send.publication_not_found": {
         "ko": "이 조직에 없는 발행물이에요.",
         "en": "Publication not found in this organization.",

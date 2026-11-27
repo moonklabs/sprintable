@@ -25,19 +25,9 @@ from app.services.publication_command import viewer_can_retry
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comments"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
-    """story #3516 AC4 — 목록 GET은 에이전트도 가능(읽기), 수동 재수집은 휴먼 전용
-    (channel_posts.py::_require_human과 동형 권한 폭 — 발행류 액션은 항상 휴먼)."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail=human_error(
-                "COMMENT_REFRESH_HUMAN_ONLY", "댓글 재수집은 휴먼 멤버만 가능해요.",
-                user_message="댓글 재수집은 휴먼 멤버만 가능해요.",
-            ),
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story 5041 · PO 11-27 — a manual refresh only reads the channel (5 minutes per publication); a person or an agent may ask for it."""
+    return await resolve_member(auth, org_id, db)
 
 
 class CommentReplySummary(BaseModel):
@@ -251,7 +241,7 @@ async def refresh_publication_comments_endpoint(
     후속 스코프."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    await _require_human(db, auth, org_id)
+    await _caller(db, auth, org_id)
 
     try:
         result = await refresh_comments_now(db, org_id=org_id, publication_id=publication_id)

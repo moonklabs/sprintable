@@ -31,19 +31,9 @@ from app.services.publication_reconciliation import reconcile_publication
 router = APIRouter(prefix="/api/v2/organizations", tags=["insights-board"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
-    """campaigns.py::_require_human과 동형 — 추가 role 제한 없음(org 멤버인 휴먼이면
-    누구나), 에이전트는 403."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "FOLLOW_UP_CREATE_HUMAN_ONLY",
-                "message": "후속 작업 생성은 휴먼 멤버만 가능합니다(에이전트는 조회만).",
-            },
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """The member making the call — a person or an agent (story 5041 · PO 11-27: a follow-up is a new internal story)."""
+    return await resolve_member(auth, org_id, db)
 
 
 class InsightSnapshotBucketView(BaseModel):
@@ -329,7 +319,7 @@ async def create_publication_follow_up_endpoint(
 ) -> FollowUpCreateResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id)
+    resolved = await _caller(db, auth, org_id)
 
     try:
         result = await create_publication_follow_up(

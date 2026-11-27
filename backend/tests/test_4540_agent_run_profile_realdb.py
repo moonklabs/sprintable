@@ -285,7 +285,9 @@ async def test_07_who_may_read_and_change(world):
                 assert _code(r) == (403, "person_session_required")
         finally:
             await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
-        assert _code(await c.get(_one(agent), headers=_key(device)))[0] == 403  # an agent key reads only through /agent-run-profile
+        # story 5041 (PO 11-27 · row 16): an agent key may READ a profile through this road too — and is told it cannot change it (can_change is worked out for the caller)
+            seen_by_key = await c.get(_one(agent), headers=_key(device))
+            assert seen_by_key.status_code == 200 and seen_by_key.json()["can_change"] is False and seen_by_key.json()["can_change_unattended"] is False
         assert await _row(agent) is None
 
         # another org's admin: the agent is not there for them

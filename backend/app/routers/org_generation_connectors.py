@@ -190,7 +190,7 @@ async def list_generation_connectors_endpoint(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> GenerationConnectorListResponse:
     _require_org_match(org_id, verified_org_id)
-    await _require_human(db, auth, org_id)
+    await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: the list has no credential in it (provider · label · state only) — a member of the org, person or agent, may read it
     rows = await list_org_generation_connectors(db, org_id=org_id, active_only=active_only)
     return GenerationConnectorListResponse(connectors=[_to_response(r) for r in rows])
 

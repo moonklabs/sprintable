@@ -205,7 +205,7 @@ async def _pause_ads_boost_endpoint(
 ) -> CommandResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    resolved = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: stopping the spend is safe for an agent too (start · resume · cancel stay with a person)
     try:
         command = await request_ads_boost_pause(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
@@ -560,7 +560,7 @@ async def _refresh_ads_boost_spend_endpoint(
 ) -> SpendRefreshResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    resolved = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: a read-and-store refresh with its own 429 — an agent may ask
     try:
         result = await refresh_ads_boost_spend_now(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,

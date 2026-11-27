@@ -103,9 +103,7 @@ async def get_agent_profile(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    person = await resolve_member(auth, org_id, db)
-    if person.type != "human":
-        raise HTTPException(status_code=403, detail={"code": "person_session_required"})
+    person = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: the read is a person or an agent; can_change stays false for an agent (it is worked out for this caller)
     return await profiles.read_for_person(
         db, org_id=org_id, user_id=uuid.UUID(auth.user_id), agent_id=agent_id, actor_is_owner=await is_active_owner(db, person),
     )

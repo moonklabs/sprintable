@@ -30,18 +30,10 @@ from app.services.publication_command import viewer_can_retry
 router = APIRouter(prefix="/api/v2/organizations", tags=["channel-post-comment-replies"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
-    """channel_post_comments.py::_require_human과 동형(발행류 액션은 항상 휴먼)."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail=human_error(
-                "COMMENT_REPLY_HUMAN_ONLY", "이 액션은 휴먼 멤버만 가능해요.",
-                user_message="이 액션은 휴먼 멤버만 가능해요.",
-            ),
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """The member making the call — a person or an agent (story 5041 · PO 11-27). Turning a comment into a story is internal; sending a
+    reply for approval only opens the gate — the send itself waits for a person's approval."""
+    return await resolve_member(auth, org_id, db)
 
 
 class CreateFollowUpRequest(BaseModel):
@@ -65,15 +57,14 @@ async def create_comment_follow_up_endpoint(
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> CreateFollowUpResponse:
-    """AC2 — 댓글을 story로 전환. 휴먼 전용(insights_board.py::create_publication_
-    follow_up_endpoint와 동형 권한 폭). `title`은 서버가 기본값을 안 짓는다 —
+    """AC2 — 댓글을 story로 전환. 휴먼 · 에이전트 모두(story 5041). `title`은 서버가 기본값을 안 짓는다 —
     FE가 「[댓글] {게시물 제목}」 prefill을 책임지고, 여기엔 필수 값으로 온다.
 
-    에러: `403 COMMENT_REPLY_HUMAN_ONLY`(에이전트 호출) · `404`(comment_id 없음/
+    에러: `404`(comment_id 없음/
     다른 org 소속)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id)
+    resolved = await _caller(db, auth, org_id)
 
     try:
         result = await create_comment_follow_up(
@@ -251,7 +242,7 @@ async def submit_comment_reply_endpoint(
     `supports_reply=False`)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id)
+    resolved = await _caller(db, auth, org_id)
 
     try:
         reply = await submit_comment_reply(db, org_id=org_id, reply_id=reply_id, requester_member_id=resolved.id)
