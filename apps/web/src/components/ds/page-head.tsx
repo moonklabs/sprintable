@@ -13,6 +13,7 @@ export type PageHeadProps = Omit<ComponentProps<'div'>, 'className' | 'title' | 
 
 /**
  * 4913(UI-R5) PageHead — 조직 구역 «쪽 머리». **제목이 없다**: 화면 제목은 앱 틀 위 막대(`TopBarSlot`)가 가져간다(보드 · 목표 · 문서 · 실행 등 다시 지은 화면과 같게 — PO 11-12).
+ * 한글 낱말은 중간에서 끊지 않는다(`break-keep`) — 긴 영문 · 숫자 낱말이 칸을 넘지 않게 `overflow-wrap:anywhere`를 같이 준다(ds Banner · Field · Metric과 같은 쌍 · story 5048 PO 11-27 — 에이전트 화면 «관 / 리해요»). 호출처가 따로 감쌀 필요 없다.
  * 같은 이름이 두 자리에 나오지 않도록 이 부품은 제목 자리를 아예 갖지 않는다. 설명 · 보조 글 · 행동이 다 없으면 아무것도 그리지 않는다(빈 줄을 남기지 않는다).
  */
 export function PageHead({ description, meta, actions, className, ...props }: PageHeadProps) {
@@ -24,8 +25,8 @@ export function PageHead({ description, meta, actions, className, ...props }: Pa
       {...props}
     >
       <div className="min-w-0 space-y-1">
-        {description ? <p className="m-0 max-w-prose text-ds-body text-ds-ink-2">{description}</p> : null}
-        {meta ? <p className="m-0 text-ds-small text-ds-ink-3">{meta}</p> : null}
+        {description ? <p className="m-0 max-w-prose break-keep text-ds-body text-ds-ink-2 [overflow-wrap:anywhere]">{description}</p> : null}
+        {meta ? <p className="m-0 break-keep text-ds-small text-ds-ink-3 [overflow-wrap:anywhere]">{meta}</p> : null}
       </div>
       {actions ? <div data-slot="ds-page-head-actions" className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
