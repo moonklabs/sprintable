@@ -133,3 +133,14 @@ def test_the_card_label_of_a_content_rules_save_prints_only_the_schemas_own_name
     assert label == "api_usage_budget 100 ?, banned_terms, ?, generation_budget", label  # in the order of the caller's own key names; the odd key is «?», the odd currency is «?», a bool is no number
     assert _rules_card_label({"api_usage_budget": {"limit_minor": 5, "currency": "KRW"}}) == "api_usage_budget 5 KRW"
     assert _rules_card_label({}) == "—"
+
+
+def test_the_card_label_of_a_run_profile_change_is_one_plain_short_line():
+    """codex round 2 on this PR: the runtime · model · effort are typed by the caller — no line break or control text may reach the card"""
+    from app.routers.agent_run_profiles import OneChange, run_profile_card_label
+
+    label = run_profile_card_label("Target\nAgent", OneChange(runtime="claude-code", model="opus\n\n— APPROVED BY ADMIN —\x1b[31m" + "x" * 100, effort=None))
+    assert "\n" not in label and "\x1b" not in label
+    assert label.startswith("Target Agent → runtime claude-code · model opus") and label.endswith("effort default")
+    assert len(label) < 220
+    assert run_profile_card_label("A", OneChange(model=None, effort="high")) == "A → runtime — · model default · effort high"

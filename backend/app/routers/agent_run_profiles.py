@@ -134,6 +134,17 @@ async def put_many_profiles(
     return {"profiles": views}
 
 
+def _one_line(value: str | None, fallback: str, limit: int = 40) -> str:
+    """a value the caller typed, as it may stand on an approval card: one line, printable characters only, short — never a line break or control text that could pass for the card's own words"""
+    text = "".join(ch if ch.isprintable() else " " for ch in (value or ""))
+    text = " ".join(text.split())
+    return (text[:limit] if text else fallback)
+
+
+def run_profile_card_label(agent_name: str, body: "OneChange") -> str:
+    return f"{_one_line(agent_name, '—', 60)} → runtime {_one_line(body.runtime, '—')} · model {_one_line(body.model, 'default')} · effort {_one_line(body.effort, 'default')}"
+
+
 @router.put("/agents/{agent_id}/run-profile")
 async def put_agent_profile(
     request: Request,
@@ -158,7 +169,7 @@ async def put_agent_profile(
             raise HTTPException(status_code=404, detail="Agent not found")
         _decision = await agent_action.gate_agent_for_org(
             request, db, auth=auth, agent=_caller, org_id=org_id, action_key="agent_run_profile.update", refuse=_refuse,
-            target_label=f"{_name} → runtime {body.runtime or '—'} · model {body.model or 'default'} · effort {body.effort or 'default'}",
+            target_label=run_profile_card_label(_name, body),
         )
         if _decision is None:  # never: «no auto slot» — and were it ever, the agent does not walk into the person path
             raise _refuse
