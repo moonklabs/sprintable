@@ -61,6 +61,15 @@ describe('ds Button', () => {
     expect(btn().className).toMatch(/(^|\s)disabled:text-ds-ink-3/);
   });
 
+  it('⭐불러오는 중 스피너는 단추 크기 표(BUTTON_ICON_STEP)를 따른다 — md · lg 모두 20(40 높이 조작 = md), 14 아님(story 5048 ④)', async () => {
+    for (const size of ['md', 'lg'] as const) {
+      await act(async () => { root.render(<Button loading size={size}>저장</Button>); });
+      const svg = btn().querySelector('[data-icon="progress_activity"]')!;
+      expect(svg.getAttribute('width'), size).toBe('20');
+      expect(svg.getAttribute('height'), size).toBe('20');
+    }
+  });
+
   it('⭐불러오는 중: aria-busy · 도는 아이콘 · 글 유지 · 눌러도 onClick이 안 불린다', async () => {
     const onClick = vi.fn();
     await act(async () => { root.render(<Button loading onClick={onClick}>저장</Button>); });

@@ -5,7 +5,7 @@ import { Button as ButtonPrimitive } from '@base-ui/react/button';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 import { ARIA_DISABLED_FACE, DISABLED_FACE } from './disabled-face';
-import { Icon } from './icon';
+import { Icon, type IconSize } from './icon';
 
 /**
  * UI-3(a9d56577) 새 Button — doc ui3-token-names-and-component-list-v0 §4 #1. 변형 넷(주 · 보조 · 조용 · 위험) × 크기 둘(md · lg — story 5048 T0 ①부터 둘 다 높이 40: 조작 높이는 40 하나).
@@ -39,6 +39,9 @@ export const buttonVariants = cva(
   },
 );
 
+/** 단추 크기별 안쪽 아이콘 단계 — 한 표(story 5048 ④ PO 11-27). md · lg 둘 다 높이 40 하나(40 높이 조작 = md 20)라 같은 단계. 로딩 스피너가 이 표를 따른다(호출부 `iconStart`도 같은 단계로 둔다). */
+const BUTTON_ICON_STEP = { md: 'md', lg: 'md' } as const satisfies Record<'md' | 'lg', IconSize>;
+
 type ButtonBase = Omit<ButtonPrimitive.Props, 'children' | 'onClick'> & VariantProps<typeof buttonVariants> & {
   /** 불러오는 중 — 글은 그대로 두고 앞에 도는 아이콘, `aria-busy`, 눌러도 아무 일도 없다(asChild의 자식 onClick도 막는다). */
   loading?: boolean;
@@ -53,7 +56,7 @@ export type ButtonProps = ButtonBase & ({ asChild?: false; children?: ReactNode 
 export function Button({ className, variant, size, loading = false, iconStart, asChild = false, children, disabled, onClick, ...props }: ButtonProps) {
   const cls = cn(buttonVariants({ variant, size }), className);
   const blocked = loading || !!disabled;
-  const spinner = loading ? <Icon name="progress_activity" size={14} spin /> : iconStart;
+  const spinner = loading ? <Icon name="progress_activity" size={BUTTON_ICON_STEP[size ?? 'md']} spin /> : iconStart;
 
   if (asChild) {
     const child = Children.only(children);

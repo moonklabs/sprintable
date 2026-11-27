@@ -20,6 +20,7 @@ const ALLOWED: Record<string, string> = {
   'components/chat/room-head.tsx::<Icon name="smart_toy" size={14} />': '위와 같은 수 단추의 둘째 수',
 };
 
+
 function* sources(dir: string): Generator<string> {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
@@ -46,7 +47,7 @@ function openingTag(text: string, start: number): string {
 describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
   it.each(DIRS)('⭐%s: 아이콘 태그에 직접 크기 클래스(size-3.5 · h-4 w-4 · size-5 · size-8 · size-[17px] …) 0 · ds Icon에 숫자 크기(14 · 16 · 18 · 20 · 24 · 32) 0', (dir) => {
     const hits: string[] = [];
-    for (const file of sources(join(SRC, dir))) {
+    for (const file of /\.tsx$/.test(dir) ? [join(SRC, dir)] : sources(join(SRC, dir))) {
       const text = readFileSync(file, 'utf8');
       const rel = file.slice(SRC.length + 1);
       const lucide = new Set<string>();
@@ -76,7 +77,8 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
     }
     expect(DIRS.length).toBeGreaterThan(0);
     expect(new Set(DIRS).size).toBe(DIRS.length);
-    for (const d of DIRS) expect(statSync(join(SRC, d)).isDirectory(), d).toBe(true);
+    for (const d of DIRS) expect(statSync(join(SRC, d)).isDirectory() || /\.tsx$/.test(d), d).toBe(true); // 폴더 · 또는 공용 부품 한 파일(`.tsx`)
+    for (const d of DIRS.filter((x) => /\.tsx$/.test(x))) expect(statSync(join(SRC, d)).isFile(), d).toBe(true);
   });
 
   it('⭐허용 목록의 자리는 실제로 그 파일에 있다(죽은 항목 0 — 지우면 목록도 줄인다)', () => {

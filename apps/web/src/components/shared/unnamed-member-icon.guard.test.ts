@@ -46,4 +46,9 @@ describe('신원 폴백 아이콘 한 벌(story #4284)', () => {
     const src = read('components/shared/unnamed-member-icon.tsx');
     expect(src).toMatch(/type === 'agent' \? Bot : User/);
   });
+  it('⭐아이콘 크기는 둘러싼 동그라미를 따른다 — 기본 size-1/2 · 고정 size-3 아님 · 호출부가 h-3 w-3을 따로 주지 않는다(story 5048 ④ PO 11-27)', () => {
+    expect(read('components/shared/unnamed-member-icon.tsx')).toMatch(/className = 'size-1\/2'/);
+    const fixed = sourceFiles(SRC).filter((rel) => /<UnnamedMemberIcon\b[^>]*\b(?:h-3 w-3|size-3)\b/.test(read(rel)));
+    expect(fixed).toEqual([]);
+  });
 });
