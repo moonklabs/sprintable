@@ -86,12 +86,15 @@ async def add_project_channel_participant(
 async def remove_project_channel_participant(
     db: AsyncSession, *, channel_id: uuid.UUID, member_id: uuid.UUID,
 ) -> None:
-    """Take `member_id` out of the channel (idempotent: not seated is fine)."""
+    """Take `member_id` out of the channel (idempotent: not seated is fine). Their unread lines of the channel are marked read in the same transaction (story 5049)."""
+    from app.services.event_room_gate import mark_room_words_lines_read
+
     await db.execute(
         delete(ConversationParticipant).where(
             ConversationParticipant.conversation_id == channel_id, ConversationParticipant.member_id == member_id,
         )
     )
+    await mark_room_words_lines_read(db, room_ids=[channel_id], member_ids=[member_id])
 
 
 async def ensure_project_channel_quietly(
@@ -137,17 +140,22 @@ async def unseat_from_project_channels_of_org(db: AsyncSession, *, org_id: uuid.
     """A person left the organization (their `project_access` rows are gone): take them out of EVERY project channel of the organization, in the caller's transaction (not quiet — see above)."""
     if not member_ids:
         return
+    from app.services.event_room_gate import mark_room_words_lines_read
+
     channel_ids = select(Conversation.id).where(Conversation.org_id == org_id, Conversation.is_project_channel.is_(True))
     await db.execute(
         delete(ConversationParticipant).where(
             ConversationParticipant.conversation_id.in_(channel_ids), ConversationParticipant.member_id.in_(member_ids),
         )
     )
+    await mark_room_words_lines_read(db, room_ids=channel_ids, member_ids=list(member_ids))  # story 5049: their unread channel lines are read with the seat
 
 
 async def unseat_from_all_project_channels(db: AsyncSession, *, member_ids_sql, params: dict) -> None:
     """(account deletion) take the members the given SQL names out of every project channel of every organization — see `routers/account.py`. In the caller's transaction."""
     from sqlalchemy import text
+
+    from app.services.event_room_gate import mark_room_words_lines_read
 
     await db.execute(
         text(
@@ -156,13 +164,20 @@ async def unseat_from_all_project_channels(db: AsyncSession, *, member_ids_sql, 
         ),
         params,
     )
+    # story 5049: and their unread channel lines are read (the ids the caller's SQL names, resolved once)
+    ids = [r[0] for r in (await db.execute(text(member_ids_sql), params)).all()]
+    if ids:
+        await mark_room_words_lines_read(db, room_ids=select(Conversation.id).where(Conversation.is_project_channel.is_(True)), member_ids=ids)
 
 
 async def empty_project_channel(db: AsyncSession, *, project_id: uuid.UUID) -> None:
     """The project is being deleted: take EVERY participant out of its channel, in the deleting transaction. The room itself stays (its history is kept; `project_id` goes NULL by the foreign key)
     — a room of nobody, so no participant row is left for the «room without a project» rule to open."""
+    from app.services.event_room_gate import mark_room_words_lines_read
+
     channel_ids = select(Conversation.id).where(Conversation.project_id == project_id, Conversation.is_project_channel.is_(True))
     await db.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id.in_(channel_ids)))
+    await mark_room_words_lines_read(db, room_ids=channel_ids)  # story 5049: nobody is in the room any more — nobody keeps an unread line of it
 
 
 async def retitle_project_channel_quietly(db: AsyncSession, *, project_id: uuid.UUID, title: str) -> bool:

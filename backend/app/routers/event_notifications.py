@@ -14,7 +14,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
-from app.services.event_room_gate import room_of, stored_event, withheld_payloads
+from app.services.event_room_gate import room_of, room_words_lines_readable_clause, stored_event, withheld_payloads
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
@@ -273,6 +273,7 @@ async def list_notifications(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
+            await room_words_lines_readable_clause(db, org_id, auth),  # story 5049: a room's words are listed only for who reads the room now (a mention stays)
         )
         .order_by(Event.created_at.desc())
         .limit(limit)
@@ -312,6 +313,7 @@ async def get_unread_count(
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
             ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
+            await room_words_lines_readable_clause(db, org_id, auth),  # story 5049: counted only while the room is readable (the room's own unread count counts readable rooms alone)
         )
     )
     count = result.scalar_one()
@@ -369,6 +371,8 @@ async def mark_all_read(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
+            # story 5049: «read all» marks what the bell shows — a line of a room the person cannot read now was never seen, so it is left unread (it shows again if the access comes back)
+            await room_words_lines_readable_clause(db, org_id, auth),
         )
         .values(read_at=now)
     )

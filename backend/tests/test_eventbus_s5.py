@@ -45,6 +45,18 @@ def auth_ctx(org_id, member_id):
     return ctx
 
 
+@pytest.fixture(autouse=True)
+def _room_gate_is_not_under_test_here(monkeypatch):
+    """story 5049 — the bell's «a room's words only for who reads the room now» clause asks the database who the caller is and which rooms they read (real-Postgres tests:
+    `test_5049_unread_room_readable_realdb.py`); these route-plumbing tests feed the session a fixed list of results, so the clause is stood in by «true» (no extra statements)."""
+    from sqlalchemy import true
+
+    async def _always(db, org_id, auth):
+        return true()
+
+    monkeypatch.setattr("app.routers.event_notifications.room_words_lines_readable_clause", _always)
+
+
 @pytest.fixture
 async def client(mock_session, auth_ctx, org_id, member_id):
     from app.dependencies.auth import get_current_user, get_verified_org_id
