@@ -117,7 +117,7 @@ describe('design-system.css — 밀도 · 그림자 · 움직임 이름 토큰',
       'ds-head': rem('ds-head'),
       'ds-chat-row': rem('ds-chat-row'),
       'ds-nav-item': rem('ds-nav-item'),
-    }).toEqual({ 'ds-control-sm': 40, 'ds-compact': 40, 'ds-control': 40, 'ds-touch': 44, 'ds-control-xl': 48, 'ds-row': 56, 'ds-tag': 28, 'ds-bar': 64, 'ds-head': 80, 'ds-chat-row': 88, 'ds-nav-item': 240 });
+    }).toEqual({ 'ds-control-sm': 40, 'ds-compact': 40, 'ds-control': 40, 'ds-touch': 44, 'ds-control-xl': 48, 'ds-row': 56, 'ds-tag': 28, 'ds-bar': 64, 'ds-head': 80, 'ds-chat-row': 60, 'ds-nav-item': 240 });
   });
 
   it('⭐그림자 없음(키트 규칙): popup · overlay 이름은 남고 값은 none — 칸은 1px 선과 면 색 차이로만 가른다', () => {

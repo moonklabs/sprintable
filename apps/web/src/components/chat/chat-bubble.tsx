@@ -329,7 +329,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
         const openReadingPanel = toEmbedCardOpenPanel(onOpenReadingPanel);
         return <EmbedCard entity_type={ref.entityType} entity_id={ref.entityId} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
-      return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
+      return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-normal last:mb-0 ${text}`}>{children}</p>;
     },
     strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
     em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
@@ -363,7 +363,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
     td: ({ children }: { children?: React.ReactNode }) => <td className={`border-b px-2 py-1 ${border} ${text}`}>{children}</td>,
     ul: ({ children }: { children?: React.ReactNode }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
     ol: ({ children }: { children?: React.ReactNode }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
-    li: ({ children }: { children?: React.ReactNode }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
+    li: ({ children }: { children?: React.ReactNode }) => <li className={`text-sm leading-normal ${text}`}>{children}</li>,
     blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
       if (href?.startsWith('mention:')) {
@@ -418,7 +418,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
 
   if (!hasMarkdown && !hasMention) {
     return (
-      <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
+      <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-normal ${text}`}>
         {/* story 4854 — a plain message (no markdown character) used to show an address as dead text; the plain path links http(s) addresses now (whitespace and line breaks stay as typed) */}
         {splitPlainUrls(content).map((part, i) => part.kind === 'url'
           ? <a key={i} href={part.value} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{part.value}</a>
@@ -727,7 +727,7 @@ export function ChatBubble({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''} outline-none focus-visible:ring-2 focus-visible:ring-ds-action`}
+        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-1' : 'mt-4'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''} outline-none focus-visible:ring-2 focus-visible:ring-ds-action`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -821,7 +821,7 @@ export function ChatBubble({
           {isDeleted ? (
             // story #2319 — tombstone placeholder. 색/경고 없이 무채색(story #2299 AC⑤와 같은
             // 규율 — 「끊어짐」은 사실 표시일 뿐 에러가 아니다).
-            <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+            <div className={`min-w-0 max-w-full rounded-ds-bubble px-3.5 py-2.5 text-sm italic text-ds-ink-2 ${
               isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
             }`}>
               {t('deletedMessagePlaceholder')}
@@ -829,7 +829,7 @@ export function ChatBubble({
           ) : isBlockedSender && !blockedMessageRevealed ? (
             // story #2349 — tombstone과 다르다: 서버는 내용을 그대로 내려준다. 여기서 클라가
             // 가리고, "보기"로 펼칠 수 있어야 한다(PO 규격 — 되돌릴 수 없는 tombstone과 구분).
-            <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+            <div className={`min-w-0 max-w-full rounded-ds-bubble px-3.5 py-2.5 text-sm italic text-ds-ink-2 ${
               isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
             }`}>
               {t('blockedSenderMessagePlaceholder')}{' '}
@@ -895,7 +895,7 @@ export function ChatBubble({
             </Card>
           ) : eventTextFallback ? (
             // story 4906 (PO 11-14, «이벤트는 카드 · 사람이 한 말은 말풍선»): an event message with no card template is drawn in the SAME shell as the template card (EVENT_CARD_SHELL: one face · one line · one corner) — its head · words · list are the card's own structure; the gray bubble reads as something a person said
-            <div data-testid="chat-bubble-text" data-event-card="text" className={`${EVENT_CARD_SHELL} text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]`}>
+            <div data-testid="chat-bubble-text" data-event-card="text" className={`${EVENT_CARD_SHELL} text-sm leading-normal text-foreground [overflow-wrap:anywhere]`}>
               <EventTextFallback
                 content={message.content} eventKey={eventTarget?.event_key} payload={eventTarget?.payload}
                 refs={eventTarget?.refs as Record<string, unknown> | undefined}
@@ -908,7 +908,7 @@ export function ChatBubble({
             hasAttachments ? null : (
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
               // 같은 틀(italic muted·bg-ds-background·경고색·펼치기 없음).
-              <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
+              <div className={`min-w-0 max-w-full rounded-ds-bubble px-3.5 py-2.5 text-sm italic text-ds-ink-2 ${
                 isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
               }`} data-testid="chat-bubble-empty-placeholder">
                 {t('emptyMessagePlaceholder')}
@@ -920,14 +920,14 @@ export function ChatBubble({
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
             // story 4887 (UI-4 P4-b · AC3 B3) — an AGENT's message has no bubble: the head line above (name · tag · time) says who, and the text sits on the page. A person's message (mine or another person's) keeps its bubble — it is the bubble that tells the two kinds apart at a glance (B3: «에이전트 글만 말풍선 없는 평문»).
-            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed ${isMine ? 'text-ds-on-mine' : 'text-foreground'} [overflow-wrap:anywhere] ${
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-normal ${isMine ? 'text-ds-on-mine' : 'text-foreground'} [overflow-wrap:anywhere] ${
               plainRow
                 ? `rounded-lg ${isMine ? LAYER.rowMine : LAYER.rowOthers} px-3 py-2`
                 : isMine
-                  ? `rounded-ds-bubble rounded-tr-ds-tail ${LAYER.rowMine} px-4 py-3`
+                  ? `rounded-ds-bubble rounded-tr-ds-tail ${LAYER.rowMine} px-3.5 py-2.5`
                   : isAgent
-                    ? `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-4 py-3`
-                    : `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-4 py-3`
+                    ? `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-3.5 py-2.5`
+                    : `rounded-ds-bubble rounded-tl-ds-tail ${LAYER.rowOthers} px-3.5 py-2.5`
             }`} data-bubble={plainRow ? 'plain' : 'filled'}>
               {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는

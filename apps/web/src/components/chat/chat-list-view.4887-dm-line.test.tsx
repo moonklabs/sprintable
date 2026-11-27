@@ -105,11 +105,11 @@ describe('[SID:4887] ChatListView — the DM line (P2-c)', () => {
     expect(agentChip.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('⭐ the row is the kit chat row (story 5048 ②c): min 88 high, padding 16/12 — it was py-2 · 54/76 high', async () => {
+  it('⭐ the row is the kit chat row, denser (story 5048 ②c → chat density 11-27): min 60 high, padding 12/10 — it was 88 · py-3', async () => {
     await mount([conv('c1', [ME, HUMAN])]);
     const row = container.querySelector('[data-testid="chat-list-rooms"] button') as HTMLElement; // the head's «+» is the first button of the list now
     expect(row.className).toContain('min-h-ds-chat-row');
-    expect(row.className).toContain('py-3 ');
-    expect(row.className).not.toContain('py-2 ');
+    expect(row.className).toContain('py-2.5 ');
+    expect(row.className).not.toContain('py-3 ');
   });
 });
