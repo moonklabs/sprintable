@@ -7,7 +7,7 @@ include해 무중단 별칭 서빙을 구현한다.
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -436,6 +436,7 @@ async def update_goal(
 @router.delete("/{id}", status_code=200)
 async def delete_goal(
     id: uuid.UUID,
+    request: Request,
     repo: GoalRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -465,7 +466,12 @@ async def delete_goal(
 
     resolved = await resolve_member(auth, org_id, session)
     if resolved.type != "human":
-        raise HTTPException(status_code=403, detail="Goal 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — kept as an ask a person presses (see delete_story)
+        from app.services import agent_action
+
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=goal.project_id, action_key="goal.delete", target_label=goal.title,
+        )
 
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
         raise HTTPException(

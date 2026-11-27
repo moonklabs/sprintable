@@ -28,6 +28,10 @@ class GetTaskInput(SprintableInput):
     task_id: str
 
 
+class DeleteTaskInput(SprintableInput):
+    task_id: str
+
+
 class AddTaskInput(SprintableInput):
     story_id: str
     title: str
@@ -81,6 +85,14 @@ async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
         items, headers = await client.get_with_headers("/api/v2/tasks", params=params)
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_my_tasks")
+    except Exception as exc:
+        return err(exc)
+
+
+async def delete_task(args: DeleteTaskInput) -> list[TextContent]:
+    """story 5041 — asks for a task to be deleted for good: the server keeps the ask, a person presses a card, the delete runs under THEIR name (answer: `pending_approval`, 202)."""
+    try:
+        return ok(await client.delete(f"/api/v2/tasks/{args.task_id}"))
     except Exception as exc:
         return err(exc)
 

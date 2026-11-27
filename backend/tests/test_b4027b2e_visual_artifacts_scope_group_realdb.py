@@ -89,6 +89,11 @@ async def _setup_app_api_key(app, Session, org_id, project_id, *, scope: list[st
         await s.commit()
         s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=m.id, project_id=project_id))
         await s.commit()
+        # story 5041: an agent's delete is a request a person presses, and a request is only taken from an agent that can see the project (the same check a person's call makes)
+        from app.models.project_access import ProjectAccess
+
+        s.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, member_id=m.id, permission="granted", role="member"))
+        await s.commit()
         agent_id = m.id
 
     async def _db():
@@ -507,7 +512,7 @@ async def test_create_spec_pin_canvas_scope_201_no_overblock():
             )
             assert upd.status_code == 200, upd.text
             deleted = await client.delete(f"/api/v2/visual-artifacts/{artifact_id}/pins/{pin_id}")
-            assert deleted.status_code == 200, deleted.text
+            assert deleted.status_code == 202, deleted.text  # story 5041: an agent's pin delete is kept as a request a person presses
         finally:
             await client.aclose()
     finally:

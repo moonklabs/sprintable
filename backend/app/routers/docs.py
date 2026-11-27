@@ -3,7 +3,7 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -916,6 +916,7 @@ async def update_doc(
 @router.delete("/{id}", status_code=200)
 async def delete_doc(
     id: uuid.UUID,
+    request: Request,
     repo: DocRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
@@ -926,7 +927,15 @@ async def delete_doc(
     from app.services.member_resolver import resolve_member
     deleter = await resolve_member(auth, repo.org_id, repo.session)
     if deleter.type != "human":
-        raise HTTPException(status_code=403, detail="Doc 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — kept as an ask a person presses (see delete_story)
+        from app.services import agent_action
+
+        _asked = await repo.get(id)
+        if _asked is None:
+            raise HTTPException(status_code=404, detail="Doc not found")
+        return await agent_action.request_approval(
+            request, repo.session, auth=auth, agent=deleter, org_id=repo.org_id, project_id=_asked.project_id, action_key="doc.delete", target_label=_asked.title,
+        )
     doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")

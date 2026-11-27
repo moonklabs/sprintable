@@ -100,13 +100,13 @@ from .tools.projects import (
     ListProjectsInput, SetDefaultProjectInput, list_projects, set_default_project,
 )
 from .tools.docs import (
-    CreateDocInput, GetDocInput, ListDocsInput,
+    CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
     SearchDocsInput, SubmitForApprovalInput, UpdateDocInput,
-    create_doc, get_doc, list_docs, search_docs, submit_for_approval, update_doc,
+    create_doc, delete_doc, get_doc, list_docs, search_docs, submit_for_approval, update_doc,
 )
 from .tools.goals import (
-    AddGoalInput, ListGoalsInput, TransitionGoalInput, UpdateGoalInput,
-    add_goal, list_goals, transition_goal, update_goal,
+    AddGoalInput, DeleteGoalInput, ListGoalsInput, TransitionGoalInput, UpdateGoalInput,
+    add_goal, delete_goal, list_goals, transition_goal, update_goal,
 )
 from .tools.hypotheses import (
     ConfirmHypothesisInput, CreateHypothesisInput, GetHypothesisInput,
@@ -143,7 +143,7 @@ from .tools.rewards import (
 )
 from .tools.sprints import (
     CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
-    activate_sprint, cancel_planning_sprint, close_sprint, create_sprint,
+    activate_sprint, cancel_planning_sprint, close_sprint, create_sprint, delete_sprint,
     get_velocity, list_sprints, sprint_summary, update_sprint,
 )
 from .tools.standup import (
@@ -154,17 +154,17 @@ from .tools.standup import (
     save_standup, standup_history, standup_missing, update_retro_action_status,
 )
 from .tools.stories import (
-    AddStoryInput, AssignStoryToSprintInput, GetStoryInput,
+    AddStoryInput, AssignStoryToSprintInput, DeleteStoryInput, GetStoryInput,
     ListBacklogInput, ListStoriesInput, UnassignStoryFromSprintInput, UpdateStoryInput,
     UpdateStoryStatusInput,
-    add_story, assign_story_to_sprint, get_story,
+    add_story, assign_story_to_sprint, delete_story, get_story,
     list_backlog, list_stories, unassign_story_from_sprint,
     update_story, update_story_status,
 )
 from .tools.tasks import (
-    AddTaskInput, GetTaskInput, ListMyTasksInput,
+    AddTaskInput, DeleteTaskInput, GetTaskInput, ListMyTasksInput,
     ListTasksInput, UpdateTaskInput, UpdateTaskStatusInput,
-    add_task, get_task, list_my_tasks, list_tasks,
+    add_task, delete_task, get_task, list_my_tasks, list_tasks,
     update_task, update_task_status,
 )
 from .tools.user_blocks import ListUserBlocksInput, RemoveUserBlockInput, list_user_blocks, remove_user_block
@@ -576,7 +576,11 @@ _TOOL_DEFS: list[tuple] = [
      # story #4330 AC4 — 본문 일시도 오프셋 필수(없으면 422 DATETIME_OFFSET_REQUIRED).
      + offset_required_note("measure_after"),
      UpdateStoryInput, update_story),
-    # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
+    # story 5041: sprintable_delete_story 복원 — 에이전트 혼자 지우는 길(hard-delete)은 그대로 0, 실행은 사람의 카드 누름(그 사람 이름)이다.
+    ("sprintable_delete_story",
+     "[일감] 스토리 영구 삭제 요청(승인 카드)."
+     " ⭐지우는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 지워진다).",
+     DeleteStoryInput, delete_story),
     ("sprintable_assign_story_to_sprint",
      "[일감] 스토리를 스프린트에 배정.",
      AssignStoryToSprintInput, assign_story_to_sprint),
@@ -586,7 +590,11 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_story_status",
      "[일감] 스토리 상태 변경.",
      UpdateStoryStatusInput, update_story_status),
-    # Tasks (6) — E-SECURITY SEC-S1 확장: delete_task 제거(에이전트 hard-delete 차단)
+    # Tasks (6) — story 5041: delete_task 복원(승인 카드 · 에이전트 혼자 지우는 길 0)
+    ("sprintable_delete_task",
+     "[일감] 태스크 영구 삭제 요청(승인 카드)."
+     " ⭐지우는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 지워진다).",
+     DeleteTaskInput, delete_task),
     ("sprintable_list_tasks",
      "[일감] 태스크 목록 조회.",
      ListTasksInput, list_tasks),
@@ -605,7 +613,11 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_task_status",
      "[일감] 태스크 상태 변경.",
      UpdateTaskStatusInput, update_task_status),
-    # Goals(구 Epics, 4) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트 hard-delete 차단).
+    # Goals(구 Epics, 4) — story 5041: delete_goal 복원(승인 카드 · 에이전트 혼자 지우는 길 0 · 소속 스토리까지 지워지므로 요청은 카드뿐이다).
+    ("sprintable_delete_goal",
+     "[일감] 목표 영구 삭제 요청(소속 스토리까지 — 승인 카드)."
+     " ⭐지우는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 지워진다).",
+     DeleteGoalInput, delete_goal),
     # 계층 리네이밍 B1(story 1925): 신 이름이 primary, 구 이름(sprintable_*_epic)은 **같은 핸들러
     # 함수**를 참조하는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1 — 로직 복제
     # 0, 드리프트 불가). 별칭 유지 기간 동안 무중단 서빙.
@@ -684,8 +696,13 @@ _TOOL_DEFS: list[tuple] = [
      "[일감] 스프린트 활성화 (planning → active).",
      SprintIdInput, activate_sprint),
     ("sprintable_close_sprint",
-     "[일감] 진행 중 · 검토 중(active · review) 스프린트 종료 — 파괴적(admin/destructive 권한 필요). 시작 안 한 스프린트는 sprintable_cancel_planning_sprint.",
+     "[일감] 진행 중 · 검토 중(active · review) 스프린트 종료 요청(승인 카드 — story 5041: 더는 숨겨지지 않는다)."
+     " ⭐닫는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 닫힌다). 시작 안 한 스프린트는 sprintable_cancel_planning_sprint.",
      SprintIdInput, close_sprint),
+    ("sprintable_delete_sprint",
+     "[일감] 스프린트 영구 삭제 요청(승인 카드)."
+     " ⭐지우는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 지워진다).",
+     SprintIdInput, delete_sprint),
     ("sprintable_cancel_planning_sprint",
      "[일감] 시작 안 한(계획 중) 스프린트 접기 — 진행 중 · 검토 중 스프린트는 못 접음(그건 sprintable_close_sprint · admin 권한).",
      SprintIdInput, cancel_planning_sprint),
@@ -714,6 +731,10 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_search_docs",
      "[지식] 문서 제목/본문 검색.",
      SearchDocsInput, search_docs),
+    ("sprintable_delete_doc",
+     "[지식] 문서 영구 삭제 요청(승인 카드)."
+     " ⭐지우는 게 아니라 «승인 요청»이다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행된다. 응답 status=pending_approval(202)은 실행 완료가 아니니, 사람에게 «승인 카드를 올렸어요» 라고 그대로 전하고 결과는 DM으로 온다(거절·24시간 무응답이면 안 지워진다).",
+     DeleteDocInput, delete_doc),
     ("sprintable_create_doc",
      "[지식] 문서 생성. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
      "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282). "
@@ -947,7 +968,7 @@ _TOOL_DEFS: list[tuple] = [
      " 핀의 설명을 정정·보강할 때.",
      UpdateSpecPinInput, update_spec_pin),
     ("sprintable_delete_spec_pin",
-     "[일감] 스펙 핀 삭제(최신 버전 소속만 대상). ⭐더 이상 유효하지 않은 스펙 핀을 치울 때.",
+     "[일감] 스펙 핀 삭제 요청(최신 버전 소속만 대상 · 승인 카드). ⭐더 이상 유효하지 않은 스펙 핀을 치울 때. 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 지워진다(응답 status=pending_approval — 실행 완료가 아니다).",
      DeleteSpecPinInput, delete_spec_pin),
     ("sprintable_delete_artifact",
      "[일감] artifact 삭제(soft delete — deleted_at만 세팅, 자식 row 물리삭제 없음). **생성자만"
@@ -1037,7 +1058,7 @@ _TOOL_DEFS: list[tuple] = [
      + offset_required_note("date"),
      UpdateMeetingInput, update_meeting),
     ("sprintable_delete_meeting",
-     "[일감] 미팅 소프트 삭제.",
+     "[일감] 미팅 삭제 요청(승인 카드). 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 지워진다(응답 status=pending_approval — 실행 완료가 아니다).",
      MeetingIdInput, delete_meeting),
     ("sprintable_trigger_ai_summary",
      "[일감] 미팅 AI 요약 생성 트리거.",
@@ -1094,7 +1115,7 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] 팀원 보상 잔액 조회 — member_id의 이 프로젝트 잔액(balance). 본인 또는 조직 관리자만.",
      GetWalletInput, get_wallet),
     ("sprintable_give_reward",
-     "[조직] 팀원 보상/패널티 지급.",
+     "[조직] 팀원 보상/패널티 지급 요청(승인 카드). 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 지급된다(응답 status=pending_approval — 실행 완료가 아니다).",
      GiveRewardInput, give_reward),
     ("sprintable_get_leaderboard_v2",
      "[조직] 보상 리더보드 조회 — 이 프로젝트 순위. period(all · daily · weekly · monthly, 기본 all) · limit(1~100, 기본 50).",

@@ -170,7 +170,6 @@ app/routers/dev_webhook_stub.py::서명이 일치하지 않습니다
 app/routers/dev_webhook_stub.py::이미 처리된 nonce입니다(재전송 거부)
 app/routers/dev_wordpress_stub.py::fail-closed: prod 배포에 WORDPRESS_TEST_STUB_ENABLED가 켜져 있습니다(story e4fc29fa 조각③c AC4).
 app/routers/docs.py::(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로
-app/routers/docs.py::Doc 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/docs.py::comma-separated doc ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)
 app/routers/docs.py::문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요
 app/routers/docs.py::유효하지 않은 슬러그
@@ -223,7 +222,6 @@ app/routers/gates.py::이미 처리된 결재는 위임할 수 없습니다.
 app/routers/gates.py::이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.
 app/routers/gates.py::지정한 결재자는 결재 자격(owner/admin)이 없습니다.
 app/routers/goals.py::"glance"면 participant_ids/focal_story가 추가로 붙는다(story #2298, 옵트인).
-app/routers/goals.py::Goal 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/goals.py::comma-separated goal ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)
 app/routers/goals.py::goal status 변경은 POST /goals/{id}/transition 전용 엔드포인트를 사용하세요 (FSM·SoD·gate 우회 방지).
 app/routers/hitl.py::HITL 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
@@ -243,7 +241,6 @@ app/routers/measurement_connections.py::GA4 재인증이 필요합니다.
 app/routers/measurement_connections.py::GA4가 연결되어 있지 않습니다.
 app/routers/measurement_connections.py::이 계정에서 접근 가능한 속성이 아닙니다.
 app/routers/measurement_connections.py::이 환경에 GA4 연결이 아직 구성되지 않았습니다(google_client_id/backend_url 미설정).
-app/routers/meetings.py::Meeting 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/notification_preferences.py::'는 event_key를 가질 수 없습니다.
 app/routers/notification_preferences.py::scope_type='event_key'는 event_key가 필수입니다.
 app/routers/notification_preferences.py::scope_type='event_key'는 scope_id를 가질 수 없습니다.
@@ -291,14 +288,12 @@ app/routers/site_posts.py::story #3734 — true면 보관된(deleted_at not null
 app/routers/site_posts.py::글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).
 app/routers/site_posts.py::발행 취소는 조직 owner 또는 admin만 가능합니다.
 app/routers/site_posts.py::발행 취소는 휴먼 멤버만 가능합니다.
-app/routers/sprints.py::Sprint 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/sprints.py::hypothesis_id 또는 statement/metric_definition/measure_after 전부가 필요합니다.
 app/routers/sprints.py::hypothesis_id와 신규 가설 필드를 동시에 줄 수 없습니다.
 app/routers/sprints.py::statement가 비어 있을 수 없습니다.
 app/routers/sprints.py::스프린트 종료:
 app/routers/sprints.py::스프린트를 찾을 수 없습니다.
 app/routers/stories.py::' 전이:
-app/routers/stories.py::Story 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/stories.py::comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)
 app/routers/stories.py::done 전이는 merge 게이트 통과 필요:
 app/routers/stories.py::human_owner_member_id는 human member만 지정할 수 있습니다.
@@ -320,7 +315,6 @@ app/routers/stories.py::워크플로우 위반 감지
 app/routers/stories.py::이 라우트는 지금 target_type='chat_message'·form='proof' 조합만 지원합니다
 app/routers/stories.py::프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)
 app/routers/support_gateway_token.py::고객 문의 에스컬레이션 —
-app/routers/tasks.py::Task 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)
 app/routers/tasks.py::comma-separated task ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)
 app/routers/tasks.py::스토리:
 app/routers/tasks.py::이 status가 아닌 것만(예: done 제외 — 미완료 목록, get_overdue_tasks가 사용)

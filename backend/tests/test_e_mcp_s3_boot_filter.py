@@ -18,15 +18,16 @@ def test_disallowed_tools_legacy_keeps_nondestructive_hides_destructive():
     assert "sprintable_add_story" not in d     # 비파괴 → 노출
     # E-SECURITY SEC-S1(확장): delete_story/task/epic/doc 제거(에이전트 hard-delete 차단) —
     # delete_meeting으로 대체 예시(에이전트 MCP 표면에 남는 도메인 destructive 도구)
-    assert "sprintable_delete_meeting" in d        # destructive → 숨김(grant 없음)
-    assert "sprintable_give_reward" in d
+    # story 5041 — nothing the server answers with a card is hidden any more
+    assert "sprintable_delete_meeting" not in d
+    assert "sprintable_give_reward" not in d
 
 
 def test_disallowed_tools_none_fallback_equals_legacy():
     """매니페스트 fetch 실패(None) = 레거시 비파괴셋(destructive만 숨김)."""
     d = server.disallowed_tools(None)
     assert "sprintable_add_story" not in d
-    assert "sprintable_delete_meeting" in d
+    assert "sprintable_delete_meeting" not in d
 
 
 def test_ping_never_in_disallowed():
@@ -50,5 +51,7 @@ def test_filter_fallback_none_hides_only_destructive(monkeypatch):
     removed: list[str] = []
     monkeypatch.setattr(server.mcp, "remove_tool", lambda name: removed.append(name))
     server.filter_tools_by_scope(None)  # degrade
-    assert "sprintable_delete_meeting" in removed        # destructive 숨김
+    # story 5041 — the server answers delete_meeting with a card: it is no longer hidden. What the rule still hides: any OTHER destructive name
+    assert "sprintable_delete_meeting" not in removed
+    assert not any(n in removed for n in ("sprintable_delete_story", "sprintable_close_sprint", "sprintable_give_reward"))
     assert "sprintable_add_story" not in removed      # 비파괴 보존

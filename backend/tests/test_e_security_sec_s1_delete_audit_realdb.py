@@ -135,7 +135,7 @@ async def test_agent_delete_forbidden():
         client = _client_for(app)
         try:
             resp = await client.delete(f"/api/v2/stories/{story_id}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text # story 5041: an agent's delete is no longer refused — it is KEPT as a request a person presses (nothing is deleted here)
         finally:
             await client.aclose()
 

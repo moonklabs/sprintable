@@ -37,6 +37,10 @@ class AddGoalInput(SprintableInput):
     target_date: str | None = None
 
 
+class DeleteGoalInput(SprintableInput):
+    goal_id: str
+
+
 class UpdateGoalInput(SprintableInput):
     # ⚠️deprecated 별칭(sprintable_update_epic)도 같은 스키마 재사용 — 구 필드명 epic_id도
     # 계속 받아야 무중단(hierarchy-rename-alias-mechanism-design §1/§3 동형).
@@ -61,6 +65,14 @@ class UpdateGoalInput(SprintableInput):
     success_hypothesis: str | None = None
     metric_definition: dict | None = None
     measure_after: str | None = None
+
+
+async def delete_goal(args: DeleteGoalInput) -> list[TextContent]:
+    """story 5041 — asks for a goal (and every story in it) to be deleted for good: the server keeps the ask, a person presses a card, the delete runs under THEIR name (answer: `pending_approval`, 202)."""
+    try:
+        return ok(await client.delete(f"/api/v2/goals/{args.goal_id}"))
+    except Exception as exc:
+        return err(exc)
 
 
 async def list_goals(args: ListGoalsInput) -> list[TextContent]:

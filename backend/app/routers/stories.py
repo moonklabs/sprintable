@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.gates import GateResponse, to_gate_response
-from app.services import mcp_attachment_upload
+from app.services import agent_action, mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import (
     AttachmentCandidate,
@@ -2720,6 +2720,7 @@ async def update_story(
 @router.delete("/{id}", status_code=200)
 async def delete_story(
     id: uuid.UUID,
+    request: Request,
     repo: StoryRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -2734,7 +2735,13 @@ async def delete_story(
 
     resolved = await resolve_member(auth, org_id, session)
     if resolved.type != "human":
-        raise HTTPException(status_code=403, detail="Story 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — an agent is not told «no»: the server keeps the ask and a person presses it (the call then runs under THEIR rights). app/services/agent_action.py
+        _asked = await repo.get(id)
+        if _asked is None:
+            raise HTTPException(status_code=404, detail="Story not found")
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=_asked.project_id, action_key="story.delete", target_label=_asked.title,
+        )
 
     story = await repo.get(id)
     if story is None:

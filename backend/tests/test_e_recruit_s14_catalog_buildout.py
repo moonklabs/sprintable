@@ -98,7 +98,9 @@ def test_release_manager_tools_list_does_not_instruct_close_sprint():
     mod = _load_migration()
     behaviors = mod._ROLE_BEHAVIORS["release-manager"]
     assert "sprintable_close_sprint" not in behaviors
-    assert not is_tool_allowed("sprintable_close_sprint", ["stories", "tasks", "sprints", "chat", "docs"])
+    # story 5041: close_sprint is no longer a tool the key scope hides — the server answers an agent's close with a card a person presses — so the old «would be refused» premise is gone;
+    # the role list still does not instruct it (a release manager asks for the close through the chat, the person presses)
+    assert is_tool_allowed("sprintable_close_sprint", ["stories", "tasks", "sprints", "chat", "docs"])
 
 
 def test_all_18_roles_compose_without_error_and_validate_against_default_tool_groups():

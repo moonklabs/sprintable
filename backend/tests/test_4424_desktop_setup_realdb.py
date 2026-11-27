@@ -95,6 +95,7 @@ async def _sql(*stmts: str, params: dict | None = None, fetch: str | None = None
 _CLEAN = [
     # story #4846 (0472): deleting a project no longer deletes the `events` rows of its rooms (`project_id` is `SET NULL`), so the delivery rows these tests make are removed by name —
     # left behind they pile up on the fixed recipient ids and the next test counts them.
+    f"DELETE FROM agent_hitl_requests WHERE org_id IN ('{ORG}','{ORG2}')",  # story 5041: an agent's ask a person presses
     f"DELETE FROM events WHERE org_id IN ('{ORG}','{ORG2}')",
     f"DELETE FROM agent_run_tool_calls WHERE org_id IN ('{ORG}','{ORG2}')",
     "DELETE FROM onboarding_events WHERE session_id IN (SELECT id FROM desktop_setups WHERE device_name LIKE 'd4424%')",
@@ -425,8 +426,19 @@ async def test_ac3_to_ac6_least_privilege_other_keys_disconnect_and_the_record(w
         # and its scope carries no admin / destructive tool
         scope = (await _sql(fetch=f"SELECT scope FROM agent_api_keys WHERE key_hash='{hashlib.sha256(key.encode()).hexdigest()}'"))[0][0]
         assert not {"admin", "destructive"} & set(scope)
-        for tool in ("sprintable_delete_story", "sprintable_close_sprint", "sprintable_give_reward"):
+        # story 5041: delete / close / grant are answered by the SERVER (an agent only ASKS — a person presses, the call runs under their rights), so they are not hidden by the key's scope any more;
+        # what a least-privilege key still may not reach is the admin group and any other destructive name
+        for tool in ("sprintable_emit_event", "sprintable_trigger_ai_summary", "sprintable_delete_widget"):
             assert is_tool_allowed(tool, scope) is False, tool
+        # … and the delete / close / grant tools the key now SEES are no way to do those things alone: calling them as this key makes a request a person presses (202), nothing is deleted or closed
+        victim = uuid.uuid4()
+        await _sql(f"INSERT INTO stories (id, org_id, project_id, title, status) VALUES ('{victim}', '{ORG}', '{PROJ}', 'd4424 must survive', 'backlog')")
+        for tool in ("sprintable_delete_story", "sprintable_close_sprint", "sprintable_give_reward"):
+            assert is_tool_allowed(tool, scope) is True, tool
+        asked = await c.delete(f"/api/v2/stories/{victim}", headers=bearer)
+        assert asked.status_code == 202 and asked.json()["status"] == "pending_approval", asked.text
+        assert (await _sql(fetch=f"SELECT count(*) FROM stories WHERE id='{victim}'"))[0][0] == 1, "an agent key never deletes — it only asks"
+        assert (await _sql(fetch=f"SELECT status FROM agent_hitl_requests WHERE id='{asked.json()['request_id']}'"))[0][0] == "pending"
         assert is_tool_allowed("sprintable_list_stories", scope) is True
 
         # AC4: the agent that was already running kept its key, untouched

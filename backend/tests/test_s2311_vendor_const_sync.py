@@ -32,14 +32,14 @@ def _load_check_mcp_vendor_sync():
 # ── AC1: 자동 발견 — 손으로 나열한 목록이 아니라 실제 교집합 ────────────────────────
 
 def test_common_constants_are_auto_discovered_not_hardcoded():
-    """지금 리포에 실제로 공통 이름 6개가 있다 — 이 값이 이 테스트가 하드코딩한 «기대 목록»이
+    """지금 리포에 실제로 공통 이름 7개가 있다 — 이 값이 이 테스트가 하드코딩한 «기대 목록»이
     아니라 `find_matching_constants()`가 두 모듈을 실행해 스스로 찾은 결과임을 확認한다
     (AC1: 새 상수가 양쪽에 추가되면 이 집합도 저절로 늘어난다 — 유지보수 불필요)."""
     mod = _load_check_mcp_vendor_sync()
     common = mod.find_matching_constants()
     assert set(common) == {
         "ALL_GROUPS", "_ALWAYS_ALLOWED", "_CORE", "_DESTRUCTIVE_SCOPES",
-        "_GROUP_KEYWORDS", "_LEGACY_SCOPES",
+        "_GROUP_KEYWORDS", "_LEGACY_SCOPES", "_SERVER_DECIDES_TOOLS",  # story 5041
     }
 
 

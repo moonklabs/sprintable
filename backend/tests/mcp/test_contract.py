@@ -24,6 +24,8 @@ EXPECTED_TOOLS = {
     "sprintable_update_story",
     "sprintable_assign_story_to_sprint", "sprintable_unassign_story_from_sprint",
     "sprintable_update_story_status",
+    # story 5041: the five deletes are back as ASKS (the server keeps the ask, a person presses a card, the delete runs under THEIR name — an agent alone still has no road to a hard delete)
+    "sprintable_delete_story", "sprintable_delete_task", "sprintable_delete_goal", "sprintable_delete_doc", "sprintable_delete_sprint",
     # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
@@ -175,7 +177,7 @@ def test_total_tool_count():
     # 1일·7일 인사이트 스냅샷+델타 — 이 도메인 둘째 도구) — 126→127. story #3769:
     # sprintable_get_content_rules 1종 신설(조직 콘텐츠 규칙 읽기) — 127→128. story #4430:
     # sprintable_list_user_blocks · sprintable_remove_user_block 2종 신설(에이전트 자기 차단 목록) — 128→130.
-    assert len(_TOOLS) == 148  # story 5034: sprintable_show_in_chat 147→148 · story 5040: sprintable_cancel_planning_sprint 146→147 · story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
+    assert len(_TOOLS) == 153  # story 5041: delete_story · task · goal · doc · sprint back as asks 148→153 · story 5034: sprintable_show_in_chat 147→148 · story 5040: sprintable_cancel_planning_sprint 146→147 · story 4646: sprintable_get_chat_attachment 144→145→146 (이전 주석 체인 그대로) · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: sprintable_watch · unwatch · list_watches 신설 130→133 · story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

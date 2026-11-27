@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -308,6 +308,7 @@ async def update_task(
 @router.delete("/{id}", status_code=200)
 async def delete_task(
     id: uuid.UUID,
+    request: Request,
     repo: TaskRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -320,7 +321,19 @@ async def delete_task(
 
     resolved = await resolve_member(auth, org_id, session)
     if resolved.type != "human":
-        raise HTTPException(status_code=403, detail="Task 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — kept as an ask a person presses (see delete_story)
+        from app.models.pm import Story
+        from app.services import agent_action
+
+        _asked = await repo.get(id)
+        if _asked is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        _project_id = (await session.execute(select(Story.project_id).where(Story.id == _asked.story_id))).scalar_one_or_none()
+        if _project_id is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=_project_id, action_key="task.delete", target_label=_asked.title,
+        )
     task = await repo.get(id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")

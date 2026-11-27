@@ -896,6 +896,7 @@ async def update_spec_pin(
 async def delete_spec_pin(
     id: uuid.UUID,
     pin_id: uuid.UUID,
+    request: Request,
     auth: AuthContext = Depends(get_current_user),
     scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
@@ -909,6 +910,16 @@ async def delete_spec_pin(
     pin = await _get_latest_spec_pin_or_404(session, artifact, pin_id)
     if pin is None:
         return _err("NOT_FOUND", "Spec pin not found on the artifact's latest version", 404)
+    # story 5041 — an agent asks, a person presses (see delete_story); the pin goes under the PRESSER'S name and rights
+    from app.services import agent_action
+    from app.services.member_resolver import resolve_member
+
+    _caller = await resolve_member(auth, org_id, session, project_id=project_id)
+    if _caller.type != "human":
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=_caller, org_id=org_id, project_id=project_id, action_key="spec_pin.delete",
+            target_label=str(getattr(artifact, "title", "") or pin_id),
+        )
     await session.delete(pin)
     await session.flush()
     return _ok({"ok": True, "id": str(pin_id)})

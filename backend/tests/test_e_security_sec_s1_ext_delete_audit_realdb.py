@@ -180,7 +180,7 @@ async def test_agent_delete_task_forbidden():
         client = _client_for(app)
         try:
             resp = await client.delete(f"/api/v2/tasks/{seeded['task_id']}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text # story 5041: an agent's delete is no longer refused — it is KEPT as a request a person presses (nothing is deleted here)
         finally:
             await client.aclose()
         async with Session() as s:
@@ -235,7 +235,7 @@ async def test_agent_delete_doc_forbidden():
         client = _client_for(app)
         try:
             resp = await client.delete(f"/api/v2/docs/{seeded['doc_id']}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text # story 5041: an agent's delete is no longer refused — it is KEPT as a request a person presses (nothing is deleted here)
         finally:
             await client.aclose()
     finally:
@@ -284,7 +284,7 @@ async def test_agent_delete_epic_forbidden():
         client = _client_for(app)
         try:
             resp = await client.delete(f"/api/v2/epics/{seeded['epic_id']}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text # story 5041: an agent's delete is no longer refused — it is KEPT as a request a person presses (nothing is deleted here)
         finally:
             await client.aclose()
     finally:
