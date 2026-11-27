@@ -16,7 +16,6 @@ import { PageFrame } from '@/components/ds/page-frame';
 import { RowList, RowListItem } from '@/components/ds/row-list';
 import { NativeSelect } from '@/components/ds/select';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
 import { LoopStageBar } from '@/components/loops/loop-stage-bar';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';

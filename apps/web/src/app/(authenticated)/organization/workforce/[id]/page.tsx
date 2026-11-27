@@ -30,13 +30,13 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageSplit } from '@/components/ds/page-split';
 import { SummaryCard } from '@/components/ds/summary-card';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentsTopBarTitle, TitleTopBarSlot, useAgentsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { DetailCard } from '@/components/agents/detail-card';
 import { AgentProjectAccessSection } from '@/components/settings/agent-project-access-section';
+import { AgentActionPolicySection } from '@/components/agents/agent-action-policy-section';
 import { Avatar } from '@/components/shared/avatar';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 import { MemberNotificationPreferencesSummary } from '@/components/agents/member-notification-preferences-summary';
@@ -1000,6 +1000,8 @@ export default function AgentDetailPage() {
           projects={projects}
           canEdit={(orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent}
         />
+        {/* story 5041 ② — what this agent may do on its own, per project (an organisation owner / admin's setting; the server refuses everyone else, and the section then draws nothing) */}
+        {(orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent ? <AgentActionPolicySection agentId={id} projects={projects} /> : null}
         </TabsContent>
       </Tabs>
         </div>
