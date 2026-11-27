@@ -714,10 +714,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [filterOrgId, setFilterOrgId] = useState(orgId);
   if (orgId && orgId !== filterOrgId) {
     setFilterOrgId(orgId);
-    if (filterOrgId && projectFilter) {
-      setProjectFilter('');
-      try { window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY); } catch { /* storage unavailable — nothing was kept */ }
-    }
+    if (filterOrgId && projectFilter) setProjectFilter(''); // the stored copy is removed after the commit (the effect below the storage read) — a render may be thrown away, so it writes nothing outside React
   }
 
   // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
@@ -726,12 +723,15 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
   // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
   // story 5031: `orgId` is a dependency too — the organization-wide ask has the same URL in every organization (the organization rides on the session / X-Org-Id), so nothing else changes when it does.
+  // story 5031 — a chosen project that is not one of the person's projects (the same condition as the «not one of the person's projects» effect below): do not ask WITH it — that effect drops it and this one runs again, so no ask carries another organization's project
+  // (an organization first known late · a context that shows the new organization before the old choice is gone).
+  const filterOutsideMine = Boolean(projectFilter) && projectFilter !== 'none' && projectMemberships.length > 0 && !projectMemberships.some((m) => m.projectId === projectFilter);
   useEffect(() => {
-    if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
+    if (!filterReady || filterOutsideMine) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
     void fetchConversations(0, false);
-  }, [fetchConversations, filterReady, orgId]);
+  }, [fetchConversations, filterReady, orgId, filterOutsideMine]);
 
   // story 4847 (AC1) — the tab's stored filter, read after mount (the storage is not readable while hydrating) and only kept when it still names one of the person's projects.
   useEffect(() => {
@@ -744,6 +744,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setFilterReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // story 5031 — the stored copy of the choice made in the OLD organization goes when the organization really changes (the state was already cleared in the render); a first look at a late-known organization only records it
+  const storedOrgRef = useRef(orgId);
+  useEffect(() => {
+    if (!orgId) return;
+    if (storedOrgRef.current && storedOrgRef.current !== orgId) {
+      try { window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY); } catch { /* storage unavailable — nothing was kept */ }
+    }
+    storedOrgRef.current = orgId;
+  }, [orgId]);
 
   // an older server, and a project is picked after all: the project-only list it can answer
   useEffect(() => {

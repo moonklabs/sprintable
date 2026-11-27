@@ -196,7 +196,7 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     await strict(ORG_B, PB1.projectId);
     await flush();
     const after = listCalls(fetchMock).slice(before);
-    expect(after.length).toBeGreaterThanOrEqual(1);
+    expect(after, 'ONE ask for the switch (an update runs the effect once, StrictMode or not)').toHaveLength(1);
     expect(after.every((u) => u === '/api/conversations?limit=30&offset=0'), `no ask of the switch carries the old project: ${after.join(' | ')}`).toBe(true);
     expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
     expect(container.textContent).toContain('비 조직 방');
@@ -217,6 +217,42 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     await switchTo(ORG_B, PB1.projectId); // a real switch now
     expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
     expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0');
+    expect(container.textContent).toContain('비 조직 방');
+  });
+});
+
+describe('ChatListView — 걸러 보기가 «내 프로젝트가 아닌» 채로 물음에 실리지 않는다(story 5031 · codex 판 2)', () => {
+  // the two guards are separate: «not mine» (below) cannot help when the shell shows the NEW organization while the person's project list is still the OLD organization's (the old choice still looks like theirs) —
+  // only dropping the choice in the render the organization changes keeps that ask clean.
+  it('새 조직이 먼저 오고 프로젝트 목록은 아직 옛 조직 것이어도(옛 걸러 보기가 «내 프로젝트»로 보임) 옛 프로젝트 id를 단 물음이 나가지 않는다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, PA2.projectId);
+    const fetchMock = stubServer();
+    await mountIn(ORG_A, PA1.projectId);
+    const before = listCalls(fetchMock).length;
+    await switchTo(ORG_B, PB1.projectId, {}, { projectMemberships: [PA1, PA2] }); // organization B, project list still A's
+    const after = listCalls(fetchMock).slice(before);
+    expect(after.some((u) => u.includes(PA2.projectId)), `no ask carries the old project even while the list lags: ${after.join(' | ')}`).toBe(false);
+    expect(after).toEqual(['/api/conversations?limit=30&offset=0']);
+    expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
+  });
+
+  it('조직을 늦게 알게 되었는데 저장된 걸러 보기가 그 조직의 내 프로젝트가 아니면: 그 id를 단 물음은 나가지 않고, 걸러 보기는 비워지고, 저장도 지워진다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, PA2.projectId); // chosen when the person was in organization A
+    const fetchMock = stubServer();
+    server.org = ORG_B;
+    // the context is empty of an organization at mount but already lists the stored project as the person's (so the first read keeps it)…
+    useDashboardContextMock.mockReturnValue({ ...ctxOf(ORG_B, PB1.projectId), orgId: undefined, projectMemberships: [PA2] });
+    await act(async () => { root.render(wrap(<ChatListView projectId={PB1.projectId} currentTeamMemberId="me-1" />)); });
+    await flush();
+    const before = listCalls(fetchMock).length;
+    // …then the shell knows the organization (B) and B's projects: the stored one is not among them
+    useDashboardContextMock.mockReturnValue(ctxOf(ORG_B, PB1.projectId));
+    await act(async () => { root.render(wrap(<ChatListView projectId={PB1.projectId} currentTeamMemberId="me-1" />)); });
+    await flush();
+    const after = listCalls(fetchMock).slice(before);
+    expect(after.some((u) => u.includes(PA2.projectId)), `no ask carries the other organization's project: ${after.join(' | ')}`).toBe(false);
+    expect(after.at(-1)).toBe('/api/conversations?limit=30&offset=0');
+    expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
     expect(container.textContent).toContain('비 조직 방');
   });
 });
