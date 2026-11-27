@@ -204,13 +204,14 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     await mount();
 
     // story 4887 (UI-4 screen PR) — no single representative photo in the title (a group has many); each participant has their own chip below it
-    expect(container.querySelector('[data-testid="room-head"] h1 img')).toBeNull();
+    expect(container.querySelector('h1 img'), 'the name (the bar\'s h1 since 5b) carries no photo').toBeNull();
     expect(container.querySelectorAll('[data-testid="room-head-chip"]')).toHaveLength(2);
   });
 
   // story 4887 (UI-4 screen PR · the approved room head) — the old test here pinned the shell top bar's clipping of an agent avatar's ring (#2988); the head is its own block now and the
   // clipping is gone. What the head owes instead: one chip per participant, an AGENT's chip saying how it is connected, and no button of its own besides «⋯» and the chip row's «+».
-  it('⭐ the head: name (h1) · tag · one line of facts · a chip per participant — an agent\'s chip carries its connection word', async () => {
+  // story 5031 (C1 step 5b): the NAME is the top bar's h1 now (the page's only heading) — the head keeps the tag, the facts line and the people, and draws no heading
+  it('⭐ the head: tag · one line of facts · a chip per participant — an agent\'s chip carries its connection word; the name is the page\'s one h1 (the bar\'s), not the head\'s', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/conv-1')) {
         return {
@@ -232,7 +233,8 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
 
     const head = container.querySelector('[data-testid="room-head"]') as HTMLElement;
     expect(head, 'the room head').not.toBeNull();
-    expect(head.querySelector('h1')?.textContent).toBe('페드루');
+    expect(head.querySelectorAll('h1, h2, h3, [role="heading"]'), 'the head draws no heading').toHaveLength(0);
+    expect([...container.querySelectorAll('h1')].map((h) => h.textContent)).toEqual(['페드루']); // reverted (the name h1 back in the head too) → two
     expect(head.querySelector('[data-testid="room-head-tag"]')?.textContent).toBe('DM');
     expect(head.querySelector('[data-testid="room-head-subline"]')?.textContent).toContain('2명');
     const chips = [...head.querySelectorAll('[data-testid="room-head-chip"]')];
@@ -321,7 +323,7 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/방이름=Claim(600)
 // 로 재분류(구조·크기 불변).
 describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)', () => {
-  it('DM 헤더 타이틀이 font-semibold(Claim 무게)를 갖는다', async () => {
+  it('DM: the name\'s h1 (the bar\'s) wears the bar\'s title weight and the head has no h1 (story 5031 5b — it was: the head\'s h1 is font-semibold)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/conv-1')) {
         return {
@@ -339,15 +341,16 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     }));
     await mount();
 
-    const titleEl = container.querySelector('[data-testid="room-head"] h1'); // story 4887 — the name's weight sits on the head's h1
-    expect(titleEl).not.toBeUndefined();
-    expect(titleEl?.className).toContain('font-semibold');
-    expect(titleEl?.className).not.toContain('font-medium');
+    // story 5031 (5b): the name's h1 is the shell bar's — it wears the bar's title weight (font-medium, like every screen's bar title); the head has none (4887's «font-semibold on the head's h1» premise is gone)
+    const titleEl = container.querySelector('h1');
+    expect(titleEl?.textContent).toBe('유나');
+    expect(titleEl?.className).toContain('font-medium');
+    expect(container.querySelector('[data-testid="room-head"] h1')).toBeNull();
   });
 
   // 카디르 QA독립검증(PR#3405) — PR-5 신규 테스트가 DM(plain span)만 렌더해 group(editable
   // 버튼 분기)의 동일 처방이 무테스트였던 갭. PR-6(#3405 이월분)에 편입.
-  it('group 방이름(편집 가능 버튼 분기)도 font-semibold(Claim 무게)를 갖는다', async () => {
+  it('group: the same — the bar\'s h1 carries the name, the head has the rename pencil and no h1 (story 5031 5b)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/conv-1')) {
         return {
@@ -365,10 +368,12 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     }));
     await mount();
 
-    const titleEl = container.querySelector('[data-testid="room-head"] h1');
+    // story 5031 (5b): a group's name is the bar's h1 as plain text (the way to change it is the pencil in the head — page.ime.4831 / page.5031-bar-title)
+    const titleEl = container.querySelector('h1');
     expect(titleEl?.textContent).toBe('팀 채널');
-    expect(titleEl?.className).toContain('font-semibold');
-    expect(titleEl?.className).not.toContain('font-medium');
+    expect(titleEl?.className).toContain('font-medium');
+    expect(container.querySelector('[data-testid="room-head"] h1')).toBeNull();
+    expect(container.querySelector('[data-testid="room-head"] button[aria-label="' + koMessages.chats.editRoomName + '"]'), 'the rename pencil is in the head').not.toBeNull();
   });
 });
 

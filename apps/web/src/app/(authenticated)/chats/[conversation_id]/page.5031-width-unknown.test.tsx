@@ -42,7 +42,7 @@ async function titleSpanFor(w: 'unknown' | 'below-lg' | 'lg-up') {
   function Probe() { return <div data-testid="bar-title">{useTopBar().title}</div>; }
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ToastProvider><TopBarProvider><Probe /><ConversationPage /></TopBarProvider></ToastProvider></NextIntlClientProvider>); });
   await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
-  return container.querySelector('[data-testid="bar-title"] > span.text-sm');
+  return container.querySelector('[data-testid="bar-title"] > h1.text-sm');
 }
 
 describe('[SID:5031] ConversationPage — the desktop bar\'s room name waits for a KNOWN width', () => {

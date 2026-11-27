@@ -28,7 +28,7 @@ async function build() {
         window.__added = 0;
         window.__mount = () => {
           createRoot(document.getElementById('root')).render(React.createElement('div', { id: 'frame', className: 'bg-ds-background', style: { width: 1100 } },
-            React.createElement(RoomHead, { title: '런치 주간 조율', tag: '프로젝트 방', subline: 'Launch week · 3명', chips: CHIPS, moreCount: 0, addLabel: '참여자 추가', onAdd: () => { window.__added += 1; }, trailing: React.createElement('span', null, '⋯'),
+            React.createElement(RoomHead, { tag: '프로젝트 방', subline: 'Launch week · 3명', chips: CHIPS, moreCount: 0, addLabel: '참여자 추가', onAdd: () => { window.__added += 1; }, trailing: React.createElement('span', null, '⋯'),
               ...(window.__fold ? { peopleLabel: '참여자 보기', peopleCount: 3 } : {}) })));
         };`,
       resolveDir: WEB, loader: 'tsx',

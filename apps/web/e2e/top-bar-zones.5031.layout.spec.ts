@@ -45,6 +45,7 @@ async function build() {
         import { TopBarSlot } from './src/components/nav/top-bar-slot';
         import { SidebarProvider } from './src/components/ui/sidebar';
         import { BAR_HIDDEN_ON_PHONE_CLASS } from './src/lib/top-bar-phone';
+        import { RoomHead } from './src/components/chat/room-head';
         import { ToastProvider } from './src/components/ui/toast';
         import { TeamPresenceToggleProvider } from './src/components/presence/team-presence-toggle';
         import { CommandPaletteProvider } from './src/components/command-palette/command-palette-context';
@@ -56,6 +57,7 @@ async function build() {
               <ToastProvider><CommandPaletteProvider><TopBarProvider><SidebarProvider><TeamPresenceToggleProvider value={{ toggle() {}, workingCount: 3, open: false }}>
                 <div id="frame" style={{ width: cfg.frameWidth + 'px' }} className="flex flex-col">
                   <TopBar className={cfg.hiddenOnPhone ? BAR_HIDDEN_ON_PHONE_CLASS : undefined} orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }, ...(cfg.longError ? [{ orgId: 'o2', orgName: '둘째 조직', orgSlug: 'second' }] : [])]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
+                  {cfg.roomHead ? <RoomHead rename={<button type="button" aria-label="방 이름 바꾸기">✎</button>} tag="프로젝트 방" subline="AC4 project · 4명" chips={['지우(나)', '개발 에이전트', '검수 에이전트', '민서'].map((n, i) => ({ id: String(i), who: <span>{n}</span> }))} addLabel="참여자 추가" onAdd={() => {}} trailing={<span>⋯</span>} /> : null}
                   <TopBarSlot title={title} actions={cfg.withActions ? <><button type="button" id="action-btn" className="rounded-ds-control border px-3">액션</button><div id="odd-action" style={{ cursor: 'pointer' }} className="px-2" onClick={() => {}}>기타</div></> : null} />
                 </div>
               </TeamPresenceToggleProvider></SidebarProvider></TopBarProvider></CommandPaletteProvider></ToastProvider>
@@ -76,7 +78,7 @@ async function build() {
   return built;
 }
 
-type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean; hiddenOnPhone?: boolean; /** a very long text for the organization-switch failure line (and a second organization to fail switching to) */ longError?: string };
+type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean; hiddenOnPhone?: boolean; /** a very long text for the organization-switch failure line (and a second organization to fail switching to) */ longError?: string; /** story 5031 (5b): the real room head under the bar */ roomHead?: boolean };
 const SHORT = { org: '올리베이라', project: '스프린터블' };
 const LONG = { org: '아주아주아주아주아주아주아주아주 긴 조직 이름 주식회사 문클랩스 코리아 서비스', project: '아주아주아주아주아주아주아주아주아주아주아주아주 긴 프로젝트 이름 — 결제 연동과 정산 자동화와 고객 문의 분류' };
 /** the width the shell leaves the bar at a window width: the window − 56 icon bar − 256 list column − 16 inset margins (≥ lg) */
@@ -331,5 +333,42 @@ for (const win of DESKTOP) {
     expect(Math.round(after.right!.l)).toBe(Math.round(before.right!.l));
     expect(after.left!.r).toBeLessThanOrEqual(after.center!.l + 0.5);
     expect(after.barOffsetH).toBe(64);
+  });
+}
+
+// story 5031 (C1 step 5b): in a room from lg the NAME is the top bar's last crumb (the page's one h1) and the head under it is tag · facts · people only. Measured with the REAL bar + the REAL room head: the head stays ≥ 80 high and whole whatever the name's length (the name is not in it), a very long room name is cut with an ellipsis in the bar
+// and does not push the search field or the buttons, and there is exactly one h1 on the screen.
+const LONG_ROOM = '결제 연동 · 오늘 할 일 · 정산 자동화 · 고객 문의 분류 · 주간 회의록 정리와 공유 · 아주아주아주아주아주아주 긴 방 이름';
+for (const win of DESKTOP) {
+  test(`[SID:5031] ${win}: a room — one h1 (the bar's), the head is ≥ 80 high with no heading and whole, a very long room name is cut in the bar and moves nothing`, async ({ page }) => {
+    const frameWidth = barWidth(win);
+    const base = { pathname: '/chats/room-1', titleKind: 'h1', ...SHORT, frameWidth, roomHead: true } as const;
+    await open(page, { ...base, title: '점심 모임' }, { win });
+    const shortScene = await measure(page);
+    const shortHead = await page.evaluate(() => { const h = document.querySelector('[data-testid="room-head"]') as HTMLElement; return { h: h.offsetHeight, w: h.scrollWidth - h.clientWidth }; });
+    await open(page, { ...base, title: LONG_ROOM }, { win });
+    const m = await measure(page);
+    const head = await page.evaluate(() => {
+      const h = document.querySelector('[data-testid="room-head"]') as HTMLElement;
+      const h1 = document.querySelector('[data-testid="top-bar-title"] h1') as HTMLElement;
+      const inHead = [...h.querySelectorAll('*')].filter((e) => { const r = e.getBoundingClientRect(); const hr = h.getBoundingClientRect(); return r.width > 0 && (r.left < hr.left - 0.5 || r.right > hr.right + 0.5); }).length;
+      return { h: h.offsetHeight, overflow: h.scrollWidth - h.clientWidth, headings: h.querySelectorAll('h1, h2, h3, [role="heading"]').length, h1s: document.querySelectorAll('h1').length, h1InBar: !!h1 && !!h1.closest('[data-testid="top-bar"]'), cut: h1.scrollWidth > h1.clientWidth, inHeadOutside: inHead, chips: h.querySelectorAll('[data-testid="room-head-chip"]').length };
+    });
+    console.log(`[5031 room] win ${win} bar ${m.bar!.w}×${m.bar!.h} · head ${head.h} (short name ${shortHead.h}) · h1 cut ${head.cut} · field x ${Math.round(m.field!.l)} w ${Math.round(m.field!.w)}`);
+    expect(head.h1s, 'exactly one h1 on the screen').toBe(1);
+    expect(head.h1InBar, 'and it is in the bar').toBe(true);
+    expect(head.headings, 'the head draws no heading').toBe(0);
+    expect(head.h, 'the head keeps the kit\'s 80').toBeGreaterThanOrEqual(80);
+    expect(head.h, 'and the name length changes nothing in it').toBe(shortHead.h);
+    expect(head.overflow, 'the head does not overflow sideways').toBe(0);
+    expect(head.inHeadOutside, 'every box of the head is inside it').toBe(0);
+    expect(head.chips).toBe(4);
+    expect(head.cut, 'the long room name is cut with an ellipsis in the bar').toBe(true);
+    expect(m.barScrollW - m.barClientW, 'the bar does not overflow').toBe(0);
+    expect(m.outside).toEqual([]);
+    expect(Math.round(m.field!.l), 'the search field is where the short name left it').toBe(Math.round(shortScene.field!.l));
+    expect(Math.round(m.field!.w)).toBe(Math.round(shortScene.field!.w));
+    expect(Math.round(m.right!.l)).toBe(Math.round(shortScene.right!.l));
+    expect(m.barOffsetH).toBe(64);
   });
 }

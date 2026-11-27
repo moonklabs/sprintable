@@ -49,7 +49,7 @@ describe('RoomBarTitle — the people button (story 5032)', () => {
       await act(async () => {
         root.render(
           <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-            <RoomHead title="런칭" chips={[]} addLabel="추가" peopleLabel="참여자 보기" peopleCount={3} peopleParts={{ people: 2, agents: 1, spoken: '사람 2 · 부를 수 있는 에이전트 1' }} />
+            <RoomHead chips={[]} addLabel="추가" peopleLabel="참여자 보기" peopleCount={3} peopleParts={{ people: 2, agents: 1, spoken: '사람 2 · 부를 수 있는 에이전트 1' }} />
           </NextIntlClientProvider>,
         );
       });

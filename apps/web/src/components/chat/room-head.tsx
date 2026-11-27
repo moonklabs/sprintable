@@ -19,11 +19,14 @@ export interface RoomHeadChip {
 export interface RoomHeadProps {
   /** a channel: the people button's two counts when the head folds into it (a short window) */
   peopleParts?: RoomPeopleParts;
-  /** the room's name (an `h1` is drawn around it; the caller passes the editable / plain variant) */
-  title: ReactNode;
-  /** the small tag after the name — «프로젝트 방» · «DM» · «그룹» */
+  /**
+   * story 5031 (C1 step 5b): the room's NAME is not in the head any more — from lg it is the last crumb of the top bar's path and that is the screen's one `h1`. The head keeps what the bar does not carry: the facts line and the people. The only name-related thing left here is the way to CHANGE
+   * the name (a group room's rename): the caller passes its control (a pencil button; the input while editing) — absent for a room whose name cannot be changed. It is a control, not a heading: this head draws no heading at all.
+   */
+  rename?: ReactNode;
+  /** the small tag at the start of the line — «프로젝트 방» · «DM» · «그룹» */
   tag?: string | null;
-  /** the line under the name: project · people */
+  /** the line of facts: project · people */
   subline?: string | null;
   chips: RoomHeadChip[];
   /** how many participants did not fit (shown as «+N») */
@@ -39,21 +42,21 @@ export interface RoomHeadProps {
 }
 
 /**
- * story 4887 (UI-4 screen PR · the approved layout B3) — the room head inside the room's column: the name, a tag, ONE line of facts and a row of participant chips.
+ * story 4887 (UI-4 screen PR · the approved layout B3) — the room head inside the room's column: a tag, ONE line of facts and a row of participant chips (story 5031 5b: the name moved to the top bar's path — see `rename`).
  * story 5031 (C1 step 2b, kit numbers): at least 80 high (`min-h-20`: the chip row may still make it taller) with 24 on each side (`px-6`).
  * It carries no button of its own except the «+» that ends the chip row (add a participant) and whatever the caller puts at the right end («⋯»). From lg up only — a phone gets RoomBarTitle in the shell's header row.
  */
-export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, onAdd, trailing, peopleLabel, peopleCount, peopleParts }: RoomHeadProps) {
+export function RoomHead({ rename, tag, subline, chips, moreCount = 0, addLabel, onAdd, trailing, peopleLabel, peopleCount, peopleParts }: RoomHeadProps) {
   // story 4946 — in a SHORT window (under 600 px high) the chip row is replaced by the «people N» button; the same content is never drawn twice (a media query in JS, not a hidden copy: one set of testids · one tab order)
   const short = useMediaQuery('(max-height: 600px)');
   const folded = short && Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
     // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20). Folded (short window) the content is two rows of 40-px controls (62), so py-2 (16) lands it on exactly 80; py-3 would make it 86
-    // story 5048 (chat row · PO 11-27): the head is TWO lines — name · tag · the line of facts · «⋯» on the first, the people chips on the second (it was name / facts / chips = three, ≈170 px with the chip rows). The numbers in the facts line are the text's own font (tabular), not the fixed-width one.
+    // story 5048 (chat row · PO 11-27): the head is TWO lines — (the rename pencil) · tag · the line of facts · «⋯» on the first (the name is the bar's h1 since 5b), the people chips on the second (it was name / facts / chips = three, ≈170 px with the chip rows). The numbers in the facts line are the text's own font (tabular), not the fixed-width one.
     <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'pb-1.5 pt-2' : 'pb-2 pt-2'}`}>
       <div className="flex min-w-0 items-center gap-2">
-        <h1 className="m-0 min-w-0 shrink truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
+        {rename ? <div className="flex min-w-0 shrink-0 items-center" data-testid="room-head-rename">{rename}</div> : null}
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
         {subline ? <p className="m-0 min-w-0 shrink-[3] truncate text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="room-head-subline">{subline}</p> : null}
         {/* story 4946 — only in a short window: the people button that the chip row folds into */}

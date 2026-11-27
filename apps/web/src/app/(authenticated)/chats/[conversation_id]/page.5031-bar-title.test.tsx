@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 //
-// story 5031 (C1 step 5a · PO 11-27) — from lg the top bar's path ends with the ROOM's name («조직 › 채팅 › 방 이름»). The page publishes it through the shell's title slot as a plain span: the room head under the bar still draws the page's one h1 (until step 5b),
-// so the bar's copy must not be a heading. Below lg the slot carries the phone's own room bar (that part is page.4887-head-menu / page.test).
+// story 5031 (C1 step 5a · PO 11-27) — from lg the top bar's path ends with the ROOM's name («조직 › 채팅 › 방 이름»), published through the shell's title slot.
+// Story 5031 (C1 step 5b): that name is now the page's ONE h1 (the room head under the bar draws no heading — it keeps the tag, the facts and the people, and a pencil to rename a group room).
+// Below lg the slot carries the phone's own room bar (its h1 · page.4887-head-menu / page.test).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -52,12 +53,14 @@ async function mount(belowLg: boolean) {
 const bar = () => container.querySelector('[data-testid="bar-title"]') as HTMLElement;
 
 describe('[SID:5031] ConversationPage — the room\'s name in the top bar from lg', () => {
-  it('⭐from lg the bar\'s title is the room\'s name as a plain span — not a heading — and the page keeps its one h1 (the room head\'s)', async () => {
+  it('⭐from lg the bar\'s title IS the room\'s name as the page\'s one h1 — and the room head holds no heading at all', async () => {
     await mount(false);
     expect(bar().textContent).toBe('점심 모임');
-    expect(bar().firstElementChild!.tagName).toBe('SPAN');
-    expect(bar().querySelector('h1, h2, [role="heading"]')).toBeNull();
-    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(bar().firstElementChild!.tagName).toBe('H1');
+    expect([...container.querySelectorAll('h1, [role="heading"][aria-level="1"]')].map((h) => h.textContent)).toEqual(['점심 모임']);
+    const head = container.querySelector('[data-testid="room-head"]')!;
+    expect(head, 'the room head is drawn from lg').not.toBeNull();
+    expect(head.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]')).toHaveLength(0);
   });
 
   it('below lg the bar carries the phone\'s own room bar (back · name · people), not the lg span', async () => {
@@ -108,21 +111,21 @@ describe('[SID:5031] ConversationPage — the REAL publisher under the REAL bar'
     expect(pathItems()).toEqual(['올리베이라 조직', '채팅', '점심 모임']);
     const last = container.querySelector('[data-testid="top-bar-title"]')!;
     expect(last.getAttribute('aria-current')).toBe('page');
-    expect(last.firstElementChild!.tagName).toBe('SPAN');
+    expect(last.firstElementChild!.tagName).toBe('H1'); // 5b: the name is the heading
   });
 
   it('⭐the 1024 / 1023 boundary: at 1024 the bar carries the room\'s name (desktop shape); at 1023 the phone room bar replaces it (and the tablet\'s menu door appears) — and back at 1024; the real components switch, the shell is not mounted', async () => {
     const win = emulateWidth(1024);
     await mountWithBar();
-    expect(container.querySelector('[data-testid="top-bar-title"] > span')!.textContent).toBe('점심 모임');
+    expect(container.querySelector('[data-testid="top-bar-title"] > h1')!.textContent).toBe('점심 모임');
     expect(container.querySelector('[data-testid="room-bar"]')).toBeNull();
     expect(container.querySelector('[data-slot="sidebar-trigger"]')).toBeNull();
     await win.setWidth(1023);
     expect(container.querySelector('[data-testid="top-bar-title"] [data-testid="room-bar"]'), 'the phone\'s room bar is the bar\'s title').not.toBeNull();
-    expect(container.querySelector('[data-testid="top-bar-title"] > span.text-sm')).toBeNull();
+    expect(container.querySelector('[data-testid="top-bar-title"] > h1.text-sm')).toBeNull();
     expect(container.querySelector('[data-slot="sidebar-trigger"]'), '768–1023: the tablet\'s menu door').not.toBeNull();
     await win.setWidth(1024);
-    expect(container.querySelector('[data-testid="top-bar-title"] > span')!.textContent).toBe('점심 모임');
+    expect(container.querySelector('[data-testid="top-bar-title"] > h1')!.textContent).toBe('점심 모임');
     expect(container.querySelector('[data-slot="sidebar-trigger"]')).toBeNull();
   });
 
@@ -130,6 +133,9 @@ describe('[SID:5031] ConversationPage — the REAL publisher under the REAL bar'
     emulateWidth(390);
     await mountWithBar();
     expect(container.querySelector('[data-testid="top-bar-title"] [data-testid="room-bar"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="top-bar-title"] > span.text-sm')).toBeNull();
+    expect(container.querySelector('[data-testid="top-bar-title"] > h1.text-sm')).toBeNull();
+    // ONE h1 on a phone too: the room bar's (the in-column head is not drawn below lg)
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="room-head"]')).toBeNull();
   });
 });

@@ -82,7 +82,7 @@ async function build() {
               <div id="screen" style={{ display: 'flex', width: '1028px', height: '760px' }} className="bg-background text-foreground">
                 <div id="rail" className="flex min-h-0 w-[248px] shrink-0 flex-col overflow-hidden border-r border-border"><ChatListView projectId="p1" currentTeamMemberId="me-1" canStartRoom /></div>
                 <div id="room" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                  <RoomHead title="결제 연동 · 오늘 할 일" tag="프로젝트 방" subline="AC4 project · 4명" chips={[chip({ member_id: 'me-1', name: '지우', type: 'human' }), chip({ member_id: 'a-1', name: '개발 에이전트', type: 'agent' }, 'online'), chip({ member_id: 'a-2', name: '검수 에이전트', type: 'agent' }, 'idle'), chip({ member_id: 'h-2', name: '민서', type: 'human' })]} addLabel="참여자 추가" onAdd={() => {}} trailing={<button type="button" aria-label="방 더보기">⋯</button>} />
+                  <RoomHead rename={<button type="button" aria-label="방 이름 바꾸기">✎</button>} tag="프로젝트 방" subline="AC4 project · 4명" chips={[chip({ member_id: 'me-1', name: '지우', type: 'human' }), chip({ member_id: 'a-1', name: '개발 에이전트', type: 'agent' }, 'online'), chip({ member_id: 'a-2', name: '검수 에이전트', type: 'agent' }, 'idle'), chip({ member_id: 'h-2', name: '민서', type: 'human' })]} addLabel="참여자 추가" onAdd={() => {}} trailing={<button type="button" aria-label="방 더보기">⋯</button>} />
                   <div id="timeline" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{MESSAGES.map((m, i) => <ChatBubble key={m.id} message={m} isMine={m.created_by === 'me-1'} isGrouped={false} onOpenThread={() => {}} />)}</div>
                   <ChatInput threadId="c1" onSend={async () => {}} onUploadFile={async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size })} projectId="p1" currentTeamMemberId="me-1" participants={[{ member_id: 'a-1', name: '개발 에이전트' }]} placeholder={ko.chats.inputPlaceholderFull} />
                 </div>
@@ -172,19 +172,20 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(popup).toHaveCount(0);
       expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-testid')), 'focus returns to the «⋯» that opened it').toBe('chat-list-options');
 
-      // ② the room head: name · tag · one line · a chip row; its buttons are only the «+» (the «⋯» here is the harness's trailing slot)
+      // ② the room head: (the rename pencil) · tag · one line · a chip row; its buttons are only the «+» (the «⋯» here is the harness's trailing slot). Story 5031 5b: the NAME is not here any more — from lg it is the top bar's path (the page's one h1; measured in top-bar-zones.5031) — so the head has no heading
       const head = page.locator('[data-testid="room-head"]');
-      await expect(head.locator('h1')).toHaveText('결제 연동 · 오늘 할 일');
+      await expect(head.locator('h1, h2, h3, [role="heading"]'), 'no heading in the head (the name is the bar\'s h1 — story 5031 5b) · reverted (the name h1 back in the head) → 1').toHaveCount(0);
       await expect(head.locator('[data-testid="room-head-tag"]')).toHaveText('프로젝트 방');
       await expect(head.locator('[data-testid="room-head-subline"]')).toContainText('4명');
       expect(await head.locator('[data-testid="room-head-chip"]').count()).toBe(4);
       expect(await head.locator('[data-slot="ds-status-label"]').count(), 'the two agents carry a connection word, the two people do not').toBe(2);
       const hb = (await box(page, '[data-testid="room-head"]'))!;
-      // story 5048 (chat row · PO 11-27): the head is TWO lines — name · tag · the facts line · «⋯» on the first, the chips on the second (it was name / facts / chips, 109–170 px)
-      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(120); // name row (40) + at most two chip rows at this width · reverted (facts on their own line) → one more row, ≥ 150
-      const h1b = (await box(page, '[data-testid="room-head"] h1'))!;
+      // story 5048 (chat row · PO 11-27): the head is TWO lines — tag · the facts line · «⋯» on the first, the chips on the second (it was name / facts / chips, 109–170 px); 5b: still ≥ 80 (min-h-20) without the name
+      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(120); // first row + at most two chip rows at this width · reverted (facts on their own line) → one more row, ≥ 150
+      expect(hb.h, `the head keeps the kit's 80 (${hb.h}px)`).toBeGreaterThanOrEqual(80);
+      const tagb = (await box(page, '[data-testid="room-head-tag"]'))!;
       const subb = (await box(page, '[data-testid="room-head-subline"]'))!;
-      expect(Math.abs((subb.y + subb.h / 2) - (h1b.y + h1b.h / 2)), 'the facts line sits on the name row').toBeLessThanOrEqual(8);
+      expect(Math.abs((subb.y + subb.h / 2) - (tagb.y + tagb.h / 2)), 'the facts line sits on the tag\'s row').toBeLessThanOrEqual(8);
       expect(await page.locator('[data-testid="room-head-subline"]').evaluate((e) => getComputedStyle(e).fontFamily.toLowerCase().includes('mono')), 'the numbers in the facts line are not fixed-width').toBe(false);
 
       // ③ the composer is ONE bordered box holding the clip, the text and «⏎ 보내기»
