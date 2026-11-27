@@ -65,6 +65,10 @@ export interface ChatMessage {
   delivery_withheld?: DeliveryWithheld;
   // story 5032 (C2) — what the server actually decided about who gets this message (agents delivered · agents not · how many people) · to the sender only; absent = the server did not say (an older server, or its pre-check failed) — never read as «nobody»
   delivery_decision?: DeliveryDecision;
+  // story 5046 (C13) — WHEN the sender wanted a working agent to get this: only the one non-default word is carried (`after_turn`); absent = «지금» (today's meaning). Every reader of the message has it.
+  delivery_mode?: DeliveryMode;
+  // story 5046 (C13) — how it went into each agent's turn, by agent member id (`turn` = into the running turn · `next_turn` = as a turn of its own) with the server's time — to the sender only; absent = nothing reported yet
+  delivery_log?: DeliveryLog;
   // story #4761 (D3) — the agents this message reaches only when someone makes them look · in the send answer to the sender only
   agent_wake?: AgentWake;
   /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
@@ -196,6 +200,27 @@ export interface DeliveryDecision {
   humans_delivered: number;
 }
 
+export type DeliveryMode = 'after_turn';
+export type DeliveryVia = 'turn' | 'next_turn';
+export type DeliveryLog = Record<string, { via: DeliveryVia; at: string }>;
+
+/** story 5046: the exact word only — anything else (`now`, a typo, a number) is «not said» = the default. */
+export function parseDeliveryMode(v: unknown): DeliveryMode | undefined {
+  return v === 'after_turn' ? 'after_turn' : undefined;
+}
+
+/** story 5046: the server's per-agent lines, closed shape — a line with another `via` or no time is dropped; nothing left = nothing (never an empty object that would read as «reported»). */
+export function parseDeliveryLog(v: unknown): DeliveryLog | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: DeliveryLog = {};
+  for (const [agentId, line] of Object.entries(v as Record<string, unknown>)) {
+    if (!agentId || !line || typeof line !== 'object') continue;
+    const { via, at } = line as { via?: unknown; at?: unknown };
+    if ((via === 'turn' || via === 'next_turn') && typeof at === 'string' && at !== '') out[agentId] = { via, at };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** The decision, or nothing when the wire shape is wrong or incomplete (absent must never turn into «delivered to nobody»). */
 export function parseDeliveryDecision(v: unknown): DeliveryDecision | undefined {
   if (!v || typeof v !== 'object') return undefined;
@@ -268,6 +293,9 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     delivery_withheld: parseDeliveryWithheld(raw.delivery_withheld),
     // story 5032 (C2) — the server's real delivery decision, the sender's own line only (kept whole; absent stays absent)
     delivery_decision: parseDeliveryDecision(raw.delivery_decision),
+    // story 5046 (C13) — the sender's «끝나고 이어서» word and the server's record of how it went in (the sender's own line only); absent stays absent
+    delivery_mode: parseDeliveryMode(raw.delivery_mode),
+    delivery_log: parseDeliveryLog(raw.delivery_log),
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story 5034 (C4) — the server's card word pair, kept whole (approval_target's rule: absent = null).

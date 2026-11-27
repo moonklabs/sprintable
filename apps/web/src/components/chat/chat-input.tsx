@@ -24,7 +24,8 @@ import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier
 import { isSystemPublisher, resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
-import type { SendAttachment } from '@/hooks/use-chat-sse';
+import type { DeliveryMode, SendAttachment } from '@/hooks/use-chat-sse';
+import { DeliveryChoice, type DeliveryChoiceValue } from './delivery-timing';
 import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { ENTITY_ICONS } from './embed-card';
@@ -172,7 +173,8 @@ function saveDraft(threadId: string, text: string): void {
 }
 
 interface ChatInputProps {
-  onSend: (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => Promise<void>;
+  /** story 5046 (C13): the 4th word is the sender's «끝나고 이어서» (`after_turn`) — absent = «지금» (today's meaning) */
+  onSend: (content: string, mentionedIds?: string[], attachments?: SendAttachment[], deliveryMode?: DeliveryMode) => Promise<void>;
   onUploadFile?: (file: File) => Promise<SendAttachment>;
   disabled?: boolean;
   placeholder?: string;
@@ -204,9 +206,11 @@ interface ChatInputProps {
   incomingFiles?: { nonce: number; files: File[] } | null;
   /** story 4906 — told the whole text of the box whenever it changes (the room's «moved from 홈» note goes when the box is emptied). */
   onDraftChange?: (text: string) => void;
+  /** story 5046 (C13): the agents of the room that are working right now (name · runtime) — the delivery choice is drawn only when the message would reach one of them */
+  workingAgents?: { id: string; name: string; runtimeType: string | null }[];
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, incomingFiles, onDraftChange }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, incomingFiles, onDraftChange, workingAgents }: ChatInputProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -254,6 +258,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mentionedIdsRef = useRef<string[]>([]);
+  // story 5046 (C13): the same ids as a state (the ref does not redraw) — and the sender's pick of WHEN a working agent gets this message (a pick is for ONE message: «지금» again after each send)
+  const [mentionedNow, setMentionedNow] = useState<string[]>([]);
+  const [delivery, setDelivery] = useState<DeliveryChoiceValue>('now');
 
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
@@ -422,6 +429,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     setMentionMembers([]);
     if (!mentionedIdsRef.current.includes(member.id)) {
       mentionedIdsRef.current = [...mentionedIdsRef.current, member.id];
+      setMentionedNow(mentionedIdsRef.current);
       onMentionIdsChange?.(mentionedIdsRef.current);
     }
     requestAnimationFrame(() => {
@@ -467,6 +475,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     });
   };
 
+  // story 5046 (C13): the working agents this message would REACH — one named in the text, or the only other member of the room (a 1:1). Only then is «when» worth a choice.
+  const onlyOther = steerTargets.length === 1 ? steerTargets[0]!.member_id : null;
+  const reachedWorking = (workingAgents ?? []).filter((a) => mentionedNow.includes(a.id) || a.id === onlyOther);
+  const deliveryChoiceShown = !steerMode && reachedWorking.length > 0 && (text.trim().length > 0 || pendingFiles.length > 0);
+  const cannotInterject = reachedWorking.filter((a) => a.runtimeType === 'opencode').map((a) => a.name); // the one runtime known not to take a message into a running turn (it waits for the turn to end anyway)
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
@@ -492,6 +506,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           trimmed,
           mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
           attachments && attachments.length > 0 ? attachments : undefined,
+          // story 5046: the 4th word only when «끝나고 이어서» is chosen AND the choice is drawn — «지금» (the default) sends the call exactly as it was before this story
+          ...(deliveryChoiceShown && delivery === 'after_turn' ? (['after_turn'] as const) : []),
         );
       } catch (e) {
         // story 4847 — the send that registers an attachment in a room with no project is refused by code: say that, not «전송 실패»
@@ -503,6 +519,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       setDroppedFiles(0);
       setCommandQuery(null);
       mentionedIdsRef.current = [];
+      setMentionedNow([]);
+      setDelivery('now');
       onMentionIdsChange?.([]);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } finally {
@@ -684,6 +702,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           />
         </div>
       )}
+      {deliveryChoiceShown ? <DeliveryChoice value={delivery} onChange={setDelivery} cannotInterject={cannotInterject} /> : null}
       {/* Pending file chips (전송 전) */}
       {pendingFiles.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
