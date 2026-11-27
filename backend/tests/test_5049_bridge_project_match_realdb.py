@@ -13,6 +13,7 @@ project, so a mapping that named another project's room (a hand-written row) pos
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -437,5 +438,125 @@ async def test_12_a_dm_of_the_mapping_project_is_skipped_too_no_third_person_is_
         r2, _pe, _m = await w.post(platform)
         result = r2.json()["data"] if platform == "slack" else r2.json()["result"]
         assert result["action"] == "conversation_message_created", r2.json()
+    finally:
+        await engine.dispose()
+
+
+# ── codex round 1: the revoke race · the audit lines under concurrency · the CHECK's state ──────────────────────────────────────────────────────────
+
+
+async def test_13_a_revoke_running_when_the_line_arrives_is_waited_for_the_seat_is_gone_so_nothing_is_written():
+    """a channel's access is taken away by deleting the seat (and the access row) in one transaction. Connection B has done that and not committed; the line arrives on connection A: it must not read the old seat
+    and write — it waits for B (the seat row is locked FOR SHARE by the read), then finds no seat: `channel_author_not_seated`, no message, no seat put back."""
+    engine, w = await _world()
+    try:
+        conv = await w.room(w.pa, channel=True, seat_author=True)
+        await w.map_to(conv)
+        b = w.Session()
+        await b.execute(text("DELETE FROM conversation_participants WHERE conversation_id = :c AND member_id = :m"), {"c": conv, "m": w.author})
+        await b.execute(text("DELETE FROM project_access WHERE project_id = :p AND member_id = :m"), {"p": w.pa, "m": w.author})
+        task = asyncio.create_task(w.post("slack"))  # connection A
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), 1.5)  # still waiting for B: it did not read the old seat and go on
+            assert not task.done()
+        finally:
+            await b.commit()
+            await b.close()
+        r, pe, memo = await asyncio.wait_for(task, 20)
+        _is_skip(r, "slack", "channel_author_not_seated")
+        assert await w.counts(conv) == (0, 0), "a line was written after the revoke committed, or the seat was put back"
+        pe.assert_not_awaited()
+        memo.assert_not_awaited()
+    finally:
+        await engine.dispose()
+
+
+async def test_13b_a_revoke_that_arrives_while_the_line_is_being_written_waits_for_it_message_first_revoke_after(monkeypatch):
+    engine, w = await _world()
+    try:
+        conv = await w.room(w.pa, channel=True, seat_author=True)
+        await w.map_to(conv)
+        import app.services.conversation_auth as ca
+
+        real = ca.members_holding_channel_project
+        reached, release = asyncio.Event(), asyncio.Event()
+
+        async def paused(*a, **k):
+            held = await real(*a, **k)
+            reached.set()
+            await release.wait()  # the line is between «seat checked» and «committed»
+            return held
+
+        monkeypatch.setattr(ca, "members_holding_channel_project", paused)
+
+        async def revoke():
+            async with w.Session() as b:
+                await b.execute(text("DELETE FROM conversation_participants WHERE conversation_id = :c AND member_id = :m"), {"c": conv, "m": w.author})
+                await b.commit()
+
+        line = asyncio.create_task(w.post("slack"))
+        await asyncio.wait_for(reached.wait(), 15)
+        revoking = asyncio.create_task(revoke())
+        await asyncio.sleep(1.5)
+        assert not revoking.done(), "the revoke went through while the line was still being written"
+        release.set()
+        r, _pe, _memo = await asyncio.wait_for(line, 20)
+        assert r.json()["data"]["action"] == "conversation_message_created", r.json()
+        await asyncio.wait_for(revoking, 20)
+        assert await w.counts(conv) == (1, 0)  # the line first, the revoke after
+    finally:
+        await engine.dispose()
+
+
+async def test_14_eight_lines_skipped_at_once_for_one_mapping_and_reason_leave_exactly_one_audit_row(monkeypatch):
+    """each line is its own request (own session); a barrier right after the «is there a recent row» read makes them all read BEFORE any writes — what the advisory lock per (mapping, reason) must prevent. (With the lock
+    the others wait for the first one's commit and never reach the barrier together: it times out for them, which is the point.)"""
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.selectable import Select
+
+    from app.routers.bridge import _inbound_to_conversation
+
+    engine, w = await _world()
+    try:
+        conv = await w.room(w.pb)
+        await w.map_to(conv)
+        barrier = asyncio.Barrier(8)
+        real_execute = AsyncSession.execute
+
+        async def execute(self, stmt, *a, **k):
+            res = await real_execute(self, stmt, *a, **k)
+            if isinstance(stmt, Select) and "permission_audit_logs" in str(stmt):
+                try:
+                    await asyncio.wait_for(barrier.wait(), 1.0)
+                except (asyncio.TimeoutError, asyncio.BrokenBarrierError):
+                    pass
+            return res
+
+        async def one():
+            async with w.Session() as s:
+                return await _inbound_to_conversation(
+                    s, conv, w.author, "x", None, message_ts="1.0", org_id=w.org, mapping_project_id=w.pa, mapping_id=w.mapping_id, platform="slack",
+                )
+
+        with monkeypatch.context() as m:
+            m.setattr(AsyncSession, "execute", execute)
+            results = await asyncio.gather(*[one() for _ in range(8)])
+        assert all(r == {"action": "skipped", "detail": "conversation_project_mismatch"} for r in results), results
+        assert len(await w.audit()) == 1, "concurrent skips of one (mapping, reason) wrote more than one audit row"
+    finally:
+        await engine.dispose()
+
+
+async def test_15_the_widened_check_is_validated_and_the_migration_adds_it_not_valid_then_validates():
+    from pathlib import Path
+
+    engine, w = await _world()
+    try:
+        async with w.Session() as s:
+            validated = (await s.execute(text("SELECT convalidated FROM pg_constraint WHERE conname = 'permission_audit_logs_action_check'"))).scalar_one()
+        assert validated is True
+        src = (Path(__file__).resolve().parent.parent / "alembic" / "versions" / "0503_audit_action_bridge_skipped.py").read_text()
+        assert src.index("NOT VALID") < src.index("VALIDATE CONSTRAINT permission_audit_logs_action_check")
     finally:
         await engine.dispose()

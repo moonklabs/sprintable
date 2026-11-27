@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.dependencies.database import get_db
 from app.repositories.bridge_inbound import BridgeInboundRepository, build_bridge_metadata, check_rate_limit
@@ -51,6 +51,11 @@ async def _skip_inbound(
     )
     try:
         async with session.begin_nested():
+            # one (mapping, reason) at a time: two inbound lines that skip together would both find no recent row and both write one. The lock is held to the end of the transaction — the commit below —
+            # so a waiter reads the committed row.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"{org_id}:{mapping_id}:{reason}"},
+            )
             recent = (await session.execute(
                 select(AuditLog.id).where(
                     AuditLog.org_id == org_id,
@@ -121,12 +126,15 @@ async def _inbound_to_conversation(
         return await _skip_inbound(session, "conversation_is_dm", **skip)
 
     # 참여자 등록 (없으면 추가)
-    existing_participant = (await session.execute(
-        select(ConversationParticipant.id).where(
-            ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.member_id == author_id,
-        )
-    )).scalar_one_or_none()
+    seat_query = select(ConversationParticipant.id).where(
+        ConversationParticipant.conversation_id == conversation_id,
+        ConversationParticipant.member_id == author_id,
+    )
+    if conv.is_project_channel:
+        # a channel's access is taken away by deleting the seat (+ the access row) in one transaction: lock the seat row FOR SHARE until THIS transaction ends, so a revoke that comes between the check
+        # below and the message's commit waits for the message («message first, revoke after») — and one already running is waited for here, so the seat is gone when it is read
+        seat_query = seat_query.with_for_update(read=True, of=ConversationParticipant)
+    existing_participant = (await session.execute(seat_query)).scalar_one_or_none()
     if conv.is_project_channel:
         if existing_participant is None:
             return await _skip_inbound(session, "channel_author_not_seated", **skip)
