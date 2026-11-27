@@ -160,6 +160,11 @@ export default function ConversationPage() {
     renameButtonRef.current?.focus();
   }, [editingTitle]);
   const [titleDraft, setTitleDraft] = useState('');
+  // story 5031 (pencil follow-up): a group room's «이름 바꾸기» line in the «⋯» menu opens the same input as the pencil. The menu closes by itself when an item is chosen and would hand the focus back to the «⋯» button — which would BLUR the input that
+  // opened a moment ago (its onBlur saves = closes it). So the input is opened AFTER the menu has closed, and that one close does not return the focus (the input takes it). Both flags live for this one choice only: they are cleared when the menu opens again
+  // and when they have been used, so a menu closed any other way (Esc · a click outside · another item) returns the focus to «⋯» as before.
+  const renameAfterMenuCloseRef = useRef(false);
+  const skipMenuReturnFocusRef = useRef(false);
   const [chosen, setChosen] = useState<{ convId: string; projectId: string } | null>(null); // story 4847 — for a room that has no project of its own
   const chosenProjectId = chosen && chosen.convId === conversation_id ? chosen.projectId : null;
   const [metaFailedFor, setMetaFailedFor] = useState<string | null>(null); // story 4847 — the room whose own facts could not be read (not a 403): say so and offer to read them again
@@ -382,6 +387,17 @@ export default function ConversationPage() {
   });
   const headMoreCount = Math.max(0, (meta?.participants.length ?? 0) - HEAD_CHIP_MAX);
   // the room's name: a group's is editable in place (story #2969 · #1990), a DM's is the other's name, an unknown room says «대화» / «불러오는 중»
+  // ONE way to open the rename input — the desktop pencil, the phone's title button and the «⋯» menu's line all call this
+  const startRename = () => { setTitleDraft(meta?.title ?? ''); setEditingTitle(true); };
+  const onHeadMenuOpenChange = (next: boolean) => {
+    setHeadMenuOpen(next);
+    if (next) { renameAfterMenuCloseRef.current = false; skipMenuReturnFocusRef.current = false; return; }
+    if (renameAfterMenuCloseRef.current) {
+      renameAfterMenuCloseRef.current = false;
+      skipMenuReturnFocusRef.current = true; // the menu's own focus return would blur the input
+      setTimeout(startRename, 0); // after the menu has closed
+    }
+  };
   // the rename input — ONE definition for the phone's title (below) and the desktop head's rename control
   const renameInput = (
     <Input
@@ -404,12 +420,16 @@ export default function ConversationPage() {
   // them for width and for the drag region, and the crumb is a heading (no control inside a heading).
   const renameControl = meta?.type === 'group' ? (
     editingTitle ? renameInput : (
-      <IconButton
-        ref={renameButtonRef}
-        icon="edit"
-        label={t('editRoomName')}
-        onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
-      />
+      // story 5031 (pencil follow-up): the pencil is quiet until the hand is on the head's first line (hover) or the focus is inside it — only where a mouse really can hover (`mouse:`, the repo's rule for hover-revealed controls: lib/hover-reveal.ts · hover-reveal.guard.test.ts: a finger / an emulator webview / an app shell never hides it).
+      // `opacity-0`, never `hidden` — a Tab still reaches it (and shows it). The group is the head's first line (`group/head`, room-head.tsx).
+      <span className="flex opacity-100 transition-opacity mouse:opacity-0 mouse:group-hover/head:opacity-100 mouse:group-focus-within/head:opacity-100" data-testid="room-head-pencil">
+        <IconButton
+          ref={renameButtonRef}
+          icon="edit"
+          label={t('editRoomName')}
+          onClick={startRename}
+        />
+      </span>
     )
   ) : null;
   const headTitle = editingTitle && meta?.type === 'group' ? (
@@ -417,7 +437,7 @@ export default function ConversationPage() {
   ) : meta?.type === 'group' ? (
     <button
       type="button"
-      onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
+      onClick={startRename}
       className="group/title flex min-w-0 items-center gap-1"
       aria-label={t('editRoomName')}
     >
@@ -441,7 +461,7 @@ export default function ConversationPage() {
           <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
         </span>
       ) : null}
-      <DropdownMenu open={headMenuOpen} onOpenChange={setHeadMenuOpen}>
+      <DropdownMenu open={headMenuOpen} onOpenChange={onHeadMenuOpenChange}>
         <DropdownMenuTrigger
           ref={headMenuTriggerRef}
           type="button"
@@ -452,7 +472,23 @@ export default function ConversationPage() {
         >
           <Icon name="more_horiz" size="sm" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={6} className="w-52">
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-52"
+          finalFocus={() => {
+            // the one close that opens the rename input does not hand the focus back to «⋯» (the input takes it) — every other close does (`true` = the library's own default)
+            if (skipMenuReturnFocusRef.current) { skipMenuReturnFocusRef.current = false; return false; }
+            return true;
+          }}
+        >
+          {/* story 5031 (pencil follow-up): a group room's rename, first in the menu (the desktop pencil is quiet until hover; on a phone this is the line next to the title button) — the same opener as the pencil. Not testid `room-head-rename`: that is the head's wrapper of the pencil. */}
+          {meta.type === 'group' ? (
+            <DropdownMenuItem onClick={() => { renameAfterMenuCloseRef.current = true; }} data-testid="room-head-menu-rename">
+              <Icon name="edit" size="sm" className="text-muted-foreground" />
+              {t('editRoomName')}
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onClick={() => void handleToggleMute()} data-testid="room-head-mute">
             <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size="sm" className="text-muted-foreground" />
             {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
