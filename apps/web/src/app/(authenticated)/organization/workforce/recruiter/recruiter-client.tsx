@@ -1704,7 +1704,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">1</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center leading-none justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">1</span>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1">
                         <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
@@ -1738,7 +1738,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       여기서 말한다. 매핑에 없는(아직 등재 안 된) 런타임이면 "아직 없다"를
                       명시적으로 말한다 — 침묵하지 않는다(§2 처방 그대로). */}
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">2</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center leading-none justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">2</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
                       {/* story #2434(유나양 규격 v1, 2026-08-03) — "실행하세요"류 지시형은 그 경로를
@@ -1784,7 +1784,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </div>
                   </div>
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">3</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center leading-none justify-center rounded-full bg-ds-action-soft text-micro font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
                       {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이

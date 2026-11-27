@@ -709,7 +709,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   key={m.id}
                   // 에이전트 = 네모에 가까운 채움 마크 · 사람 = 동그라미(story #3049 규칙 그대로). «에이전트» 글은 아바타의 스크린리더 글로.
                   className={cn(
-                    'relative flex h-5 w-5 items-center justify-center rounded-full border text-micro font-medium ring-1 ring-ds-surface-high',
+                    'relative flex h-5 w-5 items-center leading-none justify-center rounded-full border text-micro font-medium ring-1 ring-ds-surface-high',
                     m.type === 'agent'
                       ? cn('border-proof-blue', AGENT_MARK_FILL_CLASS)
                       : 'border-ds-line bg-ds-surface-sunk text-ds-ink-2',
@@ -726,7 +726,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 </div>
               ))}
               {assigneeList.length > 3 && (
-                <div className="flex h-5 w-5 items-center justify-center rounded-full border border-ds-line bg-ds-surface-sunk text-micro font-medium text-ds-ink-2 ring-1 ring-ds-surface-high">
+                <div className="flex h-5 w-5 items-center leading-none justify-center rounded-full border border-ds-line bg-ds-surface-sunk text-micro font-medium text-ds-ink-2 ring-1 ring-ds-surface-high">
                   +{assigneeList.length - 3}
                   {assigneeList.slice(3).some((m) => m.type === 'agent') ? <span className="sr-only">{t('filterAgents')}</span> : null}
                 </div>
