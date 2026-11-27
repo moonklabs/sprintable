@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -14,7 +14,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
-from app.services.event_room_gate import room_of, stored_event, withheld_payloads
+from app.services.event_room_gate import room_of, room_words_lines_readable_clause, stored_event, withheld_payloads
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
@@ -34,6 +34,14 @@ _APPROVALS_INBOX_SIGNAL_TYPES = (
 # whose payload.event_type is `conversation.message`. Measured on dev: 2 messages → 4 lines and a badge of 4. The `dispatched` row also carries the push / personal-webhook delivery (outbox) — that
 # stays; only the BELL READ leaves the row out, and the hiding rules below (mute · spectator) decide on the message_created row alone — so for every account «lines = messages, unread = messages».
 _CHAT_MESSAGE_DISPATCHED = "conversation.message"
+
+
+async def _jit_off(db: AsyncSession) -> None:
+    """story 5049 — the bell's three statements (count · list · «read all») are priced by the planner far above `jit_above_cost` (100,000; each row of the recipient is charged every sub-plan of the hiding and room rules), so
+    with `jit = on` (the Postgres default, on in dev) PostgreSQL COMPILES them with LLVM on every call: on dev the unread-count was ~84 ms of work and ~2.2 s of compiling, and the LLVM memory (outside the backend's memory contexts)
+    ~50–85 MB a backend until the backend died of memory (OOM, four times in 15 minutes). The statements are short interpreted work; compiling them never pays. `SET LOCAL`: in force until THIS transaction ends (commit or
+    rollback), then the connection goes back to the pool exactly as it was — nothing leaks to the next request on it; the database-wide setting is the operator's, not ours."""
+    await db.execute(text("SET LOCAL jit = off"))
 
 
 def _is_hidden_notification(member_id: uuid.UUID):
@@ -267,12 +275,14 @@ async def list_notifications(
     project_id 필터: 해당 프로젝트의 member_id로 조회 (multi-project 사용자 대응).
     """
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
+    await _jit_off(db)
     result = await db.execute(
         select(Event)
         .where(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
+            await room_words_lines_readable_clause(db, org_id, auth),  # story 5049: a room's words are listed only for who reads the room now (a mention stays)
         )
         .order_by(Event.created_at.desc())
         .limit(limit)
@@ -306,12 +316,14 @@ async def get_unread_count(
     project_id 필터: 해당 프로젝트 알림만 집계.
     """
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
+    await _jit_off(db)
     result = await db.execute(
         select(func.count()).where(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
             ~_is_hidden_notification(member_id),  # 48dbada0+270c87e6: mute·미발화 그룹 관전 제외
+            await room_words_lines_readable_clause(db, org_id, auth),  # story 5049: counted only while the room is readable (the room's own unread count counts readable rooms alone)
         )
     )
     count = result.scalar_one()
@@ -363,12 +375,15 @@ async def mark_all_read(
     """PATCH /api/v2/event-notifications/read-all — 전체 읽음 처리."""
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
     now = datetime.now(timezone.utc)
+    await _jit_off(db)
     result = await db.execute(
         update(Event)
         .where(
             Event.org_id == org_id,
             Event.recipient_id == member_id,
             Event.read_at.is_(None),
+            # story 5049: «read all» marks what the bell shows — a line of a room the person cannot read now was never seen, so it is left unread (it shows again if the access comes back)
+            await room_words_lines_readable_clause(db, org_id, auth),
         )
         .values(read_at=now)
     )

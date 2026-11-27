@@ -488,13 +488,14 @@ async def test_soft_delete_200():
             # call 9: S-MBR-10 AC5 DELETE project_access
             # call 10: story #5032 — the person's member ids (SELECT members.id of this user in this organization), for the channel unseat
             # call 11: story #5032 — DELETE the person's seats from the organization's project channels (conversation_participants)
-            # call 12: soft_delete internal get(id)
-            # call 13: soft_delete UPDATE deleted_at
+            # call 12: story 5049 — the same seats' unread channel lines are marked read (UPDATE events; ONE statement in the same transaction, `mark_room_words_lines_read` right after the DELETE above)
+            # call 13: soft_delete internal get(id)
+            # call 14: soft_delete UPDATE deleted_at
             if call_count == 2:  # the person's session lock comes before any token row is touched (calls 3 and 4)
                 assert "pg_advisory_xact_lock" in str(stmt) and "pg_advisory_xact_lock_shared" not in str(stmt)
             if call_count in (3, 4):
                 assert "refresh_tokens" in str(stmt)
-            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 12) else None
+            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 13) else None
             result.scalars.return_value.all.return_value = []
             return result
 
