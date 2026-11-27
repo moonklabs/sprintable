@@ -95,7 +95,7 @@ function GroupRow({
             aria-label={t('toolPermissions.expandTools', { group: label })}
             className="rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            <ChevronDown className={`size-ds-icon-sm transition-transform ${expanded ? 'rotate-180' : ''}`} />
           </button>
         )}
       </div>
@@ -199,7 +199,7 @@ export function ToolPermissionPicker({ value, onChange, disabled }: ToolPermissi
           <div key={g.key} className="flex items-center gap-3 rounded-md bg-muted px-2 py-1.5">
             <GroupCheckbox checked disabled ariaLabel={label(g.key)} />
             <span className="flex-1 text-sm text-foreground">{t('toolPermissions.coreAlways')}</span>
-            <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+            <Lock className="size-ds-icon-sm text-muted-foreground" aria-hidden />
           </div>
         ))}
 

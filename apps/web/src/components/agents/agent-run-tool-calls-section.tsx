@@ -193,7 +193,7 @@ function ToolCallRowItem({
                 className="h-auto min-h-0 max-w-full gap-1 truncate px-1 py-0.5 font-mono text-ds-body font-normal text-ds-ink"
                 data-testid={`tool-call-toggle-${row.id}`}
               >
-                {expanded ? <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
+                {expanded ? <ChevronDown className="size-ds-icon-sm shrink-0" aria-hidden="true" /> : <ChevronRight className="size-ds-icon-sm shrink-0" aria-hidden="true" />}
                 {primaryLabel}
               </Button>
             ) : (

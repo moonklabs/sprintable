@@ -211,7 +211,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
               >
                 <div className="flex w-full items-center justify-between gap-2">
                   <span className="text-ds-body font-medium text-ds-ink">{modeLabel[m].label}</span>
-                  {selected && <Check className="h-4 w-4 shrink-0 text-ds-action-text" />}
+                  {selected && <Check className="size-ds-icon-sm shrink-0 text-ds-action-text" />}
                 </div>
                 <span className="text-ds-small text-ds-ink-3">{modeLabel[m].hint}</span>
               </button>
@@ -286,7 +286,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                           </div>
                           {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
                           <RowName className="flex-1" label={pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />
-                          {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-ds-action-text" />}
+                          {pendingId === m.id && <Check className="size-ds-icon-sm shrink-0 text-ds-action-text" />}
                         </button>
                       </li>
                     ))}
@@ -294,7 +294,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                 )}
               </div>
             ) : (
-              <Button variant="secondary" onClick={() => setShowPicker(true)} iconStart={<Plus className="h-3.5 w-3.5" aria-hidden />}>
+              <Button variant="secondary" onClick={() => setShowPicker(true)} iconStart={<Plus className="size-ds-icon-md" aria-hidden />}>
                 {t('messagingAddMember')}
               </Button>
             )}

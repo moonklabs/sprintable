@@ -218,7 +218,7 @@ function RunSection({ title, runs, activeKey, onOpen, onActive, error, onRetry, 
       {error ? (
         <div role="alert" className="flex items-center gap-3 px-2 py-2 text-ds-small text-ds-ink-2">
           <span>{t('sectionLoadError')}</span>
-          {onRetry ? <Button type="button" variant="quiet" onClick={onRetry}><RotateCw className="mr-1.5 size-3.5" />{tc('retry')}</Button> : null}
+          {onRetry ? <Button type="button" variant="quiet" onClick={onRetry}><RotateCw className="mr-1.5 size-ds-icon-md" />{tc('retry')}</Button> : null}
         </div>
       ) : null}
       {runs.map((run) => <RunRow key={run.id} run={run} active={activeKey === run.id} onOpen={onOpen} onActive={onActive} />)}
@@ -389,7 +389,7 @@ export function AgentRunsList({ agentId }: { agentId?: string } = {}) {
               <p className="text-sm font-medium text-ds-ink">{tc('error')}</p>
               <p className="text-xs text-ds-ink-3">{tc('errorDescription')}</p>
               <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>
-                <RotateCw className="mr-1.5 size-3.5" />
+                <RotateCw className="mr-1.5 size-ds-icon-md" />
                 {tc('retry')}
               </Button>
             </div>

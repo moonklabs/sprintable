@@ -130,7 +130,7 @@ export function AgentRunDetail({
   const head = (
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="quiet" onClick={onBack} data-testid="run-detail-back">
-        <ArrowLeft className="mr-1.5 size-4" aria-hidden="true" />
+        <ArrowLeft className="mr-1.5 size-ds-icon-md" aria-hidden="true" />
         {t('backToList')}
       </Button>
       {run ? <span className="text-ds-small text-ds-ink-3">{t('runId')}: {run.id.slice(0, 8)}…</span> : null}

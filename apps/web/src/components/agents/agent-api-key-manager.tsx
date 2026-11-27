@@ -350,7 +350,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
               disabled={generatedKey === null || copiedOnboarding}
               onClick={() => { if (generatedKey !== null) void copyOnboardingMessage(generatedKey, generatedMcpConfig, true); }}
             >
-              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedOnboarding ? <Check className="size-ds-icon-md text-ds-done" /> : <Copy className="size-ds-icon-md" />}
               {t('agentApiKeyCopyOnboardingCta')}
             </Button>
             <Button
@@ -520,7 +520,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                     className="font-mono"
                   />
                   <Button variant="secondary" onClick={() => void copyToClipboard(generatedKey)} className="shrink-0">
-                    {copiedKey ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedKey ? <Check className="size-ds-icon-md text-ds-done" /> : <Copy className="size-ds-icon-md" />}
                     {copiedKey ? t('agentApiKeyKeyCopiedLabel') : t('agentApiKeyCopyKeyCta')}
                   </Button>
                 </div>
@@ -545,7 +545,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                   className="mt-2"
                   onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig, true)}
                 >
-                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedOnboarding ? <Check className="size-ds-icon-md text-ds-done" /> : <Copy className="size-ds-icon-md" />}
                   {t('agentApiKeyCopyOnboardingCta')}
                 </Button>
               </div>

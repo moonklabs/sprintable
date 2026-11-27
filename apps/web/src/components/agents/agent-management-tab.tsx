@@ -303,7 +303,7 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
   };
 
   const addAgentButton = isAdmin ? (
-    <Button variant="primary" onClick={onAddAgent} iconStart={<Icon name="add" size={14} />}>{ta('manageAddAgent')}</Button>
+    <Button variant="primary" onClick={onAddAgent} iconStart={<Icon name="add" size="md" />}>{ta('manageAddAgent')}</Button>
   ) : null;
 
   return (
