@@ -172,12 +172,14 @@ async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uu
 
 
 async def _room_of_request(session: AsyncSession, request: Request, *, agent: Any, org_id: uuid.UUID, project_id: uuid.UUID) -> tuple[Any, uuid.UUID | None] | None:
-    """the room a person asked the agent in, when the agent's RUN says so: `X-Sprintable-Run-Id` (the runtime puts it on every MCP call) naming a run of THIS agent whose `conversation_id` is a live room of this
-    organization (the agent is in it; it is no other project's room). Nothing is guessed from «the agent's only running run» — no header, a run of another agent, a room that is gone or not this project's =
+    """the room a person asked the agent in, when the agent's RUN says so: `X-Sprintable-Run-Id` (the runtime puts it on every MCP call) naming a RUNNING run of THIS agent whose `conversation_id` is a live room of this
+    organization (the agent is in it; it is no other project's room; every other member of it can see the project). Nothing is guessed from «the agent's only running run» — no header, a run of another agent, a room that is gone or not this project's =
     `None` and the card goes to the person's DM as before. Second value = the person whose message started the run (a person's id), to be named on the card."""
     from app.models.agent_run import AgentRun
     from app.models.conversation import Conversation, ConversationParticipant
     from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.services.project_auth import has_project_access
 
     raw = request.headers.get("x-sprintable-run-id")
     try:
@@ -187,7 +189,7 @@ async def _room_of_request(session: AsyncSession, request: Request, *, agent: An
     if run_id is None:
         return None
     run = (await session.execute(
-        select(AgentRun.conversation_id, AgentRun.triggering_message_id).where(AgentRun.id == run_id, AgentRun.agent_id == agent.id, AgentRun.org_id == org_id)
+        select(AgentRun.conversation_id, AgentRun.triggering_message_id).where(AgentRun.id == run_id, AgentRun.agent_id == agent.id, AgentRun.org_id == org_id, AgentRun.status == "running")
     )).first()
     if run is None or run.conversation_id is None:
         return None
@@ -201,6 +203,17 @@ async def _room_of_request(session: AsyncSession, request: Request, *, agent: An
     )).first()
     if inside is None:
         return None
+    # the card's line names the ask (a story's title, a sprint's name): everyone in the room must be able to see this project — one who cannot would read it in the room though the card itself is a 404 for them
+    others = (await session.execute(select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conv.id, ConversationParticipant.member_id != agent.id))).scalars().all()
+    for other in others:
+        kind = (await session.execute(select(Member.type).where(Member.id == other, Member.org_id == org_id))).scalar_one_or_none()
+        if kind == "human":
+            # a person is judged by their login (the participant row holds the org-member anchor id)
+            who = (await session.execute(select(OrgMember.user_id).where(OrgMember.id == other, OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None)))).scalar_one_or_none()
+        else:
+            who = other if kind == "agent" else None
+        if who is None or not await has_project_access(session, who, project_id, org_id):
+            return None
     asker: uuid.UUID | None = None
     if run.triggering_message_id is not None:
         sender = (await session.execute(select(ConversationMessage.sender_id).where(ConversationMessage.id == run.triggering_message_id, ConversationMessage.conversation_id == conv.id))).scalar_one_or_none()

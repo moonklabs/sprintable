@@ -467,7 +467,7 @@ async def test_the_replay_carries_only_the_authorization_of_the_pressing_request
     assert seen["x-org-id"] == "o", "the org / project are the SNAPSHOT's, not whatever the pressing request said"
 
 
-async def _room_for_run(Session, d, *, who_asked: str = "admin", agent_in_room: bool = True, run_agent=None):
+async def _room_for_run(Session, d, *, who_asked: str = "admin", agent_in_room: bool = True, run_agent=None, run_status: str = "running", outsider: bool = False):
     """a room with the person who asked and the agent, and a run of the agent started by that person's message"""
     from app.models.agent_run import AgentRun
     from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -479,11 +479,25 @@ async def _room_for_run(Session, d, *, who_asked: str = "admin", agent_in_room: 
         s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d[f"{who_asked}_om"]))
         if agent_in_room:
             s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d["agent_id"]))
+        if outsider:
+            # a person in the room who may NOT see this project (a plain org member with no grant): the card's line would be read by them
+            from app.models.project import OrgMember
+            from app.models.user import User
+            from app.services.agent_anchor_sync import ensure_human_member
+
+            uid = uuid.uuid4()
+            s.add(User(id=uid, email=f"outsider-{uid.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=d["org_id"], user_id=uid, role="member")
+            s.add(om)
+            await s.commit()
+            await ensure_human_member(s, om.id)
+            s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=om.id))
         await s.commit()
         msg = ConversationMessage(id=uuid.uuid4(), conversation_id=conv.id, sender_id=d[f"{who_asked}_om"], content="스프린트 닫아 줘", mentioned_ids=[d["agent_id"]])
         s.add(msg)
         await s.commit()
-        run = AgentRun(id=uuid.uuid4(), org_id=d["org_id"], agent_id=run_agent or d["agent_id"], project_id=d["project_id"], status="running", conversation_id=conv.id, triggering_message_id=msg.id, trigger="chat")
+        run = AgentRun(id=uuid.uuid4(), org_id=d["org_id"], agent_id=run_agent or d["agent_id"], project_id=d["project_id"], status=run_status, conversation_id=conv.id, triggering_message_id=msg.id, trigger="chat")
         s.add(run)
         await s.commit()
         return conv.id, run.id
@@ -532,17 +546,21 @@ async def test_a_run_that_does_not_lead_to_a_room_falls_back_to_the_dm_and_nothi
             await s.commit()
         _c1, someone_elses_run = await _room_for_run(Session, d, run_agent=other.id)
         _c2, not_in_room = await _room_for_run(Session, d, agent_in_room=False)
+        _c3, finished_run = await _room_for_run(Session, d, run_status="completed")      # a stale header: that run is over
+        _c4, with_outsider = await _room_for_run(Session, d, outsider=True)               # someone in the room may not see the project
         await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
         async with _client_for(app) as c:
             a = await c.delete(f"/api/v2/stories/{d['story_id']}")                                                                    # no header
             b = await c.delete(f"/api/v2/tasks/{d['task_id']}", headers={"X-Sprintable-Run-Id": str(someone_elses_run)})               # a run of another agent
             e = await c.delete(f"/api/v2/docs/{d['doc_id']}", headers={"X-Sprintable-Run-Id": str(not_in_room)})                      # the agent is not in that room
             g = await c.delete(f"/api/v2/goals/{d['goal_id']}", headers={"X-Sprintable-Run-Id": "not-a-uuid"})
-        assert [x.status_code for x in (a, b, e, g)] == [202, 202, 202, 202]
+            h = await c.post(f"/api/v2/sprints/{d['sprint_id']}/close", headers={"X-Sprintable-Run-Id": str(finished_run)})
+            i = await c.post("/api/v2/rewards", headers={"X-Sprintable-Run-Id": str(with_outsider)}, json={"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 1, "reason": "x", "granted_by": str(d["agent_id"])})
+        assert [x.status_code for x in (a, b, e, g, h, i)] == [202] * 6
         async with Session() as s:
             ids = [str(r.id) for r in await _requests(Session, d["org_id"])]
             rows = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext.in_(ids)))).scalars().all()
-        assert len(rows) == 4 and {r.conversation_id for r in rows}.isdisjoint({_c1, _c2}), "every card is in the person's DM, none in those rooms"
+        assert len(rows) == 6 and {r.conversation_id for r in rows}.isdisjoint({_c1, _c2, _c3, _c4}), "every card is in the person's DM, none in those rooms"
         assert all(r.mentioned_ids == [d["admin_om"]] for r in rows)
     finally:
         app.dependency_overrides.clear()

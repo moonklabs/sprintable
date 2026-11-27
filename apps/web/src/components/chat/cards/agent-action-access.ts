@@ -64,7 +64,8 @@ export async function pressAgentAction(requestId: string, decision: 'approve' | 
       body: JSON.stringify({ decision }),
     });
     if (res.status === 403) return { result: 'forbidden' };
-    if (res.status === 409) return { result: 'settled' };
+    // 409 (someone else decided / it ran out) · 410 · 422 (it changed) · 404 (it is gone or no longer yours to see): the ask is not what this card shows — re-read it
+    if (res.status === 409 || res.status === 410 || res.status === 422 || res.status === 404) return { result: 'settled' };
     if (!res.ok) return { result: 'fault' };
     const view = parseAgentAction(await res.json());
     return view ? { result: 'ok', view } : { result: 'fault' };

@@ -88,6 +88,15 @@ describe('an open ask', () => {
     expect(container.textContent).not.toContain('처리했어요');
     expect(btn('승인하기')).toBeTruthy(); expect(btn('거절하기')).toBeTruthy();
   });
+  it.each([404, 410, 422])('a press answered %i (gone / changed): the card re-reads instead of repeating the press', async (status) => {
+    let reads = 0;
+    stub({ read: () => (reads++ === 0 ? json(200, view()) : json(200, view({ state: 'failed', execution: { state: 'failed', http_status: 409, reason: 'x' } }))), decision: () => json(status) });
+    await show();
+    await press('승인하기'); await press('승인해서 실행');
+    expect(reads).toBe(2);
+    expect(container.textContent).toContain('그새 상태가 바뀌어서 실행하지 않았어요');
+    expect(btn('승인하기')).toBeUndefined();
+  });
   it('a fault (500) says it could not be done and keeps the buttons', async () => {
     stub({ decision: () => json(500) }); await show();
     await press('승인하기'); await press('승인해서 실행');

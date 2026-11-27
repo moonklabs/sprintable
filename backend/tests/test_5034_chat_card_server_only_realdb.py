@@ -38,7 +38,7 @@ async def _count(Session, room) -> int:
 
 
 @pytest.mark.parametrize("caller", ["participant", "agent_participant"])
-@pytest.mark.parametrize("card", [{"kind": "story", "ref": ID}, {"kind": "timeline", "ref": "x"}, {}, "story"])
+@pytest.mark.parametrize("card", [{"kind": "story", "ref": ID}, {"kind": "agent_action", "ref": ID}, {"kind": "timeline", "ref": "x"}, {}, "story"])  # story 5041: the approval card is the server's alone
 async def test_a_card_sent_to_the_public_route_is_refused_and_nothing_is_stored(caller, card):
     engine, Session, w = await _world()
     try:
