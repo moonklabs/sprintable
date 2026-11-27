@@ -119,7 +119,7 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
               aria-pressed={transport === 'http'}
               onClick={() => handleSwitchTransport('http')}
               className="flex-1"
-              iconStart={<Cloud className="h-3.5 w-3.5" aria-hidden />}
+              iconStart={<Cloud className="size-ds-icon-md" aria-hidden />}
             >
               {to('transportHosted')}
             </Button>
@@ -128,7 +128,7 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
               aria-pressed={transport === 'stdio'}
               onClick={() => handleSwitchTransport('stdio')}
               className="flex-1"
-              iconStart={<Terminal className="h-3.5 w-3.5" aria-hidden />}
+              iconStart={<Terminal className="size-ds-icon-md" aria-hidden />}
             >
               {to('transportLocal')}
             </Button>
@@ -145,11 +145,11 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
           <div className="overflow-hidden rounded-ds-control border border-ds-line">
             <div className="flex items-center justify-between gap-2 border-b border-ds-line bg-ds-surface-sunk px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
-                <FileText className="h-4 w-4 shrink-0 text-ds-ink-3" aria-hidden />
+                <FileText className="size-ds-icon-sm shrink-0 text-ds-ink-3" aria-hidden />
                 <span className="font-mono text-ds-mono-md text-ds-ink">.mcp.json</span>
               </div>
               <Button variant="secondary" onClick={() => void handleCopy()} className="shrink-0">
-                {copied ? <><Check className="h-3.5 w-3.5" />{to('copied')}</> : <><Copy className="h-3.5 w-3.5" />{to('copyConfig')}</>}
+                {copied ? <><Check className="size-ds-icon-md" />{to('copied')}</> : <><Copy className="size-ds-icon-md" />{to('copyConfig')}</>}
               </Button>
             </div>
             <pre className="overflow-x-auto bg-ds-surface-sunk p-3 text-ds-mono-md leading-relaxed">

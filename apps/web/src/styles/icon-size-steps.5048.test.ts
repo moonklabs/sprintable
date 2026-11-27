@@ -2,6 +2,7 @@
 // 12 · 10은 12 글자 옆 칩 · 배지 안에서만 — 숫자로 직접 둔다(정적 검사는 «어느 글자 옆인지» 모르므로 허용). 14 · 16 · 18 · 20 · 32 같은 직접 크기(`size-3.5` · `h-4 w-4` · `size-8` · `size-[17px]` · `<Icon size={14}>`)는 이 영역에선 0.
 // 영역 PR마다 `icon-size-areas/`에 파일이 하나씩 늘어난다(채팅 → 칸반 → 문서 → …). 되돌리면(직접 크기로) RED. nav/*(민)는 경계라 끝까지 제외.
 // 검사 대상 = lucide 가져온 이름 + 이름이 `Icon`(으로 끝나는 · `<x.Icon>` 객체 멤버 꼴 포함) 컴포넌트 태그(동적 아이콘 변수 `<Icon>` · `<KindIcon>` · `<EntityIcon>` 포함)의 className + `…Glyph(…, 'size-…')` 호출 인자.
+// `iconStart={<…>}`(ds Button 안 아이콘)는 sm이면 RED — 단추 높이 40 = md(story 5048 ④ PO 11-27).
 // 태그는 따옴표 · 중괄호를 따라 끝을 찾는다(`[&>svg]:` 의 `>` 에 속지 않음).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ const RAW_ICON_PROP = /\bsize=\{(?:14|16|18|20|24|32)\}/;
 const ALLOWED: Record<string, string> = {
   'components/chat/room-head.tsx::<Icon name="person" size={14} />': '폰 방 막대의 «사람 N · 에이전트 N» 수 단추 — 숫자 옆 칩 크기 14(16으로 키우면 390에서 단추가 화면 밖으로 밀림 · e2e/chat-phone-bar.4887 «the people count is on the screen» 이 잡음)',
   'components/chat/room-head.tsx::<Icon name="smart_toy" size={14} />': '위와 같은 수 단추의 둘째 수',
+  'components/chat/room-head.tsx::iconStart <Icon name="groups" size="sm" />': '폰 방 막대의 «사람 N» 단추 안 아이콘 — 위 수 단추와 한 막대라 같은 이유(md로 키우면 390에서 막대가 화면 밖으로 밀릴 수 있음 · e2e/chat-phone-bar.4887 «the people count is on the screen»이 잡음). iconStart 규칙의 유일한 예외',
 };
 
 
@@ -64,6 +66,14 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
         if (Object.keys(ALLOWED).some((k) => key.startsWith(k))) continue;
         hits.push(key);
       }
+      // `iconStart={<아이콘 …/>}`는 ds Button(높이 40)의 자리 — 단추 안 아이콘은 md뿐이다(sm 16 · 14 · 16 숫자는 RED). 아이콘 이름에 숫자가 든 것(`Trash2` · `Share2`)도 본다.
+      for (const m of text.matchAll(/iconStart=\{\s*</g)) {
+        const tag = openingTag(text, m.index! + m[0].length - 1);
+        if (/size-ds-icon-sm|size="sm"|size=\{(?:14|16)\}|(?<![\w:-])(?:size|h|w)-(?:3\.5|4)(?![\w.-])/.test(tag)) {
+          const key = `${rel}::iconStart ${tag.replace(/\s+/g, ' ').slice(0, 60)}`;
+          if (!Object.keys(ALLOWED).some((k) => key.startsWith(k))) hits.push(key);
+        }
+      }
       for (const m of text.matchAll(/\w*Glyph\([^)]*['"`][^'"`]*\b(?:size|h|w)-(?:3\.5|4|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/g)) hits.push(`${rel}::${m[0].slice(0, 60)}`);
     }
     expect(hits).toEqual([]);
@@ -84,7 +94,7 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
   it('⭐허용 목록의 자리는 실제로 그 파일에 있다(죽은 항목 0 — 지우면 목록도 줄인다)', () => {
     for (const k of Object.keys(ALLOWED)) {
       const [file, snippet] = k.split('::') as [string, string];
-      expect(readFileSync(join(SRC, file), 'utf8').includes(snippet), k).toBe(true);
+      expect(readFileSync(join(SRC, file), 'utf8').includes(snippet.replace(/^iconStart /, '')), k).toBe(true);
     }
   });
 });

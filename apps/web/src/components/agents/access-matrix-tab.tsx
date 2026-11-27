@@ -230,7 +230,7 @@ export function AccessMatrixTab() {
                             aria-pressed={granted}
                             data-granted={granted ? '' : undefined}
                           >
-                            {granted && !toggling ? <Icon name="check" size={14} /> : null}
+                            {granted && !toggling ? <Icon name="check" size="md" /> : null}
                           </Button>
                         </td>
                       );
@@ -245,7 +245,7 @@ export function AccessMatrixTab() {
         <div className="flex flex-wrap items-center gap-4 text-ds-small text-ds-ink-3">
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-flex size-4 items-center justify-center rounded-ds-tag border border-ds-done bg-ds-done-soft text-ds-done">
-              <Icon name="check" size={10} />
+              <Icon name="check" size={12} />
             </span>
             {ta('matrixLegendGranted')}
           </span>

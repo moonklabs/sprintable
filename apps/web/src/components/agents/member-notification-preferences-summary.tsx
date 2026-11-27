@@ -125,7 +125,7 @@ export function MemberNotificationPreferencesSummary({ memberId, memberLabel }: 
                     aria-label={ts('notificationPreferencesSummaryEdit')}
                     title={ts('notificationPreferencesSummaryEdit')}
                   >
-                    <Pencil className="size-3.5" />
+                    <Pencil className="size-ds-icon-sm" />
                   </button>
                 )}
               </span>
