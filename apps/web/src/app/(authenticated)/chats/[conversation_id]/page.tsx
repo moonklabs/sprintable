@@ -151,6 +151,14 @@ export default function ConversationPage() {
   const [recordsOpenFor, setRecordsOpenFor] = useState<string | null>(null);
   const [headMenuOpen, setHeadMenuOpen] = useState(false); // story 4887 (UI-4 P3-a) — the room head's «⋯» menu (controlled: the library closes it through onOpenChange after an item is chosen)
   const [editingTitle, setEditingTitle] = useState(false);
+  // story 5031 (5b): the desktop head's rename pencil — where the focus returns when Enter / Esc closes the rename input (never after a blur: the person clicked elsewhere)
+  const renameButtonRef = useRef<HTMLButtonElement>(null);
+  const focusRenameButtonAfterEdit = useRef(false);
+  useEffect(() => {
+    if (editingTitle || !focusRenameButtonAfterEdit.current) return;
+    focusRenameButtonAfterEdit.current = false;
+    renameButtonRef.current?.focus();
+  }, [editingTitle]);
   const [titleDraft, setTitleDraft] = useState('');
   const [chosen, setChosen] = useState<{ convId: string; projectId: string } | null>(null); // story 4847 — for a room that has no project of its own
   const chosenProjectId = chosen && chosen.convId === conversation_id ? chosen.projectId : null;
@@ -374,7 +382,8 @@ export default function ConversationPage() {
   });
   const headMoreCount = Math.max(0, (meta?.participants.length ?? 0) - HEAD_CHIP_MAX);
   // the room's name: a group's is editable in place (story #2969 · #1990), a DM's is the other's name, an unknown room says «대화» / «불러오는 중»
-  const headTitle = editingTitle && meta?.type === 'group' ? (
+  // the rename input — ONE definition for the phone's title (below) and the desktop head's rename control
+  const renameInput = (
     <Input
       autoFocus
       value={titleDraft}
@@ -382,13 +391,29 @@ export default function ConversationPage() {
       onKeyDown={(e) => {
         // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 저장 · 닫기로 읽지 않는다 — 반쯤 쓴 방 이름이 저장되던 것(4831 측정 중 발견).
         if (isImeComposing(e)) return;
-        if (e.key === 'Enter') void handleSaveTitle();
-        else if (e.key === 'Escape') setEditingTitle(false);
+        if (e.key === 'Enter') { focusRenameButtonAfterEdit.current = true; void handleSaveTitle(); }
+        else if (e.key === 'Escape') { focusRenameButtonAfterEdit.current = true; setEditingTitle(false); }
       }}
       onBlur={() => void handleSaveTitle()}
       aria-label={t('editRoomName')}
       className="h-auto w-auto min-w-0 px-1.5 py-0.5 font-medium"
     />
+  );
+  // story 5031 (C1 step 5b): from lg the room's NAME is the top bar's h1 (below), so the head keeps only the way to change it — a pencil button (a group room only; a DM's name is the other person's). Pressing it swaps the pencil for the same input the phone uses;
+  // Enter / Esc put the focus back on the pencil (the input is gone, the focus must not fall to the page). Why a button in the head and not editing the bar's crumb: the bar is the window's drag strip with the path's switcher and the search field in it — an input there would fight
+  // them for width and for the drag region, and the crumb is a heading (no control inside a heading).
+  const renameControl = meta?.type === 'group' ? (
+    editingTitle ? renameInput : (
+      <IconButton
+        ref={renameButtonRef}
+        icon="edit"
+        label={t('editRoomName')}
+        onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
+      />
+    )
+  ) : null;
+  const headTitle = editingTitle && meta?.type === 'group' ? (
+    renameInput
   ) : meta?.type === 'group' ? (
     <button
       type="button"
@@ -451,8 +476,8 @@ export default function ConversationPage() {
   return (
     <>
       {/* story 4887 (UI-4) — a PHONE (below lg) puts the room's name · people · «⋯» into the shell's own header row (no second head under it: 135 px of reading column); lg up keeps the in-column head below. */}
-      {/* story 5031 (C1 step 5a): from lg the bar's path ends with the room's name — org › 채팅 › room — as a plain span (NOT a heading: the room head below still draws the page's h1 until step 5b). The text only; the name's in-place edit stays in the head. */}
-      {width === 'lg-up' ? <TopBarSlot title={<span className="text-sm font-medium">{headerTitle}</span>} titleText={headerTitle} actions={null} /> : null}
+      {/* story 5031 (C1 step 5b): from lg the bar's path ends with the room's name — org › 채팅 › room — and it is the page's ONE h1 (the room head below draws no heading; the list rail beside it is an h2 on a room route). The name's change lives in the head (a pencil). */}
+      {width === 'lg-up' ? <TopBarSlot title={<h1 className="text-sm font-medium">{headerTitle}</h1>} titleText={headerTitle} actions={null} /> : null}
       {isBelowLg ? (
         <TopBarSlot
           title={(
@@ -476,7 +501,7 @@ export default function ConversationPage() {
       ) : null}
       {isBelowLg ? null : (
         <RoomHead
-          title={headTitle}
+          rename={renameControl}
           tag={headTag}
           subline={headSubline}
           chips={headChips}

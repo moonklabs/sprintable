@@ -61,7 +61,7 @@ async function build() {
                 />
                 <div id="col" className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   {/* the page draws this in the room column as well — below lg it must be display:none (the bar in the shell row replaces it) */}
-                  <RoomHead title={title} tag="프로젝트 방" subline="AC4 project · 3명" chips={[chip('m1', '지우(나)'), chip('a1', '개발 에이전트', 'online')]} addLabel="참여자 추가" onAdd={() => {}} trailing={null} />
+                  <RoomHead tag="프로젝트 방" subline="AC4 project · 3명" chips={[chip('m1', '지우(나)'), chip('a1', '개발 에이전트', 'online')]} addLabel="참여자 추가" onAdd={() => {}} trailing={null} />
                   <div id="timeline" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{Array.from({ length: 30 }, (_, i) => <p key={i} className="py-2 text-sm">메시지 {i} — 긴 문장이 한 줄을 넘어가도 가로로 밀리지 않아야 해요 어떤 폭에서도</p>)}</div>
                   <ChatInput threadId="c1" onSend={async () => {}} onUploadFile={async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size })} projectId="p1" currentTeamMemberId="me-1" participants={[{ member_id: 'a-1', name: '개발 에이전트' }]} placeholder={ko.chats.inputPlaceholderMobile} />
                 </div>
