@@ -165,10 +165,22 @@ export default function ConversationPage() {
     if (editingTitle || !focusRenameButtonAfterEdit.current) return;
     if (renameButtonRef.current) { focusRenameButtonAfterEdit.current = false; renameButtonRef.current.focus(); return; }
     if (titleButtonElRef.current) { focusRenameButtonAfterEdit.current = false; titleButtonElRef.current.focus(); return; }
-    // a phone's title button is not mounted yet (the bar draws it next): `titleButtonRef` gives it the focus then. Anywhere else nothing of the rename is on screen: «⋯» (never the page body)
-    if (!isBelowLg) { focusRenameButtonAfterEdit.current = false; headMenuTriggerRef.current?.focus(); }
+    // anywhere but a phone nothing of the rename is on screen: «⋯» (never the page body)
+    if (!isBelowLg) { focusRenameButtonAfterEdit.current = false; headMenuTriggerRef.current?.focus(); return; }
+    // a phone's title button is not mounted yet (the bar draws it next): `titleButtonRef` gives it the focus then. If it never comes (this room has no rename — a one-to-one room · still loading), «⋯» takes it: the request does not wait for ever
+    const id = setTimeout(() => {
+      if (!focusRenameButtonAfterEdit.current) return;
+      focusRenameButtonAfterEdit.current = false;
+      headMenuTriggerRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(id);
   }, [editingTitle, isBelowLg]);
   const [titleDraft, setTitleDraft] = useState('');
+  // story 5031 (pencil follow-up · codex): this page component is REUSED between rooms (only ChatView is keyed by the room). The name edit — the open input and its draft — belongs to the room it was started in: leaving that room closes it and DISCARDS the draft
+  // (state adjusted while rendering — React's «derive from a changed prop» form, so no frame draws room B with room A's input). Not saved: a person who clicked away has already saved it (the input's blur); what is left is the browser's back / a link that
+  // takes no blur, and a save from here would go to the wrong room.
+  const [renameRoom, setRenameRoom] = useState(conversation_id);
+  if (renameRoom !== conversation_id) { setRenameRoom(conversation_id); setEditingTitle(false); setTitleDraft(''); }
   // story 5031 (pencil follow-up): a group room's «이름 바꾸기» line in the «⋯» menu opens the same input as the pencil. The menu closes by itself when an item is chosen and would hand the focus back to the «⋯» button — which would BLUR the input that
   // opened a moment ago (its onBlur saves = closes it). So the input is opened AFTER the menu has closed, and that one close does not return the focus (the input takes it). Both flags live for this one choice only: they are cleared when the menu opens again
   // and when they have been used, so a menu closed any other way (Esc · a click outside · another item) returns the focus to «⋯» as before.
@@ -186,8 +198,10 @@ export default function ConversationPage() {
   const latestRoomRef = useRef({ conversation_id, isGroup: meta?.type === 'group', editing: editingTitle, start: startRename });
   useEffect(() => { latestRoomRef.current = { conversation_id, isGroup: meta?.type === 'group', editing: editingTitle, start: startRename }; });
   useEffect(() => () => {
+    // leaving a room (or the page): nothing of this room's rename is left pending — the opening timer, the menu's two flags, and the request to put the focus back (it would otherwise steal the focus into the next room)
     renameAfterMenuCloseRef.current = false;
     skipMenuReturnFocusRef.current = false;
+    focusRenameButtonAfterEdit.current = false;
     if (renameTimerRef.current !== null) { clearTimeout(renameTimerRef.current); renameTimerRef.current = null; }
   }, [conversation_id]);
   const onHeadMenuOpenChange = (next: boolean) => {

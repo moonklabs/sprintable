@@ -4,7 +4,7 @@
 // The trap this pins: choosing the line closes the menu, and the menu would hand the focus back to «⋯» — which BLURS the rename input that just opened (its onBlur saves = closes it). So the input is opened after the menu has closed and that one close does not return the focus.
 // The opener is the pencil's own (`startRename`), so a rename by the menu sends the very same request as one by the pencil. jsdom is an approximation of the library's focus return (no layout, no real focus trap) — the real browser is not exercised here.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
@@ -30,7 +30,8 @@ function stubRoom(type: 'group' | 'dm') {
     const u = String(url);
     if (/\/api\/conversations\/conv-\d$/.test(u) && init?.method === 'PATCH') { patches.push(JSON.parse(init.body ?? '{}')); return { ok: true, status: 200, json: async () => ({}) }; }
     if (/\/api\/conversations\/conv-\d$/.test(u)) {
-      return { ok: true, status: 200, json: async () => ({ title: type === 'group' ? (u.endsWith('conv-2') ? '둘째 방' : '점심 모임') : null, type, muted: false, last_read_at: null, free_response: false, project_id: 'proj-1', is_project_channel: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }, { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' }] }) };
+      const kind = u.endsWith('conv-3') ? 'dm' : type; // conv-3 is always a one-to-one room (no rename)
+      return { ok: true, status: 200, json: async () => ({ title: kind === 'group' ? (u.endsWith('conv-2') ? '둘째 방' : '점심 모임') : null, type: kind, muted: false, last_read_at: null, free_response: false, project_id: 'proj-1', is_project_channel: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }, { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' }] }) };
     }
     return { ok: true, status: 200, json: async () => ({ data: [] }) };
   }));
@@ -288,5 +289,61 @@ describe('[SID:5031 · pencil · codex] the opening that waits for the menu to c
     await settle();
     expect(input(), 'reverted (no cancel on re-open) → the input opens').toBeNull();
     expect(trigger().getAttribute('aria-expanded'), 'the menu is the one that is open').toBe('true');
+  });
+});
+
+describe('[SID:5031 · pencil · codex 2 · LOW] the pending opening under StrictMode', () => {
+  const click = (el: Element) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  // «the page goes away while the opening waits» is not pinned: counting timers cannot tell the opening's from the library's own (measured: a library timer is left after an unmount with or without ours) — the cleanup that clears it is the one the room-change test exercises.
+  it('StrictMode (effects run twice): the line still opens the input once, focused, and it stays', async () => {
+    stubRoom('group');
+    await mountWithBar();
+    await act(async () => { root.render(<StrictMode>{makeTree()}</StrictMode>); });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    await openMenu();
+    await act(async () => { click(menuRename()!); });
+    await vi.waitFor(() => expect(input()).not.toBeNull());
+    await settle();
+    expect(container.querySelectorAll('input[data-slot="input"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(input());
+    expect(patches).toHaveLength(0);
+  });
+  // «another line chosen» is not pinned: the opening waits ONE tick (0 ms) after the menu closed — no other line can be chosen in that time; the cancel in each other line's onClick is code only.
+});
+
+describe('[SID:5031 · pencil · codex 2] leaving a room closes the name edit of THAT room (the page component is reused between rooms)', () => {
+  const goTo = async (id: string) => { await act(async () => { routeId.current = id; root.render(makeTree()); }); await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); }); await settle(); };
+
+  it('⭐HIGH 1: an edit left open in room A (no blur — e.g. the browser\'s back) is closed in room B, and B\'s own name — never A\'s half-written draft — is what the next edit starts from; nothing is sent', async () => {
+    stubRoom('group');
+    await mountWithBar();
+    await act(async () => { pencil()!.click(); });
+    await type(input()!, 'A에서 쓰다 만 이름');
+    expect(input()!.value).toBe('A에서 쓰다 만 이름');
+    await goTo('conv-2');
+    expect(barH1()!.textContent).toBe('둘째 방');
+    expect(input(), 'reverted → B draws A\'s input with A\'s draft (an Enter would rename B)').toBeNull();
+    expect(patches, 'leaving discards the draft — it is not saved (the target of a save from here would be the wrong room)').toHaveLength(0);
+    await act(async () => { pencil()!.click(); });
+    expect(input()!.value, 'the next edit starts from B\'s own name').toBe('둘째 방');
+    await act(async () => { key(input()!, 'Enter'); });
+    await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
+    expect(patches, 'unchanged name → no request').toHaveLength(0);
+  });
+
+  it('⭐HIGH 2 (a phone): Enter in room A, then a room with no title button (a DM) — no focus request is left behind: the next room that has a title button does not have its focus stolen', async () => {
+    stubRoom('group');
+    emulateWidth(390);
+    await mountWithBar();
+    await act(async () => { titleButton()!.click(); });
+    await type(input()!, '이름');
+    // Enter and the move to the DM happen before the bar has drawn A's title button again
+    await act(async () => { key(input()!, 'Enter'); routeId.current = 'conv-3'; root.render(makeTree()); });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(titleButton(), 'a DM has no rename button').toBeNull();
+    // straight on to a group room (before the 50 ms the phone's fallback waits for the title button — that timer would hand the focus to «⋯» of the DM by itself): its title button mounts
+    await goTo('conv-2');
+    expect(titleButton()).not.toBeNull();
+    expect(document.activeElement, 'reverted → the left-over request steals the focus into this room\'s title button').not.toBe(titleButton());
   });
 });
