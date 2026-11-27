@@ -92,15 +92,15 @@ export function TreeRow({ depth, indent = 'default', title, icon, emoji, statusM
         )}
       >
         {isFolder ? (
-          <Icon name={expanded ? 'expand_more' : 'chevron_right'} size={14} className="shrink-0 text-ds-ink-3" />
+          <Icon name={expanded ? 'expand_more' : 'chevron_right'} size="sm" className="shrink-0 text-ds-ink-3" />
         ) : (
           // 잎 줄: 화살표 자리를 같은 크기로 비워 같은 깊이의 제목이 줄을 맞춘다(폰에서도 같은 폭).
-          <span aria-hidden="true" data-slot="ds-tree-arrow-gap" className="size-3.5 shrink-0" />
+          <span aria-hidden="true" data-slot="ds-tree-arrow-gap" className="size-ds-icon-sm shrink-0" />
         )}
         {emoji ? (
           <span aria-hidden="true" data-slot="ds-tree-emoji" className="shrink-0 text-ds-body">{emoji}</span>
         ) : icon ? (
-          <Icon name={icon} className="shrink-0 text-ds-ink-3" />
+          <Icon name={icon} size="sm" className="shrink-0 text-ds-ink-3" />
         ) : null}
         {statusMark ? <span className="shrink-0">{statusMark}</span> : null}
         <span className="min-w-0 flex-1 truncate font-semibold">{title}</span>

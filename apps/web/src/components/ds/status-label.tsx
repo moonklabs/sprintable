@@ -34,7 +34,7 @@ export function StatusLabel({ status, label, className, ...props }: StatusLabelP
   return (
     <span data-slot="ds-status-label" data-status={status} className={cn('inline-flex items-center gap-1.5 whitespace-nowrap font-sans text-ds-mono-md tabular-nums', spec.text, className)} {...props}>
       {spec.mark === 'icon' ? (
-        <Icon name={spec.icon} size={14} className={cn('shrink-0', spec.color)} />
+        <Icon name={spec.icon} size="sm" className={cn('shrink-0', spec.color)} />
       ) : (
         <span
           aria-hidden="true"

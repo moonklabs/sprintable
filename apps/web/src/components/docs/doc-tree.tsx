@@ -12,7 +12,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { cn } from '@/lib/utils';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { ConfirmDialog } from '@/components/ds/dialog';
-import { Icon } from '@/components/ds/icon';
+import { ICON_SIZE, Icon } from '@/components/ds/icon';
 import { IconButton } from '@/components/ds/icon-button';
 import { TreeRow, treeIndentPx, type TreeRowProps } from '@/components/ds/tree-row';
 import { useTreeExpanded } from './use-tree-expanded';
@@ -524,7 +524,7 @@ function TreeNode({
           ) : (
             <p
               className="py-1 text-ds-small italic text-ds-ink-3"
-              style={{ paddingLeft: `${treeIndentPx(depth + 1, 'compact') + 8 + 14 + 8}px` }}
+              style={{ paddingLeft: `${treeIndentPx(depth + 1, 'compact') + 8 + ICON_SIZE.sm + 8}px` }}
             >
               {/* story #4390 — 예전엔 기본값 'No child docs'(영어)를 호출부가 안 넘겨 한국어 화면에도 영어가 나왔다 → 로케일 문장(docs.noChildDocs). */}
               {emptyFolderLabel ?? t('noChildDocs')}

@@ -60,7 +60,7 @@ export function Stepper({ steps, current, stateLabels, className, ...rest }: Ste
                 state === 'upcoming' && 'border-ds-line-control bg-ds-surface text-ds-ink-3',
               )}
             >
-              {state === 'done' ? <Icon name="check" size={14} /> : i + 1}
+              {state === 'done' ? <Icon name="check" size="sm" /> : i + 1}
             </span>
             <span
               data-slot="ds-stepper-label"
