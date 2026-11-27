@@ -43,16 +43,16 @@ async function bubble(isMine: boolean, senderType: 'human' | 'agent' = 'human'):
 }
 
 describe('말풍선 모양 (story 5048 T0 ②c)', () => {
-  it('⭐내 말풍선: 모서리 16 · 오른쪽 위 꼬리 4 · 안쪽 16/12', async () => {
+  it('⭐내 말풍선: 모서리 12 · 오른쪽 위 꼬리 4 · 안쪽 14/10(채팅 밀도 11-27: 16 → 12 · 16/12 → 14/10)', async () => {
     const { b } = await bubble(true);
     const c = b.className.split(/\s+/);
-    expect(c).toEqual(expect.arrayContaining(['rounded-ds-bubble', 'rounded-tr-ds-tail', 'px-4', 'py-3']));
+    expect(c).toEqual(expect.arrayContaining(['rounded-ds-bubble', 'rounded-tr-ds-tail', 'px-3.5', 'py-2.5']));
     expect(c).not.toContain('rounded-tl-ds-tail');
   });
-  it('⭐남의 말풍선: 모서리 16 · 왼쪽 위 꼬리 4 · 안쪽 16/12', async () => {
+  it('⭐남의 말풍선: 모서리 12 · 왼쪽 위 꼬리 4 · 안쪽 14/10(채팅 밀도 11-27)', async () => {
     const { b } = await bubble(false);
     const c = b.className.split(/\s+/);
-    expect(c).toEqual(expect.arrayContaining(['rounded-ds-bubble', 'rounded-tl-ds-tail', 'px-4', 'py-3']));
+    expect(c).toEqual(expect.arrayContaining(['rounded-ds-bubble', 'rounded-tl-ds-tail', 'px-3.5', 'py-2.5']));
     expect(c).not.toContain('rounded-tr-ds-tail');
   });
   it('⭐최대 폭은 72%와 480 중 작은 쪽(--container-ds-bubble)', async () => {

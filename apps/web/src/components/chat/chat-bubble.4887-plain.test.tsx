@@ -42,7 +42,7 @@ describe('ChatBubble — an agent\'s text sits on the same layer as a person\'s,
   it('⭐ an AGENT\'s message (not mine) is on the others\' layer (ds-surface-high) with the agent\'s squarer corners — no longer bare text on the page', async () => {
     await render({ agent: true, mine: false });
     expect(box().getAttribute('data-bubble')).toBe('filled'); // reverted (plain agent) → 'plain'
-    for (const c of ['bg-ds-surface-high', 'rounded-ds-bubble', 'rounded-tl-ds-tail', 'px-4']) expect(box().className, c).toContain(c); // story 5048 ②c: one kit bubble shape for every sender (16 · tail 4 · 16/12)
+    for (const c of ['bg-ds-surface-high', 'rounded-ds-bubble', 'rounded-tl-ds-tail', 'px-3.5']) expect(box().className, c).toContain(c); // story 5048 ②c: one kit bubble shape for every sender (16 · tail 4 · 16/12)
     expect(box().className).not.toContain('rounded-xl');
     expect(box().className).not.toContain('bg-ds-mine');
     expect(box().textContent).toContain('안녕하세요'); // the text is still there
@@ -61,7 +61,7 @@ describe('ChatBubble — an agent\'s text sits on the same layer as a person\'s,
     expect(box().getAttribute('data-bubble')).toBe('filled');
     expect(box().className).toContain('bg-ds-surface-high'); // reverted (plain for all but mine) → missing
     expect(box().className).toContain('rounded-ds-bubble');
-    expect(box().className).toContain('px-4');
+    expect(box().className).toContain('px-3.5');
   });
 
   it('⭐ MY message keeps its bubble (the blue-soft fill, rounded on the left and bottom, padded)', async () => {

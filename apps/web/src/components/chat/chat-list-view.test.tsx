@@ -840,7 +840,7 @@ describe('ChatListView — window.focus 강제 재fetch·중복 coalescing (stor
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로 재분류
 // (구조·크기 불변, preview는 이미 Body-small 부합이라 무편집).
 describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
-  it('대화명이 20 Medium(키트 이름 · text-ds-card-title)이다 — story 5048 ②c', async () => {
+  it('대화명이 14 Medium(본문 단 · text-ds-body)이다 — story 5048 ②c → 채팅 밀도 11-27: 20 → 14(목록 줄 60)', async () => {
     stubFetchWithConversations([{
       id: 'conv-dm-1', type: 'dm', title: '유나',
       latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
@@ -852,7 +852,7 @@ describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
     await mount();
     const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
     expect(nameEl).not.toBeUndefined();
-    expect(nameEl?.className).toContain('text-ds-card-title');
+    expect(nameEl?.className).toContain('text-ds-body');
     expect(nameEl?.className).not.toContain('font-semibold');
   });
 

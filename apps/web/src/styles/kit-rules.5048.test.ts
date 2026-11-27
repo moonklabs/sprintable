@@ -77,8 +77,8 @@ describe('키트 규칙 ① 크기 · 여백 — 간격 단계 · 조작 높이 
     expect(rem('ds-tag')).toBe(28);
   });
 
-  it('⭐부품 규격의 큰 높이: 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240', () => {
-    expect([rem('ds-bar'), rem('ds-head'), rem('ds-chat-row'), rem('ds-nav-item')]).toEqual([64, 80, 88, 240]);
+  it('⭐부품 규격의 큰 높이: 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 60(story 5048 채팅 밀도: 88 → 60) · 탐색 항목 폭 240', () => {
+    expect([rem('ds-bar'), rem('ds-head'), rem('ds-chat-row'), rem('ds-nav-item')]).toEqual([64, 80, 60, 240]);
     expect(px(/--container-ds-bubble:\s*([\d.]+)rem;/, themeStatic) * 16).toBe(480); // story 5048 ②c: 말풍선 최대 폭(--container-ds-bubble)
   });
 
@@ -88,7 +88,7 @@ describe('키트 규칙 ① 크기 · 여백 — 간격 단계 · 조작 높이 
 
   it('⭐모서리 단계: 8(모든 조작 · 카드 · 태그) · 16(말풍선, 꼬리 쪽 한 귀만 4) · 원(아바타)', () => {
     expect([radius('control'), radius('panel'), radius('tag')]).toEqual([8, 8, 8]);
-    expect([radius('bubble'), radius('pill'), radius('tail')]).toEqual([16, 16, 4]);
+    expect([radius('bubble'), radius('pill'), radius('tail')]).toEqual([12, 16, 4]); // story 5048 채팅 밀도: 말풍선 16 → 12(안쪽 여백에 비례 — 16 그대로면 작아진 말풍선이 알약처럼 보임)
     expect(radius('circle')).toBeGreaterThanOrEqual(999);
   });
 
