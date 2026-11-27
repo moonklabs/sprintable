@@ -34,7 +34,8 @@ export function TopBarSwitcherHost({ orgs, currentOrgId, projects, currentProjec
     <SwitcherCtx.Provider value={{ s, anchor, setAnchor }}>
       {children}
       {/* an organization switch that failed says so (never silent · same line as the list column's switcher) */}
-      {s.switchOrgError ? <p role="alert" className="shrink-0 truncate text-ds-small text-ds-failed">{s.switchOrgError}</p> : null}
+      {/* the line is held to a width (it shrinks and cuts with «…»; the whole text stays in `title`): a long failure text must not eat the path's room or reach the search field and the buttons */}
+      {s.switchOrgError ? <p role="alert" title={s.switchOrgError} className="min-w-0 max-w-48 shrink truncate text-ds-small text-ds-failed">{s.switchOrgError}</p> : null}
       <CreateOrganizationDialog open={s.createOrgOpen} onOpenChange={s.setCreateOrgOpen} onCreated={s.handleOrgCreated} />
       <CreateProjectDialog s={s} />
     </SwitcherCtx.Provider>

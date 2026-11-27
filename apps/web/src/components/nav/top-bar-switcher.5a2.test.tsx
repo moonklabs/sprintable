@@ -64,26 +64,33 @@ afterEach(async () => {
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
 
 /** the bar (real) with the list column's switcher mounted beside it (a second instance) when `withColumn` */
-async function mount(opts: { pathname?: string; title?: React.ReactNode; withColumn?: boolean; projectId?: string | undefined; rerenderWith?: { projectId: string } }) {
+async function mount(opts: { pathname?: string; title?: React.ReactNode; withColumn?: boolean; projectId?: string | undefined; strict?: boolean; noBar?: boolean }) {
   if (opts.pathname) nav.pathname = opts.pathname;
   const { TopBar } = await import('./top-bar');
   const { TopBarProvider } = await import('./top-bar-context');
   const { TopBarSlot } = await import('./top-bar-slot');
   const { SidebarProvider } = await import('@/components/ui/sidebar');
   const { UnifiedSwitcher } = await import('./unified-switcher');
-  const tree = (projectId: string | undefined) => (
-    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <TopBarProvider pathname={nav.pathname}><SidebarProvider>
-        <TopBar orgId="o1" orgMemberships={ORGS} projectId={projectId} projectMemberships={PROJECTS} />
-        {opts.title !== undefined ? <TopBarSlot title={opts.title} /> : null}
-        {opts.withColumn ? <UnifiedSwitcher orgs={ORGS} currentOrgId="o1" projects={PROJECTS} currentProjectId={projectId} /> : null}
-      </SidebarProvider></TopBarProvider>
-    </NextIntlClientProvider>
-  );
+  const tree = (projectId: string | undefined, noBar = opts.noBar) => {
+    const body = (
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <TopBarProvider pathname={nav.pathname}><SidebarProvider>
+          {noBar ? null : <TopBar orgId="o1" orgMemberships={ORGS} projectId={projectId} projectMemberships={PROJECTS} />}
+          {opts.title !== undefined ? <TopBarSlot title={opts.title} /> : null}
+          {opts.withColumn ? <UnifiedSwitcher orgs={ORGS} currentOrgId="o1" projects={PROJECTS} currentProjectId={projectId} /> : null}
+        </SidebarProvider></TopBarProvider>
+      </NextIntlClientProvider>
+    );
+    return opts.strict ? <React.StrictMode>{body}</React.StrictMode> : body;
+  };
   const pid = 'projectId' in opts ? opts.projectId : 'p1';
   await act(async () => { root.render(tree(pid)); });
   await settle();
-  return { rerender: async (projectId: string | undefined) => { await act(async () => { root.render(tree(projectId)); }); await settle(); } };
+  return {
+    rerender: async (projectId: string | undefined) => { await act(async () => { root.render(tree(projectId)); }); await settle(); },
+    /** the bar is gone (a phone's settings has none) while the list column's switcher stays */
+    withoutBar: async () => { await act(async () => { root.render(tree(pid, true)); }); await settle(); },
+  };
 }
 const trigger = (kind: 'org' | 'project') => container.querySelector(`[data-testid="top-bar-switcher-${kind}"]`) as HTMLButtonElement | null;
 const menu = () => document.body.querySelector('[role="menu"]') as HTMLElement | null;
@@ -213,5 +220,43 @@ describe('TopBar 5a-2 — the «새 프로젝트» door of the desktop app opens
     await act(async () => { line.click(); });
     await settle();
     expect(newProjectDialogs()).toHaveLength(1);
+  });
+});
+
+// story 5031 (5a-2 · codex): the owner registry at the React level — StrictMode's double effect, the bar going away, the ⌘N flag that comes late
+describe('TopBar 5a-2 — the new-project door at the React level', () => {
+  it('⭐StrictMode (every effect runs twice): still two registered instances (not four) and exactly one dialog', async () => {
+    (window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop = bridge;
+    const { OPEN_NEW_PROJECT_EVENT } = await import('./new-project-entry');
+    const { __newProjectOwnerCount } = await import('./new-project-owner');
+    await mount({ title: <span>흐름</span>, withColumn: true, strict: true });
+    expect(__newProjectOwnerCount()).toBe(2);
+    await act(async () => { window.dispatchEvent(new Event(OPEN_NEW_PROJECT_EVENT)); });
+    await settle();
+    expect(newProjectDialogs()).toHaveLength(1);
+  });
+
+  it('⭐the bar goes away (a phone\'s settings draws none): the list column\'s switcher takes the door over — one dialog, and the owner count drops to one', async () => {
+    (window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop = bridge;
+    const { OPEN_NEW_PROJECT_EVENT } = await import('./new-project-entry');
+    const { __newProjectOwnerCount } = await import('./new-project-owner');
+    const m = await mount({ title: <span>흐름</span>, withColumn: true });
+    expect(__newProjectOwnerCount()).toBe(2);
+    await m.withoutBar();
+    expect(__newProjectOwnerCount()).toBe(1);
+    await act(async () => { window.dispatchEvent(new Event(OPEN_NEW_PROJECT_EVENT)); });
+    await settle();
+    expect(newProjectDialogs()).toHaveLength(1);
+  });
+
+  it('LIMIT (intended): the ⌘N flag is read when a switcher registers; a flag that appears later on a page that is already mounted opens nothing (the window event is the door for an open page — see new-project-owner.ts)', async () => {
+    (window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop = bridge;
+    const { NEW_PROJECT_PARAM } = await import('./new-project-entry');
+    await mount({ title: <span>흐름</span>, withColumn: true });
+    window.history.replaceState(null, '', `/dashboard?${NEW_PROJECT_PARAM}=1`);
+    await settle();
+    expect(newProjectDialogs()).toHaveLength(0);
+    expect(window.location.search, 'and the flag is left where it is').toBe(`?${NEW_PROJECT_PARAM}=1`);
+    window.history.replaceState(null, '', '/');
   });
 });

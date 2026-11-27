@@ -2,6 +2,8 @@
 // Every project switcher owns its own dialog (UnifiedSwitcher in the list column · in the icon bar's account popover · the desktop top bar's path), so two of them mounted together would each open one — two dialogs on one press.
 // This registry is the ONE place that decides: instances register while mounted, the event / the flag reaches exactly ONE of them — the highest priority (the top bar's path: always mounted from lg), ties → the one registered last. A switcher mounted alone (a test of the sidebar) is simply the owner.
 // A browser has no bridge: nothing registers, and the event / the flag open nothing (the flag is left alone), as before.
+// Limit (intended, not fixed): the ⌘N flag is read when an instance REGISTERS (once per mount, in the microtask after it). The app puts the flag on the address it loads, so it is there before the page's scripts run; a flag that arrives later on an already mounted page
+// (the app never pushes script into the page) is not read — the window event is the way for a page that is already open. Reading the address on every navigation would add a listener and a place that can open the dialog twice; not worth it for a door the app does not use.
 import { desktopApp } from '@/lib/desktop-app';
 import { NEW_PROJECT_PARAM, OPEN_NEW_PROJECT_EVENT } from '@/components/nav/new-project-entry';
 
