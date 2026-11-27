@@ -70,6 +70,8 @@ class HitlGateConfig(Base):
     work_type: Mapped[str] = mapped_column(Text, nullable=False)   # 'done' | 'merge'
     actor_type: Mapped[str] = mapped_column(Text, nullable=False)  # 'agent' | 'human'
     level: Mapped[str] = mapped_column(Text, nullable=False)       # 'auto' | 'ask' | 'block'
+    # story 5041 ② (0507): one agent's own setting (null = every agent); `work_type` may also be `action:<key>` (an action of services/agent_action.py)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

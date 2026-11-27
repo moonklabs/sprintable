@@ -1141,7 +1141,21 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0505 = (_ROOT / "backend/alembic/versions/0505_reward_ledger_agent_action_request.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_reward_ledger_agent_action_request ON reward_ledger (agent_action_request_id) WHERE agent_action_request_id IS NOT NULL" in up0505
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|DROP|NOT NULL DEFAULT)\b|drop_column|alter_column|rename_|CONCURRENTLY|SET NOT NULL", up0505.replace("WHERE agent_action_request_id IS NOT NULL", "")), "0505's upgrade() adds one nullable column and one partial unique index — nothing more"
-    hits = [h for h in hits if not h.startswith(("0471_", "0505_", "0506_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
+    # story 5041 ② (0507): `hitl_gate_config` learns an agent and an action key — ELEVEN `op.execute` calls of upgrade() the reading lists: ONE nullable column with no default (`ADD COLUMN IF NOT EXISTS agent_id uuid NULL`:
+    # no rewrite), the CHECK of `work_type` made again wider (DROP CONSTRAINT IF EXISTS · ADD … NOT VALID · VALIDATE: every existing row is `done` / `merge`, which stay in the list), and the table's two UNIQUE indexes
+    # replaced by the same two plus `agent_id IS NULL` in the predicate (every existing row has agent_id NULL, so each index holds exactly the rows it held) with two new ones for the agent-specific rows (empty when built) and one
+    # plain partial index on `agent_id`. The table is one row per setting — a handful of rows. A running old revision: it reads and writes only `done` / `merge` rows with agent_id NULL (all that exists), so its reads and
+    # inserts are unchanged; the ONE thing it cannot do is its upsert in `set_gate_level` (the admin's gate-level PUT): that statement names the old index predicate (`ON CONFLICT … WHERE project_id IS NULL`), which the replaced
+    # index no longer matches, so that single PUT answers an error until the new revision serves — an admin settings write of a dev-only gate experiment, retried by the person. Nothing is deleted, retyped, backfilled or
+    # renamed; the downgrade() (which removes the agent-specific and action rows) is not read.
+    policy = [h for h in hits if h.startswith("0507_")]
+    assert len(policy) == 11 and all("op.execute(" in h for h in policy), policy
+    up0507 = (_ROOT / "backend/alembic/versions/0507_hitl_gate_config_agent_action_policy.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert "ADD COLUMN IF NOT EXISTS agent_id uuid NULL" in up0507 and up0507.count("ADD COLUMN") == 1, "one nullable column, no default"
+    assert up0507.count("DROP INDEX IF EXISTS") == 2 and "uq_hitl_gate_org_default" in up0507 and "uq_hitl_gate_project_override" in up0507, "only the two unique indexes are replaced"
+    assert "NOT VALID" in up0507 and "VALIDATE CONSTRAINT ck_hitl_gate_work_type" in up0507
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME)\b|drop_column|alter_column|rename_|CONCURRENTLY|SET NOT NULL|DEFAULT", up0507), "0507's upgrade() adds one nullable column, one wider CHECK and indexes — nothing is rewritten or deleted"
+    hits = [h for h in hits if not h.startswith(("0471_", "0505_", "0506_", "0507_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

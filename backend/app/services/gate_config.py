@@ -41,6 +41,7 @@ async def resolve_gate_level_with_source(
                     HitlGateConfig.project_id == project_id,
                     HitlGateConfig.work_type == work_type,
                     HitlGateConfig.actor_type == actor_type,
+                    HitlGateConfig.agent_id.is_(None),  # story 5041 ② (0507): one agent's own rows are the action policy's (services/agent_action_policy.py)
                 )
             )
         ).scalar_one_or_none()
@@ -55,6 +56,7 @@ async def resolve_gate_level_with_source(
                 HitlGateConfig.project_id.is_(None),
                 HitlGateConfig.work_type == work_type,
                 HitlGateConfig.actor_type == actor_type,
+                HitlGateConfig.agent_id.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -119,13 +121,13 @@ async def set_gate_level(
     if project_id is None:
         stmt = stmt.on_conflict_do_update(
             index_elements=["org_id", "work_type", "actor_type"],
-            index_where=text("project_id IS NULL"),
+            index_where=text("project_id IS NULL AND agent_id IS NULL"),
             set_={"level": level, "updated_at": func.now()},
         )
     else:
         stmt = stmt.on_conflict_do_update(
             index_elements=["org_id", "project_id", "work_type", "actor_type"],
-            index_where=text("project_id IS NOT NULL"),
+            index_where=text("project_id IS NOT NULL AND agent_id IS NULL"),
             set_={"level": level, "updated_at": func.now()},
         )
     await session.execute(stmt)
@@ -143,6 +145,7 @@ async def set_gate_level(
                 scope_filter,
                 HitlGateConfig.work_type == work_type,
                 HitlGateConfig.actor_type == actor_type,
+                HitlGateConfig.agent_id.is_(None),
             )
         )
     ).scalars().first()
@@ -172,6 +175,7 @@ async def delete_gate_override(
             HitlGateConfig.project_id == project_id,
             HitlGateConfig.work_type == work_type,
             HitlGateConfig.actor_type == actor_type,
+            HitlGateConfig.agent_id.is_(None),
         )
     )
     await session.flush()
