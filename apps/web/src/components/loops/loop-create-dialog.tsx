@@ -422,7 +422,7 @@ export function LoopCreateDialog({
                     )}
                   />
                   {drafted ? (
-                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-ds-surface-sunk px-2 py-1.5 text-xs text-muted-foreground">
+                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-ds-surface px-2 py-1.5 text-xs text-muted-foreground">
                       <span>✦</span>
                       <span>
                         <b className="text-foreground">{t('createLoopDraftNoteTitle')}</b> {t('createLoopDraftNoteBody')}{' '}
@@ -548,7 +548,7 @@ export function LoopCreateDialog({
                         onClick={() => setLinkedId(h.id)}
                         className={cn(
                           'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                          linkedId === h.id ? 'border-primary bg-ds-surface-sunk text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
+                          linkedId === h.id ? 'border-primary bg-ds-surface text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                         )}
                       >
                         {h.statement}
@@ -557,7 +557,7 @@ export function LoopCreateDialog({
                   </div>
                 )}
                 {linkedHypothesis ? (
-                  <div className="rounded-lg border border-ds-line-control bg-ds-surface-sunk p-2 text-xs text-foreground">
+                  <div className="rounded-lg border border-ds-line-control bg-ds-surface p-2 text-xs text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
                       {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}

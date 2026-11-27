@@ -151,7 +151,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   className={cn(
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
-                      ? 'border-ds-line-control bg-ds-surface-sunk text-brand-text'
+                      ? 'border-ds-line-control bg-ds-surface-high text-brand-text'
                       : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                   )}
                 >
@@ -226,7 +226,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                         className={cn(
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
-                            ? 'border-ds-line-control bg-ds-surface-sunk text-brand-text'
+                            ? 'border-ds-line-control bg-ds-surface-high text-brand-text'
                             : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground hover:bg-overlay-fill-2',
                         )}
                       >
