@@ -96,6 +96,33 @@ async def _get_or_create_approval_dm(
     )
 
 
+async def lock_rooms_in_id_order(db: AsyncSession, room_ids: "list[uuid.UUID] | set[uuid.UUID]") -> None:
+    """story 5053 — take the row lock of every room a fan-out is about to write into, in ONE order (the room id), before the first message goes in.
+
+    Every message insert raises its room's `updated_at` (the trigger of migration 0506), which takes that room's row lock until the transaction ends. A card fan-out writes SEVERAL rooms in one transaction;
+    two fan-outs that reach the same rooms in opposite orders (the approver lists have no order of their own) used to be able to wait on each other → `deadlock detected`. Taking the locks up front in
+    id order makes every such transaction queue in the same order instead."""
+    ids = sorted({r for r in room_ids if r is not None}, key=str)
+    if ids:
+        await db.execute(select(Conversation.id).where(Conversation.id.in_(ids)).order_by(Conversation.id).with_for_update())
+
+
+async def prepare_card_rooms(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, requester_id: uuid.UUID, approver_ids: "list[uuid.UUID]",
+) -> None:
+    """get-or-create the DM of the requester with each approver (the loop that writes the cards finds them again), then lock them all in room-id order — see `lock_rooms_in_id_order`.
+    A DM that cannot be made here is left to the loop, which reports it the way it always did."""
+    room_ids: list[uuid.UUID] = []
+    for approver_id in approver_ids:
+        try:
+            async with db.begin_nested():
+                conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=requester_id, approver_id=approver_id)
+                room_ids.append(conv.id)
+        except Exception:  # noqa: BLE001 — the writing loop owns the failure report
+            logger.warning("approval fan-out: room for approver %s could not be prepared", approver_id, exc_info=True)
+    await lock_rooms_in_id_order(db, room_ids)
+
+
 async def dispatch_approval_request_cards(
     db: AsyncSession,
     *,
@@ -202,6 +229,9 @@ async def dispatch_approval_request_cards(
     # 새 나간다). recipients가 이미 비지 않았음을 위에서 확인했으므로, 끝까지 돌고도
     # delivered_count==0이면 "성공과 전멸이 같은 무음"인 그 갭 그대로다.
     delivered_count = 0
+
+    # story 5053 — the rooms of every recipient are locked in room-id order BEFORE the first card goes in (two fan-outs reaching the same rooms in opposite orders must queue, not deadlock)
+    await prepare_card_rooms(db, org_id=org_id, project_id=project_id, requester_id=requester_id, approver_ids=list(recipients))
 
     for approver_id in recipients:
         try:
