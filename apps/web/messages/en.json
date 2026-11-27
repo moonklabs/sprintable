@@ -8065,7 +8065,7 @@
       },
       "thisComputerOff": "Turn notifications off on this computer only",
       "thisComputerOffNote": "Notifications on your phone and other computers stay as they are.",
-      "dockBadge": "Show the waiting count on the Dock icon",
+      "dockBadge": "Show how many things need my hand on the Dock icon",
       "trayIcon": "Keep an icon in the menu bar",
       "keepRunning": "Keep the app running when the window closes",
       "keepRunningNote": "Notifications, the Dock badge and the menu-bar icon keep working. Agents keep working whatever this is set to. To quit the app, press ⌘Q.",

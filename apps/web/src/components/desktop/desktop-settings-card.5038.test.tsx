@@ -56,7 +56,7 @@ describe('[SID:5038 C8] the words (PO 11-27: the keep-on switch\'s name and note
     expect(q('desktop-setting-keepRunning')!.textContent).toContain('창을 닫아도 앱 켜 두기');
     expect(q('desktop-setting-keepRunning-note')!.textContent).toBe('알림 · 독 배지 · 메뉴 막대 아이콘이 계속 돼요. 에이전트는 이 설정과 상관없이 계속 일해요. 앱을 끝내려면 ⌘Q.');
     const text = container.textContent ?? '';
-    for (const w of ['컴퓨터 알림', '내 손이 필요할 때', '일이 끝났을 때', '오류가 났을 때', '이 컴퓨터만 알림 끄기', '폰과 다른 컴퓨터의 알림은 그대로예요.', '독 아이콘에 기다리는 수 보기', '메뉴 막대에 아이콘 두기']) expect(text, w).toContain(w);
+    for (const w of ['컴퓨터 알림', '내 손이 필요할 때', '일이 끝났을 때', '오류가 났을 때', '이 컴퓨터만 알림 끄기', '폰과 다른 컴퓨터의 알림은 그대로예요.', '독 아이콘에 내 손이 필요한 일 수 보기', '메뉴 막대에 아이콘 두기']) expect(text, w).toContain(w);
   });
   it('en has every word too (the same seven switches)', async () => {
     setBridge(newApp()); await render('en');
