@@ -115,6 +115,13 @@ describe('[SID:5032] initials() skips a leading mark', () => {
     ['«Dev» Ops', 'DO'],
     ['"quote" bot', 'QB'],
     ['[QA]', 'QA'],
+    ['[A]', 'A'], // the closing mark is not part of the letter either
+    ['「A」', 'A'],
+    ['@dev', 'DE'], // a handle's «@» is a mark
+    ["O'Brien", 'OB'],
+    ['(4) 번', '4'], // a digit is a letter for this rule
+    ['- Dev', 'DE'], // a first word that is only a mark is left out: the name is one word «Dev»
+    ['··· 두리', '두'],
   ])('%s → %s', (name, expected) => {
     expect(initials(name)).toBe(expected); // reverted → «[» · «(» · «·» · ««»
   });

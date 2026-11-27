@@ -123,7 +123,7 @@ describe('story 4713 AC3 — the Mac block in the browser\'s «새 프로젝트�
     // several setups, still not a Mac: the count alone — «이 컴퓨터의 앱에서 열려요» would promise an opening that cannot happen (Yuna's note)
     rc.value = { connected_setups: 3 };
     await render();
-    expect(text()).toContain('이 계정에는 Mac 3대가 연결돼 있어요.');
+    expect(text()).toContain('이 계정에 연결된 Mac은 3대예요.');
     expect(text()).not.toContain('이 컴퓨터의 앱');
     await render({ locale: 'en' });
     expect(text()).toContain('3 Macs are connected to this account.');

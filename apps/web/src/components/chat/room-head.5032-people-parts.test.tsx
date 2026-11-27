@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { RoomBarTitle } from './room-head';
+import { RoomBarTitle, RoomHead } from './room-head';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,8 +35,29 @@ describe('RoomBarTitle — the people button (story 5032)', () => {
     expect(btn().textContent).toContain('참여자 보기');
     expect(btn().textContent).toContain('사람 2 · 부를 수 있는 에이전트 1'); // the reader hears the channel head's own line; the glyphs + numbers are hidden from it
     expect(btn().querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThanOrEqual(2);
+    // the drawn glyphs + numbers are hidden from a screen reader: the two count groups are aria-hidden, the sr-only line is not
+    for (const id of ['room-bar-people-humans', 'room-bar-people-agents']) expect(btn().querySelector(`[data-testid="${id}"]`)!.parentElement!.getAttribute('aria-hidden')).toBe('true');
+    expect(btn().querySelector('.sr-only[class]:not([aria-hidden])')?.textContent).toBeTruthy();
     expect(btn().querySelector('[data-icon="person"]')).not.toBeNull();
     expect(btn().querySelector('[data-icon="smart_toy"]')).not.toBeNull();
+  });
+
+  it('the folded desktop head (a short window) forwards the two counts too', async () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q.includes('max-height: 600px'), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
+    try {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <RoomHead title="런칭" chips={[]} addLabel="추가" peopleLabel="참여자 보기" peopleCount={3} peopleParts={{ people: 2, agents: 1, spoken: '사람 2 · 부를 수 있는 에이전트 1' }} />
+          </NextIntlClientProvider>,
+        );
+      });
+      expect(btn().querySelector('[data-testid="room-bar-people-humans"]')?.textContent).toBe('2'); // reverted (peopleParts not forwarded) → one number
+      expect(btn().querySelector('[data-testid="room-bar-people-agents"]')?.textContent).toBe('1');
+    } finally {
+      window.matchMedia = real;
+    }
   });
 
   it('any other room keeps the one number', async () => {

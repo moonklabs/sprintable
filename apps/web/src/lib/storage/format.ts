@@ -83,8 +83,8 @@ export function initials(name: string | null | undefined): string {
   const words = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '?';
   // story 5032 (C2 · PO 11-27, the second look at 390): a name that starts with a mark — «[4846 실측] …», «(내) …», «·x» — drew «[» as its letter. The letter comes from the first LETTER or digit: leading punctuation is skipped
-  // (an emoji is not punctuation — story 4794 keeps it), a word that is only punctuation is left out, and a name made only of punctuation keeps its first character as before.
-  const words2 = words.map((w) => w.replace(/^[\p{P}]+/u, '')).filter(Boolean);
+  // (an emoji is not punctuation — story 4794 keeps it): the marks are dropped from every word («[A]» → «A», «「A」» → «A», «O'Brien» → «OB»), a word that is only punctuation is left out, and a name made only of punctuation keeps its first character as before.
+  const words2 = words.map((w) => w.replace(/\p{P}+/gu, '')).filter(Boolean);
   const parts = words2.length > 0 ? words2 : [words[0] ?? ''];
   const first = parts[0] ?? '';
   const isLatin = /[a-zA-Z]/.test(first);
