@@ -106,7 +106,7 @@ export function AddParticipantModal({
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <DialogTitle className="text-sm font-semibold text-foreground">{t('addParticipantsTitle')}</DialogTitle>
           <button type="button" onClick={onClose} aria-label={tc('close')} className="text-muted-foreground hover:text-foreground">
-            <X className="h-4 w-4" />
+            <X className="size-ds-icon-sm" />
           </button>
         </div>
 
@@ -145,7 +145,7 @@ export function AddParticipantModal({
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}
-                    {selected === m.id && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
+                    {selected === m.id && <Check className="size-ds-icon-sm flex-shrink-0 text-primary" />}
                   </button>
                 </li>
               ))}

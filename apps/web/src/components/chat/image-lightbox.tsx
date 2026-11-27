@@ -194,14 +194,14 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                   title={t('lightboxOpenOriginal')}
                   className="flex size-9 items-center justify-center rounded-full text-on-scrim/80 transition hover:bg-on-scrim-fill-1 hover:text-on-scrim"
                 >
-                  <ExternalLink className="h-4.5 w-4.5" aria-hidden />
+                  <ExternalLink className="size-ds-icon-sm" aria-hidden />
                 </a>
               )}
               <DialogPrimitive.Close
                 aria-label={t('lightboxClose')}
                 className="flex size-9 touch:size-11 items-center justify-center rounded-full text-on-scrim/80 transition hover:bg-on-scrim-fill-1 hover:text-on-scrim"
               >
-                <X className="h-5 w-5" aria-hidden />
+                <X className="size-ds-icon-md" aria-hidden />
               </DialogPrimitive.Close>
             </div>
           </div>
@@ -215,7 +215,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 aria-label={t('lightboxPrev')}
                 className="absolute left-2 top-1/2 z-10 flex size-10 touch:size-11 -translate-y-1/2 items-center justify-center rounded-full bg-scrim-2 text-on-scrim transition hover:bg-scrim-3 lg:left-4"
               >
-                <ChevronLeft className="h-6 w-6" aria-hidden />
+                <ChevronLeft className="size-ds-icon-lg" aria-hidden />
               </button>
             )}
             {hasMultiple && index < items.length - 1 && (
@@ -225,12 +225,12 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 aria-label={t('lightboxNext')}
                 className="absolute right-2 top-1/2 z-10 flex size-10 touch:size-11 -translate-y-1/2 items-center justify-center rounded-full bg-scrim-2 text-on-scrim transition hover:bg-scrim-3 lg:right-4"
               >
-                <ChevronRight className="h-6 w-6" aria-hidden />
+                <ChevronRight className="size-ds-icon-lg" aria-hidden />
               </button>
             )}
 
             {signState === 'fetching' && (
-              <Loader2 className="h-8 w-8 animate-spin text-on-scrim/60" aria-label={current.alt} />
+              <Loader2 className="size-ds-icon-lg animate-spin text-on-scrim/60" aria-label={current.alt} />
             )}
             {signState === 'denied' && (
               <p className="text-sm text-on-scrim/70">{t('attachmentDenied')}</p>
@@ -254,7 +254,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                     download={current.alt}
                     className="flex items-center gap-1.5 rounded px-3 py-1.5 hover:text-on-scrim"
                   >
-                    <Download className="h-4 w-4" aria-hidden />
+                    <Download className="size-ds-icon-sm" aria-hidden />
                     {t('mediaDownload')}
                   </a>
                 </div>

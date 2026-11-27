@@ -773,7 +773,7 @@ export function EntityPreviewModal({
           className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
           aria-label={tc('close')}
         >
-          <X className="h-4 w-4" />
+          <X className="size-ds-icon-sm" />
         </button>
       )}
     </div>
@@ -820,7 +820,7 @@ export function EntityPreviewModal({
           onClick={onClose}
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ExternalLink className="size-ds-icon-sm" />
           {linkKind === 'via-parent'
             ? (parentKind === 'epic' ? t('goToParentGoal') : parentKind === 'doc' ? t('goToParentDoc') : t('goToParentStory'))
             : t('viewAll')}
@@ -1005,7 +1005,7 @@ export function EmbedCard({
             aria-label={t('preview')}
             title={t('preview')}
           >
-            <Eye className="size-3.5" />
+            <Eye className="size-ds-icon-sm" />
           </button>
         </div>
         {showModal && (

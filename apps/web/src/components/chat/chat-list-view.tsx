@@ -314,7 +314,7 @@ function ConversationRow({
         />
       ) : (
         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
-          <Icon name={isChannel ? 'tag' : conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
+          <Icon name={isChannel ? 'tag' : conv.type === 'dm' ? 'chat_bubble' : 'groups'} size="md" />
         </div>
       )}
 
@@ -385,7 +385,7 @@ function OutsideProjectRow({
       <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         conv.type === 'dm' ? 'bg-ds-action-soft text-primary' : 'bg-info-tint text-foreground'
       }`}>
-        {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        {conv.type === 'dm' ? <MessageSquare className="size-ds-icon-sm" /> : <Users className="size-ds-icon-sm" />}
       </div>
       <div className="min-w-0 flex-1">
         {/* story #2969 §1.3-b(PR-5) — 대화명=Claim(600), ConversationRow와 동일 처방. */}

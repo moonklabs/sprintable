@@ -619,7 +619,7 @@ function ApprovalRequestBody({
     ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
     : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label });
   const tossButton = (
-    <DsButton type="button" variant="quiet" onClick={() => setTossOpen(true)} iconStart={<Forward className="h-3.5 w-3.5" aria-hidden />}>
+    <DsButton type="button" variant="quiet" onClick={() => setTossOpen(true)} iconStart={<Forward className="size-ds-icon-md" aria-hidden />}>
       {t('approvalRequestTossTrigger')}
     </DsButton>
   );

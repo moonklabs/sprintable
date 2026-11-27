@@ -160,7 +160,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
   return (
     <>
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <Icon className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{target.label}</span>
         <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{FORMAT_LABEL_LITERAL[format] ?? tChats(FORMAT_LABEL_KEYS[format as Exclude<Format, 'html' | 'pdf'>])}</span>
         <button
@@ -171,7 +171,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           aria-label={tChats('openFullscreen')}
           title={tChats('fullscreen')}
         >
-          <Expand className="h-4 w-4" />
+          <Expand className="size-ds-icon-sm" />
         </button>
         <button
           type="button"
@@ -181,7 +181,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           aria-label={tChats('mediaDownload')}
           title={tChats('mediaDownload')}
         >
-          <Download className="h-4 w-4" />
+          <Download className="size-ds-icon-sm" />
         </button>
         <button
           type="button"
@@ -189,7 +189,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label={tChats('closePanel')}
         >
-          <X className="h-4 w-4" />
+          <X className="size-ds-icon-sm" />
         </button>
       </div>
 
@@ -268,7 +268,7 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
       if (!assetId) {
         return (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <FileText className="size-8 text-muted-foreground" aria-hidden />
+            <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
             <p className="text-sm text-foreground">{t('previewPreparing')}</p>
             <p className="text-xs text-muted-foreground">{t('attachmentNoConvertId')} {t('downloadToCheck')}</p>
           </div>
@@ -278,7 +278,7 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
     case 'office':
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-          <FileText className="size-8 text-muted-foreground" aria-hidden />
+          <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
           <p className="text-sm text-foreground">{t('previewPreparing')}</p>
           <p className="text-xs text-muted-foreground">{t('officeNotSupported')} {t('downloadToCheck')}</p>
         </div>
@@ -286,7 +286,7 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
     default:
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-          <File className="size-8 text-muted-foreground" aria-hidden />
+          <File className="size-ds-icon-lg text-muted-foreground" aria-hidden />
           <p className="text-sm text-foreground">{t('formatNoPreview')}</p>
           <p className="text-xs text-muted-foreground">{t('downloadToCheck')}</p>
         </div>
@@ -405,7 +405,7 @@ function DocxBody({ url, label }: { url: string; label: string }) {
   if (status === 'failed') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
         <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
         <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
@@ -502,7 +502,7 @@ function PdfBody({ url, label }: { url: string; label: string }) {
   if (status === 'failed') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
         <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
         <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
@@ -512,7 +512,7 @@ function PdfBody({ url, label }: { url: string; label: string }) {
   if (status === 'loading') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+        <Loader2 className="size-ds-icon-lg animate-spin text-muted-foreground" aria-hidden />
       </div>
     );
   }
@@ -579,7 +579,7 @@ function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
   if (status === 'failed') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
         <p className="text-sm text-foreground">{t('previewRenderFailed')}</p>
         <p className="text-xs text-muted-foreground">{t('inAppRenderFailed')} {t('downloadToCheck')}</p>
       </div>
@@ -589,7 +589,7 @@ function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
   if (status === 'loading') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+        <Loader2 className="size-ds-icon-lg animate-spin text-muted-foreground" aria-hidden />
       </div>
     );
   }
@@ -723,7 +723,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
   if (status === 'failed') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <FileText className="size-ds-icon-lg text-muted-foreground" aria-hidden />
         <p className="text-sm text-foreground">{t('conversionFailed')}</p>
         <p className="text-xs text-muted-foreground">{t('pdfConversionFailedDesc')} {t('downloadToCheck')}</p>
         {failMessage && (
@@ -736,7 +736,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
   if (status === 'converting') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+        <Loader2 className="size-ds-icon-lg animate-spin text-muted-foreground" aria-hidden />
         <p className="text-sm text-foreground">{preparingLarge ? t('convertingContinues') : t('converting')}</p>
         <p className="break-keep text-xs text-muted-foreground">
           {preparingLarge ? tCommon('backgroundJobSlow') : t('firstViewSlowNotice', { elapsed: elapsedSec })}

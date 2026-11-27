@@ -104,7 +104,7 @@ export function RoomPeoplePopover({ peopleLabel, peopleCount, peopleParts, chips
   if (peopleCount <= 0) return null;
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button variant="quiet" title={peopleLabel} data-testid="room-bar-people" iconStart={<Icon name="groups" size={16} />} className={`shrink-0 px-2 ${className ?? ''}`} />}>
+      <PopoverTrigger render={<Button variant="quiet" title={peopleLabel} data-testid="room-bar-people" iconStart={<Icon name="groups" size="sm" />} className={`shrink-0 px-2 ${className ?? ''}`} />}>
         {/* the name the reader hears is «참여자 보기 3»: the fixed label (sr-only) + the number (visible) */}
         <span className="sr-only">{peopleLabel} </span>
         {peopleParts ? (
@@ -128,7 +128,7 @@ export function RoomPeoplePopover({ peopleLabel, peopleCount, peopleParts, chips
           ))}
           {moreCount > 0 ? <li data-testid="room-head-more" className="text-ds-mono-md tabular-nums text-ds-ink-3">+{moreCount}</li> : null}
         </ul>
-        {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size={16} />} onClick={() => { setOpen(false); onAdd(); }} data-testid="room-head-add">{addLabel}</Button> : null}
+        {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size="md" />} onClick={() => { setOpen(false); onAdd(); }} data-testid="room-head-add">{addLabel}</Button> : null}
       </PopoverContent>
     </Popover>
   );

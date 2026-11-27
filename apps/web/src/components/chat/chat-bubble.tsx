@@ -241,7 +241,7 @@ function CopyableCode({ raw, inline, className, onMine = false }: { raw: string;
         title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
         className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-overlay-fill-3 group-hover/code:opacity-100"
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className={copyFailed ? 'size-3.5 text-destructive' : 'size-3.5'} />}
+        {copied ? <Check className="size-ds-icon-sm" /> : <Copy className={copyFailed ? 'size-ds-icon-sm text-destructive' : 'size-ds-icon-sm'} />}
       </button>
     </span>
   );
@@ -786,7 +786,7 @@ export function ChatBubble({
               onClick={handleOpenThread}
               className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 touch:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine && !plainRow ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
-              <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
+              <MessageSquareReply className="size-ds-icon-sm" aria-hidden="true" />
             </Button>
           )}
           {/* Sender name — hidden when grouped */}
@@ -1076,7 +1076,7 @@ export function ChatBubble({
               onClick={handleOpenMenuButton}
               className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
-              <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              <MoreHorizontal className="size-ds-icon-sm" aria-hidden="true" />
             </Button>
             {onOpenThread && (
               <Button
@@ -1087,7 +1087,7 @@ export function ChatBubble({
                 onClick={handleOpenThread}
                 className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-10' : 'left-full ml-10'}`}
               >
-                <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
+                <MessageSquareReply className="size-ds-icon-sm" aria-hidden="true" />
               </Button>
             )}
           </span>

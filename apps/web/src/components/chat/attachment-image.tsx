@@ -122,7 +122,7 @@ export function AttachmentImage({ storedUrl, conversationId, storyId, alt, onOpe
   if (state === 'denied') {
     return (
       <div className={`${FRAME_CLASS} flex-col gap-1.5 text-muted-foreground`}>
-        <Lock className="h-4 w-4" aria-hidden />
+        <Lock className="size-ds-icon-sm" aria-hidden />
         <span className="text-xs">{t('attachmentDenied')}</span>
       </div>
     );
@@ -135,7 +135,7 @@ export function AttachmentImage({ storedUrl, conversationId, storyId, alt, onOpe
           onClick={reload}
           className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          <RefreshCw className="size-ds-icon-sm" aria-hidden />
           {t('attachmentReload')}
         </button>
       </div>

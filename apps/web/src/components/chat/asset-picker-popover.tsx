@@ -143,7 +143,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
     >
       {/* 헤더 */}
       <div className="flex items-center gap-2 px-3 pb-2 pt-3 text-xs font-semibold">
-        <FolderOpen className="size-4 shrink-0 text-info" aria-hidden />
+        <FolderOpen className="size-ds-icon-sm shrink-0 text-info" aria-hidden />
         <span className="text-foreground">{t('assetPickerTitle')}</span>
         <span className="ml-auto rounded-md border border-border bg-muted px-1 py-px text-micro font-normal text-muted-foreground">
           esc
@@ -152,7 +152,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
 
       {/* 검색 */}
       <div className="relative mx-3 mb-2">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-ds-icon-sm -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input
           ref={searchRef}
           type="text"
@@ -226,7 +226,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
                   onClick={() => setReloadKey((k) => k + 1)}
                   className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                 >
-                  <RefreshCw className="size-3.5" aria-hidden />
+                  <RefreshCw className="size-ds-icon-sm" aria-hidden />
                   {t('assetPickerRetry')}
                 </button>
               }
@@ -269,7 +269,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
                   >
                     {/* 썸네일 30×30 — 타입 틴트 글리프(서명 썸네일 필드 부재 → 글리프). */}
                     <span className={`grid size-[30px] shrink-0 place-items-center overflow-hidden rounded-sm ${tint}`}>
-                      <Icon className="size-4" />
+                      <Icon className="size-ds-icon-sm" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className={`block truncate text-xs text-foreground ${sel ? 'font-semibold' : ''}`}>

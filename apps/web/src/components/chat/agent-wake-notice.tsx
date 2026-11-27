@@ -32,7 +32,7 @@ export function AgentWakeNotice({ targets }: { targets: AgentWakeTarget[] }) {
       role="status"
       className="mx-2 mt-1 flex items-start gap-2.5 rounded-xl border border-info-border bg-info-tint px-3.5 py-2.5 text-left"
     >
-      <Info className="mt-0.5 h-[18px] w-[18px] shrink-0 text-info" aria-hidden />
+      <Info className="mt-0.5 size-ds-icon-sm shrink-0 text-info" aria-hidden />
       <div className="min-w-0 space-y-1.5">
         <p className="text-sm text-foreground">{lead}</p>
         <div className="flex flex-wrap items-center gap-2">
@@ -43,7 +43,7 @@ export function AgentWakeNotice({ targets }: { targets: AgentWakeTarget[] }) {
             data-testid="agent-wake-copy"
             onClick={() => { void copyTextSafely(prompt).then((r) => { if (r.ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } }); }}
           >
-            {copied ? <><Check className="h-3.5 w-3.5" />{t('agentWakeCopied')}</> : <><Copy className="h-3.5 w-3.5" />{t('agentWakeCopy')}</>}
+            {copied ? <><Check className="size-ds-icon-sm" />{t('agentWakeCopied')}</> : <><Copy className="size-ds-icon-sm" />{t('agentWakeCopy')}</>}
           </Button>
         </div>
         <p className="text-sm text-foreground">
@@ -54,7 +54,7 @@ export function AgentWakeNotice({ targets }: { targets: AgentWakeTarget[] }) {
             className="inline-flex items-center gap-1 rounded text-xs font-medium text-info underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {t('agentWakeAppLink')}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            <ArrowRight className="size-ds-icon-sm" aria-hidden />
           </Link>
         </p>
       </div>

@@ -100,9 +100,9 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
         <span className="text-xs font-semibold text-foreground">{t('pulseLabel')}</span>
         <span className="min-w-0 flex-1 truncate text-editorial-meta text-muted-foreground">{epicSummary}</span>
         {expanded ? (
-          <ChevronUp className="ml-auto size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronUp className="ml-auto size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : (
-          <ChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown className="ml-auto size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
       </Button>
       {expanded && (

@@ -37,7 +37,7 @@ export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
           <Button asChild variant="quiet">
             <Link href={flatHref(`/organization/workforce/${hint.agent_id}`)}>
               {t('commandBlockedSettings')}
-              <Icon name="arrow_forward" size={14} aria-hidden />
+              <Icon name="arrow_forward" size="sm" aria-hidden />
             </Link>
           </Button>
         )}

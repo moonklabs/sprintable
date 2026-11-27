@@ -584,7 +584,7 @@ function EventPublishActionButton({
     return (
       <div className="flex items-center gap-2">
         <Button type="button" size="sm" disabled title={t('eventActionUnauthorized')}>
-          <Send className="h-3.5 w-3.5" aria-hidden />
+          <Send className="size-ds-icon-sm" aria-hidden />
           {label}
         </Button>
         <p className="text-editorial-meta text-muted-foreground">{t('eventActionUnauthorized')}</p>
@@ -629,7 +629,7 @@ function EventPublishActionButton({
   return (
     <div className="flex flex-col gap-1">
       <Button type="button" size="sm" onClick={() => void handleClick()} disabled={publishing}>
-        <Send className="h-3.5 w-3.5" aria-hidden />
+        <Send className="size-ds-icon-sm" aria-hidden />
         {label}
       </Button>
       {error && (

@@ -27,7 +27,7 @@ export function ConnectionLostBanner({ polling, onRefresh }: ConnectionLostBanne
       data-testid="connection-lost-banner"
       className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground"
     >
-      <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
+      <WifiOff className="size-ds-icon-sm flex-shrink-0" />
       <span className="flex-1" data-testid="connection-lost-banner-text">
         {polling ? t('connectionLostPolling') : t('connectionLost')}
       </span>

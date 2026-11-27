@@ -1041,7 +1041,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             onClick={closeThread}
             className="flex min-h-ds-touch items-center gap-1 px-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="size-ds-icon-md" />
             {t('title')}
           </button>
           <span className="truncate text-sm font-medium text-foreground">{t('threadLabel')}</span>
@@ -1072,7 +1072,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               별도 dismiss 상태 불요). */}
           {unconnectedAgentParticipants.length > 0 && (
             <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
-              <UserX className="h-3.5 w-3.5 flex-shrink-0" />
+              <UserX className="size-ds-icon-sm flex-shrink-0" />
               <span className="flex-1">
                 {unconnectedAgentParticipants.length === 1
                   ? agentNotConnectedBannerText(unconnectedAgentParticipants[0]!, t, tc)
@@ -1098,7 +1098,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                 style={{ height: isRefreshing ? 40 : pullDistance * 0.6 }}
               >
                 <RefreshCw
-                  className={`h-5 w-5 text-muted-foreground transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
+                  className={`size-ds-icon-md text-muted-foreground transition-transform ${isRefreshing ? 'animate-spin' : ''}`}
                   style={{ transform: `rotate(${(pullDistance / PULL_THRESHOLD) * 180}deg)` }}
                 />
               </div>

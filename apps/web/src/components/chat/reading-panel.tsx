@@ -127,7 +127,7 @@ export function ReadingPanel({
               title={t('closeAll')}
               className={`shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground ${onToggleExpanded ? '' : 'ml-auto'}`}
             >
-              <X className="size-3.5" />
+              <X className="size-ds-icon-sm" />
             </button>
           )}
         </div>

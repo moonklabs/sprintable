@@ -159,7 +159,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         onClick={toggleManualExpand} aria-expanded={railMode !== 'collapsed'}
         className={`fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block 2xl:hidden ${railMode !== 'collapsed' ? '!hidden' : ''}`}
       >
-        <PanelLeftOpen className="h-4 w-4" />
+        <PanelLeftOpen className="size-ds-icon-sm" />
       </button>
 
       {/* 대화 outlet — 모바일은 리스트가 아닌 라우트(`/chats/[id]`)일 때만 전체화면, 데스크톱은

@@ -23,7 +23,7 @@ const twMerge = extendTailwindMerge({
         'ds-title', 'ds-card-title', 'ds-body', 'ds-small', 'ds-mono-lg', 'ds-mono-md', 'ds-mono-sm',
       ],
       // UI-3(a9d56577) 밀도 · 그림자 · 움직임 토큰(design-system.css `@theme`) — 안 알리면 `cn('h-ds-control', 'h-8')`처럼 호출부의 덮어쓰기가 조용히 안 먹는다.
-      'spacing': ['ds-control-sm', 'ds-compact', 'ds-control', 'ds-touch', 'ds-control-xl', 'ds-row'],
+      'spacing': ['ds-control-sm', 'ds-compact', 'ds-control', 'ds-touch', 'ds-control-xl', 'ds-row', 'ds-icon-sm', 'ds-icon-md', 'ds-icon-lg'], // story 5048 ④-②: 아이콘 크기 단계(size-ds-icon-*) — 알려야 `cn('size-4', 'size-ds-icon-md')`가 하나로 합쳐진다
       'shadow': ['ds-popup', 'ds-overlay'],
       'animate': ['ds-pulse', 'ds-slide-in'],
     },

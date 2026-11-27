@@ -122,7 +122,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
 
   return (
     <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-ds-line-control bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-foreground">
-      <ArrowUpCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
+      <ArrowUpCircle className="size-ds-icon-sm shrink-0 text-primary" aria-hidden />
       <span className="flex-1">{t(suggestion.label)}</span>
       {state.status === 'failed' && <span className="text-destructive">{t('intentSuggestionFailed')}</span>}
       {suggestion.kind === 'approval' ? (
@@ -149,7 +149,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
         </button>
       )}
       <button type="button" onClick={handleDismiss} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t('intentSuggestionDismiss')}>
-        <X className="size-3.5" aria-hidden />
+        <X className="size-ds-icon-sm" aria-hidden />
       </button>
     </div>
   );

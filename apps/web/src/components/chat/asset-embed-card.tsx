@@ -92,7 +92,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
     return (
       <div className="mt-2 flex max-w-75 items-center gap-2.5 rounded-md border border-border bg-ds-surface-sunk px-2.5 py-2">
         <span className="grid size-[38px] shrink-0 place-items-center rounded-sm bg-muted text-ds-ink-2">
-          {fileGlyph(null, 'size-[17px]')}
+          {fileGlyph(null, 'size-ds-icon-sm')}
         </span>
         <div className="min-w-0 flex-1">
           <p className={`truncate text-xs font-semibold ${nameTone}`}>{label}</p>
@@ -111,13 +111,13 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
     <>
       {/* 썸네일 38×38 — 타입 틴트 글리프(서명 썸네일 필드 부재 → 글리프, 추후 affordance). */}
       <span className={`grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-sm ${tint}`}>
-        {fileGlyph(asset.content_type, 'size-[17px]')}
+        {fileGlyph(asset.content_type, 'size-ds-icon-sm')}
       </span>
       <div className="min-w-0 flex-1">
         <p className={`truncate text-xs font-semibold ${nameTone}`}>{asset.name}</p>
         <p className={`mt-px text-editorial-meta ${metaTone}`}>{meta}</p>
       </div>
-      <ExternalLink className={`size-[15px] shrink-0 ${arrowTone}`} aria-hidden />
+      <ExternalLink className={`size-ds-icon-sm shrink-0 ${arrowTone}`} aria-hidden />
     </>
   );
 

@@ -82,7 +82,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
         onClick={() => { onReply(); onClose(); }}
         className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
       >
-        <MessageSquareReply className="h-3.5 w-3.5 text-muted-foreground" />
+        <MessageSquareReply className="size-ds-icon-sm text-muted-foreground" />
         {tChats('replyToMessage')}
       </button>
       {hasSelection && (
@@ -93,7 +93,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
           onClick={() => { onCopySelection?.(); onClose(); }}
           className="flex h-auto min-h-0 w-full min-w-0 justify-start gap-2.5 whitespace-nowrap rounded-none border-0 px-3 py-2 text-sm font-normal"
         >
-          <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+          <Copy className="size-ds-icon-sm text-muted-foreground" />
           {tChats('copySelection')}
         </Button>
       )}
@@ -103,7 +103,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
         onClick={() => { onCopy(); onClose(); }}
         className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
       >
-        <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+        <Copy className="size-ds-icon-sm text-muted-foreground" />
         {tChats('copyMessage')}
       </button>
       {!isMine && onBlock && (
@@ -113,7 +113,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
           onClick={() => { onBlock(); onClose(); }}
           className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
         >
-          <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
+          <ShieldOff className="size-ds-icon-sm text-muted-foreground" />
           {tChats('blockUserConfirmConfirm')}
         </button>
       )}
@@ -124,7 +124,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
           onClick={() => { citeAction.onSelect(); onClose(); }}
           className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
         >
-          <Quote className="h-3.5 w-3.5 text-muted-foreground" />
+          <Quote className="size-ds-icon-sm text-muted-foreground" />
           {citeAction.kind === 'start' ? tChats('citeFromHere') : tChats('citeToHere')}
         </button>
       )}
@@ -137,7 +137,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText
             onClick={() => { onDelete(); onClose(); }}
             className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm text-foreground hover:bg-destructive-tint"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="size-ds-icon-sm" />
             {tc('delete')}
           </button>
         </>

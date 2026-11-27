@@ -72,7 +72,7 @@ function NowStripCard({ item }: { item: NowStripItem }) {
     >
       <span className={cn('h-full w-[3px] shrink-0 self-stretch rounded-full', SEVERITY_SOLID_BG[item.severity])} aria-hidden="true" />
       <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-        <Icon className="size-3.5" aria-hidden="true" />
+        <Icon className="size-ds-icon-sm" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-foreground">{item.title}</span>
@@ -225,9 +225,9 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
           )}
         </span>
         {expanded ? (
-          <ChevronUp className="ml-auto size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronUp className="ml-auto size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : (
-          <ChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown className="ml-auto size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
         <span className="sr-only">{expanded ? t('nowStripCollapse') : t('nowStripExpand')}</span>
       </Button>

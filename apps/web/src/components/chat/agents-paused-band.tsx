@@ -99,7 +99,7 @@ export function AgentsPausedBand({ conversationId, state, onResumed }: {
     <section className={`sticky top-0 z-10 border-b ${tone} break-keep`} data-testid="agents-paused-band" aria-labelledby="agents-paused-title">
       <div className="flex flex-col gap-1 px-4 py-3">
         <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-foreground">
-          <Pause className="size-3.5 shrink-0 self-center" aria-hidden />
+          <Pause className="size-ds-icon-sm shrink-0 self-center" aria-hidden />
           <span id="agents-paused-title" className="font-semibold">{t('title')}</span>
           {/* muted beside the title (Yuna §1) — but never muted on the warning tint (§6) */}
           <span className={`text-xs ${tinted ? 'text-foreground' : 'text-muted-foreground'}`} data-testid="agents-paused-since" title={format.dateTime(opened, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz })}>
