@@ -29,11 +29,19 @@ export interface AgentActionView {
   changed: boolean;
   /** the card offers «always allow» (story 5041 ②): the server says so — only to an organisation owner / admin, for an action that has an auto slot, while the ask is open */
   alwaysAllowAvailable: boolean;
+  /** story 5041 B6 — a «화면 열기» card: this is done by a person on a screen (a connection · a credential), nothing is kept to approve — a button to the screen and a way to close the card. `href` is one of the server's closed list, an app-internal path */
+  screen: { key: string; href: string } | null;
 }
 
 const STATES: readonly string[] = ['pending', 'retry', 'running', 'executed', 'failed', 'rejected', 'expired'];
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const nameOf = (v: unknown): string | null => (obj(v) && typeof v.name === 'string' && v.name.trim() !== '' ? v.name.trim() : null);
+
+/** the screen of a «화면 열기» card: a key and an app-internal path (one `/`, then a letter — never a scheme or `//`), else none */
+function screenOf(v: unknown): { key: string; href: string } | null {
+  if (!obj(v) || typeof v.key !== 'string' || typeof v.href !== 'string') return null;
+  return /^\/[a-z][a-z0-9/-]*$/.test(v.href) ? { key: v.key, href: v.href } : null;
+}
 
 /** the server's body → the card's picture, or `null` when it is not one (a fault worth «try again» — never a guessed card) */
 export function parseAgentAction(raw: unknown): AgentActionView | null {
@@ -57,6 +65,7 @@ export function parseAgentAction(raw: unknown): AgentActionView | null {
     gone: raw.state === 'executed' && typeof raw.action_key === 'string' && raw.action_key.endsWith('.delete') && target !== null,
     changed: raw.state === 'failed' && status !== null && [404, 409, 410, 422].includes(status),
     alwaysAllowAvailable: raw.always_allow_available === true,
+    screen: screenOf(raw.screen),
   };
 }
 

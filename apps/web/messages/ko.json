@@ -6292,6 +6292,8 @@
     "deployRevokeYes": "빼기",
     "deployRevokeNo": "취소",
     "agentActionAskedBy": "{name}님이 요청했어요",
+    "agentActionOpenScreen": "화면 열기",
+    "agentActionScreenDismiss": "닫기",
     "agentActionApprove": "승인하기",
     "agentActionReject": "거절하기",
     "agentActionConfirmAsk": "되돌릴 수 없는 일이에요. 정말 승인할까요?",

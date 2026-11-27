@@ -6292,6 +6292,8 @@
     "deployRevokeYes": "Remove",
     "deployRevokeNo": "Cancel",
     "agentActionAskedBy": "Requested by {name}",
+    "agentActionOpenScreen": "Open the screen",
+    "agentActionScreenDismiss": "Close",
     "agentActionApprove": "Approve",
     "agentActionReject": "Decline",
     "agentActionConfirmAsk": "This cannot be undone. Approve it?",

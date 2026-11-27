@@ -248,10 +248,121 @@ def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
     return t(spec.what_key, locale, target=plain_text(target_label, 120) or "—")
 
 
+# story 5041 B6 — «화면 열기»: roads whose purpose is that a PERSON does it on the screen themselves (a connection, a credential: nothing of it may be kept for a later press). An agent that calls one gets its 403 as
+# before and a CARD is put in front of the person: what it is, and a button to the screen. The card keeps nothing but the screen's key — no stored call, no body, no secret. A closed list: `href` is the web route.
+SCREENS: dict[str, str] = {
+    "channel_connections": "/organization/channels",
+    "generation_connectors": "/organization/generation-connectors",
+}
+
+
+class OpenScreenRequired(HTTPException):
+    """raised by a road's «people only» guard when the caller is an AGENT and the road belongs to a screen in `SCREENS`: the app's handler (main.py) puts the card in front of the person — in its OWN session, the road's
+    is rolled back by the 403 — and answers the agent the SAME 403 (the road's own code and message) with `open_screen` added to the body."""
+
+    def __init__(self, screen_key: str, *, org_id: uuid.UUID, agent: Any, detail: dict[str, Any]) -> None:
+        # the road's OWN refusal body, unchanged (its code and message stay what every older caller and test reads), plus the one word that tells the agent a card was put in front of the person
+        super().__init__(status_code=403, detail={**detail, "open_screen": screen_key})
+        self.screen_key, self.org_id, self.agent = screen_key, org_id, agent
+
+
+async def _screen_project_id(session: AsyncSession, request: Request, *, agent: Any, org_id: uuid.UUID) -> uuid.UUID | None:
+    """the project the card is filed under: the project of the room the agent's RUN was started in, else the first project the agent holds (a card needs a project to be routed and read for a viewer); none → no card"""
+    from app.models.agent_run import AgentRun
+    from app.models.conversation import Conversation
+    from app.models.project import Project
+    from app.models.project_access import ProjectAccess
+
+    raw = request.headers.get("x-sprintable-run-id")
+    try:
+        run_id = uuid.UUID(raw) if raw else None
+    except ValueError:
+        run_id = None
+    if run_id is not None:
+        found = (await session.execute(
+            select(Conversation.project_id).join(AgentRun, AgentRun.conversation_id == Conversation.id)
+            .where(AgentRun.id == run_id, AgentRun.agent_id == agent.id, AgentRun.org_id == org_id, AgentRun.status == "running", Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if found is not None:
+            return found
+    return (await session.execute(
+        select(ProjectAccess.project_id).join(Project, Project.id == ProjectAccess.project_id)
+        .where(ProjectAccess.member_id == agent.id, ProjectAccess.permission == "granted", Project.org_id == org_id, Project.deleted_at.is_(None))
+        .order_by(ProjectAccess.created_at, ProjectAccess.id).limit(1)
+    )).scalar_one_or_none()
+
+
+async def request_open_screen(request: Request, session: AsyncSession, *, org_id: uuid.UUID, agent: Any, screen_key: str, locale: str | None = None) -> uuid.UUID | None:
+    """the card for «a person does this on the screen»: one open card per agent and screen (the same call again is the same card), counted in the same hourly ceiling as an ask, delivered the way an ask is (the room the person
+    asked in, else the DMs of those who may press). Returns the request id, or None when no card could be put (no project to file it under · nobody to show it to) — the agent still gets its 403."""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+
+    if screen_key not in SCREENS:
+        return None
+    locale = locale or resolve_locale_from_request(None, request.headers.get("accept-language"))
+    project_id = await _screen_project_id(session, request, agent=agent, org_id=org_id)
+    if project_id is None:
+        return None
+    now = datetime.now(timezone.utc)
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"agent_action:{org_id}:{agent.id}"})
+    open_same = (await session.execute(
+        select(HitlRequest.id).where(
+            HitlRequest.org_id == org_id, HitlRequest.request_type == REQUEST_TYPE, HitlRequest.agent_id == agent.id, HitlRequest.status == "pending",
+            HitlRequest.deleted_at.is_(None), HitlRequest.expires_at > now, HitlRequest.hitl_metadata["screen"]["key"].astext == screen_key,
+        ).order_by(HitlRequest.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if open_same is not None:
+        return open_same
+    recent = (await session.execute(
+        select(func.count()).select_from(HitlRequest).where(
+            HitlRequest.org_id == org_id, HitlRequest.request_type == REQUEST_TYPE, HitlRequest.agent_id == agent.id,
+            HitlRequest.created_at > now - timedelta(hours=1), HitlRequest.deleted_at.is_(None),
+        )
+    )).scalar_one()
+    if recent >= MAX_OPEN_PER_AGENT_PER_HOUR:
+        return None
+    approvers = await _approver_ids(session, org_id=org_id, agent_id=agent.id)
+    room = await _room_of_request(session, request, agent=agent, org_id=org_id, project_id=project_id)
+    asker = room[1] if room else None
+    what = t(f"agent_action.screen.{screen_key}", locale)
+    req = HitlRequest(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id, agent_id=agent.id, request_type=REQUEST_TYPE,
+        title=what[:300], prompt=t("agent_action.screen.prompt", locale),
+        requested_for=asker or (approvers[0] if approvers else agent.id),
+        status="pending", expires_at=now + EXPIRES_AFTER,
+        hitl_metadata={"action_key": f"screen.{screen_key}", "screen": {"key": screen_key}, "requested_by_agent": {"id": str(agent.id), "name": agent.name}, "cards": []},
+    )
+    session.add(req)
+    await session.flush()
+    text_line = t("agent_action.card_text", locale, what=what, agent=agent.name or "—")
+    cards: list[dict[str, str]] = []
+    from app.services.approval_delivery import lock_rooms_in_id_order, prepare_card_rooms
+
+    if room is not None:
+        await lock_rooms_in_id_order(session, [room[0].id])
+    else:
+        await prepare_card_rooms(session, org_id=org_id, project_id=project_id, requester_id=agent.id, approver_ids=list(approvers))
+    if room is not None:
+        message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=asker, req=req, locale=locale, text_line=text_line, room=room[0])
+        if message_id is not None:
+            cards.append({"approver_id": str(asker) if asker else None, "message_id": str(message_id), "conversation_id": str(room[0].id)})
+    if not cards:
+        for approver_id in approvers:
+            message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=approver_id, req=req, locale=locale, text_line=text_line)
+            if message_id is not None:
+                cards.append({"approver_id": str(approver_id), "message_id": str(message_id)})
+    req.hitl_metadata = {**req.hitl_metadata, "cards": cards}
+    await session.flush()
+    return req.id if cards else None
+
+
 def card_texts(req: HitlRequest, locale: str) -> tuple[str, str]:
     """the card's sentence and its warning, made when it is READ in the reader's language (story 5041 · PO 11-27: on an English screen the card said «되돌릴 수 없어요…» because the stored text was
     written in the language of the agent's request). The stored title / prompt are the fallback for a request whose action this server no longer knows."""
     meta = req.hitl_metadata or {}
+    screen = (meta.get("screen") or {}).get("key")
+    if screen in SCREENS:
+        return t(f"agent_action.screen.{screen}", locale), t("agent_action.screen.prompt", locale)
     spec = SPECS.get(meta.get("action_key", ""))
     if spec is None:
         return req.title, req.prompt

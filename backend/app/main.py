@@ -343,6 +343,24 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+from app.services.agent_action import OpenScreenRequired, request_open_screen  # noqa: E402  (story 5041 B6)
+
+
+@app.exception_handler(OpenScreenRequired)
+async def open_screen_exception_handler(request: Request, exc: OpenScreenRequired) -> JSONResponse:
+    """story 5041 B6 — an agent called a road a PERSON does on the screen: the card goes in front of the person (in this handler's OWN session — the road's was rolled back by the 403) and the agent is answered the same
+    403 as before with `open_screen` in the body. A card that could not be put never changes the answer (best effort — the agent still has its 403)."""
+    from app.core.database import async_session_factory
+
+    try:
+        async with async_session_factory() as session:
+            await request_open_screen(request, session, org_id=exc.org_id, agent=exc.agent, screen_key=exc.screen_key)
+            await session.commit()
+    except Exception:  # noqa: BLE001 — the answer to the agent does not depend on the card
+        logging.getLogger(__name__).warning("open_screen card not posted agent=%s screen=%s", getattr(exc.agent, "id", None), exc.screen_key, exc_info=True)
+    return await http_exception_handler(request, HTTPException(status_code=403, detail=exc.detail))
+
+
 _CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
 # story 4976: a phone's instruction into a running turn (the words are in the body — plain, or as the envelope) is never sent back in a refusal
 _DESKTOP_COMMAND_PATH = re.compile(r"/api/v2/agents/[^/]+/desktop-commands")

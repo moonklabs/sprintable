@@ -56,13 +56,16 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     TeamMember.type="agent"로 정확히 판정(S1의 actor_type fail-closed 원칙과 동일 축)."""
     resolved = await resolve_member(auth, org_id, db)
     if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "CHANNEL_CONNECTION_HUMAN_ONLY",
-                "message": "채널 연결은 휴먼 멤버만 가능합니다(에이전트는 토큰을 읽거나 다룰 수 없습니다).",
-            },
-        )
+        # story 5041 B6 — a connection is made on the screen by a person: the agent still gets this 403 (its code is kept below for the card-less case), and a CARD with a button to the screen is put in front of the person
+        from app.services.agent_action import SCREENS, OpenScreenRequired
+
+        refusal = {
+            "code": "CHANNEL_CONNECTION_HUMAN_ONLY",
+            "message": "채널 연결은 휴먼 멤버만 가능합니다(에이전트는 토큰을 읽거나 다룰 수 없습니다).",
+        }
+        if resolved.type == "agent" and "channel_connections" in SCREENS:
+            raise OpenScreenRequired("channel_connections", org_id=org_id, agent=resolved, detail=refusal)
+        raise HTTPException(status_code=403, detail=refusal)
     return resolved
 
 

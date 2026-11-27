@@ -62,6 +62,11 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID)
     # 같은 축, 새 한글 문장 0).
     resolved = await resolve_member(auth, org_id, db)
     if resolved.type != "human":
+        # story 5041 B6 — the credential is typed on the screen by a person: a card with a button to the screen goes to the person, the agent keeps its 403
+        from app.services.agent_action import OpenScreenRequired
+
+        if resolved.type == "agent":
+            raise OpenScreenRequired("generation_connectors", org_id=org_id, agent=resolved, detail={"code": "GENERATION_CONNECTOR_HUMAN_ONLY"})
         raise HTTPException(status_code=403, detail={"code": "GENERATION_CONNECTOR_HUMAN_ONLY"})
     return resolved
 

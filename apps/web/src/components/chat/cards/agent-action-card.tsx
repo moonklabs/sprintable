@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { CardFrame } from './card-frame';
 import { fetchAgentAction, pressAgentAction, type AgentActionView } from './agent-action-access';
 import { EntityCard } from './entity-card';
@@ -30,6 +32,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
   const t = useTranslations('chats');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const busy = phase.kind === 'busy';
+  const flatHref = useFlatHref();
   const press = async (decision: 'approve' | 'reject', alwaysAllow = false) => {
     if (busy) return; // one press at a time
     setPhase({ kind: 'busy' });
@@ -52,7 +55,14 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
         {/* what it is about — the object's own card (title · status; a click opens it in the side panel, read for THIS viewer); once a delete is done there is nothing left to open */}
         {view.target && !view.gone ? <EntityCard kind={view.target.kind} refId={view.target.id} /> : null}
         {view.gone ? <p className="m-0 text-ds-small text-ds-ink-2" data-testid="agent-action-gone">{t('agentActionGone')}</p> : null}
-        {open && phase.kind !== 'confirm' && phase.kind !== 'always' ? (
+        {/* story 5041 B6 — «화면 열기»: a person does this on the screen; nothing is kept to approve. A button to the screen, and a way to close the card (the one decision it has) */}
+        {open && view.screen ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" asChild><Link href={flatHref(view.screen.href)} data-testid="agent-action-open-screen">{t('agentActionOpenScreen')}</Link></Button>
+            <Button variant="quiet" loading={busy} disabled={busy} onClick={() => void press('reject')}>{t('agentActionScreenDismiss')}</Button>
+          </div>
+        ) : null}
+        {open && !view.screen && phase.kind !== 'confirm' && phase.kind !== 'always' ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" loading={busy} disabled={busy} onClick={() => (view.irreversible ? setPhase({ kind: 'confirm' }) : void press('approve'))}>{t('agentActionApprove')}</Button>
             <Button variant="secondary" disabled={busy} onClick={() => void press('reject')}>{t('agentActionReject')}</Button>
@@ -60,7 +70,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
             {view.alwaysAllowAvailable ? <Button variant="quiet" disabled={busy} onClick={() => setPhase({ kind: 'always' })}>{t('agentActionAlwaysAllow')}</Button> : null}
           </div>
         ) : null}
-        {open && phase.kind === 'always' ? (
+        {open && !view.screen && phase.kind === 'always' ? (
           <div className="flex flex-col gap-2" role="group" aria-label={t('agentActionAlwaysAllow')}>
             <p className="m-0 text-ds-small text-ds-ink-2">{t('agentActionAlwaysAllowAsk')}</p>
             <div className="flex flex-wrap items-center gap-2">
@@ -69,7 +79,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
             </div>
           </div>
         ) : null}
-        {open && phase.kind === 'confirm' ? (
+        {open && !view.screen && phase.kind === 'confirm' ? (
           <div className="flex flex-col gap-2" role="group" aria-label={t('agentActionApprove')}>
             <p className="m-0 text-ds-small text-ds-ink-2">{t('agentActionConfirmAsk')}</p>
             <div className="flex flex-wrap items-center gap-2">
@@ -78,7 +88,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
             </div>
           </div>
         ) : null}
-        {view.state === 'pending' ? <p className="m-0 text-ds-small text-ds-ink-3">{t('agentActionPendingHint')}</p> : null}
+        {view.state === 'pending' && !view.screen ? <p className="m-0 text-ds-small text-ds-ink-3">{t('agentActionPendingHint')}</p> : null}
         {outcome ? <p className="m-0 min-w-0 break-words text-ds-small text-ds-ink-2">{outcome}</p> : null}
         {phase.kind === 'error' ? <p role="alert" className="m-0 text-ds-small text-ds-failed">{phase.why === 'forbidden' ? t('agentActionErrForbidden') : t('agentActionErrFault')}</p> : null}
       </div>
