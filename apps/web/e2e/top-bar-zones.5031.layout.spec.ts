@@ -52,10 +52,10 @@ async function build() {
           window.__pathname = cfg.pathname;
           const title = cfg.titleKind === 'none' ? null : cfg.titleKind === 'empty-component' ? React.createElement(function Empty() { return null; }) : cfg.titleKind === 'h1' ? <h1 className="text-sm font-medium">{cfg.title}</h1> : <span className="text-sm font-medium">{cfg.title}</span>;
           createRoot(document.getElementById('root')).render(
-            <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
+            <NextIntlClientProvider locale="ko" messages={cfg.longError ? { ...ko, nav: { ...ko.nav, switcherSwitchOrgError: cfg.longError } } : ko} timeZone="Asia/Seoul">
               <ToastProvider><CommandPaletteProvider><TopBarProvider><SidebarProvider><TeamPresenceToggleProvider value={{ toggle() {}, workingCount: 3, open: false }}>
                 <div id="frame" style={{ width: cfg.frameWidth + 'px' }} className="flex flex-col">
-                  <TopBar className={cfg.hiddenOnPhone ? BAR_HIDDEN_ON_PHONE_CLASS : undefined} orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
+                  <TopBar className={cfg.hiddenOnPhone ? BAR_HIDDEN_ON_PHONE_CLASS : undefined} orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }, ...(cfg.longError ? [{ orgId: 'o2', orgName: '둘째 조직', orgSlug: 'second' }] : [])]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
                   <TopBarSlot title={title} actions={cfg.withActions ? <><button type="button" id="action-btn" className="rounded-ds-control border px-3">액션</button><div id="odd-action" style={{ cursor: 'pointer' }} className="px-2" onClick={() => {}}>기타</div></> : null} />
                 </div>
               </TeamPresenceToggleProvider></SidebarProvider></TopBarProvider></CommandPaletteProvider></ToastProvider>
@@ -65,7 +65,7 @@ async function build() {
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'),
-    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"' },
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"', 'process.env.NEXT_PUBLIC_EE_ENABLED': '"false"' }, // (5a-2: the switcher's dialogs read the EE flag)
     plugins: [routerPlugin(), layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
@@ -76,7 +76,7 @@ async function build() {
   return built;
 }
 
-type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean; hiddenOnPhone?: boolean };
+type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean; hiddenOnPhone?: boolean; /** a very long text for the organization-switch failure line (and a second organization to fail switching to) */ longError?: string };
 const SHORT = { org: '올리베이라', project: '스프린터블' };
 const LONG = { org: '아주아주아주아주아주아주아주아주 긴 조직 이름 주식회사 문클랩스 코리아 서비스', project: '아주아주아주아주아주아주아주아주아주아주아주아주 긴 프로젝트 이름 — 결제 연동과 정산 자동화와 고객 문의 분류' };
 /** the width the shell leaves the bar at a window width: the window − 56 icon bar − 256 list column − 16 inset margins (≥ lg) */
@@ -89,6 +89,8 @@ async function open(page: Page, cfg: Cfg, o: { win: number; desktopApp?: boolean
   await page.route('http://preview.test/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` });
+    // story 5031 (5a-2): the switcher's menu reads the projects of an organization
+    if (url.pathname === '/api/projects') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'p1', name: '스프린터블' }, { id: 'p2', name: '랜딩' }] }) });
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
   });
   if (o.desktopApp) {
@@ -265,5 +267,69 @@ for (const [win, frame] of [[390, 390], [1280, barWidth(1280)]] as const) {
     await expect(nav.getByRole('heading', { name: '실행 기록' })).toHaveCount(1);
     await expect(nav.getByRole('listitem')).toHaveCount(win < 1024 ? 1 : 3);
     expect(await nav.getByRole('listitem').last().getAttribute('aria-current')).toBe('page');
+  });
+}
+
+// story 5031 (5a-2 · PO 11-27): the «조직» / «프로젝트» crumbs open the project switcher's menu. Real keyboard in Chromium (jsdom has no native Enter → click): Enter and Space open it, Esc closes it, focus comes back to the crumb. And in the desktop app the trigger AND the open menu are no-drag.
+for (const key of ['Enter', 'Space'] as const) {
+  test(`[SID:5031] 1280: the project crumb opens its menu with ${key}; Esc closes it and the focus comes back to the crumb; the organization crumb opens the same menu`, async ({ page }) => {
+    await open(page, { pathname: '/acme/sprintable/flow', titleKind: 'span', title: '흐름', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280 });
+    const project = page.getByTestId('top-bar-switcher-project');
+    await expect(project).toHaveAttribute('aria-haspopup', 'menu');
+    await project.focus();
+    await page.keyboard.press(key);
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: '랜딩' })).toBeVisible();
+    const lines = await menu.getByRole('menuitem').allTextContents();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(project, 'the focus returns to the crumb that opened the menu').toBeFocused();
+    const org = page.getByTestId('top-bar-switcher-org');
+    await org.focus();
+    await page.keyboard.press(key);
+    await expect(page.getByRole('menu')).toBeVisible();
+    expect(await page.getByRole('menu').getByRole('menuitem').allTextContents(), 'the same menu').toEqual(lines);
+    await page.keyboard.press('Escape');
+    await expect(org).toBeFocused();
+  });
+}
+
+test('[SID:5031] desktop app: both crumb triggers and the OPEN menu compute `-webkit-app-region: no-drag` (a menu opened under the drag strip must not move the window)', async ({ page }) => {
+  await open(page, { pathname: '/acme/sprintable/flow', titleKind: 'span', title: '흐름', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280, desktopApp: true });
+  const region = (sel: string) => page.evaluate((q) => getComputedStyle(document.querySelector(q)!).getPropertyValue('-webkit-app-region').trim(), sel);
+  expect(await region('[data-testid="top-bar-switcher-org"]')).toBe('no-drag');
+  expect(await region('[data-testid="top-bar-switcher-project"]')).toBe('no-drag');
+  await page.getByTestId('top-bar-switcher-project').click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  expect(await region('[data-slot="dropdown-menu-content"]'), 'the open menu').toBe('no-drag');
+  // and the trigger is a pressable of the strip like the others (the strip itself still drags)
+  expect(await region('[data-testid="top-bar"]')).toBe('drag');
+});
+
+// story 5031 (5a-2 · codex): a failed organization switch says so in a line beside the path. A very long failure text must stay inside the left zone (cut with «…», the whole text in `title`) — not eat the bar or reach the search field and the buttons.
+const LONG_ERROR = '조직을 바꾸지 못했어요. 서버가 응답하지 않거나 네트워크가 끊겼을 수 있어요. 잠시 뒤에 다시 시도해 주세요. 그래도 안 되면 설정의 조직 화면에서 직접 바꾸거나 관리자에게 문의해 주세요. '.repeat(3);
+for (const win of DESKTOP) {
+  test(`[SID:5031] ${win}: a very long organisation-switch failure text is cut inside the left zone — the search field and the buttons stay where they were, no overflow`, async ({ page }) => {
+    const cfg: Cfg = { pathname: '/acme/sprintable/flow', titleKind: 'span', title: '흐름', ...SHORT, frameWidth: barWidth(win), withActions: true, longError: LONG_ERROR };
+    await open(page, cfg, { win });
+    const before = await measure(page);
+    // fail a switch: open the menu, choose the other organization's project (the stubbed session call answers nothing usable)
+    await page.getByTestId('top-bar-switcher-org').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '랜딩' }).last().click();
+    const alert = page.getByRole('alert');
+    await expect(alert).toBeVisible();
+    const after = await measure(page);
+    const err = await alert.boundingBox();
+    console.log(`[5031 error line] win ${win} width ${Math.round(err!.width)} · overflow ${after.barScrollW - after.barClientW}`);
+    expect(await alert.getAttribute('title'), 'the whole text stays reachable').toBe(LONG_ERROR);
+    expect(err!.width, 'the line is held to a width').toBeLessThanOrEqual(192.5);
+    expect(after.barScrollW - after.barClientW, 'no overflow').toBe(0);
+    expect(after.outside).toEqual([]);
+    expect(Math.round(after.field!.l)).toBe(Math.round(before.field!.l));
+    expect(Math.round(after.field!.w)).toBe(Math.round(before.field!.w));
+    expect(Math.round(after.right!.l)).toBe(Math.round(before.right!.l));
+    expect(after.left!.r).toBeLessThanOrEqual(after.center!.l + 0.5);
+    expect(after.barOffsetH).toBe(64);
   });
 }
