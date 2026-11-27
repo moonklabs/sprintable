@@ -52,11 +52,12 @@ describe('[SID:4829] /desktop — the phone cards in local mode', () => {
     const types = await cardsWith('1');
     const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
+    const { DesktopSettingsCard } = await import('@/components/desktop/desktop-settings-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
     const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice');
     const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
     // story 4832: and no «연결된 기기» list — a local install has one computer, nothing to list or disconnect
-    expect(types).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, PhoneRelayLocalNotice]);
+    expect(types).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopSettingsCard, PhoneRelayLocalNotice]);
     expect(types).not.toContain(DesktopDevices);
   });
 
@@ -65,12 +66,13 @@ describe('[SID:4829] /desktop — the phone cards in local mode', () => {
       const types = await cardsWith(value);
       const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
       const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
+      const { DesktopSettingsCard } = await import('@/components/desktop/desktop-settings-card');
       const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
       const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
       const { PhoneSessionManagement } = await import('@/components/desktop/phone-session-management');
       const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
       const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
-      expect(types, `SPRINTABLE_EMBEDDED=${String(value)}`).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
+      expect(types, `SPRINTABLE_EMBEDDED=${String(value)}`).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopSettingsCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
     }
   });
 });

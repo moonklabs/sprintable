@@ -22,6 +22,40 @@ export function appUpdateOfferOf(raw: unknown): AppUpdateOffer | null {
   return Object.freeze({ version: o.version, phase: o.phase as AppUpdateOffer['phase'] });
 }
 
+/** story 5038 (C8 · B 설정 칸): the app's own settings as the page sees them — the app's closed shape (the three notices outside the window, «this computer only», the Dock badge, the menu-bar icon, «keep the app when the window closes»). Booleans only. */
+export const DESKTOP_NOTICE_KINDS = ['needs_hand', 'finished', 'failed'] as const;
+export type DesktopNoticeKind = (typeof DESKTOP_NOTICE_KINDS)[number];
+export interface DesktopSettings {
+  readonly kinds: Readonly<Record<DesktopNoticeKind, boolean>>;
+  readonly thisComputerOff: boolean;
+  readonly dockBadge: boolean;
+  readonly trayIcon: boolean;
+  readonly keepRunning: boolean;
+}
+/** a write: only the keys it names change (`kinds` may name one kind) */
+export interface DesktopSettingsPatch {
+  kinds?: Partial<Record<DesktopNoticeKind, boolean>>;
+  thisComputerOff?: boolean;
+  dockBadge?: boolean;
+  trayIcon?: boolean;
+  keepRunning?: boolean;
+}
+const SETTINGS_FLAGS = ['thisComputerOff', 'dockBadge', 'trayIcon', 'keepRunning'] as const;
+
+/** the settings when they fit the app's closed shape EXACTLY (every flag a boolean, the three kinds booleans) — anything else is «no settings» (null): a half-known shape draws no switch that could lie. A fresh frozen copy. */
+export function desktopSettingsOf(raw: unknown): DesktopSettings | null {
+  const o = raw as Record<string, unknown> | null | undefined;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const k = o.kinds as Record<string, unknown> | null | undefined;
+  if (!k || typeof k !== 'object' || Array.isArray(k)) return null;
+  for (const kind of DESKTOP_NOTICE_KINDS) if (typeof k[kind] !== 'boolean') return null;
+  for (const f of SETTINGS_FLAGS) if (typeof o[f] !== 'boolean') return null;
+  return Object.freeze({
+    kinds: Object.freeze({ needs_hand: k.needs_hand as boolean, finished: k.finished as boolean, failed: k.failed as boolean }),
+    thisComputerOff: o.thisComputerOff as boolean, dockBadge: o.dockBadge as boolean, trayIcon: o.trayIcon as boolean, keepRunning: o.keepRunning as boolean,
+  });
+}
+
 export interface SprintableDesktop {
   readonly inApp: true;
   readonly device: { readonly name: string };
@@ -52,6 +86,12 @@ export interface SprintableDesktop {
   startUpdate?(): Promise<{ ok: true } | { ok: false; code: string }>;
   /** story 4971 ③: the offered build as it changes (the current one at once, null when none). Absent in an older app. Read it through `subscribeAppUpdate`. */
   subscribeUpdate?(listener: (offer: AppUpdateOffer | null) => void): () => void;
+  /** story 5038 (C8 · B 설정 칸): the app's settings when this page loaded — only an app that keeps a settings file has it (an older app: absent → the page draws no desktop settings). Read it through `desktopSettings`. */
+  readonly settings?: DesktopSettings;
+  /** story 5038: write some of them (a closed patch, true / false only) → the settings as KEPT, or `{ ok:false, code }` (`bad_request` · `write_failed`). Absent in an older app. Call it through `writeDesktopSettings`. */
+  setSettings?(patch: DesktopSettingsPatch): Promise<{ ok: true; settings: DesktopSettings } | { ok: false; code: string }>;
+  /** story 5038: the settings as they change (the current ones at once). Absent in an older app. Read it through `subscribeDesktopSettings`. */
+  subscribeSettings?(listener: (s: DesktopSettings) => void): () => void;
 }
 
 /** story 4693: the two files the app looks for, and the runtime each one means (the app's own table — design 4693 §2) */
@@ -105,6 +145,9 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   // 4971: the update hands are optional the same way (an older app has none → no update line); present means a function
   if (d.startUpdate !== undefined && typeof d.startUpdate !== 'function') return undefined;
   if (d.subscribeUpdate !== undefined && typeof d.subscribeUpdate !== 'function') return undefined;
+  // 5038: the settings hands are optional the same way (an older app has none → no desktop settings); present means a function
+  if (d.setSettings !== undefined && typeof d.setSettings !== 'function') return undefined;
+  if (d.subscribeSettings !== undefined && typeof d.subscribeSettings !== 'function') return undefined;
   if (readable.length === (d.runtimes as unknown[]).length) return d as SprintableDesktop;
   // a name this web does not know was left out: the same bridge, without it — ONE copy per (bridge · list the app gave): `desktopApp()` is read by useSyncExternalStore, which wants the same object while nothing changed
   const hit = trimmed.get(d as object);
@@ -263,8 +306,86 @@ export async function pressAppUpdate(bridge?: SprintableDesktop): Promise<'ok' |
   } catch { return 'failed'; }
 }
 
+// ── story 5038 (C8 · B 설정 칸): the app's settings — read at load, then pushed. Drawn ONLY when the app gives all three (the value, `setSettings`, `subscribeSettings`): an older app has none of them → no desktop settings cell.
+//    The SAME values give the SAME object (useSyncExternalStore must not loop). ──
+let pushedSettings: DesktopSettings | undefined; // undefined = nothing pushed yet (the load-time value stands)
+let settingsNow: DesktopSettings | null = null;
+const settingsListeners = new Set<() => void>();
+let stopSettings: (() => void) | null = null;
+let settingsBridge: SprintableDesktop | undefined; // the bridge the pushed value and the subscription belong to (codex: a page whose bridge object is replaced must not keep the old one's values or its subscription)
+const sameSettings = (a: DesktopSettings | null, b: DesktopSettings | null) => (a === null || b === null ? a === b : JSON.stringify(a) === JSON.stringify(b));
+
+/** everything kept for one bridge is dropped when the page's bridge is another object than the one it was kept for (the old subscription is let go) */
+function settingsFor(raw: SprintableDesktop | undefined): void {
+  if (settingsBridge === raw) return;
+  if (stopSettings) { const stop = stopSettings; stopSettings = null; try { stop(); } catch { /* the old app is gone */ } }
+  settingsBridge = raw;
+  pushedSettings = undefined;
+  settingsNow = null;
+}
+
+/** the app's settings right now, or null (a browser · an older app · the app gave no settings, or not in the closed shape · it lacks the write hand — then there is nothing the page may offer) */
+export function desktopSettings(): DesktopSettings | null {
+  const raw = rawBridge();
+  settingsFor(raw);
+  if (!raw || typeof raw.setSettings !== 'function' || typeof raw.subscribeSettings !== 'function') return null;
+  const next = pushedSettings !== undefined ? pushedSettings : desktopSettingsOf(raw.settings);
+  if (sameSettings(settingsNow, next)) return settingsNow;
+  settingsNow = next;
+  return settingsNow;
+}
+
+/** story 5038 — for useSyncExternalStore: tell me when the settings changed (the app calls back at once with the current ones). Nothing to subscribe to → a no-op. One subscription to the app is shared by all. */
+export function subscribeDesktopSettings(listen: () => void): () => void {
+  const raw = rawBridge();
+  settingsFor(raw);
+  if (!raw?.subscribeSettings) return () => undefined;
+  settingsListeners.add(listen);
+  if (!stopSettings) {
+    try {
+      stopSettings = raw.subscribeSettings((next) => {
+        const checked = desktopSettingsOf(next);
+        if (!checked) return; // not the closed shape: ignored (the page keeps what it has)
+        const have = pushedSettings !== undefined ? pushedSettings : desktopSettingsOf(raw.settings);
+        if (sameSettings(have, checked)) { pushedSettings = checked; return; }
+        pushedSettings = checked;
+        for (const l of [...settingsListeners]) l();
+      });
+    } catch { stopSettings = null; }
+  }
+  return () => {
+    settingsListeners.delete(listen);
+    if (settingsListeners.size === 0 && stopSettings) {
+      const stop = stopSettings;
+      stopSettings = null;
+      try { stop(); } catch { /* the app is gone */ }
+    }
+  };
+}
+
+/** story 5038: write some settings — the app's `setSettings(patch)`; the answer carries the settings AS KEPT (the switch shows that, never what was asked). Never rejects: `unsupported` = an older app · `failed` = the app refused or could not write (the switch stays as it was). */
+export async function writeDesktopSettings(patch: DesktopSettingsPatch, bridge?: SprintableDesktop): Promise<'ok' | 'failed' | 'unsupported'> {
+  const raw = bridge ?? rawBridge();
+  if (typeof raw?.setSettings !== 'function') return 'unsupported';
+  const mine = rawBridge(); // the page's bridge at the time of the press — the store is kept for it (an answer that comes after another bridge took over is not applied)
+  settingsFor(mine);
+  try {
+    const r = await raw.setSettings(patch);
+    const kept = r && typeof r === 'object' && (r as { ok?: unknown }).ok === true ? desktopSettingsOf((r as { settings?: unknown }).settings) : null;
+    if (!kept) return 'failed';
+    // the answer belongs to the bridge it came from: if the page has another bridge by now, the new one's values are not touched
+    if (settingsBridge === mine && rawBridge() === mine) { const changed = !sameSettings(settingsNow, kept); pushedSettings = kept; if (changed) for (const l of [...settingsListeners]) l(); }
+    return 'ok';
+  } catch { return 'failed'; }
+}
+
 /** tests only: forget the app's list and the shared subscription */
 export function __resetDesktopAppForTest(): void {
+  pushedSettings = undefined;
+  settingsNow = null;
+  settingsListeners.clear();
+  stopSettings = null;
+  settingsBridge = undefined;
   pushedOffer = undefined;
   offerNow = null;
   offerListeners.clear();

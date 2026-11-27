@@ -8077,6 +8077,25 @@
       "remoteOffOwner": "Remote control is off for this organization, so this computer can't be turned on — turn on the organization's remote control first",
       "remoteOffOthers": "Remote control is off for this organization, so this computer can't be turned on — you can try again once an organization owner{hasOwners, select, yes { ({owners})} other {}} turns it on"
     },
+    "appSettings": {
+      "title": "Desktop app settings",
+      "scope": "These apply to the app on this computer only.",
+      "noticesTitle": "Computer notifications",
+      "kind": {
+        "needs_hand": "When I am needed",
+        "finished": "When work finishes",
+        "failed": "When something goes wrong"
+      },
+      "thisComputerOff": "Turn notifications off on this computer only",
+      "thisComputerOffNote": "Notifications on your phone and other computers stay as they are.",
+      "dockBadge": "Show how many things need my hand on the Dock icon",
+      "trayIcon": "Keep an icon in the menu bar",
+      "keepRunning": "Keep the app running when the window closes",
+      "keepRunningNote": "Notifications, the Dock badge and the menu-bar icon keep working. Agents keep working whatever this is set to. To quit the app, press ⌘Q.",
+      "failed": "Couldn't change it — please try again",
+      "stateOn": "On",
+      "stateOff": "Off"
+    },
     "remoteControl": {
       "title": "Remote control",
       "body": "Paired phones can stop, instruct, and answer permission requests for this organization's desktop agents.",
