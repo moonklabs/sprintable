@@ -74,7 +74,7 @@ export function GoalOutcomeDialog({
           <DialogTitle>{t('outcomeDialogTitle')}</DialogTitle>
         </DialogHeader>
 
-        <div className="max-h-[30vh] min-h-0 shrink-0 overflow-y-auto rounded-lg border border-border bg-muted/20 px-3 py-2">
+        <div className="max-h-[30vh] min-h-0 shrink-0 overflow-y-auto rounded-lg border border-border bg-ds-surface-sunk px-3 py-2">
           <p className="text-sm leading-6 text-foreground">{goalTitle}</p>
         </div>
 
@@ -148,7 +148,7 @@ export function GoalOutcomeDialog({
             </div>
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
-              <Button type="submit" disabled={!canSubmitHitMiss} className="bg-brand text-brand-foreground hover:bg-brand/90">
+              <Button type="submit" disabled={!canSubmitHitMiss} className="bg-brand text-brand-foreground hover:bg-ds-ink-2">
                 {submitting ? tc('saving') : t('outcomeSubmit')}
               </Button>
             </DialogFooter>
@@ -173,7 +173,7 @@ export function GoalOutcomeDialog({
             </div>
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
-              <Button type="submit" disabled={!canSubmitUnmeasurable} className="bg-brand text-brand-foreground hover:bg-brand/90">
+              <Button type="submit" disabled={!canSubmitUnmeasurable} className="bg-brand text-brand-foreground hover:bg-ds-ink-2">
                 {submitting ? tc('saving') : t('outcomeSubmit')}
               </Button>
             </DialogFooter>

@@ -22,10 +22,10 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-ds-ink-2",
         secondary:
-          "border-border bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        // story #2419 — bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달, verify-rail.tsx
+          "border-border bg-secondary text-secondary-foreground [a]:hover:bg-ds-surface-high",
+        // story #2419 — bg-destructive-tint 위 text-destructive는 3.97(AA 4.5 미달, verify-rail.tsx
         // 실패 박스와 동일 조합). story #2420 v3 규칙(계열별 토큰 대신 규칙 하나) — tint 배경
         // 위 글자는 text-foreground(16.72, scripts/verify-tint-foreground-contrast.ts가 정의
         // 시점에 검증). --foreground 자체가 테마마다 값을 가지므로 dark: 짝이 따로 필요 없다.
@@ -40,7 +40,7 @@ const badgeVariants = cva(
         outline:
           "border-border bg-background text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
+          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-ds-surface-high",
         link: "text-primary underline-offset-4 hover:underline",
         // story #2420 v3 규칙(계열별 토큰 대신 규칙 하나) — destructive와 동일: tint 배경 위
         // 글자는 text-foreground다(계열색 아님). 계열은 border/bg로 전한다. 유나 라이브 실측
@@ -54,11 +54,11 @@ const badgeVariants = cva(
         // story #2937(유나 P0-02 chip 전수 감사, 2026-08-22) — tint 배경 변형 중 chip만
         // text-muted-foreground(ink-3) 잔존해 위 success/info/warning/destructive와 같은
         // #2420 v3 규칙("tint 배경 위 글자는 text-foreground")을 못 지키고 있었다. 실측: ink-3
-        // on bg-muted/70 = 3.55 라이트(AA 4.5 미달)·소비처 ~30(loops/retro/standup/gates/
+        // on bg-muted = 3.55 라이트(AA 4.5 미달)·소비처 ~30(loops/retro/standup/gates/
         // trust/recruiter/agents/cage) 라이트 체계적 갭. text-foreground로 이행. 위계
         // de-emphasis는 색이 아니라 tint 배경+작은 크기+pill 형태가 담당(다른 tint 변형이
         // 이미 증명) — 무회귀.
-        chip: "border-border bg-muted/70 text-foreground",
+        chip: "border-border bg-muted text-foreground",
       },
     },
     defaultVariants: {

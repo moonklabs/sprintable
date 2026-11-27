@@ -486,7 +486,7 @@ export default function GateDetailPage() {
                     물었고 무슨 전제였는지»는 감사 가치가 있다 — GateActivityHistory와 같은
                     원칙, 위 §2975 AC4 주석 참조). */}
                 {decisionFacts ? (
-                  <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="space-y-2 rounded-lg border border-border bg-ds-surface-sunk p-3">
                     <p className="text-sm whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
                     {decisionFacts.assumption ? (
                       <p className="text-xs whitespace-pre-wrap text-muted-foreground">
@@ -506,7 +506,7 @@ export default function GateDetailPage() {
                             {decisionFacts.options.map((option) => (
                               <label
                                 key={option}
-                                className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-xs text-foreground hover:bg-muted/40"
+                                className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-xs text-foreground hover:bg-ds-surface-high"
                               >
                                 <RadioGroupItem value={option} className="mt-0.5" />
                                 <span>{option}</span>

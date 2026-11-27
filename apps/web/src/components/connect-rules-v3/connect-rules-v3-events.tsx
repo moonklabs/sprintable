@@ -70,11 +70,11 @@ export function ConnectRulesV3Events({ orgId }: { orgId: string }) {
         <ConnectRulesV3SectionEmpty title={t('eventsAutomationEmptyTitle')} />
       ) : (
         <>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm">
             <span className="font-medium text-foreground">{to('eventsCustomGroupTitle')}</span>
             <CountBadge count={customCount} />
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm">
             <span className="font-medium text-foreground">{to('eventsPresetGroupTitle')}</span>
             <CountBadge count={presetCount} />
           </div>

@@ -319,10 +319,10 @@ export function TossSheet({
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
                   {alreadyThere ? (
-                    // 유나 규격 정정(design gate 반려, 2026-08-26) — text-primary는 bg-primary/10
+                    // 유나 규격 정정(design gate 반려, 2026-08-26) — text-primary는 bg-ds-action-soft
                     // 위에서 opacity-70(부모 row)과 겹치면 라이트 2.83/다크 3.04로 AA 미달
                     // (hover 시 더 낮음). text-foreground는 같은 조건에서 5.4~6.9 PASS.
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-semibold text-foreground">
+                    <span className="shrink-0 rounded-full bg-ds-action-soft px-2 py-0.5 text-micro font-semibold text-foreground">
                       {t('approvalRequestTossAlreadyThereChip')}
                     </span>
                   ) : (

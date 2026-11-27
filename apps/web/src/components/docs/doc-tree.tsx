@@ -125,7 +125,7 @@ export function isDescendant(docs: Doc[], ancestorId: string, nodeId: string): b
 /**
  * story #4348 — «⋮» 메뉴 항목 **전부**(이름 변경 · 위로 · 아래로 · 폴더로 · 하위 문서/폴더 추가 · 삭제 · 고르개 줄)의 한 정의 = 디자인 Button(ghost) + 이 클래스.
  * 유나 #4730(design CR 5860943821): 새 항목만 ghost · 기존 넷이 날 button이면 ↓로 훑을 때 초점 표시가 파란 outline ↔ 시트론 링으로 번갈았다 → 한 정의.
- * 높이 자동 · 테두리 0 · 왼쪽 정렬 · 보통 굵기 · 꺼짐 muted(호버 배경 없음 — 다크도: ghost의 dark:hover:bg-muted/50이 이기지 않게). 삭제만 호버를 destructive-tint로 덮는다(DOC_MENU_ITEM_DESTRUCTIVE).
+ * 높이 자동 · 테두리 0 · 왼쪽 정렬 · 보통 굵기 · 꺼짐 muted(호버 배경 없음 — 다크도: ghost의 dark:hover:bg-ds-surface-high이 이기지 않게). 삭제만 호버를 destructive-tint로 덮는다(DOC_MENU_ITEM_DESTRUCTIVE).
  * `transition-colors`(Button 기본 transition-all 대신): 팝오버는 붙는 순간 visibility:hidden → 자리 잡고 보임(AnchoredPopover)인데, transition-all이면
  * 물려받은 visibility도 전이라 열리는 그 순간 첫 항목이 아직 hidden → usePortalMenuKeys의 첫 항목 focus()가 헛돌아 초점이 «⋮»에 남았다(실 브라우저 · jsdom은 못 봄).
  */

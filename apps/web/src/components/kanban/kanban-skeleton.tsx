@@ -27,7 +27,7 @@ export function KanbanColumnsSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-3 py-3" data-testid="kanban-columns-skeleton">
       {COLUMNS.map((col) => (
-        <div key={col.id} className="flex h-full w-70 min-w-60 flex-col rounded-xl bg-muted/40 p-3">
+        <div key={col.id} className="flex h-full w-70 min-w-60 flex-col rounded-xl bg-ds-surface-sunk p-3">
           <Skeleton className="mb-3 h-4 w-20 rounded" />
           <div className="flex flex-col gap-2">
             {[1, 2, 3].map((i) => (

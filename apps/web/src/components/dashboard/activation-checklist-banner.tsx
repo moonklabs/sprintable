@@ -239,7 +239,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
           aria-busy="true"
           data-testid="activation-skeleton-collapsed"
           // 접힌 칩(아래 button)과 **같은 className** — 박스가 정의상 같다(CLS 0).
-          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-ds-surface-sunk px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
         >
           <Skeleton variant="text" className="h-4 w-40" />
           <Skeleton variant="circle" className="size-3.5 shrink-0" />
@@ -336,7 +336,7 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
           aria-expanded={false}
           aria-label={t('expandAria')}
           data-testid="activation-chip"
-          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-ds-surface-sunk px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
         >
           <span>{t(localWords ? 'collapsedChipLocal' : 'collapsedChip', { completed: state.completed, total: state.total })}</span>
           <ChevronDown className="size-3.5 shrink-0" />

@@ -366,7 +366,7 @@ export function FlowMultiLaneCanvas({
           없다(30일 재계산은 새로고침으로 자연히 갱신된다) — 화면이 «왜» 접었는지만 정직하게
           말한다. */}
       {foldedCount > 0 ? (
-        <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-2 text-editorial-meta text-muted-foreground">
+        <div className="flex items-center gap-2 border-t border-border bg-ds-background px-3 py-2 text-editorial-meta text-muted-foreground">
           <span aria-hidden="true">▸</span>
           <b className="text-foreground">{t('flowLaneFoldedCount', { n: foldedCount })}</b>
           <span>{t('flowLaneFoldedReason')}</span>

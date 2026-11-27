@@ -12,7 +12,7 @@ export function RadiusSwatch({ token }: { token: RadiusToken }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div
-        className="size-14 border-2 border-brand bg-brand/15"
+        className="size-14 border-2 border-brand bg-ds-action-soft"
         style={{ borderRadius: `var(${token.cssVar})` }}
       />
       <div className="text-center">

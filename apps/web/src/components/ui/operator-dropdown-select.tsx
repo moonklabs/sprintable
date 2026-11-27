@@ -54,7 +54,7 @@ export function OperatorDropdownSelect({
             type="button"
             {...(ariaLabelledBy ? { id: triggerId, 'aria-labelledby': `${ariaLabelledBy} ${triggerId}` } : {})}
             className={cn(
-              'flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50',
+              'flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-ds-surface-high disabled:cursor-not-allowed disabled:opacity-50',
               !selectedOption && 'text-muted-foreground',
               className,
             )}

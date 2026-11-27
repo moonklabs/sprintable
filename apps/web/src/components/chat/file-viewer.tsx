@@ -217,7 +217,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
             <button
               type="button"
               onClick={retry}
-              className="mt-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              className="mt-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-ds-ink-2"
             >
               {tc('retry')}
             </button>
@@ -415,7 +415,7 @@ function DocxBody({ url, label }: { url: string; label: string }) {
   // ignoreWidth:true라 docx-preview가 페이지/표 폭을 강제하지 않는다 — 컨테이너 폭(w-full)에
   // 자연히 맞춰지므로(fit-width, 인시던트#2788 재발수정) 가로 스크롤에 기대지 않는다.
   return (
-    <div className="min-h-full bg-muted/30">
+    <div className="min-h-full bg-ds-surface-sunk">
       {status === 'rendering' && (
         <div className="mx-auto flex max-w-2xl flex-col gap-2 p-6">
           <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />

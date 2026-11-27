@@ -188,7 +188,7 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
                   <span className="sr-only"> — {statusText}</span>
                 </p>
                 {step.status === 'failed' && (
-                  // story #2419(유나 규격) — text-destructive는 이 옅은 bg-destructive/10 박스
+                  // story #2419(유나 규격) — text-destructive는 이 옅은 bg-destructive-tint 박스
                   // 위에서 3.97(AA 미달)이었다. story #2420 v3 — 계열색 대신 text-foreground
                   // 하나로(destructive on tint: light 16.72·dark 15.58, 정의 시점 검증은
                   // scripts/verify-tint-foreground-contrast.ts). dark: 짝은 안 붙인다 —

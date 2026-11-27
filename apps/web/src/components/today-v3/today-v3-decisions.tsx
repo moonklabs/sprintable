@@ -287,7 +287,7 @@ export function TodayV3Decisions({ items, count, isAdminOrOwner, onActionSuccess
           {recipeDraftReview.map((item) => <RecipeDraftReviewCard key={item.id} item={item} />)}
           {workflowStep.map((item) => <WorkflowStepPlaceholderCard key={item.id} item={item} />)}
           {lowRiskBulk.length > 0 ? (
-            <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3.5 py-2.5" data-testid="today-v3-low-risk-row">
+            <div className="flex flex-col gap-1.5 rounded-md border border-border bg-ds-surface-sunk px-3.5 py-2.5" data-testid="today-v3-low-risk-row">
               <div className="flex items-center gap-2.5">
                 <span className="text-xs text-foreground">{t('lowRiskGroupedLine', { count: lowRiskBulk.length })}</span>
                 <Button

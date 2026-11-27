@@ -545,7 +545,7 @@ export default function InsightsBoardPage() {
   ];
 
   // 유나 CHANGES(2026-09-17) (가) — 그룹 헤더: 표=그 그룹 첫 데이터 행 앞 <tr>(기존
-  // 마크업 무변)·카드=카드 묶음 위 섹션 헤더(border-t+bg-muted/30·1행 라벨+구성원 수·
+  // 마크업 무변)·카드=카드 묶음 위 섹션 헤더(border-t+bg-ds-background·1행 라벨+구성원 수·
   // 2행 d1/d7 집계). d1/d7 라벨은 하드코딩하지 않고 insightsColumns의 같은 열 header를
   // 그대로 재사용(단일 정본 — 지표 선택기로 라벨이 바뀌어도 표·카드가 같이 바뀐다).
   const d1ColumnHeader = insightsColumns.find((c) => c.key === 'd1')!.header;

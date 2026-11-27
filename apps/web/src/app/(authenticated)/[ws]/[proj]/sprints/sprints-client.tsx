@@ -912,7 +912,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
       {/* Goal */}
       {selected.goal ? (
-        // story #4888 — 손 카드(rounded-lg border bg-muted/20) → ds Card + 토큰(ds에 짝이 없는 자리라 장 주인이 꼴을 정함: 한 단계 올린 면 + 헤어라인, 라벨은 ink-3).
+        // story #4888 — 손 카드(rounded-lg border bg-ds-background) → ds Card + 토큰(ds에 짝이 없는 자리라 장 주인이 꼴을 정함: 한 단계 올린 면 + 헤어라인, 라벨은 ink-3).
         <Card className="mb-3 px-3 py-2 text-ds-body">
           {/* story #3776(1층B) — "목표", sprints ns의 기존 goalLabel 키 재사용(같은 화면의 스프린트 목표). */}
           <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-ds-small font-medium text-ds-ink-3"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>

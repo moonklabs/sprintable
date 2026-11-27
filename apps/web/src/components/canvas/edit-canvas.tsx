@@ -142,7 +142,7 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
           title={artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}
           className={cn(
             'flex items-center gap-1 rounded-md border px-2 py-1 text-editorial-meta font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-            pinToolActive ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
+            pinToolActive ? 'border-primary bg-ds-surface-sunk text-primary' : 'border-border text-muted-foreground hover:bg-muted',
           )}
         >
           <FileText className="size-3" aria-hidden />

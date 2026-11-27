@@ -10,8 +10,8 @@ import { cn } from '@/lib/utils';
 
 /** 표 규칙 — 전체 보기의 뿌리 클래스 목록과 챗 미리보기 본문 감싸개가 같은 줄을 쓴다(글 크기는 각 본문이 정한다). */
 export const DOC_TABLE_RULES = [
-  '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
-  '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
+  '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-ds-surface-sunk',
+  '[&_thead]:bg-ds-surface-sunk [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
   '[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2',
 ].join(' ');
 

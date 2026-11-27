@@ -38,14 +38,14 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
           <button
             onClick={handleClick}
             disabled={!hasTranscript}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-ds-ink-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             ✨ {t('aiSummarize')}
           </button>
         ) : (
           <button
             onClick={cancel}
-            className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/80"
+            className="flex items-center gap-2 rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground hover:bg-ds-surface-high"
           >
             ⏹ {t('cancel')}
           </button>
@@ -69,9 +69,9 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
 
       {/* AC7: 스트리밍 텍스트 프리뷰 */}
       {isLoading && streamText && (
-        <div className="rounded-lg border bg-primary/5 p-3">
+        <div className="rounded-lg border bg-ds-surface-sunk p-3">
           <div className="mb-1 flex items-center gap-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-primary/50" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-ds-action" />
             <span className="text-xs font-medium text-primary">{t('aiSummarizing')}</span>
           </div>
           <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
@@ -82,7 +82,7 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
 
       {isLoading && !streamText && (
         <div className="flex items-center gap-2 text-xs text-primary">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-primary/50" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-ds-action" />
           {t('aiSummarizing')}
         </div>
       )}

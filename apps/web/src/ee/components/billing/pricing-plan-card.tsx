@@ -128,7 +128,7 @@ export function PricingPlanCard({
         </div>
       ) : isPricePublic && tier.id !== 'free' ? (
         isUpgrade ? (
-          <Button variant="default" size="sm" className="mb-4 w-full bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onUpgrade(tier.id)} disabled={paymentBusy}>
+          <Button variant="default" size="sm" className="mb-4 w-full bg-brand text-brand-foreground hover:bg-ds-ink-2" onClick={() => onUpgrade(tier.id)} disabled={paymentBusy}>
             {t('upgradeCta')}
           </Button>
         ) : (

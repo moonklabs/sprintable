@@ -90,7 +90,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
     <NodeViewWrapper as="div" className="my-4 not-prose" contentEditable={false}>
       {/* URL editor — visible when block is selected */}
       {selected && (
-        <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-brand/6 px-3 py-2">
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-ds-surface-sunk px-3 py-2">
           <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}
@@ -99,7 +99,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder={t('embedUrlPlaceholder')}
-            // brand 색 면(bg-brand/6) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            // brand 색 면(bg-ds-action-soft) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-ds-surface-sunk).
             className="min-w-0 flex-1 bg-card dark:bg-card"
           />
         </div>
@@ -138,7 +138,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
                 href={safeHttpUrl(url) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm transition-colors hover:bg-muted/40"
+                className="flex items-center gap-3 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-sm transition-colors hover:bg-ds-surface-high"
               >
                 <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate text-ds-ink-2">{url}</span>

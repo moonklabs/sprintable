@@ -82,7 +82,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const card = [...detail().querySelectorAll('[data-slot="ds-card"]')].find((c) => (c.textContent ?? '').includes(PLANNING.goal));
     expect(card).toBeTruthy();
     expect(card!.textContent).toContain(S.goalLabel);
-    expect(detail().querySelectorAll('.bg-muted\\/20')).toHaveLength(0);
+    expect(detail().querySelectorAll('.rounded-xl.border:is(.bg-ds-background, .bg-ds-surface-sunk):not([data-slot="ds-card"])')).toHaveLength(0);
   });
 
   it('⭐가설 게이트(계획 중 + 가설 0)가 점선 ds Card이고 «가설 추가»가 ds Button이다 — 손 카드(rounded-xl border-info-border)가 아니다', async () => {
@@ -187,7 +187,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const chips = [...detail().querySelectorAll('[data-slot="ds-chip"]')].map((x) => (x.textContent ?? '').trim());
     expect(chips).toContain('가입 화면 고치기');
     expect(chips).toContain('결제 연결');
-    expect(detail().querySelectorAll('span.bg-background.rounded-md, span.bg-muted\\/50')).toHaveLength(0);
+    expect(detail().querySelectorAll('span.bg-background.rounded-md, span.bg-ds-background, span.bg-ds-surface-sunk')).toHaveLength(0);
   });
 
   it('⭐상세 패널에 손으로 만든 카드 행(rounded-lg border li)이 남아 있지 않다', async () => {

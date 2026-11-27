@@ -66,7 +66,7 @@ export function ReportMessageSummary({
     : null;
   // story 5048 T0 ①: this card sits on the own-message face (dark in light · white in dark) — the fixed ink / brand colours below would not read there, so own cards use the on-mine set
   const evidenceLabelClass = isMine ? 'text-ds-on-mine-2' : 'text-ds-ink-2';
-  const nextBoxClass = isMine ? 'border-ds-on-mine-2' : 'border-ds-line-control bg-brand/10';
+  const nextBoxClass = isMine ? 'border-ds-on-mine-2' : 'border-ds-line-control bg-ds-surface-sunk';
   const nextArrowClass = isMine ? 'text-ds-on-mine' : 'text-brand-text';
   const nextLabelClass = isMine ? 'text-ds-on-mine' : 'text-primary';
   const nextTextClass = isMine ? 'text-ds-on-mine' : 'text-foreground';

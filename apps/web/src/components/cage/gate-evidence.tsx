@@ -721,7 +721,7 @@ const DRAFT_TARGET_LABEL_KEY: Record<HypothesisDraftTarget, string> = {
 function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts }) {
   const t = useTranslations('cage');
   return (
-    <div className="mt-1.5 rounded-lg bg-info/10 px-2.5 py-1.5">
+    <div className="mt-1.5 rounded-lg bg-info-tint px-2.5 py-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="info" className="shrink-0">{t('hypothesisDraftBadge')}</Badge>
         {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
@@ -743,10 +743,10 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
  * 기본 접힘(카드 공간 절약, AC1 "접기 가능") — 없는 필드는 그냥 생략(지어내지 않음).
  *
  * ⚠️PO 변경요청②(2026-09-02, PR#3710 리뷰) — story #2420 규칙(HypothesisOutcomeDraft와
- * 동일 근거, 위 참조): tint 배경(bg-muted/40) 위에서는 실 값(stage·channel)을 라벨과
+ * 동일 근거, 위 참조): tint 배경(bg-ds-background) 위에서는 실 값(stage·channel)을 라벨과
  * 같은 muted 톤으로 두지 않고 text-foreground로 — 두 톤이 겹치면 값이 라벨에 묻힌다.
  * 라벨(필드명)만 muted 유지. WCAG 대비비 실측(globals.css --proof-ink/-ink-3/-sunk 기반,
- * bg-muted/40을 카드/페이지 배경에 블렌드): text-foreground 16.2~17.4:1(라이트·다크 공통)
+ * bg-ds-background을 카드/페이지 배경에 블렌드): text-foreground 16.2~17.4:1(라이트·다크 공통)
  * vs 기존 text-muted-foreground 5.1~5.9:1(AA 4.5:1은 이미 통과하던 값이라 접근성 위반은
  * 아니었으나, 값과 라벨의 시각적 위계가 안 갈렸다 — #2420과 동형 근거로 값을 승격).
  */
@@ -971,7 +971,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-editorial-meta">
+    <div className="mt-1.5 space-y-1 rounded-lg bg-ds-surface-sunk px-2.5 py-1.5 text-editorial-meta">
       {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — 총예산·기간·
           목표 순서 그대로(통화는 총예산 표시에 붙는다, §절 표 그대로). ads_boost가
           아닌 gate_type은 adsBudgetMinor가 항상 null이라 이 블록 자체가 안 그려진다. */}

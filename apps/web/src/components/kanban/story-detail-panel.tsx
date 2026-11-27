@@ -2344,10 +2344,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning-tint', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning-tint', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>

@@ -121,7 +121,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
   };
 
   return (
-    <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-ds-line-control bg-primary/5 px-2.5 py-1.5 text-xs text-foreground">
+    <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-ds-line-control bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-foreground">
       <ArrowUpCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
       <span className="flex-1">{t(suggestion.label)}</span>
       {state.status === 'failed' && <span className="text-destructive">{t('intentSuggestionFailed')}</span>}
@@ -134,7 +134,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
           // 대상-프로젝트: 의도 제안 참조는 문서 id뿐이라 대상 프로젝트를 모른다(문서 페이지가 착지 뒤 자기 프로젝트로 연다).
           href={flatHref(`/docs?id=${suggestion.ref.id}`)}
           onClick={handleDismiss}
-          className="rounded border border-ds-line-control px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10"
+          className="rounded border border-ds-line-control px-1.5 py-0.5 font-medium text-primary hover:bg-ds-action-soft"
         >
           {t('intentSuggestionGoToDoc')}
         </Link>
@@ -143,7 +143,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
           type="button"
           onClick={() => void handleConfirm()}
           disabled={state.status === 'submitting'}
-          className="rounded border border-ds-line-control px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
+          className="rounded border border-ds-line-control px-1.5 py-0.5 font-medium text-primary hover:bg-ds-action-soft disabled:opacity-60"
         >
           {state.status === 'submitting' ? t('intentSuggestionSubmitting') : t('intentSuggestionConfirm')}
         </button>

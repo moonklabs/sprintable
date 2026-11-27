@@ -69,7 +69,7 @@ export function NextActionsStrip({
               onToggle={() => setExpandedEpicId(isExpanded ? null : stem.epicId)}
             />
             {isExpanded && (
-              <div className="mt-1.5 rounded-lg border border-border bg-muted/20 p-2.5">
+              <div className="mt-1.5 rounded-lg border border-border bg-ds-surface-sunk p-2.5">
                 <GoalStemCard
                   key={stem.epicId}
                   stem={stem}

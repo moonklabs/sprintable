@@ -108,7 +108,7 @@ function ActorAvatar({ name, isSystem }: { name: string; isSystem: boolean }) {
       aria-hidden
       className={cn(
         'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-        isSystem ? 'bg-muted text-muted-foreground' : 'bg-primary/15 text-primary',
+        isSystem ? 'bg-muted text-muted-foreground' : 'bg-ds-action-soft text-primary',
       )}
     >
       {initial}
@@ -152,7 +152,7 @@ function FeedRow({
     : null;
 
   return (
-    <li className="flex items-start gap-3 rounded-lg px-3 py-2.5 transition hover:bg-muted/50">
+    <li className="flex items-start gap-3 rounded-lg px-3 py-2.5 transition hover:bg-ds-surface-high">
       <ActorAvatar name={actorName} isSystem={item.actor_id === null} />
       <div className="min-w-0 flex-1">
         {/* [SID:4311 PR 3 · 유나 잘림 순서] 곁글(동사) → 이름 순으로 잘리고 꼬리는 늘 보인다 — 동사는 `flex-1`(바탕 0 · 남는 폭만 차지) ·
@@ -383,7 +383,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 정규화됨 pill + 캡션 바 (팀활동 탭만 — 시각/의미 차별화 생명선) */}
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/40 px-[22px] py-[11px]">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-ds-background px-[22px] py-[11px]">
           <span
             className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-info"
             style={{

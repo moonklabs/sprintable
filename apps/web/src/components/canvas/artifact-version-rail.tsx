@@ -63,8 +63,8 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                   'flex w-full items-start gap-2 rounded-ds-control p-2 text-left transition-colors hover:bg-ds-surface-high touch:min-h-ds-touch',
                   isSelected && LAYER.rowSelected,
                 ) : cn(
-                  'flex w-full items-start gap-2 rounded-md p-1 text-left transition-colors hover:bg-muted/40',
-                  isSelected && 'bg-muted/60',
+                  'flex w-full items-start gap-2 rounded-md p-1 text-left transition-colors hover:bg-ds-surface-high',
+                  isSelected && 'bg-ds-surface-sunk',
                 )}
               >
                 <span
@@ -80,11 +80,11 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                     {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                     {isCurrent ? (
                       column ? <Chip tone="info">{t('versionCurrentTag')}</Chip>
-                        : <span className="rounded bg-info/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionCurrentTag')}</span>
+                        : <span className="rounded bg-info-tint px-1 py-0.5 text-micro font-bold text-foreground">{t('versionCurrentTag')}</span>
                     ) : null}
                     {isAnchor ? (
                       column ? <Chip tone="done">{t('versionAnchorTag')}</Chip>
-                        : <span className="rounded bg-success/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionAnchorTag')}</span>
+                        : <span className="rounded bg-success-tint px-1 py-0.5 text-micro font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
                   {/* [SID:4311 PR 3 · 유나 1440 실측] «이름 · 꼬리 · 요약» 한 줄 — 요약 → 이름 순으로 잘리고 꼬리는 늘 보인다(예전 한 덩어리 truncate는

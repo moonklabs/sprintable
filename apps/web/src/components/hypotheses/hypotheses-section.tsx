@@ -328,7 +328,7 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const sorted = items ? [...items] : [];
 
   return (
-    // 4909 AC3 (가설 칸 1단계) — the card's face is the content layer (HYPOTHESES_FACE = LAYER.panel: one step above the page, +.030 light / +.036 dark — the old `bg-muted/20` card measured −.018 / −.004 and did not separate at all).
+    // 4909 AC3 (가설 칸 1단계) — the card's face is the content layer (HYPOTHESES_FACE = LAYER.panel: one step above the page, +.030 light / +.036 dark — the old `bg-ds-surface-sunk` card measured −.018 / −.004 and did not separate at all).
     <section aria-label={t('sectionTitle')} data-testid="hypotheses-section" className={cn('rounded-ds-control border border-ds-line p-3', HYPOTHESES_FACE)}>
       {/* story 4906 (customer lap ⑨) — the title + two buttons did not fit the 360px goal-detail card in English («Hypotheses» · «Review draft» · «Add hypothesis»): the buttons group was shrink-0 on a
           no-wrap row and ran past the card's right edge (button right 1091 · card 1059 at a 1100 window). The row and the group now WRAP — beside the title when they fit, under it when they do not. */}

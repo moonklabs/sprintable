@@ -978,7 +978,7 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // channel-posts/[draftId]/page.tsx — 실측: destructive-tint(에러 배너류)와 muted-
   // foreground(기본 상태 캡션류)가 같은 조건 분기의 서로 다른 값이라 동시 렌더 0.
   // 제거만·색 변경 0(이 스토리 스코프 밖 화면, 코드 무접촉).
-  ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-success-tint', 1],
+  // story 5048 ③b-2: recruiter-client muted-on-success-tint (1) left the list — the success box text became text-foreground (the status tint is now the opaque bg-success-tint alias, so the guard sees it)
   ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::muted-on-warning-tint', 2],
   // access-matrix-tab.tsx(232행) — `granted ? 'border-success/40 bg-success-tint text-success…'
   // : 'border-border text-muted-foreground…'`(cn() 삼항 한 개) — granted가 참/거짓 중

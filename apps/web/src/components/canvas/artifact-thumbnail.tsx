@@ -106,10 +106,10 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
     <div
       ref={wrapperRef}
       data-artifact-thumbnail
-      className={cn('shrink-0 overflow-hidden rounded border border-border bg-muted/40', className)}
+      className={cn('shrink-0 overflow-hidden rounded border border-border bg-ds-background', className)}
     >
       {state.kind === 'loading' ? (
-        <div className="size-full animate-pulse bg-muted/60" />
+        <div className="size-full animate-pulse bg-ds-surface-sunk" />
       ) : state.kind === 'image' ? (
         // story #2895(BUG·결재 표면, 선생님 실증) — object-cover는 PNG export처럼 컨테이너와
         // 비슷한 종횡비일 때만 무해하다. "imported" 아티팩트(전체 페이지 캡처, 세로로 매우

@@ -98,7 +98,7 @@ function ChannelRow({
   const needsReconnect = HUMAN_ACTION_STATUSES.has(worst);
   const label = tc(channelConnectionStatusLabelKey(worst));
   return (
-    <div className="rounded-md border border-border bg-muted/30 px-3 py-3 text-sm" data-testid="connect-rules-v3-channel-row">
+    <div className="rounded-md border border-border bg-ds-surface-sunk px-3 py-3 text-sm" data-testid="connect-rules-v3-channel-row">
       {/* story #4006 AC5 — lg 미만 좁은 열: 라벨(긴 고유명은 단어 중간 줄바꿈 대신
           break-words)과 상태(3자 이하 「미연결」류가 「미연/결」로 쪼개지지 않게
           whitespace-nowrap)가 한 줄에서 서로를 밀어내던 것 → 세로로 쌓는다. lg↑는

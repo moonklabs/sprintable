@@ -91,7 +91,7 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
         type="button"
         variant="ghost"
         onClick={() => setExpanded(!expanded)}
-        className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-muted/40"
+        className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-ds-surface-high"
         aria-expanded={expanded}
       >
         <span className="flex size-5.5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -108,7 +108,7 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
       {expanded && (
         <div className="space-y-2.5 border-t border-border p-2.5 pt-2">
           {data.activeEpic && (
-            <div className="rounded-lg bg-muted/40 p-2.5">
+            <div className="rounded-lg bg-ds-surface-sunk p-2.5">
               <div className="flex items-center justify-between gap-2 text-editorial-meta">
                 <span className="min-w-0 truncate text-foreground">{data.activeEpic.title}</span>
                 <span className="shrink-0 font-mono text-muted-foreground">{data.activeEpic.completionPct}%</span>
@@ -120,13 +120,13 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
           )}
           <div className="grid grid-cols-2 gap-2">
             {data.failedRuns !== null && (
-              <div className="rounded-lg bg-muted/40 p-2.5">
+              <div className="rounded-lg bg-ds-surface-sunk p-2.5">
                 <p className="text-micro text-muted-foreground">{tDashboard('ccRiskFailedRuns')}</p>
                 <p className="font-mono text-sm font-semibold text-foreground">{data.failedRuns}</p>
               </div>
             )}
             {data.cycleTime !== null && (
-              <div className="rounded-lg bg-muted/40 p-2.5">
+              <div className="rounded-lg bg-ds-surface-sunk p-2.5">
                 <p className="text-micro text-muted-foreground">{tDashboard('ccCycleTitle')}</p>
                 <p className="text-sm font-semibold text-foreground">
                   {data.cycleTime.sample > 0 ? tDashboard('ccCycleValue', { days: data.cycleTime.avgDays ?? 0, n: data.cycleTime.sample }) : tDashboard('ccCycleEmpty')}
@@ -134,7 +134,7 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
               </div>
             )}
             {data.contribution !== null && (
-              <div className="rounded-lg bg-muted/40 p-2.5">
+              <div className="rounded-lg bg-ds-surface-sunk p-2.5">
                 <p className="text-micro text-muted-foreground">{tDashboard('ccContributionTitle')}</p>
                 <p className="text-editorial-meta font-semibold text-foreground">
                   {tDashboard('ccContributionValue', { agent: data.contribution.agent, human: data.contribution.human, unassigned: data.contribution.unassigned })}
@@ -142,7 +142,7 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
               </div>
             )}
             {data.costTrend !== null && (
-              <div className="rounded-lg bg-muted/40 p-2.5">
+              <div className="rounded-lg bg-ds-surface-sunk p-2.5">
                 <p className="text-micro text-muted-foreground">{t('pulseCostTrendLabel')}</p>
                 <p className="font-mono text-sm font-semibold text-foreground">
                   {sparkline(data.costTrend.points)} <span className="text-editorial-meta text-muted-foreground">${data.costTrend.totalUsd.toFixed(0)}</span>

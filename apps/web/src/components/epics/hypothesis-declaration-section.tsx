@@ -68,7 +68,7 @@ export function EpicHypothesisDeclarationSection({
   }
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-ds-line-control bg-primary/[0.02] p-3">
+    <div className="space-y-2.5 rounded-xl border border-ds-line-control bg-ds-surface-sunk p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           {t('declareSectionTitle')}
@@ -79,7 +79,7 @@ export function EpicHypothesisDeclarationSection({
       </div>
 
       {declarations.length === 0 ? (
-        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-info-border bg-info-tint/20 p-3">
+        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-info-border bg-info-tint p-3">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             <Sparkles className="size-3.5 text-info" aria-hidden />
             {t('declareGateQuestion')}

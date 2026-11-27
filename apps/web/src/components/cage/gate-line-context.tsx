@@ -40,7 +40,7 @@ function ApproverRow({ status, blocking, name, memberId }: ApproverRowProps) {
         ? { Icon: XCircle, cls: 'text-destructive', label: t('lineApproverRejected') }
         : { Icon: Circle, cls: 'text-muted-foreground', label: t('lineApproverPending') };
   const { Icon } = view;
-  // story #2590(TIER3) — 조상(GateLineContext)의 bg-muted/45 위에서 텍스트로 쓰면(라벨,
+  // story #2590(TIER3) — 조상(GateLineContext)의 bg-ds-background 위에서 텍스트로 쓰면(라벨,
   // 아래) success/destructive 둘 다 대비 미달(경계·~4.4) — 라벨만 text-foreground, 아이콘은
   // 크기가 3.0 문턱을 통과해 계열색 그대로 둔다(#2420 doc "확認·비-결함" 아이콘 규칙).
   const labelCls = view.cls === 'text-muted-foreground' ? view.cls : 'text-foreground';
@@ -72,7 +72,7 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
   const approverLabels = actorRowLabels(step.approvers.map((a) => ({ id: a.member_id, label: resolveName(a.member_id) })));
 
   return (
-    <div className={`space-y-1.5 rounded-lg bg-muted/45 px-2.5 py-2 ${className ?? ''}`}>
+    <div className={`space-y-1.5 rounded-lg bg-ds-surface-sunk px-2.5 py-2 ${className ?? ''}`}>
       {/* step label: from → to 파생(갭2 v1) */}
       <div className="flex items-center gap-1.5 text-editorial-meta">
         {step.from_status ? (

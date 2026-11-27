@@ -174,7 +174,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
                           type="button"
                           disabled={alreadyAdded}
                           onClick={() => selectedBoard && onSelectStory(story, selectedBoard)}
-                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background p-2.5 text-left transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background p-2.5 text-left transition hover:bg-ds-surface-high disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{story.title}</span>
                           <Badge variant="outline">{alreadyAdded ? t('bridgeAlreadyAdded') : story.status}</Badge>

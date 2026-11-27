@@ -111,7 +111,7 @@ export function ArtifactExpandDialog({
                   className={cn(
                     'flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium',
                     htmlInteractive
-                      ? 'border-ds-line-control bg-primary/10 text-primary'
+                      ? 'border-ds-line-control bg-ds-surface-sunk text-primary'
                       : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
                   )}
                 >

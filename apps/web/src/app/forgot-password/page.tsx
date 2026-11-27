@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
             <button
               onClick={handleSubmit}
               disabled={loading || !email.trim()}
-              className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+              className="flex w-full min-h-ds-touch items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2 disabled:opacity-50"
             >
               {loading ? t('sending') : t('submitButton')}
             </button>

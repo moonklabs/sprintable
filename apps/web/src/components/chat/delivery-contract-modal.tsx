@@ -164,7 +164,7 @@ export function DeliveryContractModal({
               사실 남의 것»류 방지). info 톤(위험 아니라 «대상 명시» — warning/빨강 금지)+결과를
               명시하는 문구(저장하면 그 멤버의 설정이 바뀐다는 것까지). self 편집이면 배너 없음. */}
           {targetMemberId && (
-            <div className="mb-3 rounded-lg border border-info bg-info/8 px-3 py-2 text-xs text-foreground">
+            <div className="mb-3 rounded-lg border border-info bg-info-tint px-3 py-2 text-xs text-foreground">
               {t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}
             </div>
           )}
@@ -191,7 +191,7 @@ export function DeliveryContractModal({
                       aria-pressed={level === l}
                       className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition ${
                         level === l
-                          ? 'border-primary bg-primary/10 text-primary'
+                          ? 'border-primary bg-ds-surface-sunk text-primary'
                           : 'border-border text-muted-foreground hover:bg-muted'
                       }`}
                     >

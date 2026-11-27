@@ -349,7 +349,7 @@ export function LoopCreateDialog({
                 ))}
               </select>
               {selectedRecipe ? (
-                <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-xs text-muted-foreground">
+                <div className="space-y-1 rounded-lg border border-dashed border-border bg-ds-surface-sunk p-2 text-xs text-muted-foreground">
                   {presetDescription(selectedRecipe, tPreset) ? <p>{presetDescription(selectedRecipe, tPreset)}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
                     {cyclicStages(selectedRecipe).map((stage) => {
@@ -367,7 +367,7 @@ export function LoopCreateDialog({
             </div>
           ) : null}
 
-          <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3">
+          <div className="space-y-2.5 rounded-xl border border-border bg-ds-surface-sunk p-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-foreground">
                 {t('createLoopGoalLabel')} <span className="text-destructive">*</span>
@@ -422,7 +422,7 @@ export function LoopCreateDialog({
                     )}
                   />
                   {drafted ? (
-                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                    <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-ds-surface px-2 py-1.5 text-xs text-muted-foreground">
                       <span>✦</span>
                       <span>
                         <b className="text-foreground">{t('createLoopDraftNoteTitle')}</b> {t('createLoopDraftNoteBody')}{' '}
@@ -548,7 +548,7 @@ export function LoopCreateDialog({
                         onClick={() => setLinkedId(h.id)}
                         className={cn(
                           'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                          linkedId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
+                          linkedId === h.id ? 'border-primary bg-ds-surface text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                         )}
                       >
                         {h.statement}
@@ -557,7 +557,7 @@ export function LoopCreateDialog({
                   </div>
                 )}
                 {linkedHypothesis ? (
-                  <div className="rounded-lg border border-ds-line-control bg-primary/5 p-2 text-xs text-foreground">
+                  <div className="rounded-lg border border-ds-line-control bg-ds-surface p-2 text-xs text-foreground">
                     <p className="font-medium">{linkedHypothesis.statement}</p>
                     <p className="mt-0.5 text-muted-foreground">
                       {linkedHypothesis.metric_definition.metric} · {hypothesisStatusLabel(linkedHypothesis.status)}

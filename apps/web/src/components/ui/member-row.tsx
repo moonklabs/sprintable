@@ -24,7 +24,7 @@ export function MemberRow({
     <div
       className={cn(
         'flex items-center justify-between gap-3 rounded-md border border-border px-3 py-3 text-sm',
-        emphasis === 'subtle' ? 'bg-muted/20' : 'bg-muted/30',
+        emphasis === 'subtle' ? 'bg-ds-surface-sunk' : 'bg-ds-surface-high',
         className,
       )}
     >

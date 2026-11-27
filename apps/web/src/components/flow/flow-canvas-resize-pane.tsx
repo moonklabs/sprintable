@@ -162,7 +162,7 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
         </div>
         {overlay}
       </div>
-      <div className="flex items-center justify-center gap-2 border-t border-border bg-muted/20 py-1">
+      <div className="flex items-center justify-center gap-2 border-t border-border bg-ds-background py-1">
         <div
           role="slider"
           tabIndex={0}
@@ -172,7 +172,7 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
           aria-valuemin={1}
           aria-valuemax={lanes.length}
           data-testid="flow-canvas-resize-handle"
-          className="focus-inset h-1.5 w-10 cursor-row-resize touch-none rounded-full bg-border hover:bg-muted-foreground/40"
+          className="focus-inset h-1.5 w-10 cursor-row-resize touch-none rounded-full bg-border hover:bg-ds-line-strong"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

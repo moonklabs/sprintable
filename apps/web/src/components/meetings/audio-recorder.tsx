@@ -101,7 +101,7 @@ function DropZone({ onFile, t }: { onFile: (file: File) => void; t: (key: string
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
       className={`mt-3 flex cursor-pointer flex-col items-center rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-        dragging ? 'border-ds-line-control bg-brand/5' : 'border-border hover:border-border'
+        dragging ? 'border-ds-line-control bg-ds-surface-sunk' : 'border-border hover:border-border'
       }`}
     >
       <span className="text-2xl">📁</span>

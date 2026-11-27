@@ -45,13 +45,13 @@ export default function IntegrationsPage() {
       <p className="mt-1 text-xs text-muted-foreground">{t('integrationsDescription')}</p>
 
       {banner === 'success' ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-success bg-success/5 p-2.5 text-xs">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-success bg-success-tint p-2.5 text-xs">
           <CheckCircle2 className="size-4 shrink-0 text-success" />
           <span className="flex-1 text-foreground">{t('ghBannerSuccess')}</span>
-          <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>
+          <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-foreground hover:text-foreground"><X className="size-3.5" /></button>
         </div>
       ) : banner === 'error' ? (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-2.5 text-xs">
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-ds-surface-sunk p-2.5 text-xs">
           <AlertTriangle className="size-4 shrink-0 text-muted-foreground" />
           <span className="flex-1 text-foreground">{t('ghBannerError')}</span>
           <button type="button" onClick={() => setBanner(null)} aria-label={t('dismiss')} className="text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>

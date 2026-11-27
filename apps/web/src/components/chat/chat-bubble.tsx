@@ -907,7 +907,7 @@ export function ChatBubble({
           ) : noVisibleText ? (
             hasAttachments ? null : (
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
-              // 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
+              // 같은 틀(italic muted·bg-ds-background·경고색·펼치기 없음).
               <div className={`min-w-0 max-w-full rounded-ds-bubble px-4 py-3 text-sm italic text-ds-ink-2 ${
                 isMine ? `rounded-tr-ds-tail ${LAYER.rowOthers}` : `rounded-tl-ds-tail ${LAYER.rowOthers}`
               }`} data-testid="chat-bubble-empty-placeholder">
@@ -1098,7 +1098,7 @@ export function ChatBubble({
               type="button"
               onClick={handleOpenThread}
               data-chat-meta=""
-              className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/8"
+              className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-ds-action-soft"
             >
               <MessageSquare className="h-3 w-3" />
               {t('replyCount', { count: replyCount })}

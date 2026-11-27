@@ -276,7 +276,7 @@ export function ArtifactViewer({
     />
   )) : null;
   const embeddedThreads = threadCards ? (
-    <div className="space-y-2 border-t border-border bg-muted/10 p-3">{threadCards}</div>
+    <div className="space-y-2 border-t border-border bg-ds-background p-3">{threadCards}</div>
   ) : null;
   const dialogs = (
     <>
@@ -506,7 +506,7 @@ export function ArtifactViewer({
                 onClick={() => setPinAddMode((v) => !v)}
                 aria-pressed={pinAddMode}
                 title={t('addThreadToggleAction')}
-                className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ${pinAddMode ? 'bg-primary/10 text-primary' : 'hover:text-foreground'}`}
+                className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ${pinAddMode ? 'bg-ds-action-soft text-primary' : 'hover:text-foreground'}`}
               >
                 <MessageCircle className="h-3.5 w-3.5" aria-hidden />
                 {openThreadCount > 0 ? openThreadCount : null}
@@ -521,7 +521,7 @@ export function ArtifactViewer({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
-          <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-muted/20 p-4 outline-none">
+          <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className="relative min-w-0 bg-ds-surface-sunk p-4 outline-none">
             {stageBody}
           </div>
           <ArtifactVersionRail

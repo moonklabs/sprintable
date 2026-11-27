@@ -18,7 +18,7 @@ export const cardVariants = cva('border text-card-foreground', {
       // "정책 검토"로 별도 보류된 축(glass-panel.tsx 소비처 2곳·이 PR 범위 밖)이라 무변경.
       solid: 'border-border bg-card',
       glass: 'border-border bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88',
-      subtle: 'border-border bg-muted/30',
+      subtle: 'border-border bg-ds-surface-sunk',
       plain: 'border-border bg-card',
     },
     radius: {

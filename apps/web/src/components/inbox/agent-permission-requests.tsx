@@ -327,7 +327,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
       ) : sealed ? ( // story 4972: no word of it here — one locked line (the shell's sheet shows it)
         <p className="break-keep text-pretty text-sm text-muted-foreground" data-testid="agent-permission-sealed">{t('sealed.locked')}</p>
       ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
-        <div className="rounded-md bg-muted/50 px-2 py-1.5">
+        <div className="rounded-md bg-ds-surface-sunk px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{shownSummary(r.summary, r.masked)}</p>
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>

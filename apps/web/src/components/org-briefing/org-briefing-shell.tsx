@@ -126,8 +126,8 @@ export function OrgBriefingShell() {
         </div>
       ) : !model || !sources ? (
         <div className="space-y-3" aria-hidden="true">
-          <Card className="h-24 animate-pulse bg-muted/30" />
-          <Card className="h-24 animate-pulse bg-muted/30" />
+          <Card className="h-24 animate-pulse bg-ds-surface-sunk" />
+          <Card className="h-24 animate-pulse bg-ds-surface-sunk" />
         </div>
       ) : (
         <div className="space-y-6">

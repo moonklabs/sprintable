@@ -143,7 +143,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
       return (
         <div
           data-testid="content-insight-info"
-          className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm"
+          className="space-y-1 rounded-md border border-border bg-ds-surface-sunk p-3 text-sm"
         >
           <p className="text-xs font-medium text-muted-foreground">{t('insightSectionLabel')}</p>
           <p className="text-xs text-muted-foreground" data-testid="insight-snapshot-not-a-target">
@@ -160,7 +160,7 @@ export function InsightSnapshotBlock({ snapshots, orgTimezone, locale, publicati
   return (
     <div
       data-testid="content-insight-info"
-      className="space-y-3 rounded-md border border-border bg-muted/30 p-3 text-sm"
+      className="space-y-3 rounded-md border border-border bg-ds-surface-sunk p-3 text-sm"
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-muted-foreground">{t('insightSectionLabel')}</p>

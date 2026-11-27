@@ -184,7 +184,7 @@ function WikiLinkMenu({
           onClick={() => command(item)}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
             i === selectedIndex
-              ? 'bg-primary/10 text-primary'
+              ? 'bg-ds-action-soft text-primary'
               : 'text-foreground hover:bg-muted'
           }`}
         >

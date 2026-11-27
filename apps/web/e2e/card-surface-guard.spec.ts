@@ -80,6 +80,8 @@ for (const { path: routePath, label } of ROUTES) {
     expect(textLength, `${routePath} — 페이지 텍스트가 사실상 없음(len ${textLength}) — 렌더 실패 의심`).toBeGreaterThan(10);
 
     const baseline = await page.evaluate(countSurfacelessBoxes);
+    // 진단: 잡힌 상자(태그.클래스 w×h) — 실패 메시지에 붙여 CI 로그에서 어느 자리인지 바로 보이게(판정에는 안 쓰임).
+    const boxesAtBaseline = await page.evaluate(() => (window as unknown as { __surfacelessBoxes?: string[] }).__surfacelessBoxes ?? []);
 
     // 양성대조 (a) 표면 있는 카드 — 카운트 불변.
     const surfacedId = await injectSyntheticBox(page, 'var(--card)');
@@ -100,6 +102,6 @@ for (const { path: routePath, label } of ROUTES) {
     expect(afterRepainted, `${routePath} — 양성대조(c) 실패: bg-background 재도색 합성 카드를 못 잡음(${baseline}→${afterRepainted})`).toBe(baseline + 1);
 
     // 양성대조 셋을 통과한 라우트의 실측치만 판정에 쓴다.
-    expect(baseline, `${routePath} — 배경 위 무표면 상자 ${baseline}건 발견(Card/SectionCard로 치환할 것)`).toBe(0);
+    expect(baseline, `${routePath} — 배경 위 무표면 상자 ${baseline}건 발견(Card/SectionCard로 치환할 것)${baseline > 0 ? ` — ${JSON.stringify(boxesAtBaseline)}` : ''}`).toBe(0);
   });
 }

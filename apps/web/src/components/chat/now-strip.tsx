@@ -202,7 +202,7 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
         type="button"
         variant="ghost"
         onClick={() => setExpanded(!expanded)}
-        className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-muted/40"
+        className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-ds-surface-high"
         aria-expanded={expanded}
       >
         <span className="text-xs font-semibold text-foreground">{t('nowStripLabel')}</span>

@@ -21,7 +21,7 @@ export function ColorSwatch({ token }: { token: ColorToken }) {
           {value || token.cssVar}
         </p>
       </div>
-      <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
+      <code className="shrink-0 rounded bg-ds-surface-sunk px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
         {token.tailwind}
       </code>
     </div>

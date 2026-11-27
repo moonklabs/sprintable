@@ -180,14 +180,14 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
             placeholder={tDocs('pageEmbedPlaceholder')}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            // 겹침색 면(bg-overlay-fill-1) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            // 겹침색 면(bg-overlay-fill-1) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-ds-surface-sunk).
             className="min-w-0 flex-1 bg-card dark:bg-card"
             autoFocus
           />
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg bg-brand/14 px-3 py-1 text-xs font-medium text-brand-text hover:bg-brand/24"
+            className="rounded-lg bg-ds-action-soft px-3 py-1 text-xs font-medium text-brand-text hover:bg-brand/24"
           >
             {tChats('embedFormEmbed')}
           </button>
@@ -245,7 +245,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') onNavigate?.(doc.slug);
           }}
-          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 transition-colors hover:border-ds-line-control hover:bg-brand/6"
+          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 transition-colors hover:border-ds-line-control hover:bg-ds-surface-sunk"
         >
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>

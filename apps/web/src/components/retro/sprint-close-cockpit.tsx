@@ -131,10 +131,10 @@ function HypothesisCard({ hypothesis }: { hypothesis: RetroHypothesisResult }) {
     <div
       className={cn(
         'flex flex-col gap-2 rounded-xl border p-3.5',
-        isVerified && 'border-success-border bg-success-tint/40',
-        isFalsified && 'border-border bg-muted/40',
-        isMeasuring && 'border-dashed border-border bg-muted/20',
-        hypothesis.status === 'killed' && 'border-border bg-muted/40 opacity-70',
+        isVerified && 'border-success-border bg-success-tint',
+        isFalsified && 'border-border bg-ds-background',
+        isMeasuring && 'border-dashed border-border bg-ds-background',
+        hypothesis.status === 'killed' && 'border-border bg-ds-background opacity-70',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -206,7 +206,7 @@ function SynthesisBlock({
   }
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-info-tint/10 p-4">
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-info-tint p-4">
       <div className="flex items-center gap-2">
         <Sparkles className="size-3.5 text-info" aria-hidden />
         <h2 className="flex-1 text-sm font-semibold text-foreground">{t('synthesisTitle')}</h2>
@@ -280,7 +280,7 @@ function RecommendationCard({
 
   if (seeded) {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-success-border bg-success-tint/40 p-3.5">
+      <div className="flex flex-col gap-2 rounded-xl border border-success-border bg-success-tint p-3.5">
         <p className="text-sm font-medium leading-snug text-foreground">{statement}</p>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="success">{t('recSeededBadge')}</Badge>
@@ -425,7 +425,7 @@ export function SprintCloseCockpit({
       ) : synthesis ? (
         <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />
       ) : (
-        <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center">
+        <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-ds-surface-sunk p-5 text-center">
           <Sparkles className="size-4 text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
           {generateError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('synthesisGenerateFailed')}</p> : null}
@@ -457,8 +457,8 @@ export function SprintCloseCockpit({
               </div>
             ))}
           </div>
-          <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint/30 p-2.5 text-xs leading-snug text-foreground">
-            <span className="font-semibold text-info" aria-hidden>ⓘ</span>
+          <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint p-2.5 text-xs leading-snug text-foreground">
+            <span className="font-semibold text-foreground" aria-hidden>ⓘ</span>
             {t('hitlBanner')}
           </div>
         </div>

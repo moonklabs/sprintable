@@ -186,7 +186,7 @@ export function HypothesisDeclarationCard({
             className={cn('min-h-0 bg-background dark:bg-background', value.drafted && 'border-ds-line-control')}
           />
           {value.drafted ? (
-            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-micro text-muted-foreground">
+            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint px-2 py-1.5 text-micro text-muted-foreground">
               <Sparkles className="mt-0.5 size-3 shrink-0 text-info" aria-hidden />
               <span><b className="text-foreground">{t('declareDraftNoteTitle')}</b> {t('declareDraftNoteBody')}</span>
             </p>
@@ -271,7 +271,7 @@ export function HypothesisDeclarationCard({
           </div>
 
           {missingFields.length > 0 ? (
-            <p className="rounded-lg border border-dashed border-info-border bg-info-tint/20 px-2 py-1.5 text-xs text-foreground">
+            <p className="rounded-lg border border-dashed border-info-border bg-info-tint px-2 py-1.5 text-xs text-foreground">
               {t('declareIncompleteCaption', { items: missingFields.map((f) => MISSING_LABEL[f]).join(', ') })}
             </p>
           ) : null}
@@ -281,7 +281,7 @@ export function HypothesisDeclarationCard({
           ) : precedentsFailed ? (
             <p className="text-micro text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
-            <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-2">
+            <div className="space-y-1.5 rounded-lg border border-border bg-ds-surface-sunk p-2">
               <p className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
                 <Sparkles className="size-3 text-info" aria-hidden />
                 {t('declareL1Title')}
@@ -331,7 +331,7 @@ export function HypothesisDeclarationCard({
                   })}
                   className={cn(
                     'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                    value.linkedHypothesisId === h.id ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
+                    value.linkedHypothesisId === h.id ? 'border-primary bg-ds-surface-sunk text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                   )}
                 >
                   {h.statement}
@@ -340,7 +340,7 @@ export function HypothesisDeclarationCard({
             </div>
           )}
           {value.linkedPreview ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-ds-line-control bg-primary/5 p-2 text-editorial-meta">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-ds-line-control bg-ds-surface-sunk p-2 text-editorial-meta">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
               <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>

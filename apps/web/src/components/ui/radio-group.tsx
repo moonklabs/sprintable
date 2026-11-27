@@ -27,7 +27,7 @@ function RadioGroupItem({ className, onKeyDown, ...props }: Omit<RadioPrimitive.
         }
       }}
       className={cn(
-        "relative inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-input bg-transparent transition-colors outline-none after:absolute after:-inset-2 focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive data-checked:border-primary dark:bg-input/30",
+        "relative inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-input bg-transparent transition-colors outline-none after:absolute after:-inset-2 focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron data-disabled:cursor-not-allowed data-disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive data-checked:border-primary dark:bg-ds-surface-sunk",
         className
       )}
       {...props}

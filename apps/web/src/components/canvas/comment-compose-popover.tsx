@@ -120,7 +120,7 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
         <button
           type="button"
           onClick={handleSubmit}
-          className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 sm:min-h-8"
+          className="min-h-11 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-ds-ink-2 sm:min-h-8"
         >
           {t('newThreadSubmitAction')}
         </button>

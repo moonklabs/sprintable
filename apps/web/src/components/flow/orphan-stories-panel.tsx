@@ -39,7 +39,7 @@ export function OrphanStoriesPanel({ orphanStories, activeGoals, onSelectStory, 
         <span className="text-editorial-meta text-muted-foreground">{t('orphanHint')}</span>
       </button>
       {expanded && (
-        <div className="space-y-1.5 border-t border-border bg-muted/30 px-3 py-3">
+        <div className="space-y-1.5 border-t border-border bg-ds-background px-3 py-3">
           {orphanStories.map((story) => (
             <OrphanRow
               key={story.id}

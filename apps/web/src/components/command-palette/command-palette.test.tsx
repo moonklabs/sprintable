@@ -221,7 +221,7 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
   it('story 9ac9b80f — context chip prefixes the human-readable #N when story_number is present', async () => {
     vi.stubGlobal('fetch', stubFetch({ story_number: 42 }));
     await mount({ contextStoryId: 's1' });
-    const chip = document.querySelector('.border-b.border-border.bg-muted\\/30');
+    const chip = document.querySelector('.border-b.border-border.bg-ds-background');
     expect(chip).toBeDefined();
     expect(chip!.textContent).toBe('◆#42 웰컴 이메일 시안 · 스토리');
   });
@@ -231,7 +231,7 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
     await mount({ contextStoryId: 's1' });
     // 까심 QA(#2227 RC): '#null' 문자열만 부재 확認으론 '#undefined'류 인접 버그를 못 잡는다 —
     // 칩 엘리먼트 자체의 정확한 텍스트를 assert해 어떤 형태의 조작된 '#...' 접두도 차단.
-    const chip = document.querySelector('.border-b.border-border.bg-muted\\/30');
+    const chip = document.querySelector('.border-b.border-border.bg-ds-background');
     expect(chip).toBeDefined();
     expect(chip!.textContent).toBe('◆웰컴 이메일 시안 · 스토리');
     expect(chip!.textContent).not.toMatch(/#/);

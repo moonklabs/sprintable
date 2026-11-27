@@ -120,7 +120,7 @@ export function GuidedHypothesisForm({
                 'rounded-full border px-3 py-1.5 text-xs font-medium transition',
                 activeExample === ex.key
                   ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-ds-line-control bg-primary/5 text-primary hover:bg-primary/10',
+                  : 'border-ds-line-control bg-ds-surface-sunk text-primary hover:bg-ds-action-soft',
               )}
             >
               {ex.label}

@@ -109,7 +109,9 @@ describe('스프린트 만들기 폼 · 열기 단추 · 삭제 확인 — ds �
     const d = dialog();
     const card = [...d.querySelectorAll('[data-slot="ds-card"]')].find((c) => (c.textContent ?? '').includes(S.planSection));
     expect(card).toBeTruthy();
-    expect(d.querySelectorAll('.bg-muted\\/20')).toHaveLength(0);
+    // 손 카드 = 계획 글을 품은 `rounded-xl border` 깔림 상자인데 ds Card를 안 품은 것(③b-2 뒤 깔림은 불투명 면이라 옛 `bg-muted/20` 표지 대신 모양으로 가림).
+    const hand = [...d.querySelectorAll('.rounded-xl.border:is(.bg-ds-background, .bg-ds-surface-sunk)')].filter((el) => (el.textContent ?? '').includes(S.planSection) && !el.querySelector('[data-slot="ds-card"]') && el.getAttribute('data-slot') !== 'ds-card');
+    expect(hand).toHaveLength(0);
   });
 
   it('⭐닫기가 이름 있는 ds 아이콘 단추이고 누르면 폼이 닫힌다', async () => {

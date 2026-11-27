@@ -222,7 +222,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
             </h1>
           </div>
 
-          <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
+          <div className="rounded-lg border border-border bg-ds-surface-sunk px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-500 delay-200 fill-mode-backwards">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 {preview.inviter_name ? (
@@ -327,7 +327,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
               disabled={submitting || (authMode === 'signup'
                 ? (!displayName.trim() || !email.trim() || !password.trim() || !tosAccepted)
                 : (!email.trim() || !password.trim()))}
-              className="flex w-full min-h-ds-touch items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+              className="flex w-full min-h-ds-touch items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {submitting ? t('joining') : t('submit')}
@@ -342,7 +342,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
             </div>
             <a
               href={`/auth/login?provider=google&invite_token=${encodeURIComponent(token!)}&tos_accepted=true`}
-              className="flex w-full min-h-ds-touch items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-ds-ink-2 transition hover:bg-muted/50"
+              className="flex w-full min-h-ds-touch items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-ds-ink-2 transition hover:bg-ds-surface-high"
             >
               <GoogleIcon />
               {t2('google')}
