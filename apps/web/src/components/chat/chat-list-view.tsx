@@ -320,7 +320,7 @@ function ConversationRow({
           label={oneOnOneParticipant.name?.trim() || (isAgentConv ? t('agent') : 'DM')}
           avatarUrl={oneOnOneParticipant.avatar_url ?? null}
           actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
-          size={32} /* story 5048 T0 ②c: the kit's 64 (40 at the least) and its 16 px row padding need the kit's 400 px list column (C1 · 민) — at today's ~248–280 px column a bigger avatar cuts the computer name of the DM line (measured: 64 → 11 of 36 px read · 48 → 27 · 40 → 38 of 41 on the CI font); the avatar stays 36 until the column is 400 */
+          size={32} /* story 5048 T0 ②c → chat density (11-27): the row is 60 high now with a 32 avatar and 10 px padding (it was the kit's 64 / 16 px that need the 400 px list column — C1 · 민); at today's ~248–280 px column a bigger avatar cuts the computer name of the DM line (measured: 64 → 11 of 36 px read · 48 → 27 · 40 → 38 of 41 on the CI font); the avatar stays 36 until the column is 400 */
           runtimeType={(isAgentConv || oneOnOneParticipant.type === 'agent') ? (oneOnOneParticipant.runtime_type ?? null) : null}
         />
       ) : (
@@ -385,7 +385,7 @@ function OutsideProjectRow({
       onClick={onClick}
       className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-ds-surface-high active:bg-muted"
     >
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
+      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         conv.type === 'dm' ? 'bg-ds-action-soft text-primary' : 'bg-info-tint text-foreground'
       }`}>
         {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Avatar, avatarSizes } from '../avatar';
+import { Avatar } from '../avatar';
 import { Banner } from '../banner';
 import { Button, buttonVariants } from '../button';
 import { Card, CardInset } from '../card';
@@ -137,7 +137,7 @@ export function ShowcasePartsA() {
         <div className="overflow-hidden rounded-ds-control border border-ds-line">
           <ListRow leading={<Avatar name="개발" actorType="agent" size={32} decorative />} title="결제 수단 두 개 추가" subtitle="PR-4821 · 14:02" trailing={<Chip tone="done" dot>끝남</Chip>} />
           <ListRow density="compact" title="촘촘한 줄" trailing={<Kbd>⌘K</Kbd>} />
-          <ListRow density="chat" leading={<Avatar name="개발" actorType="agent" size={avatarSizes.lg} decorative />} title="대화 목록 줄" subtitle="마지막 말 미리보기 · 14:02" />
+          <ListRow density="chat" leading={<Avatar name="개발" actorType="agent" size={32} decorative />} title="대화 목록 줄" subtitle="마지막 말 미리보기 · 14:02" />
           <ListRow selected title="고른 줄" subtitle="aria-current" />
           <ListRow needsHand needsHandLabel="내 손이 필요" title="승인이 필요해요" trailing={<Button variant="primary">보기</Button>} />
         </div>

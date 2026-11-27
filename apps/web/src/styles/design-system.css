@@ -86,7 +86,7 @@
 /*
  * 밀도 · 그림자 · 움직임 토큰 (UI-3 4886 AC1 · PO 11-11). 값은 부품 안에 흩어져 있던 그대로다(화면 변화 0) — 이름만 붙였다.
  * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다). story 5048 T0 ①부터 «조작 높이는 40 하나»:
- *   control-sm = compact = control = 40 · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄) · tag 28 · bar 64 · head 80 · chat-row 88 · nav-item 폭 240.
+ *   control-sm = compact = control = 40 · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄) · tag 28 · bar 64 · head 80 · chat-row 60(story 5048 채팅 밀도: 88 → 60) · nav-item 폭 240.
  * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널) — 이름은 남기되 값은 «없음»(키트: 그림자 0).
  * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`)
  *   · 토스트 들어오기 0.3초(`--ds-duration-enter`, `animate-ds-slide-in` — 옛 `slide-in`과 같은 값: 오른쪽에서 밀려 들어오며 투명 → 불투명).
@@ -101,7 +101,7 @@
   --spacing-ds-control-xl: 3rem;
   --spacing-ds-row: 3.5rem;
   --spacing-ds-tag: 1.75rem;
-  /* 부품 규격의 큰 높이(키트 문서 §2.3): 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240 */
+  /* 부품 규격의 큰 높이(키트 문서 §2.3): 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 60(채팅 밀도 11-27: 키트 88 → 60) · 탐색 항목 폭 240 */
   --spacing-ds-bar: 4rem;
   --spacing-ds-head: 5rem;
   --spacing-ds-chat-row: 3.75rem;
