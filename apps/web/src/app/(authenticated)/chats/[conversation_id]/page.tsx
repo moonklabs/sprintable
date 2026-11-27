@@ -154,12 +154,67 @@ export default function ConversationPage() {
   // story 5031 (5b): the desktop head's rename pencil — where the focus returns when Enter / Esc closes the rename input (never after a blur: the person clicked elsewhere)
   const renameButtonRef = useRef<HTMLButtonElement>(null);
   const focusRenameButtonAfterEdit = useRef(false);
+  // story 5031 (pencil follow-up · codex): where the focus goes when Enter / Esc closes the input — the desktop pencil; on a PHONE (the pencil is not mounted below lg) the title button; and the head's «⋯» when neither is there. A callback ref for the title
+  // button: it is mounted by the shell's bar a commit AFTER the input is gone (the bar re-draws from what the page publishes), so the focus is given the moment it appears, not when this effect runs.
+  const titleButtonElRef = useRef<HTMLButtonElement | null>(null);
+  const titleButtonRef = useCallback((el: HTMLButtonElement | null) => {
+    titleButtonElRef.current = el;
+    if (el && focusRenameButtonAfterEdit.current) { focusRenameButtonAfterEdit.current = false; el.focus(); }
+  }, []);
   useEffect(() => {
     if (editingTitle || !focusRenameButtonAfterEdit.current) return;
+    if (renameButtonRef.current) { focusRenameButtonAfterEdit.current = false; renameButtonRef.current.focus(); return; }
+    if (titleButtonElRef.current) { focusRenameButtonAfterEdit.current = false; titleButtonElRef.current.focus(); return; }
+    // Is there a title button to wait for? Only in a GROUP room on a phone: the input has just closed, the bar draws the title button on its next commit (RoomBarTitle always draws its `title`), and `titleButtonRef` gives it the focus then — however long that takes, no timer.
+    if (isBelowLg && meta?.type === 'group') return;
+    // …in every other case no title button can come (a one-to-one room · a room still loading · a desktop whose pencil is not there): «⋯» now, and the request is over — a room that resolves into a group later finds nothing left to steal the focus
     focusRenameButtonAfterEdit.current = false;
-    renameButtonRef.current?.focus();
-  }, [editingTitle]);
+    headMenuTriggerRef.current?.focus();
+  }, [editingTitle, isBelowLg, meta?.type]);
   const [titleDraft, setTitleDraft] = useState('');
+  // story 5031 (pencil follow-up · codex): this page component is REUSED between rooms (only ChatView is keyed by the room). The name edit — the open input and its draft — belongs to the room it was started in: leaving that room closes it and DISCARDS the draft
+  // (state adjusted while rendering — React's «derive from a changed prop» form, so no frame draws room B with room A's input). Not saved: a person who clicked away has already saved it (the input's blur); what is left is the browser's back / a link that
+  // takes no blur, and a save from here would go to the wrong room.
+  const [renameRoom, setRenameRoom] = useState(conversation_id);
+  if (renameRoom !== conversation_id) { setRenameRoom(conversation_id); setEditingTitle(false); setTitleDraft(''); }
+  // story 5031 (pencil follow-up): a group room's «이름 바꾸기» line in the «⋯» menu opens the same input as the pencil. The menu closes by itself when an item is chosen and would hand the focus back to the «⋯» button — which would BLUR the input that
+  // opened a moment ago (its onBlur saves = closes it). So the input is opened AFTER the menu has closed, and that one close does not return the focus (the input takes it). Both flags live for this one choice only: they are cleared when the menu opens again
+  // and when they have been used, so a menu closed any other way (Esc · a click outside · another item) returns the focus to «⋯» as before.
+  const renameAfterMenuCloseRef = useRef(false);
+  const skipMenuReturnFocusRef = useRef(false);
+  // ONE way to open the rename input — the desktop pencil, the phone's title button and the «⋯» menu's line all call this
+  const startRename = () => { focusRenameButtonAfterEdit.current = false; setTitleDraft(meta?.title ?? ''); setEditingTitle(true); };
+  // the opening that waits for the menu to close (below) is a timer: it is kept, and CANCELLED when anything makes it stale — the menu opens again, another line is chosen, the room changes, the page goes — and it re-checks the room and the state when it fires
+  const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingRename = () => {
+    renameAfterMenuCloseRef.current = false;
+    skipMenuReturnFocusRef.current = false;
+    if (renameTimerRef.current !== null) { clearTimeout(renameTimerRef.current); renameTimerRef.current = null; }
+  };
+  const latestRoomRef = useRef({ conversation_id, isGroup: meta?.type === 'group', editing: editingTitle, start: startRename });
+  useEffect(() => { latestRoomRef.current = { conversation_id, isGroup: meta?.type === 'group', editing: editingTitle, start: startRename }; });
+  useEffect(() => () => {
+    // leaving a room (or the page): nothing of this room's rename is left pending — the opening timer, the menu's two flags, and the request to put the focus back (it would otherwise steal the focus into the next room)
+    renameAfterMenuCloseRef.current = false;
+    skipMenuReturnFocusRef.current = false;
+    focusRenameButtonAfterEdit.current = false;
+    if (renameTimerRef.current !== null) { clearTimeout(renameTimerRef.current); renameTimerRef.current = null; }
+  }, [conversation_id]);
+  const onHeadMenuOpenChange = (next: boolean) => {
+    setHeadMenuOpen(next);
+    if (next) { cancelPendingRename(); return; }
+    if (renameAfterMenuCloseRef.current) {
+      renameAfterMenuCloseRef.current = false;
+      skipMenuReturnFocusRef.current = true; // the menu's own focus return would blur the input
+      const forRoom = conversation_id;
+      renameTimerRef.current = setTimeout(() => { // after the menu has closed
+        renameTimerRef.current = null;
+        const now = latestRoomRef.current;
+        if (now.conversation_id !== forRoom || !now.isGroup || now.editing) return;
+        now.start();
+      }, 0);
+    }
+  };
   const [chosen, setChosen] = useState<{ convId: string; projectId: string } | null>(null); // story 4847 — for a room that has no project of its own
   const chosenProjectId = chosen && chosen.convId === conversation_id ? chosen.projectId : null;
   const [metaFailedFor, setMetaFailedFor] = useState<string | null>(null); // story 4847 — the room whose own facts could not be read (not a 403): say so and offer to read them again
@@ -404,20 +459,25 @@ export default function ConversationPage() {
   // them for width and for the drag region, and the crumb is a heading (no control inside a heading).
   const renameControl = meta?.type === 'group' ? (
     editingTitle ? renameInput : (
-      <IconButton
-        ref={renameButtonRef}
-        icon="edit"
-        label={t('editRoomName')}
-        onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
-      />
+      // story 5031 (pencil follow-up): the pencil is quiet until the hand is on the head's first line (hover) or the focus is inside it — only where a mouse really can hover (`mouse:`, the repo's rule for hover-revealed controls: lib/hover-reveal.ts · hover-reveal.guard.test.ts: a finger / an emulator webview / an app shell never hides it).
+      // `opacity-0`, never `hidden` — a Tab still reaches it (and shows it). The group is the head's first line (`group/head`, room-head.tsx).
+      <span className="flex opacity-100 transition-opacity mouse:opacity-0 mouse:group-hover/head:opacity-100 mouse:group-focus-within/head:opacity-100" data-testid="room-head-pencil">
+        <IconButton
+          ref={renameButtonRef}
+          icon="edit"
+          label={t('editRoomName')}
+          onClick={startRename}
+        />
+      </span>
     )
   ) : null;
   const headTitle = editingTitle && meta?.type === 'group' ? (
     renameInput
   ) : meta?.type === 'group' ? (
     <button
+      ref={titleButtonRef}
       type="button"
-      onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
+      onClick={startRename}
       className="group/title flex min-w-0 items-center gap-1"
       aria-label={t('editRoomName')}
     >
@@ -441,7 +501,7 @@ export default function ConversationPage() {
           <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
         </span>
       ) : null}
-      <DropdownMenu open={headMenuOpen} onOpenChange={setHeadMenuOpen}>
+      <DropdownMenu open={headMenuOpen} onOpenChange={onHeadMenuOpenChange}>
         <DropdownMenuTrigger
           ref={headMenuTriggerRef}
           type="button"
@@ -452,19 +512,35 @@ export default function ConversationPage() {
         >
           <Icon name="more_horiz" size="sm" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={6} className="w-52">
-          <DropdownMenuItem onClick={() => void handleToggleMute()} data-testid="room-head-mute">
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-52"
+          finalFocus={() => {
+            // the one close that opens the rename input does not hand the focus back to «⋯» (the input takes it) — every other close does (`true` = the library's own default)
+            if (skipMenuReturnFocusRef.current) { skipMenuReturnFocusRef.current = false; return false; }
+            return true;
+          }}
+        >
+          {/* story 5031 (pencil follow-up): a group room's rename, first in the menu (the desktop pencil is quiet until hover; on a phone this is the line next to the title button) — the same opener as the pencil. Not testid `room-head-rename`: that is the head's wrapper of the pencil. */}
+          {meta.type === 'group' ? (
+            <DropdownMenuItem onClick={() => { renameAfterMenuCloseRef.current = true; }} data-testid="room-head-menu-rename">
+              <Icon name="edit" size="sm" className="text-muted-foreground" />
+              {t('editRoomName')}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem onClick={() => { cancelPendingRename(); void handleToggleMute(); }} data-testid="room-head-mute">
             <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size="sm" className="text-muted-foreground" />
             {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
           </DropdownMenuItem>
           {recordsEntry ? (
-            <DropdownMenuItem onClick={() => setRecordsOpenFor(conversation_id)} data-testid="room-head-records">
+            <DropdownMenuItem onClick={() => { cancelPendingRename(); setRecordsOpenFor(conversation_id); }} data-testid="room-head-records">
               <Icon name="history" size="sm" className="text-muted-foreground" />
               {t('agentSession.records.button')}
             </DropdownMenuItem>
           ) : null}
           {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
-          <DropdownMenuItem onClick={() => { setDeliveryFromCog(false); setShowDeliveryContract(true); }} data-testid="room-head-settings">
+          <DropdownMenuItem onClick={() => { cancelPendingRename(); setDeliveryFromCog(false); setShowDeliveryContract(true); }} data-testid="room-head-settings">
             <Icon name="settings" size="sm" className="text-muted-foreground" />
             {t('deliveryContractTitle')}
           </DropdownMenuItem>

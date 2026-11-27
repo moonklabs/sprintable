@@ -55,7 +55,7 @@ export function RoomHead({ rename, tag, subline, chips, moreCount = 0, addLabel,
     // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20). Folded (short window) the content is two rows of 40-px controls (62), so py-2 (16) lands it on exactly 80; py-3 would make it 86
     // story 5048 (chat row · PO 11-27): the head is TWO lines — (the rename pencil) · tag · the line of facts · «⋯» on the first (the name is the bar's h1 since 5b), the people chips on the second (it was name / facts / chips = three, ≈170 px with the chip rows). The numbers in the facts line are the text's own font (tabular), not the fixed-width one.
     <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'pb-1.5 pt-2' : 'pb-2 pt-2'}`}>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="group/head flex min-w-0 items-center gap-2">
         {rename ? <div className="flex min-w-0 shrink-0 items-center" data-testid="room-head-rename">{rename}</div> : null}
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
         {subline ? <p className="m-0 min-w-0 shrink-[3] truncate text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="room-head-subline">{subline}</p> : null}
