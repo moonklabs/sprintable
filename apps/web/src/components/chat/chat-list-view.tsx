@@ -581,6 +581,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const listSeqRef = useRef(0);
   // the project the list is scoped by: only the project-only fallback is — in the organization-wide list the current project is not part of the question, so changing it asks nothing
   const scopeProjectId = projectOnly ? projectId : null;
+  // story 5031 — …and the ORGANIZATION is not part of the URL either (it rides on the session · the fetch interceptor's X-Org-Id): the effect below that asks for the list lists `orgId` itself
 
   // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
   // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
@@ -705,6 +706,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     router.push(flatHref(`/chats/${conv.id}?${params.toString()}`));
   }, [t, router, projectId, flatHref]);
 
+  const handleProjectFilterChange = useCallback((next: string) => {
+    setProjectFilter(next);
+    try {
+      if (next) window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, next);
+      else window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY);
+    } catch { /* storage unavailable — the choice just does not outlive the page */ }
+  }, []);
+
+  // story 5031 — the organization the stored filter was chosen in. A switch of organization on this same, still mounted list (the chats layout mounts ONE list; the switch only pushes `?p=` and refreshes, it does not remount)
+  // must clear the old organization's rooms and ask again, and drop that choice: a project of the OLD organization asked of the new one answers nothing and would flash. `orgId` is therefore a dependency of the effect below.
+  const filterOrgIdRef = useRef(orgId);
+
   // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
   // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
   // 오기 前까지 우측이 **이전 프로젝트**의 conversations.length를 그대로 단정했다(A 0건→B
@@ -714,8 +727,13 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
+    if (orgId && filterOrgIdRef.current && orgId !== filterOrgIdRef.current) {
+      filterOrgIdRef.current = orgId;
+      // the choice was made in another organization: back to «all» FIRST, and ask once that has changed the question (this effect runs again then) — no ask carries the old organization's project
+      if (projectFilter) { handleProjectFilterChange(''); return; }
+    } else if (orgId) filterOrgIdRef.current = orgId;
     void fetchConversations(0, false);
-  }, [fetchConversations, filterReady]);
+  }, [fetchConversations, filterReady, orgId, projectFilter, handleProjectFilterChange]);
 
   // story 4847 (AC1) — the tab's stored filter, read after mount (the storage is not readable while hydrating) and only kept when it still names one of the person's projects.
   useEffect(() => {
@@ -733,14 +751,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   useEffect(() => {
     if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); setRoomsAreOrgWide(false); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
   }, [needsProject, projectId, setRoomsAreOrgWide]);
-
-  const handleProjectFilterChange = useCallback((next: string) => {
-    setProjectFilter(next);
-    try {
-      if (next) window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, next);
-      else window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY);
-    } catch { /* storage unavailable — the choice just does not outlive the page */ }
-  }, []);
 
   // story 4847 — a chosen project that is not (or no longer) one of the person's: back to «all» (e.g. the filter was kept before the project list was known)
   useEffect(() => {
