@@ -1112,7 +1112,16 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0502 = (_ROOT / "backend/alembic/versions/0502_conversations_is_project_channel.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_project_channel ON conversations (project_id)" in up0502 and "WHERE is_project_channel AND project_id IS NOT NULL" in up0502
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|DROP)\b|drop_column|alter_column|rename_|CONCURRENTLY", up0502), "0502's upgrade() adds one defaulted column and one partial unique index — nothing written, dropped or retyped"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_"))]
+    # story 5049 (C2 follow-up 1): 0503 is THREE `op.execute` lines of upgrade() the reading lists — the CHECK of `permission_audit_logs.action` made again with ONE word more (`bridge.inbound_skipped`): DROP CONSTRAINT IF EXISTS, ADD CONSTRAINT … NOT VALID,
+    # VALIDATE CONSTRAINT. A running old revision writes only the three role-change words, every one of them is in the wider list (and in the window between the drop and the add the column is merely unchecked) — so nothing it does can fail.
+    # Nothing is deleted, retyped, backfilled or renamed (the downgrade() deletes the new action's rows and is not read).
+    audit = [h for h in hits if h.startswith("0503_")]
+    assert len(audit) == 3 and all("op.execute(" in h and "permission_audit_logs" in h for h in audit), audit
+    assert "DROP CONSTRAINT IF EXISTS permission_audit_logs_action_check" in audit[0] and "ADD CONSTRAINT permission_audit_logs_action_check CHECK" in audit[1] and "NOT VALID" in audit[1] and "VALIDATE CONSTRAINT permission_audit_logs_action_check" in audit[2], audit
+    up0503 = (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME)\b|drop_column|alter_column|rename_|add_column|create_index", up0503), "0503's upgrade() only swaps one CHECK for a wider list"
+    assert "'member_added', 'member_removed', 'role_changed', 'bridge.inbound_skipped'" in (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text(), "the old three words stay in the new list"
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
