@@ -104,7 +104,7 @@
   /* 부품 규격의 큰 높이(키트 문서 §2.3): 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 88 · 탐색 항목 폭 240 */
   --spacing-ds-bar: 4rem;
   --spacing-ds-head: 5rem;
-  --spacing-ds-chat-row: 5.5rem;
+  --spacing-ds-chat-row: 3.75rem;
   --spacing-ds-nav-item: 15rem;
   /* 칸 폭(키트 Chat · 탐색 화면, 1440 기준 — 셸 배치는 C1(민)이 이 이름을 읽는다): 왼쪽 탐색 256 · 대화 목록 400 · 옆 프로필 패널 256 */
   --spacing-ds-nav: 16rem;
@@ -244,12 +244,12 @@
   --text-ds-mono-sm: 12px;
   --text-ds-mono-sm--line-height: 16px;
 
-  /* 모서리 단계: 8(모든 조작 · 카드 · 태그) · 16(말풍선 — 꼬리 쪽 한 귀만 4) · 원(아바타). 선은 1px 하나. */
+  /* 모서리 단계: 8(모든 조작 · 카드 · 태그) · 12(말풍선 — 꼬리 쪽 한 귀만 4 · story 5048 채팅 밀도: 16 → 12, 안쪽 여백에 비례) · 16(알약) · 원(아바타). 선은 1px 하나. */
   --radius-ds-tag: 8px;
   --radius-ds-control: 8px;
   --radius-ds-panel: 8px;
   --radius-ds-pill: 16px;
-  --radius-ds-bubble: 16px;
+  --radius-ds-bubble: 12px;
   --radius-ds-tail: 4px;
   --radius-ds-circle: 9999px;
 }

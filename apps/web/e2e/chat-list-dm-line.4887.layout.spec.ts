@@ -107,7 +107,7 @@ const rowOf = (page: Page, text: string) => page.locator('button', { hasText: te
 /** the computer chip of the row whose title is `title`, as the browser lays it out */
 async function chipOf(page: Page, title: string) {
   return page.evaluate(({ t }) => {
-    const row = [...document.querySelectorAll('button')].find((b) => b.querySelector('.truncate.text-ds-card-title')?.textContent === t) as HTMLElement;
+    const row = [...document.querySelectorAll('button')].find((b) => b.querySelector('.truncate.text-ds-body')?.textContent === t) as HTMLElement;
     const line = row.querySelector('[data-testid="room-dm-line"]') as HTMLElement;
     const chip = line.querySelector('[data-testid="device-chip"]') as HTMLElement;
     const text = chip.querySelector('.truncate') as HTMLElement;
@@ -154,7 +154,7 @@ test('[SID:4887] the DM the people named keeps the agent\'s NAME on the line (ne
 
 test('[SID:4887] a person\'s DM has no participant line at all and is the shortest row', async ({ page }) => {
   await open(page);
-  const h = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-card-title')).map((b) => [b.querySelector('.truncate.text-ds-card-title')!.textContent, Math.round(b.getBoundingClientRect().height)])));
+  const h = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-body')).map((b) => [b.querySelector('.truncate.text-ds-body')!.textContent, Math.round(b.getBoundingClientRect().height)])));
   const human = rowOf(page, '지우');
   await expect(human.getByTestId('room-dm-line')).toHaveCount(0);
   expect(h['지우']!, 'a row without the participant line is shorter than one with it').toBeLessThan(h[AGENT_NAME]!);

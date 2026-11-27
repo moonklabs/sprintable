@@ -133,7 +133,7 @@ export function ShowcasePartsA() {
           </RowList>
         </PageFrame>
       </Block>
-      <Block title="ListRow — 기본 · 촘촘 · 대화(88) · 고름 · 내 손이 필요">
+      <Block title="ListRow — 기본 · 촘촘 · 대화(60) · 고름 · 내 손이 필요">
         <div className="overflow-hidden rounded-ds-control border border-ds-line">
           <ListRow leading={<Avatar name="개발" actorType="agent" size={32} decorative />} title="결제 수단 두 개 추가" subtitle="PR-4821 · 14:02" trailing={<Chip tone="done" dot>끝남</Chip>} />
           <ListRow density="compact" title="촘촘한 줄" trailing={<Kbd>⌘K</Kbd>} />
