@@ -119,7 +119,7 @@ export function ExternalPublishPauseCard({ orgId, isOwnerStrict }: { orgId: stri
         <span
           className={
             state.paused
-              ? 'rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-300'
+              ? 'rounded-full bg-warning-tint px-2.5 py-0.5 text-xs font-medium text-foreground'
               : 'rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground'
           }
           data-testid="external-publish-pause-status-pill"

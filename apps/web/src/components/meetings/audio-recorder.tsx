@@ -32,7 +32,7 @@ function WaveformCanvas({ analyser }: { analyser: AnalyserNode | null }) {
       analyser.getByteTimeDomainData(data);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.beginPath();
-      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--destructive').trim() || '#ef4444';
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--destructive').trim() || 'currentColor';
       ctx.lineWidth = 2;
       const sliceWidth = canvas.width / data.length;
       let x = 0;
