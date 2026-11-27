@@ -39,7 +39,7 @@ export function AiGenerationLoading({
     <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-info-tint p-4">
       <div className="flex items-center gap-2">
         <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-          <Sparkles className="size-3.5 text-info" aria-hidden />
+          <Sparkles className="size-ds-icon-sm text-info" aria-hidden />
           Sprintable AI
         </span>
         <span className="text-micro font-medium text-muted-foreground">{headline}</span>

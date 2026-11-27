@@ -96,7 +96,7 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
           <li className="relative">
             <span className="absolute -left-5 top-2 size-2 rounded-full border-2 border-background bg-proof-amber" />
             <div className="flex items-center gap-1.5 text-editorial-ui font-medium text-foreground">
-              <FlaskConical className="size-3.5 text-muted-foreground" aria-hidden="true" />
+              <FlaskConical className="size-ds-icon-sm text-muted-foreground" aria-hidden="true" />
               {t('trustRailHypotheses', { count: hypCount })}
             </div>
           </li>

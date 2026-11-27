@@ -512,7 +512,7 @@ function ChatProofSummaryRow({ summary }: { summary: WorkcellChatProofSummary | 
       className="inline-flex items-center gap-1 text-editorial-ui font-medium text-ds-action-text hover:underline"
     >
       {t('conversationChatProofCount', { count: summary.count })}
-      <ArrowRight className="size-3" aria-hidden="true" />
+      <ArrowRight className="size-ds-icon-sm" aria-hidden="true" />
     </a>
   );
 }

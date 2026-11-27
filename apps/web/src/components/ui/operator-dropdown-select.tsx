@@ -60,7 +60,7 @@ export function OperatorDropdownSelect({
             )}
           >
             <span className="truncate">{displayLabel}</span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronDown className="size-ds-icon-md shrink-0 text-muted-foreground" />
           </button>
         }
       />
@@ -72,7 +72,7 @@ export function OperatorDropdownSelect({
             onClick={() => !option.disabled && onValueChange(option.value)}
           >
             <span className="flex-1 truncate">{option.label}</span>
-            {option.value === value && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+            {option.value === value && <Check className="size-ds-icon-sm shrink-0 text-primary" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

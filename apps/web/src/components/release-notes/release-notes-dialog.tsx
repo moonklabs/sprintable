@@ -50,7 +50,7 @@ export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogP
           <>
             <DialogHeader className="space-y-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-info">
-                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                <Sparkles className="size-ds-icon-sm" aria-hidden />
                 {t('whatsNew')}
               </span>
               <DialogTitle className="text-base">{t('title')}</DialogTitle>
@@ -68,7 +68,7 @@ export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogP
           <>
             <DialogHeader className="space-y-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-info">
-                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                <Sparkles className="size-ds-icon-sm" aria-hidden />
                 {t('whatsNew')}
               </span>
               <DialogTitle className="flex flex-wrap items-center gap-2 text-lg">
@@ -92,7 +92,7 @@ export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogP
                         className="ml-1.5 inline-flex items-center gap-0.5 text-info hover:underline"
                       >
                         {t('learnMore')}
-                        <ArrowRight className="h-3 w-3" aria-hidden />
+                        <ArrowRight className="size-ds-icon-sm" aria-hidden />
                       </a>
                     )}
                   </span>
@@ -116,7 +116,7 @@ export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogP
                 onClick={reset}
                 className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
               >
-                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                <ChevronLeft className="size-ds-icon-sm" aria-hidden />
                 {t('previousNotes')}
               </button>
               <DialogTitle className="text-base">{t('title')}</DialogTitle>
@@ -136,7 +136,7 @@ export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogP
                     <Badge variant="outline" className="shrink-0 text-xs">{n.version}</Badge>
                     <span className="min-w-0 flex-1 truncate text-sm">{n.title}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">{n.publishedAt}</span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <ChevronRight className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                   </button>
                 </li>
               ))}

@@ -26,7 +26,7 @@ export function LocaleSwitcher({ className = '' }: { className?: string }) {
       title={locale === 'en' ? '한국어로 변경' : 'Switch to English'}
       className={`flex items-center gap-1 rounded-xl px-2 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground ${className}`.trim()}
     >
-      <Globe className="h-3.5 w-3.5" />
+      <Globe className="size-ds-icon-sm" />
       <span>{locale.toUpperCase()}</span>
     </button>
   );

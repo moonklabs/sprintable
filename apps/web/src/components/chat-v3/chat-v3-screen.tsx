@@ -374,7 +374,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                         lg 미만 전용(lg↑는 레일·맥락 패널이 항상 인라인이라 불요). */}
                     <div className="flex h-13 shrink-0 items-center justify-between border-b border-border px-3 lg:hidden">
                       <Button type="button" variant="ghost" size="sm" onClick={() => setNarrowDetailOpen(false)} className="gap-1 px-2">
-                        <ChevronLeft className="size-4" aria-hidden="true" />
+                        <ChevronLeft className="size-ds-icon-md" aria-hidden="true" />
                         {t('threadRailTitle')}
                       </Button>
                       <Button
@@ -385,7 +385,7 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
                         aria-label={t('contextPanelTitle')}
                         data-testid="chat-v3-context-open-narrow"
                       >
-                        <PanelRight className="size-4" aria-hidden="true" />
+                        <PanelRight className="size-ds-icon-md" aria-hidden="true" />
                       </Button>
                     </div>
                     <ChatV3Messages

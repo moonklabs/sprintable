@@ -554,7 +554,7 @@ export function WorkListDetailPanel({
           </p>
         </div>
         <Button type="button" variant="ghost" size="sm" aria-label={t('panelClose')} onClick={onClose}>
-          <X className="size-4" aria-hidden="true" />
+          <X className="size-ds-icon-md" aria-hidden="true" />
         </Button>
       </div>
 

@@ -227,7 +227,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
           <>
             <div className="flex flex-wrap items-center gap-2">
               <FilterDropdown
-                icon={<ListFilter className="size-3.5 shrink-0" aria-hidden="true" />}
+                icon={<ListFilter className="size-ds-icon-sm shrink-0" aria-hidden="true" />}
                 ariaLabel={t('filterGoalAriaLabel')}
                 selectedLabel={selectedGoalLabel}
                 placeholder={t('filterAllGoals')}

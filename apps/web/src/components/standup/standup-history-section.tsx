@@ -97,7 +97,7 @@ export function StandupHistorySection({ projectId, memberNameById = {}, memberNa
     <section className="mt-8 space-y-3">
       <div className="flex items-center gap-2">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-          <ClipboardList className="h-4 w-4" aria-hidden />
+          <ClipboardList className="size-ds-icon-sm" aria-hidden />
           {t('history')}
         </h2>
         {/* story #4302 — 20건씩 받는 목록이라 불러온 수는 전체가 아니다: 더 남았으면 «48+»(formatAtLeast · 유나 판정). 칩은 맨 수만

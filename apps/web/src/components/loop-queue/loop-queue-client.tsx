@@ -170,7 +170,7 @@ export function LoopQueueClient() {
         </div>
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-1.5 rounded-2xl border border-border bg-card px-5 py-10 text-center">
-          <AlertTriangle className="size-5 text-muted-foreground" aria-hidden="true" />
+          <AlertTriangle className="size-ds-icon-lg text-muted-foreground" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('empty')}</p>
         </div>
       ) : (

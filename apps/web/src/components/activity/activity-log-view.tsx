@@ -358,7 +358,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 title={tc('error')}
                 description={tc('errorDescription')}
                 action={
-                  <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
+                  <DsButton onClick={reload} iconStart={<Icon name="refresh" size="md" />}>
                     {tc('retry')}
                   </DsButton>
                 }
@@ -373,7 +373,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               title={t('emptyTitle')}
               description={t('emptyDescription')}
               action={
-                <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
+                <DsButton onClick={reload} iconStart={<Icon name="refresh" size="md" />}>
                   {t('reload')}
                 </DsButton>
               }

@@ -74,6 +74,8 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
           if (!Object.keys(ALLOWED).some((k) => key.startsWith(k))) hits.push(key);
         }
       }
+      // 부모 선택자로 자식 svg 크기를 주는 꼴(`[&_svg]:size-4` · `[&>svg]:size-4` · `[&_svg:not([class*='size-'])]:size-4`)도 직접 크기다 — 단계 토큰으로(codex 지적). 12(`size-3`)는 칩 · 배지 · 작은 단추라 허용.
+      for (const m of text.matchAll(/\[&[>_ ]svg(?::not\(\[class\*='size-'\]\))?\]:(?:size|h|w)-(?:3\.5|4|4\.5|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/g)) hits.push(`${rel}::${m[0]}`);
       for (const m of text.matchAll(/\w*Glyph\([^)]*['"`][^'"`]*\b(?:size|h|w)-(?:3\.5|4|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/g)) hits.push(`${rel}::${m[0].slice(0, 60)}`);
     }
     expect(hits).toEqual([]);

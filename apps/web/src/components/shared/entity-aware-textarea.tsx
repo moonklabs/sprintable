@@ -118,7 +118,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
                   className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-ds-surface-high text-foreground font-medium' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-foreground'}`}
                 >
-                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
+                  <EntityIcon className="mr-1.5 size-ds-icon-sm shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
                   {statusLabel ? (
                     <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-ds-surface-sunk text-muted-foreground">{statusLabel}</span>

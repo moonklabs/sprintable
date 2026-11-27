@@ -149,7 +149,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
       <SectionCardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Activity className="size-4 text-primary" />
+            <Activity className="size-ds-icon-sm text-primary" />
             <div className="text-sm font-semibold text-foreground">{t('title')}</div>
           </div>
           <Link

@@ -76,7 +76,7 @@ export function ReclaimNoticeAlert() {
 
   return (
     <Alert variant="info" role="status" data-testid="reclaim-notice">
-      <Info className="h-4 w-4 text-info" aria-hidden />
+      <Info className="size-ds-icon-sm text-info" aria-hidden />
       <AlertTitle>{t('title')}</AlertTitle>
       <AlertDescription>
         {names.length > 0 ? <span className="block break-keep">{t('body', { items, eulReul: pickEulReulJosa(items) })}</span> : null}

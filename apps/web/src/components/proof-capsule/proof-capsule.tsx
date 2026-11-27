@@ -199,13 +199,13 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
       <div className="flex flex-wrap items-center gap-3.5 text-editorial-ui leading-[1.45] text-proof-ink-2">
         {evidence.acMet != null && evidence.acTotal != null ? (
           <span className="inline-flex items-center gap-1">
-            <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" aria-hidden="true" />
+            <Check className="motion-safe:animate-proof-check-in size-ds-icon-sm text-proof-green" aria-hidden="true" />
             {t('evidence.acMet', { met: evidence.acMet, total: evidence.acTotal })}
           </span>
         ) : null}
         {evidence.autoVerify === 'passed' ? (
           <span className="inline-flex items-center gap-1">
-            <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" aria-hidden="true" />
+            <Check className="motion-safe:animate-proof-check-in size-ds-icon-sm text-proof-green" aria-hidden="true" />
             {t('evidence.autoPassed')}
           </span>
         ) : null}
