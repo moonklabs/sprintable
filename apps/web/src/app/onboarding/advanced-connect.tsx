@@ -249,7 +249,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
   // Its place (story 4766 · AC3): AFTER the press — the press stands on the first screen of a laptop window (≈800 px visible), the notes under it
   const pressShown = phase !== 'ready' || revoked;
   const prereqBlock = (
-    <div className="space-y-1.5 rounded-md border border-border bg-ds-background p-3" data-testid="advanced-prereq">
+    <div className="space-y-1.5 rounded-md border border-border bg-ds-surface-sunk p-3" data-testid="advanced-prereq">
       <p className="break-keep text-ds-small font-medium text-foreground">{t('prereqTitle')}</p>
       <p className="break-keep text-ds-small text-muted-foreground">{t('prereqBody')}</p>
       <ul className="space-y-1">

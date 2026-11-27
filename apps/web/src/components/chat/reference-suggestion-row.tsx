@@ -136,7 +136,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
         return (
           <div
             key={c.raw}
-            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-ds-background px-2.5 py-1.5 text-xs text-muted-foreground"
+            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-muted-foreground"
           >
             <Link2 className="size-3.5 shrink-0" aria-hidden />
             {state.status === 'linked' ? (

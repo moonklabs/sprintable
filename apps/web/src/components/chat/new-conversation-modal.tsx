@@ -232,7 +232,7 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
           )}
 
           {projectsFailed ? (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-ds-background px-3 py-2 text-xs text-muted-foreground" role="alert" data-testid="new-room-projects-failed">
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2 text-xs text-muted-foreground" role="alert" data-testid="new-room-projects-failed">
               <span>{t('projectsLoadFailed')}</span>
               <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()} data-testid="new-room-retry-projects">{t('projectsRetry')}</Button>
             </div>

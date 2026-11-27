@@ -60,7 +60,7 @@ function BudgetRow({
   locale: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-background px-3 py-2.5 text-sm" data-testid="connect-rules-v3-budget-row">
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm" data-testid="connect-rules-v3-budget-row">
       <span className="font-medium text-foreground">{label}</span>
       <span className="text-xs text-muted-foreground">
         {budget
@@ -133,21 +133,21 @@ export function ConnectRulesV3Rules({ orgId }: { orgId: string }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-background px-3 py-2.5 text-sm">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm">
         <div>
           <p className="font-medium text-foreground">{t('ruleBannedTerms')}</p>
           <p className="text-xs text-muted-foreground">{t('ruleBannedTermsDescription')}</p>
         </div>
         <span className="text-xs text-muted-foreground">{rules.banned_terms.length > 0 ? t('ruleOn') : t('ruleOff')}</span>
       </div>
-      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-background px-3 py-2.5 text-sm">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm">
         <div>
           <p className="font-medium text-foreground">{t('ruleRequireUtm')}</p>
           <p className="text-xs text-muted-foreground">{t('ruleRequireUtmDescription')}</p>
         </div>
         <span className="text-xs text-muted-foreground">{rules.require_utm ? t('ruleOn') : t('ruleOff')}</span>
       </div>
-      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-background px-3 py-2.5 text-sm" data-testid="connect-rules-v3-utm-auto-row">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-ds-surface-sunk px-3 py-2.5 text-sm" data-testid="connect-rules-v3-utm-auto-row">
         <div>
           <p className="font-medium text-foreground">{tcr('utmRulesSectionTitle')}</p>
           <p className="text-xs text-muted-foreground">{tcr('utmRulesSectionDescription')}</p>

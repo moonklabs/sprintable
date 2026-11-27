@@ -245,19 +245,19 @@ export function StandupFeedbackDialog({
           {/* Done / Plan / Blockers 전체 텍스트 */}
           {entry ? (
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border border-border bg-ds-background p-3">
+              <div className="rounded-md border border-border bg-ds-surface-sunk p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-success">{t('doneLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.done && 'text-muted-foreground')}>
                   {entry.done || t('emptySection')}
                 </p>
               </div>
-              <div className="rounded-md border border-border bg-ds-background p-3">
+              <div className="rounded-md border border-border bg-ds-surface-sunk p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-info">{t('planLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.plan && 'text-muted-foreground')}>
                   {entry.plan || t('emptySection')}
                 </p>
               </div>
-              <div className="rounded-md border border-border bg-ds-background p-3">
+              <div className="rounded-md border border-border bg-ds-surface-sunk p-3">
                 <div className="text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockersLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground', !entry.blockers && 'text-muted-foreground')}>
                   {entry.blockers || t('emptySection')}
@@ -270,7 +270,7 @@ export function StandupFeedbackDialog({
 
           {/* 연결된 스토리 */}
           {linkedStories.length > 0 ? (
-            <div className="rounded-md border border-border bg-ds-background p-3 space-y-2">
+            <div className="rounded-md border border-border bg-ds-surface-sunk p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('linkedStories')}</p>
                 <Badge variant="outline">{t('linkedStoryCount', { count: linkedStories.length })}</Badge>
@@ -333,7 +333,7 @@ export function StandupFeedbackDialog({
                   const isAuthor = currentMemberId === item.feedback_by_id;
                   const isEditing = editingFeedbackId === item.id;
                   return (
-                    <div key={item.id} className="rounded-md border border-border bg-ds-background p-3">
+                    <div key={item.id} className="rounded-md border border-border bg-ds-surface-sunk p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={getReviewTypeVariant(item.review_type)}>{t(`reviewType_${item.review_type}`)}</Badge>

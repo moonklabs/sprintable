@@ -1191,7 +1191,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             })}
           </div>
         ) : (
-          <div className="rounded-md border border-border bg-ds-background px-4 py-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-border bg-ds-surface-sunk px-4 py-3 text-sm text-muted-foreground">
             {tSettings('agentScopeAllProjectsHint', { count: orgProjects?.length ?? 0 })}
           </div>
         )}
@@ -1676,7 +1676,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         {t('codexConfigTomlPathNote', CODEX_PATH_NOTE_PARAMS)}
                       </p>
                     )}
-                    <pre className="overflow-x-auto rounded-md border border-border bg-ds-background p-3 text-xs text-ds-ink-2">
+                    <pre className="overflow-x-auto rounded-md border border-border bg-ds-surface-sunk p-3 text-xs text-ds-ink-2">
                       {buildMcpConfigText(equipResult.mcp_config, runtime)}
                     </pre>
                   </div>
@@ -1845,7 +1845,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 // (story #2857 후속 — hermes는 이제 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 mcp_config를
                 // 받아 이 분기를 안 탄다. 옛 목록에 남겨두면 주석이 실제와 어긋나 §0급 오도가 된다.)
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
-                <div className="rounded-md border border-dashed border-border bg-ds-background p-3 text-xs text-muted-foreground">
+                <div className="rounded-md border border-dashed border-border bg-ds-surface-sunk p-3 text-xs text-muted-foreground">
                   {t('mcpNotApplicable')}
                 </div>
               )}

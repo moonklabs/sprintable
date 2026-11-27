@@ -202,7 +202,7 @@ function WindowLine({ t, msLeft, onClose }: { t: T; msLeft: number; onClose: () 
   const s = Math.max(0, Math.ceil(msLeft / 1000));
   const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-ds-background px-3 py-2 text-sm text-foreground" data-testid="phone-files-window">
+    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-ds-surface-sunk px-3 py-2 text-sm text-foreground" data-testid="phone-files-window">
       <span>{t('window.on', { time })}</span>
       <Button variant="outline" size="sm" onClick={onClose} data-testid="phone-files-window-close">{t('window.close')}</Button>
     </div>
@@ -296,7 +296,7 @@ function DownloadLine({ t, dl, onStop, onRetry }: { t: T; dl: Download; onStop: 
   const computer = usePhoneBridge().deviceKind === 'computer'; // story 4994 (a guest has no download cap; kept whole so no «폰» line can come from a shell that offers it)
   if (dl.kind === 'running') {
     return (
-      <div role="status" className="flex items-center justify-between gap-2 rounded-md border border-border bg-ds-background px-3 py-2 text-sm text-foreground" data-testid="phone-files-download-running">
+      <div role="status" className="flex items-center justify-between gap-2 rounded-md border border-border bg-ds-surface-sunk px-3 py-2 text-sm text-foreground" data-testid="phone-files-download-running">
         <span className="flex items-center gap-2"><Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />{dl.of > 0 ? t('download.running', { got: dl.got, of: dl.of }) : t('download.starting')}</span>
         <Button variant="outline" size="sm" onClick={onStop} data-testid="phone-files-download-stop">{t('download.stop')}</Button>
       </div>

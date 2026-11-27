@@ -1259,7 +1259,7 @@ export default function ContentPostEditPage() {
       {publication?.published_at ? (
         <div
           data-testid="content-publication-info"
-          className="space-y-1 rounded-md border border-border bg-ds-background p-3 text-sm"
+          className="space-y-1 rounded-md border border-border bg-ds-surface-sunk p-3 text-sm"
         >
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('publishedInfoUrlLabel')}</span>{' '}
@@ -1300,7 +1300,7 @@ export default function ContentPostEditPage() {
       {publication?.destination && publication.destination !== 'hosted_site' && (publication.channel_publication || publication.command) ? (
         <div
           data-testid="content-external-publication-info"
-          className="space-y-1 rounded-md border border-border bg-ds-background p-3 text-sm"
+          className="space-y-1 rounded-md border border-border bg-ds-surface-sunk p-3 text-sm"
         >
           <div>
             <span className="text-xs font-medium text-muted-foreground">{t('externalPublicationDestinationLabel')}</span>{' '}
