@@ -46,7 +46,10 @@ def _state(req: HitlRequest) -> str:
 
 
 async def _person(auth: AuthContext, org_id: uuid.UUID, session: AsyncSession):
-    if (auth.claims.get("app_metadata") or {}).get("api_key_id"):
+    # a person's SESSION only: no key of any kind — an agent's key (`api_key_id`) AND a person's own personal key (`human_api_key_id`, the `hu_live_` one: it looks like a person to `resolve_member` but it sits in
+    # config files and local agents' environments — whoever can read it could approve an ask this agent made, under that person's name). Both claims are the only two key origins `get_current_user` sets.
+    _meta = auth.claims.get("app_metadata") or {}
+    if _meta.get("api_key_id") or _meta.get("human_api_key_id"):
         raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_PERSON_SESSION_REQUIRED", "message": "AGENT_ACTION_PERSON_SESSION_REQUIRED"})
     who = await resolve_member(auth, org_id, session)
     if who.type != "human":

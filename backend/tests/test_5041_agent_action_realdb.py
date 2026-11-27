@@ -107,7 +107,7 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False):
+async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False, human_key: bool = False):
     """whoever the next call is made by (an agent is `api_key=True` with its member id; a person is a plain session)"""
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
@@ -125,6 +125,10 @@ async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False):
         claims = {"app_metadata": {"org_id": str(org_id)}}
         if api_key:
             claims["app_metadata"]["api_key_id"] = "test-key"
+        if human_key:
+            # the personal key of a person (`hu_live_`): `get_current_user` builds a person-shaped context and carries ONLY this marker
+            claims["app_metadata"]["human_api_key_id"] = "test-human-key"
+            claims["app_metadata"]["actor_type"] = "human"
         return AuthContext(user_id=str(user_id), email="test@test", claims=claims)
 
     async def _org():
@@ -312,6 +316,13 @@ async def test_only_a_persons_session_can_press():
         async with _client_for(app) as c:
             by_key = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
             read_by_key = await c.get(f"/api/v2/agent-actions/{request_id}")
+        await _act_as(app, Session, d["admin_user"], d["org_id"], human_key=True)  # a person's PERSONAL key: the admin who made the agent, but not a session
+        async with _client_for(app) as c:
+            by_personal_key = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+            reject_by_personal_key = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "reject"})
+            read_by_personal_key = await c.get(f"/api/v2/agent-actions/{request_id}")
+        assert [r.status_code for r in (by_personal_key, reject_by_personal_key, read_by_personal_key)] == [403, 403, 403]
+        assert by_personal_key.json()["error"]["code"] == "AGENT_ACTION_PERSON_SESSION_REQUIRED"
         assert by_agent.status_code == 403 and by_agent.json()["error"]["code"] == "AGENT_ACTION_PERSON_SESSION_REQUIRED"
         assert by_key.status_code == 403 and by_key.json()["error"]["code"] == "AGENT_ACTION_PERSON_SESSION_REQUIRED"
         assert read_by_key.status_code == 403
