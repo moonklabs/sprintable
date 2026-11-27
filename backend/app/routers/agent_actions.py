@@ -86,13 +86,14 @@ async def _load(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, req
 
 
 # what the ask is about, read from the stored call's PATH only (never the body): the card offers «열어 보기» on it. `kind` is the entity registry's word.
+_U = svc._UUID  # the one UUID shape the action patterns already use (Kadir 6012 L2: not `[0-9a-f-]{36}`, which `-` ×36 passes)
 _TARGET_PATHS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("story", re.compile(r"^/api/v2/stories/(?P<id>[0-9a-fA-F-]{36})$")),
-    ("task", re.compile(r"^/api/v2/tasks/(?P<id>[0-9a-fA-F-]{36})$")),
-    ("epic", re.compile(r"^/api/v2/(?:goals|epics)/(?P<id>[0-9a-fA-F-]{36})$")),
-    ("doc", re.compile(r"^/api/v2/docs/(?P<id>[0-9a-fA-F-]{36})$")),
-    ("sprint", re.compile(r"^/api/v2/sprints/(?P<id>[0-9a-fA-F-]{36})(?:/close)?$")),
-    ("artifact", re.compile(r"^/api/v2/visual-artifacts/(?P<id>[0-9a-fA-F-]{36})/pins/[0-9a-fA-F-]{36}$")),
+    ("story", re.compile(rf"/api/v2/stories/(?P<id>{_U})")),
+    ("task", re.compile(rf"/api/v2/tasks/(?P<id>{_U})")),
+    ("epic", re.compile(rf"/api/v2/(?:goals|epics)/(?P<id>{_U})")),
+    ("doc", re.compile(rf"/api/v2/docs/(?P<id>{_U})")),
+    ("sprint", re.compile(rf"/api/v2/sprints/(?P<id>{_U})(?:/close)?")),
+    ("artifact", re.compile(rf"/api/v2/visual-artifacts/(?P<id>{_U})/pins/{_U}")),
 )
 
 
@@ -108,7 +109,7 @@ def _target_of(snapshot: dict | None, action_key: str | None = None) -> dict | N
     if not isinstance(path, str):
         return None
     for kind, pattern in _TARGET_PATHS:
-        m = pattern.match(path)
+        m = pattern.fullmatch(path)  # the whole path (Kadir 6012 L1: `$` also matches before a trailing newline)
         if m:
             if _ACTION_KIND.get(action_key or "") != kind:
                 return None

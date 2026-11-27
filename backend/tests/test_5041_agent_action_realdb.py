@@ -915,3 +915,34 @@ def test_every_registered_action_is_asked_for_by_exactly_one_route():
                     if kw.arg == "action_key" and isinstance(kw.value, ast.Constant):
                         named[kw.value.value] = named.get(kw.value.value, 0) + 1
     assert named == {key: 1 for key in SPECS}, named
+
+
+# ── Kadir's audit of 6012 (lows) ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_target_is_read_from_the_whole_path_and_a_real_uuid_only():
+    """L1: `$` also matched before a trailing newline · L2: `[0-9a-f-]{36}` let `-` ×36 through — the target is the action patterns' own UUID shape, the whole path"""
+    from app.routers.agent_actions import _target_of
+
+    ok = "0d6e953f-6d43-42c1-a87c-b023544497db"
+    assert _target_of({"path": f"/api/v2/stories/{ok}"}, "story.delete") == {"kind": "story", "id": ok}
+    assert _target_of({"path": f"/api/v2/stories/{ok}\n"}, "story.delete") is None, "a newline after the id is not the path"
+    assert _target_of({"path": "/api/v2/stories/" + "-" * 36}, "story.delete") is None, "36 dashes are not a UUID"
+    assert _target_of({"path": f"/api/v2/stories/{ok}/../x"}, "story.delete") is None
+    assert _target_of({"path": f"/api/v2/sprints/{ok}/close"}, "sprint.close") == {"kind": "sprint", "id": ok}
+    assert _target_of({"path": f"/api/v2/sprints/{ok}/close\n"}, "sprint.close") is None
+
+
+def test_the_reason_the_agent_is_told_is_a_code_never_the_responses_sentence():
+    """L3: the line is spoken by the server to the asking agent — a sentence written for the person who pressed can name what the agent may not read"""
+    import httpx
+
+    from app.services.agent_action import _reason_of
+
+    def resp(status, body):
+        return httpx.Response(status, json=body)
+
+    assert _reason_of(resp(403, {"detail": {"code": "FORBIDDEN", "message": "Only Kim in Sales may do this"}})) == "FORBIDDEN"
+    assert _reason_of(resp(403, {"detail": {"message": "Only Kim in Sales may do this"}})) == "HTTP 403"
+    assert _reason_of(resp(404, {"detail": "Story 'Salary review' not found"})) == "HTTP 404", "a sentence is not a code"
+    assert _reason_of(resp(409, {"detail": "SPRINT_ALREADY_CLOSED"})) == "SPRINT_ALREADY_CLOSED"
+    assert _reason_of(httpx.Response(500, text="boom")) == "HTTP 500"

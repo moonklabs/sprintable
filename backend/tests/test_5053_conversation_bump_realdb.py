@@ -198,6 +198,44 @@ async def test_the_backfill_does_not_count_a_tombstoned_word_as_activity():
 
 
 @pytest.mark.anyio
+async def test_the_dry_run_counts_exactly_what_the_apply_would_change_an_empty_room_is_neither():
+    """dev 11-27: the dry-run said 535 after the apply had corrected everything — rooms with no live word (none ever, or all deleted) were counted because `LEAST` ignores a NULL"""
+    from app.models.conversation import ConversationMessage
+    from scripts.jobs.backfill_conversation_updated_at import _COUNT_SQL, backfill
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        never = await _room(Session, d, title="never spoken", updated_at=OLD)
+        all_gone = await _room(Session, d, title="all deleted", updated_at=OLD)
+        late = await _room(Session, d, title="out of step", updated_at=OLD)
+        async with Session() as s:
+            s.add(ConversationMessage(id=uuid.uuid4(), conversation_id=late, sender_id=d["agent_id"], content="a word", created_at=OLD + timedelta(days=5)))
+            gone = ConversationMessage(id=uuid.uuid4(), conversation_id=all_gone, sender_id=d["agent_id"], content="a word, deleted", created_at=OLD + timedelta(days=5))
+            s.add(gone)
+            await s.commit()
+            await s.execute(text("UPDATE conversation_messages SET deleted_at = now() WHERE id = :i"), {"i": gone.id})
+            await s.execute(text("UPDATE conversations SET updated_at = :t WHERE id IN (:a, :b, :c)"), {"t": OLD, "a": never, "b": all_gone, "c": late})
+            await s.commit()
+        ours = {never, all_gone, late}
+
+        async def _counted():
+            async with Session() as s:
+                return int((await s.execute(text(_COUNT_SQL))).scalar_one())
+
+        before = await _counted()
+        assert before >= 1, "the room that really is out of step is counted"
+        changed = await backfill(Session, chunk=50, apply=True)
+        assert changed >= 1
+        assert await _counted() == 0, "after the apply the dry-run says 0 — it must not keep counting rooms the apply cannot change"
+        assert abs((await _updated_at(Session, never)) - OLD) < timedelta(milliseconds=1) and abs((await _updated_at(Session, all_gone)) - OLD) < timedelta(milliseconds=1), "empty rooms are left alone"
+        assert ours
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_a_message_stamped_in_the_future_cannot_pin_a_room_to_the_top():
     """codex pass: a hand-stamped / imported message with a future time counts as «now» — a later real word still moves the room"""
     from app.models.conversation import ConversationMessage
