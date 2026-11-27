@@ -211,7 +211,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
   if (loading) {
     return (
       <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Loader2 className="size-ds-icon-sm animate-spin" />
         {tc('loading')}
       </div>
     );
@@ -452,7 +452,7 @@ export function UpgradeCheckoutDialog({
             disabled={submitting || paymentUnresolved}
           >
             {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" />
+              <Loader2 className="size-ds-icon-md animate-spin" data-icon="inline-start" />
             ) : null}
             {t('checkoutDialogConfirm')}
           </Button>
@@ -584,7 +584,7 @@ function DowngradeConfirmDialog({
             {t('checkoutDialogCancel')}
           </Button>
           <Button variant="default" onClick={handleConfirm} disabled={submitting}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
+            {submitting ? <Loader2 className="size-ds-icon-md animate-spin" data-icon="inline-start" /> : null}
             {t('downgradeDialogConfirm')}
           </Button>
         </DialogFooter>
@@ -647,7 +647,7 @@ function CancelSubscriptionConfirmDialog({
             {t('cancelDialogKeepPlan')}
           </Button>
           <Button variant="destructive" onClick={handleConfirm} disabled={submitting}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" /> : null}
+            {submitting ? <Loader2 className="size-ds-icon-md animate-spin" data-icon="inline-start" /> : null}
             {t('cancelDialogConfirm')}
           </Button>
         </DialogFooter>

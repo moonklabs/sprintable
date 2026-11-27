@@ -1,4 +1,0 @@
-# 칸반 + 이웃 epics · sprints(④-④)
-components/kanban
-components/epics
-components/sprints

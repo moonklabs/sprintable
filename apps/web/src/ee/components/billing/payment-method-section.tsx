@@ -100,7 +100,7 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
       ) : (
         <div className="flex items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-sm text-foreground">
-            <CreditCard className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <CreditCard className="size-ds-icon-sm text-muted-foreground" aria-hidden />
             {t('paymentMethodMasked', {
               issuer: key.card_issuer_code ?? '',
               number: key.card_number_masked ?? '',
@@ -113,7 +113,7 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
             className="gap-1.5 text-muted-foreground hover:text-destructive"
             onClick={() => setConfirmOpen(true)}
           >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+            <Trash2 className="size-ds-icon-sm" aria-hidden />
             {t('paymentMethodDeleteButton')}
           </Button>
         </div>
@@ -130,7 +130,7 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
               {t('paymentMethodDeleteCancel')}
             </Button>
             <Button type="button" variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : t('paymentMethodDeleteConfirm')}
+              {deleting ? <Loader2 className="size-ds-icon-md animate-spin" /> : t('paymentMethodDeleteConfirm')}
             </Button>
           </DialogFooter>
         </DialogContent>

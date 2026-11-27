@@ -1,4 +1,0 @@
-# 저장소 · 가설 · 캔버스(④-⑭a)
-components/storage
-components/hypotheses
-components/canvas

@@ -148,7 +148,7 @@ export function PaymentAttemptBanner({
     return (
       <Alert variant="info" data-payment-attempt-state={state.phase}>
         <AlertDescription className="flex items-start gap-2 break-keep">
-          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+          <Loader2 className="mt-0.5 size-ds-icon-sm shrink-0 animate-spin" />
           <span className="space-y-1">
             <span className="block">{t(state.phase === 'processing' ? 'paymentAttemptProcessing' : 'paymentAttemptChecking')}</span>
             {/* story #4341 AC3(유나 확정) — 운영자 알림이 실제로 전달된 뒤에만(시도 응답의 operator_notified_at) «담당자에게 알렸어요»로

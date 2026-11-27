@@ -1,3 +1,0 @@
-# 조직 화면 + org-briefing(④-⑨)
-app/(authenticated)/organization
-components/org-briefing

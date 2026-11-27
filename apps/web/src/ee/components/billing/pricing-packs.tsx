@@ -22,7 +22,7 @@ function QuantityStepper({ pack, value, min, max, onChange }: { pack: string; va
         onClick={() => onChange(Math.max(min, value - 1))}
         aria-label={t('packQtyDecrease', { pack })}
       >
-        <Minus className="h-3.5 w-3.5" />
+        <Minus className="size-ds-icon-sm" />
       </Button>
       <span className="min-w-9 border-x border-border px-2 text-center text-sm font-semibold">{value}</span>
       <Button
@@ -33,7 +33,7 @@ function QuantityStepper({ pack, value, min, max, onChange }: { pack: string; va
         onClick={() => onChange(Math.min(max, value + 1))}
         aria-label={t('packQtyIncrease', { pack })}
       >
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="size-ds-icon-sm" />
       </Button>
     </div>
   );

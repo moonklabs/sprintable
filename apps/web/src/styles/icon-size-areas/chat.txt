@@ -1,3 +1,0 @@
-# 채팅 — 부품 + 채팅 화면 쪽(④-②)
-components/chat
-app/(authenticated)/chats
