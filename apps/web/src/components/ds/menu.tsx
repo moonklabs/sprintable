@@ -72,7 +72,7 @@ export function MenuItem({ className, children, icon, shortcut, variant = 'defau
       )}
       {...props}
     >
-      {icon ? <Icon name={icon} className="shrink-0" /> : null}
+      {icon ? <Icon name={icon} size="sm" className="shrink-0" /> : null}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {shortcut ? <span className="ml-4 shrink-0 text-ds-ink-3">{shortcut}</span> : null}
     </MenuPrimitive.Item>

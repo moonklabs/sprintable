@@ -33,6 +33,16 @@ describe('ds IconButton', () => {
     expect(container.querySelector('button')!.className).toContain('size-ds-control');
   });
 
+  it('⭐안쪽 아이콘은 단추 크기 표를 따른다 — md · lg(높이 40) = 20 · xl(48) = 24 (story 5048 ④ · 전에는 16 · 18 · 22)', async () => {
+    const w = () => container.querySelector('button svg')!.getAttribute('width');
+    await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" />); });
+    expect(w()).toBe('20');
+    await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" size="lg" />); });
+    expect(w()).toBe('20');
+    await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" size="xl" />); });
+    expect(w()).toBe('24');
+  });
+
   it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 실선 흐린 면 · 이름(label)은 그대로 필수', async () => {
     await act(async () => { root.render(<IconButton label="새 대화" icon="add" variant="primary" size="xl" />); });
     const b = container.querySelector('button')!;
@@ -49,7 +59,7 @@ describe('ds IconButton', () => {
     expect(b.className).toContain('size-ds-control-xl');
     expect(b.className).toContain('touch:min-h-ds-touch');
     expect(b.className).not.toMatch(/(^|\s)bg-ds-action(\s|$)/);
-    expect(b.querySelector('svg')!.getAttribute('width')).toBe('22');
+    expect(b.querySelector('svg')!.getAttribute('width')).toBe('24'); // 48 큰 아이콘 단추 = lg 24 (story 5048 ④ · 전에는 22)
   });
 
   it('⭐비활성 primary는 native disabled · aria-disabled(focusableWhenDisabled) 둘 다 활성 색을 잃는다', async () => {

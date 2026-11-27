@@ -4,7 +4,7 @@ import { Button as ButtonPrimitive } from '@base-ui/react/button';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 import { ARIA_DISABLED_FACE, DISABLED_FACE } from './disabled-face';
-import { Icon, type IconName } from './icon';
+import { Icon, type IconName, type IconSize } from './icon';
 
 const iconButtonVariants = cva(
   [
@@ -32,10 +32,13 @@ export interface IconButtonProps extends Omit<ButtonPrimitive.Props, 'children' 
   icon: IconName;
 }
 
+/** 단추 크기별 안쪽 아이콘 단계 — 한 표(story 5048 ④ PO 11-27). md · lg는 높이 40 하나(40 높이 조작 = md 20) · xl 48 큰 아이콘 단추 = lg 24. 전에는 16 · 18 · 22를 숫자로 줬다. */
+const ICON_BUTTON_STEP = { md: 'md', lg: 'md', xl: 'lg' } as const satisfies Record<'md' | 'lg' | 'xl', IconSize>;
+
 export function IconButton({ label, icon, size, variant, className, ...props }: IconButtonProps) {
   return (
     <ButtonPrimitive data-slot="ds-icon-button" aria-label={label} title={label} className={cn(iconButtonVariants({ variant, size }), className)} {...props}>
-      <Icon name={icon} size={size === 'xl' ? 22 : size === 'lg' ? 18 : 16} />
+      <Icon name={icon} size={ICON_BUTTON_STEP[size ?? 'md']} />
     </ButtonPrimitive>
   );
 }

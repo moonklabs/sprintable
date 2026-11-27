@@ -1,2 +1,2 @@
-# 영역이 아닌 «공용 부품 한 파일» — 단추의 로딩 스피너 단계가 단추 크기 표(BUTTON_ICON_STEP)를 따르는지(④-⑤). 6031이 폴더 전체(components/ds)로 넓힌다.
-components/ds/button.tsx
+# 영역이 아닌 «공용 ds 부품 묶음» — ds 부품이 아이콘 크기를 숫자로 안 주고 단추 크기 표(BUTTON_ICON_STEP · ICON_BUTTON_STEP) · 단계("sm|md|lg")로 준다(④-⑤ · ④-⑦).
+components/ds

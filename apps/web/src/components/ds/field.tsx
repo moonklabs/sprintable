@@ -38,7 +38,7 @@ export function Field({ label, hint, error, children, className }: FieldProps) {
       {children({ id, 'aria-invalid': error ? true : undefined, 'aria-describedby': hasNote ? noteId : undefined })}
       {error ? (
         <p id={noteId} role="alert" className="flex items-start gap-1 text-ds-small text-ds-failed break-keep [overflow-wrap:anywhere]">
-          <Icon name="error" size={14} className="mt-0.5 shrink-0" />
+          <Icon name="error" size="sm" className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </p>
       ) : hint ? (

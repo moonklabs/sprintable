@@ -64,13 +64,13 @@ describe('ds TreeRow', () => {
     expect(ctl().hasAttribute('aria-expanded')).toBe(false);
   });
 
-  it('⭐잎 줄은 화살표 자리를 폴더 줄과 같은 크기(14px)로 비워 제목이 줄을 맞춘다 — 폰에서도 같은 폭', async () => {
+  it('⭐잎 줄은 화살표 자리를 폴더 줄과 같은 크기(sm 16)로 비워 제목이 줄을 맞춘다 — 폰에서도 같은 폭', async () => {
     await render(<TreeRow depth={1} title="문서" />);
     const gap = ctl().querySelector('[data-slot="ds-tree-arrow-gap"]') as HTMLElement;
-    expect(has(gap, 'size-3.5')).toBe(true);
+    expect(has(gap, 'size-ds-icon-sm')).toBe(true);
     await render(<TreeRow depth={1} title="폴더" expanded={false} />);
     expect(ctl().querySelector('[data-slot="ds-tree-arrow-gap"]')).toBeNull();
-    expect(ctl().querySelector('svg')!.getAttribute('width')).toBe('14');
+    expect(ctl().querySelector('svg')!.getAttribute('width')).toBe('16');
   });
 
   it('⭐선택(열린 문서)은 줄 단추에 aria-current=page · 옅은 action 면, 아닌 줄은 없다', async () => {

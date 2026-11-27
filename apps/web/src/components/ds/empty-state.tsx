@@ -19,7 +19,7 @@ export function EmptyState({ icon, title, description, action, size = 'default',
   const inline = size === 'inline';
   return (
     <div data-slot="ds-empty-state" data-size={size} className={cn('flex flex-col items-center gap-2 px-6 text-center', inline ? 'py-4' : 'py-10', className)}>
-      {icon && !inline ? <Icon name={icon} size={24} className="text-ds-ink-3" /> : null}
+      {icon && !inline ? <Icon name={icon} size="lg" className="text-ds-ink-3" /> : null}
       <p className="m-0 text-ds-card-title font-semibold text-ds-ink">{title}</p>
       {description ? <p className="m-0 max-w-sm text-ds-small text-ds-ink-2">{description}</p> : null}
       {action ? <div className="mt-1">{action}</div> : null}
