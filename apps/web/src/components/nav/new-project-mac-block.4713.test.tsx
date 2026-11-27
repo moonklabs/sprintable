@@ -71,7 +71,10 @@ describe('story 4713 AC3 — the Mac block in the browser\'s «새 프로젝트�
   it('several: the count sentence replaces the body (the link still opens THIS computer\'s app — no list, no «어느»)', async () => {
     rc.value = { connected_setups: 3 };
     await render();
-    expect(text()).toContain('연결된 Mac이 3대예요 — 지금 이 컴퓨터의 앱에서 열려요. 폴더를 고르면 프로젝트와 에이전트가 한 번에 만들어져요.');
+    // story 5032 (C2 · PO 11-27): «이 컴퓨터» told a first-time reader nothing about WHICH Mac — the copy now says which one (the one you are looking at) and what happens if it has no app
+    // the count is `connected_setups` — every connected host of any OS (Windows · Linux hosts join too, 11-24), so the line says «컴퓨터», not «Mac»
+    expect(text()).toContain('이 계정에 연결된 컴퓨터가 3대 있어요. 지금 쓰는 컴퓨터에 앱이 깔려 있으면 앱에서 열려요. 폴더를 고르면 프로젝트와 에이전트가 한 번에 만들어져요.');
+    expect(text()).not.toContain('이 컴퓨터');
     expect(text()).not.toContain('어느');
     expect(container.querySelector('[data-testid=new-project-mac-open]')).not.toBeNull();
   });
@@ -82,7 +85,7 @@ describe('story 4713 AC3 — the Mac block in the browser\'s «새 프로젝트�
     expect(container.querySelector('[data-testid=new-project-mac-open]')!.textContent).toBe('Continue in the Mac app');
     rc.value = { connected_setups: 2 };
     await render({ locale: 'en' });
-    expect(text()).toContain('2 Macs are connected — the app on this computer opens.');
+    expect(text()).toContain('2 computers are connected to this account. If the computer you are using right now has the app installed, it opens in the app.');
     rc.value = { connected_setups: 0 };
     await render({ locale: 'en' });
     expect(text()).toContain('With the Mac app you can start from a folder');
@@ -121,10 +124,10 @@ describe('story 4713 AC3 — the Mac block in the browser\'s «새 프로젝트�
     // several setups, still not a Mac: the count alone — «이 컴퓨터의 앱에서 열려요» would promise an opening that cannot happen (Yuna's note)
     rc.value = { connected_setups: 3 };
     await render();
-    expect(text()).toContain('연결된 Mac이 3대예요.');
+    expect(text()).toContain('이 계정에 연결된 컴퓨터는 3대예요.');
     expect(text()).not.toContain('이 컴퓨터의 앱');
     await render({ locale: 'en' });
-    expect(text()).toContain('3 Macs are connected.');
+    expect(text()).toContain('3 computers are connected to this account.');
     expect(text()).not.toContain('app on this computer');
     rc.value = { connected_setups: 0 };
     await render();

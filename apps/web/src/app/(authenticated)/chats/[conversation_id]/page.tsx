@@ -349,6 +349,8 @@ export default function ConversationPage() {
   // story 5032 (C2): a channel's head says who is in it at a glance — «사람 N · 부를 수 있는 에이전트 N» (the people are the humans in the room, the agents are the ones that can be called here)
   const channelPeople = meta ? meta.participants.filter((p) => p.type !== 'agent').length : 0;
   const channelAgents = meta ? meta.participants.filter((p) => p.type === 'agent').length : 0;
+  // story 5032 (C2 · PO 11-27, 390): a channel's people button draws the two counts apart (the sum alone left people and agents indistinguishable)
+  const channelPeopleParts = meta?.isProjectChannel ? { people: channelPeople, agents: channelAgents, spoken: t('roomHeadChannelFacts', { people: channelPeople, agents: channelAgents }) } : undefined;
   const headSubline = meta
     ? (meta.isProjectChannel
       ? t('roomHeadChannelFacts', { people: channelPeople, agents: channelAgents })
@@ -459,6 +461,7 @@ export default function ConversationPage() {
               subline={headSubline}
               peopleLabel={t('roomPeopleOpen')}
               peopleCount={meta?.participants.length ?? 0}
+              peopleParts={channelPeopleParts}
               chips={headChips}
               moreCount={headMoreCount}
               addLabel={t('addParticipants')}
@@ -480,6 +483,7 @@ export default function ConversationPage() {
           trailing={meta ? headTrailing : null}
           peopleLabel={t('roomPeopleOpen')}
           peopleCount={meta?.participants.length ?? 0}
+          peopleParts={channelPeopleParts}
           />
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background">

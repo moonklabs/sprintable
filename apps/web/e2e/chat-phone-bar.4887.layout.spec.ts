@@ -49,14 +49,14 @@ async function build() {
         import { Avatar } from './src/components/shared/avatar';
         const intl = (child) => React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, child);
         const chip = (id, name, status) => ({ id, who: <><Avatar name={name} label={name} avatarUrl={null} actorType={status ? 'agent' : 'human'} size={18} className="flex-shrink-0" runtimeType={status ? 'claude-code' : null} /><span className="min-w-0 truncate">{name}</span></>, state: status ? <StatusLabel status={status} label={{ online: '연결됨', idle: '자리 비움', offline: '오프라인' }[status]} /> : undefined });
-        window.__mount = (title, h) => {
+        window.__mount = (title, h, channel) => {
           const root = createRoot(document.getElementById('root'));
           root.render(intl(
             <ToastProvider><TopBarProvider><SidebarProvider><TeamPresenceToggleProvider value={{ toggle() {}, workingCount: 4, open: false }}>
               <div id="screen" style={{ display: 'flex', flexDirection: 'column', height: h + 'px', width: '100%' }} className="bg-background text-foreground">
                 <TopBar />
                 <TopBarSlot
-                  title={<RoomBarTitle backLabel="대화" onBack={() => {}} title={title} tag="프로젝트 방" subline="AC4 project · 3명" peopleLabel="참여자 보기" peopleCount={3} chips={[chip('m1', '지우(나)'), chip('a1', '개발 에이전트', 'online'), chip('a2', '검수 에이전트', 'idle')]} addLabel="참여자 추가" onAdd={() => {}} />}
+                  title={<RoomBarTitle backLabel="대화" onBack={() => {}} title={title} tag="프로젝트 방" subline="AC4 project · 3명" peopleLabel="참여자 보기" peopleCount={3} peopleParts={channel ? { people: 2, agents: 1, spoken: '사람 2 · 부를 수 있는 에이전트 1' } : undefined} chips={[chip('m1', '지우(나)'), chip('a1', '개발 에이전트', 'online'), chip('a2', '검수 에이전트', 'idle')]} addLabel="참여자 추가" onAdd={() => {}} />}
                   actions={<button type="button" aria-label="방 더보기" data-testid="room-head-menu" className={${JSON.stringify(TRIGGER_CLASS)}}><Icon name="more_horiz" size={16} /></button>}
                 />
                 <div id="col" className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -93,7 +93,7 @@ async function build() {
   return built;
 }
 
-async function open(page: Page, w: number, h: number, title: string) {
+async function open(page: Page, w: number, h: number, title: string, channel = false) {
   const { js, css } = await build();
   await page.setViewportSize({ width: w, height: h });
   await page.unrouteAll();
@@ -109,7 +109,7 @@ async function open(page: Page, w: number, h: number, title: string) {
   await page.goto('about:blank');
   await page.goto('http://preview.test/');
   await page.addScriptTag({ content: js });
-  await page.evaluate(([t, hh]) => (window as unknown as { __mount: (t: string, h: number) => void }).__mount(t as string, hh as number), [title, h] as const);
+  await page.evaluate(([t, hh, ch]) => (window as unknown as { __mount: (t: string, h: number, channel: boolean) => void }).__mount(t as string, hh as number, ch as boolean), [title, h, channel] as const);
   await page.waitForTimeout(1200);
   if (await page.locator('[data-testid="room-bar"]').count() === 0) throw new Error(`the room bar was not drawn — page errors: ${thrown.join(' | ') || 'none'}`);
 }
@@ -156,6 +156,23 @@ test.describe('the room head on a touch phone', () => {
     const m = await measure(page);
     expect(m.timeline!.h, `the reading column is ${m.timeline!.h}px (floor 619 — 4906 PO 11-14, was 635 before 5612; on dev after 5612: 482). Any less is RED.`).toBeGreaterThanOrEqual(619);
     expect(m.taH!, `the field is ${m.taH}px — one line of text, the hint not wrapped (before 5612 the whole region was 104; below 640 px the buttons are a second row now, see 4906)`).toBeLessThanOrEqual(40);
+  });
+
+  // story 5032 (C2 · PO 11-27, the second look at 390): a CHANNEL's people button draws the two counts apart — a person glyph + 2 and an agent glyph + 1 — instead of one number «3»; both sit on the screen, the press stays 44 px
+  test('[SID:5032] 390 × 844: a channel shows people and agents as two counts on the people button, on the screen, a 44 px press', async ({ page }) => {
+    await open(page, 390, 844, '런칭', true);
+    const people = page.locator('[data-testid="room-bar-people"]');
+    const humans = people.locator('[data-testid="room-bar-people-humans"]');
+    const agents = people.locator('[data-testid="room-bar-people-agents"]');
+    await expect(humans).toHaveText('2');
+    await expect(agents).toHaveText('1');
+    const hb = (await humans.boundingBox())!;
+    const ab = (await agents.boundingBox())!;
+    expect(ab.x, 'the agents count sits right of the people count (two separate numbers, not one)').toBeGreaterThan(hb.x + hb.width - 0.5);
+    for (const [name, b] of [['people', hb], ['agents', ab]] as const) expect(b.x >= 0 && b.x + b.width <= 390, `the ${name} count is on the screen (x ${Math.round(b.x)}..${Math.round(b.x + b.width)})`).toBe(true);
+    expect((await people.boundingBox())!.height, 'the people button is a 44 px press').toBeGreaterThanOrEqual(43.5);
+    await expect(people.locator('[data-icon="person"]')).toBeVisible();
+    await expect(people.locator('[data-icon="smart_toy"]')).toBeVisible();
   });
 
   test('[SID:4887] the people button opens the participants and the «+» on the screen; Escape closes it and the focus returns to the button', async ({ page }) => {

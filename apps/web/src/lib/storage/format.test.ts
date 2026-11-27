@@ -104,3 +104,31 @@ describe('formatRelativeTime() — 로케일별 Intl.RelativeTimeFormat + 7일 �
     expect(formatRelativeTime(future, 'en', 'UTC', Intl.DateTimeFormat().resolvedOptions().timeZone)).not.toContain('in ');
   });
 });
+
+// story 5032 (C2 · PO 11-27) — the avatar's letter is the first LETTER or digit of the name: a leading mark is skipped («[» was drawn for «[4846 실측] 프로젝트 방»).
+describe('[SID:5032] initials() skips a leading mark', () => {
+  it.each([
+    ['[4846 실측] 프로젝트 방', '4'],
+    ['[실측] 방', '실'],
+    ['(내) 대화', '내'],
+    ['·메모', '메'],
+    ['«Dev» Ops', 'DO'],
+    ['"quote" bot', 'QB'],
+    ['[QA]', 'QA'],
+    ['[A]', 'A'], // the closing mark is not part of the letter either
+    ['「A」', 'A'],
+    ['@dev', 'DE'], // a handle's «@» is a mark
+    ["O'Brien", 'OB'],
+    ['(4) 번', '4'], // a digit is a letter for this rule
+    ['- Dev', 'DE'], // a first word that is only a mark is left out: the name is one word «Dev»
+    ['··· 두리', '두'],
+  ])('%s → %s', (name, expected) => {
+    expect(initials(name)).toBe(expected); // reverted → «[» · «(» · «·» · ««»
+  });
+  it('an emoji is not a mark (story 4794 keeps it) · a name of marks only keeps its first character · empty stays «?»', () => {
+    expect(initials('\u{1F600} 두리')).toBe('\u{1F600}');
+    expect(initials('***')).toBe('*');
+    expect(initials('   ')).toBe('?');
+    expect(initials(null)).toBe('?');
+  });
+});
