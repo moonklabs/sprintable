@@ -53,16 +53,17 @@ export function resolveWorkforceView(rawPathname: string, tab: string | null): W
 }
 
 /** The «all agents» links as a strip (`active` is the current one, none in the list's own entry). */
-function AllViewsNav({ active, testId, children }: { active: AllViewKey | null; testId: string; children?: ReactNode }) {
+// `stacked` (story 5031 · C1 [6]): the caption stands on a line of its own ABOVE the strip, so the five links have the column's whole width (beside the caption they wrapped, and «채용» stood alone on the second line). The strip of a detail page keeps its back link beside it.
+function AllViewsNav({ active, testId, children, stacked = false }: { active: AllViewKey | null; testId: string; children?: ReactNode; stacked?: boolean }) {
   const ta = useTranslations('agents');
   const tn = useTranslations('nav');
   const flatHref = useFlatHref();
   const { isAdmin } = useOrgAdmin();
   const views = ALL_VIEWS.filter((v) => !v.adminOnly || isAdmin);
   return (
-    <div className="flex items-center gap-3" data-testid={testId}>
+    <div className={stacked ? 'flex flex-col items-start gap-1' : 'flex items-center gap-3'} data-testid={testId}>
       {children}
-      <div className="min-w-0 flex-1">
+      <div className={stacked ? 'w-full min-w-0' : 'min-w-0 flex-1'}>
       {/* the five links WRAP onto a second line when they do not fit (story 5035 follow-up · PO's Two-Pass on 390: the strip scrolled sideways and was cut at «접근» with nothing saying there was more) — every link is whole and one press away */}
       <TabNav aria-label={ta('allViewsLabel')} className="flex-wrap overflow-x-visible pr-0 [mask-image:none]">
         {views.map((v) => (
@@ -126,7 +127,7 @@ function SplitFrame({ agentId, children }: { agentId: string | null; children: R
         wide={wide}
         list={
           <div className="min-w-0 space-y-2" data-testid="workforce-list-column">
-            <AllViewsNav active={null} testId="workforce-all-views-menu">
+            <AllViewsNav active={null} testId="workforce-all-views-menu" stacked>
               <span className="shrink-0 text-ds-small text-ds-ink-3" data-testid="workforce-all-views-caption">{ta('allViewsCaption')}</span>
             </AllViewsNav>
             <AgentManagementTab compact onAddAgent={() => router.push(flatHref(`${WORKFORCE}?tab=recruit`))} />

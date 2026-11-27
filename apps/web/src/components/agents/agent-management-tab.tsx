@@ -355,7 +355,8 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
                 ) : <span className="size-4 shrink-0" aria-hidden />
               ) : undefined,
               title: (
-                <Link href={detailHref} className="block min-w-0 hover:underline">
+                // story 5031 (C1 [6]): the name link's press is 44 high where a finger is — padding with the same negative margin, so the row is not taller
+                <Link href={detailHref} className="block min-w-0 hover:underline touch:-my-3 touch:py-3">
                   <RowName label={label} id={agent.id} />
                 </Link>
               ),

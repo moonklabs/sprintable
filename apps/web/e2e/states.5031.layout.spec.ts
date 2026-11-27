@@ -26,8 +26,9 @@
  *   (d) at 390 every press ≥ 44 px · (e) no text under 12 px · (f) no old (non-ds) part drawn in the body (the shell's own chrome is pinned once: CHROME_OLD).
  * What is measured today and is NOT yet the rule (every entry is a finding — candidate fixes are the PR's, not this spec's):
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
- *   · dupTitle: the home body's h1 «홈» says what the bar's path already says («올리베이라 › 홈») — and the settings navigation's h1 «설정» says what the path says («설정 › 프로필»): the title twice (home = the candidate #3: the fix drops the body title or the crumb and this entry goes).
- *   · small (390): the «대화 열기» link 18 high (home rows) · «다시 시도» 28 / 18 high (home / chats errors) · the agent rows' name links 20 high · tiny: avatar initials at 10 px · oldSlots: ui Card / Popover / Tooltip / Button in the body.
+ *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
+ *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 (home «대화 열기» / «다시 시도», agent name links, the chats retry = ds button) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · `descMidBreak` at 1440: the agents list's description breaks INSIDE a word («관 / 리해요») — remove the entry after mirko's 6058 PageHead merge.
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -296,16 +297,36 @@ const measure = (page: Page) => page.evaluate(() => {
   const h1 = [...document.querySelectorAll('h1')].filter(shown).map((e) => (e.textContent || '').trim().slice(0, 30));
   // the page's title said TWICE: a heading of the body whose words are also a visible word of the top bar (its path: «올리베이라 › 홈»)
   const barWords = [...document.querySelectorAll('[data-testid="top-bar"] *')].filter((e) => e.children.length === 0 && shown(e) && !e.closest('h1')).map((e) => (e.textContent || '').trim());
-  const dupTitle = h1.some((t) => t !== '' && barWords.includes(t));
+  // «drawn» = takes room (a screen-reader-only h1 is a 1 px box: it is still THE h1, but it does not say the title a second time on the screen)
+  const drawnH1 = [...document.querySelectorAll('h1')].filter((e) => { const r = e.getBoundingClientRect(); return shown(e) && r.width > 2 && r.height > 2; }).map((e) => (e.textContent || '').trim().slice(0, 30));
+  const dupTitle = drawnH1.some((t) => t !== '' && barWords.includes(t));
+  // the agents' «전체 보기» strip: how many LINES its five links stand on (the rule: one) · the list's description: does a line break fall INSIDE a word («관 / 리해요»)
+  const stripLinks = [...document.querySelectorAll('[data-testid="workforce-all-views-menu"] [data-all-view]')].filter(shown);
+  const stripLines = new Set(stripLinks.map((e) => Math.round(e.getBoundingClientRect().top))).size;
+  const desc = [...document.querySelectorAll('#cell p, #cell div')].find((e) => e.children.length === 0 && (e.textContent || '').startsWith('조직 내 전체 프로젝트의'));
+  let descMidBreak = false;
+  const textNode = desc?.firstChild;
+  if (textNode && textNode.nodeType === 3) {
+    const text = textNode.textContent || '';
+    let prevTop: number | null = null;
+    for (let i = 0; i < text.length; i++) {
+      const r = document.createRange(); r.setStart(textNode, i); r.setEnd(textNode, i + 1);
+      const rect = r.getClientRects()[0];
+      if (!rect) continue;
+      const top = Math.round(rect.top);
+      if (prevTop !== null && top > prevTop + 2 && i > 0 && !/\s/.test(text[i - 1]!) && !/\s/.test(text[i]!)) descMidBreak = true;
+      prevTop = top;
+    }
+  }
   return {
-    h1, lit, dupTitle,
+    h1, lit, dupTitle, stripLines, descMidBreak,
     overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
     small, tiny, oldSlots, chromeOldSlots,
   };
 });
 
-type Finding = { h1?: number; dupTitle?: true; small?: string[]; tiny?: string[]; oldSlots?: string[] };
+type Finding = { h1?: number; dupTitle?: true; stripLines?: number; descMidBreak?: true; small?: string[]; tiny?: string[]; oldSlots?: string[] };
 /**
  * What the real screens do TODAY, exactly, per scene (a scene with no entry is clean): the scene is red if a listed finding is gone (a fix landed → shrink the list) or a new one shows — nothing is loosened silently.
  * `h1` is the number of visible h1 where it is not 1 · `dupTitle` the body title that the bar's path already says · `small` (phone only) presses under 44 · `tiny` text under 12 px · `oldSlots` non-ds parts in the BODY.
@@ -313,33 +334,41 @@ type Finding = { h1?: number; dupTitle?: true; small?: string[]; tiny?: string[]
  */
 // <BASELINE-BEGIN>
 const BASELINE: Record<string, Finding> = {
-  'home-default-1440': { dupTitle: true, tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
-  'home-loading-1440': { dupTitle: true, oldSlots: ['card'] },
-  'home-empty-1440': { dupTitle: true, oldSlots: ['card'] },
-  'home-error-1440': { dupTitle: true, oldSlots: ['button'] },
-  'home-long-1440': { dupTitle: true, tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
+  'home-default-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
+  'home-loading-1440': { oldSlots: ['card'] },
+  'home-empty-1440': { oldSlots: ['card'] },
+  'home-error-1440': { oldSlots: ['button'] },
+  'home-long-1440': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
   'chats-default-1440': { oldSlots: ['button', 'popover-trigger'] },
   'chats-loading-1440': { oldSlots: ['popover-trigger'] },
   'chats-empty-1440': { oldSlots: ['popover-trigger'] },
-  'chats-error-1440': { oldSlots: ['button', 'popover-trigger'] },
+  'chats-error-1440': { oldSlots: ['popover-trigger'] },
   'chats-long-1440': { oldSlots: ['button', 'popover-trigger'] },
+  'agents-default-1440': { descMidBreak: true },
+  'agents-loading-1440': { descMidBreak: true },
+  'agents-empty-1440': { descMidBreak: true },
+  'agents-error-1440': { descMidBreak: true },
+  'agents-long-1440': { descMidBreak: true },
   'settings-default-1440': { dupTitle: true },
   'settings-loading-1440': { dupTitle: true },
   'settings-empty-1440': { dupTitle: true },
   'settings-error-1440': { dupTitle: true },
   'settings-long-1440': { dupTitle: true },
-  'home-default-390': { small: ['대화 열기 48x18', '대화 열기 48x18'], tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
+  'home-default-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
   'home-loading-390': { oldSlots: ['card'] },
   'home-empty-390': { oldSlots: ['card'] },
-  'home-error-390': { small: ['다시 시도 70x28'], oldSlots: ['button'] },
-  'home-long-390': { small: ['대화 열기 48x18', '대화 열기 48x18'], tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
+  'home-error-390': { oldSlots: ['button'] },
+  'home-long-390': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
   'chats-default-390': { oldSlots: ['button', 'popover-trigger'] },
   'chats-loading-390': { oldSlots: ['popover-trigger'] },
   'chats-empty-390': { oldSlots: ['popover-trigger'] },
-  'chats-error-390': { small: ['다시 시도 47x18'], oldSlots: ['button', 'popover-trigger'] },
+  'chats-error-390': { oldSlots: ['popover-trigger'] },
   'chats-long-390': { oldSlots: ['button', 'popover-trigger'] },
-  'agents-default-390': { small: ['댄 어윈 248x20', '민 248x20', '리뷰 에이전트 104x20', '문서 에이전트 248x20'] },
-  'agents-long-390': { small: ['a-very-long-agent-name-that- 248x20', '가가가가가가가가가가가가가가가가가가가가가가가가가가가가 248x20', '댄 어윈 248x20', '민 248x20'] },
+  'agents-default-390': { stripLines: 2 },
+  'agents-loading-390': { stripLines: 2 },
+  'agents-empty-390': { stripLines: 2 },
+  'agents-error-390': { stripLines: 2 },
+  'agents-long-390': { stripLines: 2 },
   'settings-loading-390': { h1: 0 },
   'settings-empty-390': { h1: 0 },
   'settings-error-390': { h1: 0 },
@@ -361,6 +390,8 @@ async function assertScene(page: Page, place: PlaceId, key: string, phone: boole
   expect(m.lit, `${key}: exactly one place is lit`).toHaveLength(1);
   expect(m.h1.length, `${key}: the number of h1 (1 is the rule) — drawn: ${m.h1.join(' | ') || 'none'}`).toBe(base.h1 ?? 1);
   expect(m.dupTitle, `${key}: the title is said twice (the bar's path and the body's h1)`).toBe(base.dupTitle ?? false);
+  expect(m.stripLines, `${key}: the lines the agents' «전체 보기» strip stands on (the rule: one — every link whole, none alone on a second line)`).toBe(base.stripLines ?? (place === 'agents' ? 1 : 0));
+  expect(m.descMidBreak, `${key}: the agents list's description breaks INSIDE a word`).toBe(base.descMidBreak ?? false);
   expect(m.oldSlots, `${key}: old (non-ds) parts drawn in the body`).toEqual(base.oldSlots ?? []);
   expect(m.tiny, `${key}: text under 12 px`).toEqual(base.tiny ?? []);
   if (phone) expect(m.small, `${key}: presses under 44 px`).toEqual(base.small ?? []);
@@ -381,7 +412,12 @@ async function expectState(page: Page, place: PlaceId, state: StateId) {
     if (state === 'default') await expect(t('런칭 준비').first()).toBeVisible();
     if (state === 'loading') await expect(t(messages['common']!['loading']!).first()).toBeVisible();
     if (state === 'empty') await expect(t(messages['chats']!['noConversations']!).first()).toBeVisible();
-    if (state === 'error') { await expect(t(messages['chats']!['conversationsLoadFailed']!).first()).toBeVisible(); await expect(page.getByRole('button', { name: messages['common']!['retry']! }).first()).toBeVisible(); }
+    if (state === 'error') { await expect(t(messages['chats']!['conversationsLoadFailed']!).first()).toBeVisible(); await expect(page.getByRole('button', { name: messages['common']!['retry']! }), 'ONE retry press for one failure (a button)').toHaveCount(1);
+      // the ds Button (md · secondary) gives the phone's 44 by itself (touch floor) — nothing added at the call site; the height is MEASURED here, and printed
+      const box = await page.getByRole('button', { name: messages['common']!['retry']! }).boundingBox();
+      console.log(`[5031] chats retry (ds Button md secondary) ${Math.round(box!.width)}x${Math.round(box!.height)} @ viewport ${page.viewportSize()!.width}`);
+      if (page.viewportSize()!.width < 768) expect(box!.height, 'the phone press is >= 44').toBeGreaterThanOrEqual(44);
+    }
     if (state === 'long') await expect(t(LONG_TITLE.slice(0, 12)).first()).toBeVisible();
   }
   if (place === 'agents') {

@@ -105,7 +105,8 @@ export function OrgBriefingShell() {
 
       <div className="flex items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-foreground">{t('title')}</h1>
+          {/* story 5031 (C1 [6]): from lg the top bar's path already says «홈» (org › 홈) — the page's h1 stays (ONE h1, the heading a screen reader lands on) but is not drawn a second time; the phone's bar has no path, so there it is drawn as before */}
+          <h1 className="text-lg font-semibold tracking-tight text-foreground lg:sr-only">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground"><ViewerDate value={today} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>
         </div>
         {model && model.badge > 0 ? (
@@ -123,7 +124,8 @@ export function OrgBriefingShell() {
       {loadError && !model ? (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-          <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+          {/* story 5031 (C1 [6]): a phone's press is 44 (the look is the same: only where a finger is, the touch floor of the ds parts) */}
+          <Button size="sm" variant="outline" onClick={retry} className="touch:min-h-ds-touch touch:min-w-ds-touch">{tc('retry')}</Button>
         </div>
       ) : !model || !sources ? (
         <div className="space-y-3" aria-hidden="true">

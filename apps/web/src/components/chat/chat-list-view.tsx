@@ -1047,18 +1047,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // 텍스트 재시도.
     <div className="px-2 py-4">
       <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
-      {/* raw button 요소 금지(DS 게이트 A, verify-no-new-raw-button) — variant="link"가 이
-          레일 자리의 정본(ghost는 좁은 폭에서 hover 사각형이 남음, content/page.tsx:248
-          실측). 색은 문구가 아니라 행동에만 싣는다(우측은 반대로 문구가 destructive). */}
-      <Button
-        type="button"
-        variant="link"
-        size="xs"
-        onClick={retryMyConversations}
-        className="mt-1 h-auto px-0 text-xs"
-      >
+      {/* story 5031 (C1 [6]): the ONE retry of a failed list (the outlet beside it says no more than the sentence) — the ds secondary press, so it looks like a press (it was a text link) and a phone's is 44 (touch floor of the ds Button) */}
+      <DsButton type="button" size="md" variant="secondary" onClick={retryMyConversations} className="mt-2">
         {tc('retry')}
-      </Button>
+      </DsButton>
     </div>
   ) : conversations.length === 0 ? (
     // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
@@ -1147,15 +1139,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   ) : agentLoadError ? (
     <div className="px-2 py-4">
       <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
-      <Button
-        type="button"
-        variant="link"
-        size="xs"
-        onClick={retryAgentConversations}
-        className="mt-1 h-auto px-0 text-xs"
-      >
+      <DsButton type="button" size="md" variant="secondary" onClick={retryAgentConversations} className="mt-2">
         {tc('retry')}
-      </Button>
+      </DsButton>
     </div>
   ) : agentOnlyConvs.length === 0 ? (
     <div className="flex h-full items-center justify-center">

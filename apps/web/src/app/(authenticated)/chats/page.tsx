@@ -3,7 +3,6 @@
 import { useTranslations } from 'next-intl';
 import { MessageSquare } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Button } from '@/components/ui/button';
 import { useChatRail } from './chat-rail-context';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { isNoProjectAtAll } from './no-project';
@@ -30,8 +29,7 @@ import { ChatsTopBarTitle, TitleTopBarSlot, useChatsTopBarTitleText } from '@/co
  */
 export default function ChatsPage() {
   const t = useTranslations('chats');
-  const tc = useTranslations('common');
-  const { conversationsLoading, conversationCount, conversationsLoadError, retryConversations, roomsAreOrgWide } = useChatRail();
+  const { conversationsLoading, conversationCount, conversationsLoadError, roomsAreOrgWide } = useChatRail();
   // story 4847 — a person with no project at all, on a server that cannot make a room without one, is told so in the list (the rail); this side says nothing more (two different lines would be two voices).
   // On a server that serves the organization's rooms a room can be made with none, so there is something to start and the outlet says «no conversations» like anywhere else.
   const noProjectAtAll = isNoProjectAtAll(useDashboardContext()) && !roomsAreOrgWide;
@@ -48,13 +46,11 @@ export default function ChatsPage() {
           conversationsLoadError ? (
             <div className="flex flex-col items-center gap-3 text-center">
               {/* role/aria-live는 여기(우측) 한 곳에만 — 좌측 레일도 같은 문장을 그리므로
-                  둘 다 붙이면 스크린리더가 같은 문장을 두 번 읽는다. */}
+                  둘 다 붙이면 스크린리더가 같은 문장을 두 번 읽는다.
+                  story 5031 (C1 [6]): and the RETRY is the rail's alone (one press for one failure) — this side says the sentence, nothing more */}
               <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
                 {t('conversationsLoadFailed')}
               </p>
-              <Button size="sm" variant="outline" onClick={retryConversations}>
-                {tc('retry')}
-              </Button>
             </div>
           ) : conversationCount === 0 && noProjectAtAll ? null : conversationCount === 0 ? (
             <EmptyState
