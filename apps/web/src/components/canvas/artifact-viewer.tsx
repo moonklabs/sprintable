@@ -334,19 +334,19 @@ export function ArtifactViewer({
                 ))}
               </NativeSelect>
               {artifact.format === 'html' ? (
-                <DsButton variant="quiet" iconStart={<Icon name="open_in_full" size={14} />} onClick={() => setExpandOpen(true)}>{t('viewerExpandAction')}</DsButton>
+                <DsButton variant="quiet" iconStart={<Icon name="open_in_full" size="md" />} onClick={() => setExpandOpen(true)}>{t('viewerExpandAction')}</DsButton>
               ) : null}
               {canPropose && proposePending ? <Chip tone="needs-hand" icon="schedule">{t('canonicalizePendingBadge')}</Chip> : null}
-              {proposeAction ? <DsButton iconStart={<Icon name={proposeAction.icon} size={14} />} onClick={proposeAction.run}>{proposeAction.label}</DsButton> : null}
+              {proposeAction ? <DsButton iconStart={<Icon name={proposeAction.icon} size="md" />} onClick={proposeAction.run}>{proposeAction.label}</DsButton> : null}
               {artifact.format === 'tree' && onEnterEdit ? (
-                <DsButton iconStart={<Icon name="edit" size={14} />} onClick={onEnterEdit}>{isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}</DsButton>
+                <DsButton iconStart={<Icon name="edit" size="md" />} onClick={onEnterEdit}>{isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}</DsButton>
               ) : null}
-              <DsButton iconStart={<Icon name={exportAction.icon} size={14} />} onClick={exportAction.run}>{exportAction.label}</DsButton>
+              <DsButton iconStart={<Icon name={exportAction.icon} size="md" />} onClick={exportAction.run}>{exportAction.label}</DsButton>
               {onCreateThread ? (
                 <DsButton
                   variant={pinAddMode ? 'primary' : 'quiet'}
                   aria-pressed={pinAddMode}
-                  iconStart={<Icon name="chat_bubble" size={14} />}
+                  iconStart={<Icon name="chat_bubble" size="md" />}
                   onClick={() => setPinAddMode((v) => !v)}
                 >
                   {t('addThreadToggleAction')}{openThreadCount > 0 ? ` · ${openThreadCount}` : ''}
@@ -494,7 +494,7 @@ export function ArtifactViewer({
               title={t('exportDialogTitle')}
               className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
+              <Download className="size-ds-icon-sm" aria-hidden />
               {t('exportDialogTitle')}
             </button>
             {/* story #2725 — commentsComingSoon 자리표시자 폐기(미착지 트랙이 착지). onCreateThread
@@ -508,12 +508,12 @@ export function ArtifactViewer({
                 title={t('addThreadToggleAction')}
                 className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ${pinAddMode ? 'bg-ds-action-soft text-primary' : 'hover:text-foreground'}`}
               >
-                <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+                <MessageCircle className="size-ds-icon-sm" aria-hidden />
                 {openThreadCount > 0 ? openThreadCount : null}
               </button>
             ) : (
               <span className="flex items-center gap-1 text-xs">
-                <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+                <MessageCircle className="size-ds-icon-sm" aria-hidden />
                 {openThreadCount > 0 ? openThreadCount : null}
               </span>
             )}

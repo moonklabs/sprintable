@@ -108,7 +108,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
           : 'mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-editorial-meta text-muted-foreground hover:text-foreground'}
       >
         {t('descriptionPaneToggle')}
-        {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
+        {descOpen ? <ChevronUp className="size-ds-icon-sm" aria-hidden /> : <ChevronDown className="size-ds-icon-sm" aria-hidden />}
       </button>
       {descOpen ? (
         descriptionSlot ?? <p className="mt-1.5 text-editorial-meta text-muted-foreground">{t('descriptionPaneComingSoon')}</p>

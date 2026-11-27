@@ -32,7 +32,7 @@ export function HypothesesSummary({
       title={t('summaryTitle', { count })}
     >
       <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <FlaskConical className="size-3.5" aria-hidden />
+        <FlaskConical className="size-ds-icon-sm" aria-hidden />
         {count}
       </span>
       {known ? <HypothesisStatusBadge status={riskyStatus as HypothesisStatus} /> : null}

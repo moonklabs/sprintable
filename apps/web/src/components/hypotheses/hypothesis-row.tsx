@@ -84,9 +84,9 @@ export function HypothesisRow({
   const inlineAction = needsConfirm ? (
     <Button type="button" variant="secondary" onClick={() => actions.onConfirmDraft(hypothesis)}>{t('confirmDraft')}</Button>
   ) : canActivateInline ? (
-    <Button type="button" variant="secondary" onClick={() => actions.onActivate(hypothesis)} iconStart={<Play className="size-3" aria-hidden />}>{t('activate')}</Button>
+    <Button type="button" variant="secondary" onClick={() => actions.onActivate(hypothesis)} iconStart={<Play className="size-ds-icon-md" aria-hidden />}>{t('activate')}</Button>
   ) : canStartMeasuringInline ? (
-    <Button type="button" variant="secondary" onClick={() => actions.onStartMeasuring(hypothesis)} title={startHint} iconStart={<Play className="size-3" aria-hidden />}>{t('startMeasuring')}</Button>
+    <Button type="button" variant="secondary" onClick={() => actions.onStartMeasuring(hypothesis)} title={startHint} iconStart={<Play className="size-ds-icon-md" aria-hidden />}>{t('startMeasuring')}</Button>
   ) : null;
 
   // the second line's pieces: «지표 · 날짜 · 🔗 연결 수 · @담당» — each piece after the first carries its own dot and never splits from it (a wrapped line starts with a piece, not with a stray «·»)

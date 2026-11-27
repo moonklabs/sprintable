@@ -156,7 +156,7 @@ export function StorageAssetList({
           {summaryText}
         </p>
         <span className="flex-1" />
-        <Button variant="primary" iconStart={<Icon name="upload" size={14} />} onClick={() => fileInputRef.current?.click()}>
+        <Button variant="primary" iconStart={<Icon name="upload" size="md" />} onClick={() => fileInputRef.current?.click()}>
           {t('upload')}
         </Button>
         {/* story #886d996f — 업로드 트리거용 hidden file input. 4910: 여러 파일을 한 번에 고르면 파일마다 한 번씩 차례로 올린다.
@@ -189,7 +189,7 @@ export function StorageAssetList({
         <Menu>
           <MenuTrigger className="inline-flex h-ds-control-sm shrink-0 items-center gap-1.5 rounded-ds-control border border-ds-line-control px-2.5 text-ds-small text-ds-ink-2 outline-none hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action touch:min-h-ds-touch">
             {t('sortPrefix')} {sortLabel[sort]}
-            <Icon name="expand_more" size={14} />
+            <Icon name="expand_more" size="md" />
           </MenuTrigger>
           <MenuContent align="end">
             <MenuGroup>

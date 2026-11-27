@@ -67,7 +67,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
                 'repeating-linear-gradient(45deg, var(--ds-info-soft), var(--ds-info-soft) 9px, transparent 9px, transparent 18px)',
             }}
           >
-            <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-[30px]" />
+            <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-ds-icon-lg" />
           </div>
         )}
         {onClose ? (
@@ -77,7 +77,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
             aria-label={t('cancel')}
             className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-md bg-ds-surface/70 text-ds-ink-3 backdrop-blur-sm hover:bg-ds-surface-high"
           >
-            <X className="size-4" />
+            <X className="size-ds-icon-sm" />
           </button>
         ) : null}
       </div>
@@ -146,11 +146,11 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
       {/* footer */}
       <div className="flex gap-2 border-t border-ds-line px-4 py-3">
         <Button variant="quiet" className="flex-1 justify-center" onClick={() => onDownload(asset)}>
-          <Download className="size-4" />
+          <Download className="size-ds-icon-md" />
           {t('download')}
         </Button>
         <Button variant="danger" className="flex-1 justify-center" onClick={() => onRequestDelete(asset)}>
-          <Trash2 className="size-4" />
+          <Trash2 className="size-ds-icon-md" />
           {t('delete')}
         </Button>
       </div>

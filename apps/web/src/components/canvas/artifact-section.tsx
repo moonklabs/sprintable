@@ -256,7 +256,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           <div className="text-editorial-meta font-medium uppercase tracking-wide text-muted-foreground">
             {t('sectionLabel')}
           </div>
-          <PenLine className="size-6 text-muted-foreground" aria-hidden="true" />
+          <PenLine className="size-ds-icon-lg text-muted-foreground" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
           <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
           {/* story 64010b05 §2 — 임포트는 "그리기"와 co-located된 2번째 입구(별도 숨은 경로 X). */}

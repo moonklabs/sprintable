@@ -65,7 +65,7 @@ export function StorageAssetGrid({ assets, selectedAssetId, onSelect, onDelete, 
               {selected ? <span aria-hidden="true" data-testid="storage-card-selected-bar" className="absolute inset-y-1.5 left-0 z-10 w-[3px] rounded-r-full bg-ds-action" /> : null}
               <div className={cn('grid h-28 place-items-center', ASSET_CARD_WELL)}>
                 <span className={cn('grid size-12 place-items-center rounded-ds-control', FILE_TINT_DS_CLASS[fileTypeTint(asset.content_type)])}>
-                  <Icon className="size-6" />
+                  <Icon className="size-ds-icon-lg" />
                 </span>
               </div>
               <div className="flex flex-col gap-1.5 p-2.5">
@@ -73,7 +73,7 @@ export function StorageAssetGrid({ assets, selectedAssetId, onSelect, onDelete, 
                 <div className="flex items-center justify-between">
                   {usageCount > 0 ? (
                     <span className="inline-flex items-center gap-[5px] text-ds-small font-semibold text-ds-info">
-                      <Link2 className="size-[13px]" />
+                      <Link2 className="size-ds-icon-sm" />
                       {t('usageCount', { count: usageCount })}
                     </span>
                   ) : (

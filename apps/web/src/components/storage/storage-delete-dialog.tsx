@@ -59,7 +59,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               {/* Header — 고정(scroll 영역 밖) */}
               <div id={titleId} className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-xs font-[650] text-foreground">
                 <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive-tint text-destructive">
-                  <AlertTriangle className="size-[15px]" />
+                  <AlertTriangle className="size-ds-icon-sm" />
                 </span>
                 {t('deleteTitle')}
               </div>
@@ -78,7 +78,7 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
                   <>
                     {/* story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                     <div className="mt-[10px] flex items-center gap-2 rounded-[0.5rem] bg-warning-tint px-3 py-[10px] text-xs font-semibold text-foreground">
-                      <Link2 className="size-[15px] shrink-0" />
+                      <Link2 className="size-ds-icon-sm shrink-0" />
                       {t('deleteImpact', { count: usageCount })}
                     </div>
                     <div className="mt-[10px]">

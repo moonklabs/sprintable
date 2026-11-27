@@ -86,7 +86,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
 
         {/* (1) 파일 아이콘 */}
         <span className={cn('grid size-[26px] shrink-0 place-items-center rounded-ds-control', FILE_TINT_DS_CLASS[fileTypeTint(asset.content_type)])}>
-          <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-[15px]" />
+          <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-ds-icon-sm" />
         </span>
 
         {/* (2) 이름 + 메타 */}
@@ -98,7 +98,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
             {usageCount > 0 ? (
               <>
                 <span className="font-semibold text-ds-info">
-                  <Link2 className="mr-[3px] inline size-3 align-[-2px]" aria-hidden />
+                  <Link2 className="mr-[3px] inline size-ds-icon-sm align-[-2px]" aria-hidden />
                   <span className="sr-only">{t('colUsage')} </span>
                   {t('usageCount', { count: usageCount })}
                 </span>
@@ -114,7 +114,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
         {/* (3) 사용처 — lg 이상 칸 */}
         {usageCount > 0 ? (
           <span className="hidden items-center gap-[5px] text-ds-small font-semibold text-ds-info lg:inline-flex">
-            <Link2 className="size-[13px]" />
+            <Link2 className="size-ds-icon-sm" />
             {t('usageCount', { count: usageCount })}
           </span>
         ) : (
