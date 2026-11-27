@@ -137,13 +137,13 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           disabled={btn.disabled}
           onClick={() => void handleFallback()}
         >
-          <BtnIcon className={`size-3.5 shrink-0 ${fallback === 'notifying' ? 'animate-spin' : ''}`} />
+          <BtnIcon className={`size-ds-icon-md shrink-0 ${fallback === 'notifying' ? 'animate-spin' : ''}`} />
           {btn.label}
         </Button>
         {/* story #2272 — ⓔ withdraw(형제 fallback-notify와 같은 흐름). 되돌릴 수 없어 confirm 단계 */}
         {withdraw === 'withdrawn' ? (
           <div className="flex items-center gap-1.5 rounded-md bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-muted-foreground">
-            <Check className="size-3.5 shrink-0" />
+            <Check className="size-ds-icon-sm shrink-0" />
             {t('withdrawn')}
           </div>
         ) : withdraw === 'confirming' ? (
@@ -157,7 +157,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
                 {t('withdrawCancel')}
               </Button>
               <Button variant="quiet" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive" onClick={() => void handleWithdraw()}>
-                <XCircle className="size-3.5 shrink-0" />
+                <XCircle className="size-ds-icon-md shrink-0" />
                 {t('withdrawConfirm')}
               </Button>
             </div>
@@ -169,7 +169,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
             disabled={withdraw === 'withdrawing'}
             onClick={() => void handleWithdraw()}
           >
-            {withdraw === 'withdrawing' ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <XCircle className="size-3.5 shrink-0" />}
+            {withdraw === 'withdrawing' ? <Loader2 className="size-ds-icon-md shrink-0 animate-spin" /> : <XCircle className="size-ds-icon-md shrink-0" />}
             {withdraw === 'withdrawing' ? t('withdrawing') : t('withdrawRequest')}
           </Button>
         )}

@@ -110,7 +110,7 @@ function VerificationSheetRow({
         className="flex w-full items-center gap-2 text-left"
         data-testid="evidence-verification-sheet-summary"
       >
-        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <FileText className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {verificationSheetSummary(items, t, naLabel)}
         </span>
@@ -356,7 +356,7 @@ export function EvidenceSection({
                       : null;
                     return (
                       <li key={item.id} className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-ds-surface-high">
-                        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                        <Icon className="mt-0.5 size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                         <div className="min-w-0 flex-1">
                           {pinnedArtifact ? (
                             <button

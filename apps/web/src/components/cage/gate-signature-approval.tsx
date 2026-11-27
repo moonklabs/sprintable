@@ -165,7 +165,7 @@ export function GateSignatureApproval({
             onClick={() => act(onReject)}
             data-testid="gate-sig-reject"
           >
-            <XCircle className="size-4" />
+            <XCircle className="size-ds-icon-md" />
             {t('sigReject')}
           </Button>
           {rejectOnly ? null : (
@@ -174,7 +174,7 @@ export function GateSignatureApproval({
               disabled={!canSign}
               onClick={() => act(onApprove)}
             >
-              <CheckCircle className="size-4" />
+              <CheckCircle className="size-ds-icon-md" />
               {resolving ? '...' : t(approveAndSignLabelKey)}
             </Button>
           )}

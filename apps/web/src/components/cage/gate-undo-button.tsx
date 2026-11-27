@@ -67,7 +67,7 @@ export function GateUndoButton({
         disabled={undoing}
         onClick={() => void handleUndo()}
       >
-        <RotateCcw className="size-3.5" />
+        <RotateCcw className="size-ds-icon-sm" />
         {undoing ? '...' : t('gateUndo')}
       </Button>
       {error ? (

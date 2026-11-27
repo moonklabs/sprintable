@@ -1,0 +1,3 @@
+# 설정(④-⑧)
+components/settings
+app/(authenticated)/settings
