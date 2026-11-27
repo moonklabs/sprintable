@@ -680,8 +680,8 @@ async def test_agent_can_set_source_but_still_cannot_approve_or_publish():
             r_publish = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{channel_draft_id}/publish",
             )
-            assert r_publish.status_code == 403, r_publish.text
-            assert r_publish.json()["error"]["code"] == "CHANNEL_POST_PUBLISH_HUMAN_ONLY"
+            # story 5041 B2 — an agent's publish is a card a person presses (tests/test_5041_publish_cards_realdb.py); this agent holds no grant on the draft's project, so it is the plain «not found» — and nothing is published
+            assert r_publish.status_code == 404, r_publish.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

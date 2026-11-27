@@ -245,7 +245,7 @@ async def test_blocked_unapproved_of_other_kinds_is_still_not_retryable():
 
 @pytest.mark.anyio
 async def test_only_a_person_can_retry_through_the_endpoint():
-    """재시도 엔드포인트는 사람 전용(에이전트 403) — 뉴스레터 blocked_unapproved를 받게 된 뒤에도 그대로."""
+    """재시도 엔드포인트는 사람 전용 — story 5041 B2 이후 에이전트의 재시도는 «사람이 누르는 승인 카드»(202)이고, 아무것도 다시 시도되지 않는다 — 뉴스레터 blocked_unapproved를 받게 된 뒤에도 그대로."""
     from app.main import app
     from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
     from tests.test_e4fc29fa_site_post_orchestration import _session_factory
@@ -257,8 +257,8 @@ async def test_only_a_person_can_retry_through_the_endpoint():
         _setup_org_scoped_app(app, Session, ctx["org_id"], user_id=ctx["sender_id"], agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{ctx['org_id']}/publication-commands/{command.id}/retry")
-        assert r.status_code == 403, r.text
-        assert (await _send_command(Session, ctx)).status == "blocked_unapproved"
+        assert r.status_code == 202 and r.json()["status"] == "pending_approval", r.text
+        assert (await _send_command(Session, ctx)).status == "blocked_unapproved", "the ask is only kept: nothing was retried"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

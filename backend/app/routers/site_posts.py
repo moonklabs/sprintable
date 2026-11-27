@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -292,6 +293,7 @@ class SitePostResponse(BaseModel):
 
 @router.post("/{org_id}/site-posts", response_model=SitePostResponse, status_code=201)
 async def post_site_post(
+    request: Request,
     org_id: uuid.UUID,
     body: PublishSitePostRequest,
     db: AsyncSession = Depends(get_db),
@@ -304,14 +306,22 @@ async def post_site_post(
     # story #3365(Phase0 S1) AC4 — 공개 API는 휴먼 전용. 초안 제출자(고객 에이전트)와 발행자(휴먼)
     # 경계가 이 체크 하나로 갈린다 — 가드가 먼저(게이트 조회보다 앞) 서야 mutation("이 조건을
     # 제거하면 반드시 201로 실패")이 성립한다.
+    # story 5041 B2 — an AGENT's publish of a site post is a card a person presses (their name, their rights), or what the user's setting says (`block` → 403 · `auto` → it goes on as the agent); the sealed gate still decides what may go out
     if await is_agent_caller(db, org_id=org_id, member_id=uuid.UUID(auth.user_id)):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "SITE_POST_PUBLISH_HUMAN_ONLY",
-                "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).",
-            },
+        from app.services import agent_action
+
+        try:
+            agent = await resolve_member(auth, org_id, db)
+        except HTTPException:
+            agent = None  # an agent that does not resolve to a member of this organisation (no project grant) keeps the road's old refusal
+        if agent is None or agent.type != "agent":
+            raise HTTPException(status_code=403, detail={"code": "SITE_POST_PUBLISH_HUMAN_ONLY", "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출)."})
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=agent, org_id=org_id, work_item_id=body.work_item_id, action_key="site_post.publish",
+            label_suffix=f" · {body.title} · /{body.slug}", not_found=HTTPException(status_code=404, detail="work item not found"),  # the slug is the one thing the sealed content hash does not cover: it is on the card
         )
+        if _decision is not None:
+            return _decision
     # story 194acb63(배포 11 실측) — created_by_member_id는 member-bound 리소스 축이라
     # auth.user_id(users.id)가 아니라 resolve_member()가 돌려주는 org_member.id를 써야
     # 한다(위 is_agent_caller가 이미 human을 확認했으니 여기선 항상 human 분기로 해소).
@@ -889,14 +899,25 @@ async def publish_site_post_from_draft_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    # story 5041 B2 — the same for publishing a draft's approved version (see post_site_post)
     if await is_agent_caller(db, org_id=org_id, member_id=uuid.UUID(auth.user_id)):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "SITE_POST_PUBLISH_HUMAN_ONLY",
-                "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출).",
-            },
+        from app.services import agent_action
+
+        try:
+            agent = await resolve_member(auth, org_id, db)
+        except HTTPException:
+            agent = None  # an agent that does not resolve to a member of this organisation (no project grant) keeps the road's old refusal
+        if agent is None or agent.type != "agent":
+            raise HTTPException(status_code=403, detail={"code": "SITE_POST_PUBLISH_HUMAN_ONLY", "message": "글 공개는 휴먼 멤버만 가능합니다 (에이전트는 초안만 제출)."})
+        _draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+        if _draft is None:
+            raise HTTPException(status_code=404, detail="draft not found")
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=agent, org_id=org_id, work_item_id=_draft.work_item_id, action_key="site_post.publish_draft",
+            label_suffix=f" · {_draft.slug}", not_found=HTTPException(status_code=404, detail="draft not found"),
         )
+        if _decision is not None:
+            return _decision
     # story 194acb63(배포 11 실측) — 위 post_site_post와 동형 정정: auth.user_id가 아니라
     # resolve_member()의 org_member.id.
     resolved = await resolve_member(auth, org_id, db)
@@ -1064,6 +1085,7 @@ class UnpublishSitePostResponse(BaseModel):
     "/{org_id}/site-posts/drafts/{draft_id}/unpublish", response_model=UnpublishSitePostResponse,
 )
 async def unpublish_site_post_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -1080,6 +1102,19 @@ async def unpublish_site_post_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
+    _agent = await resolve_member(auth, org_id, db)
+    if _agent.type == "agent":
+        from app.services import agent_action
+
+        _draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)
+        if _draft is None:
+            raise HTTPException(status_code=404, detail="draft not found")
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=_agent, org_id=org_id, work_item_id=_draft.work_item_id, action_key="site_post.unpublish",
+            label_suffix=f" · {_draft.slug}", not_found=HTTPException(status_code=404, detail="draft not found"),
+        )
+        if _decision is not None:
+            return _decision  # (an organisation owner / admin is demanded below — an agent never is one: always a card or a block)
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
     draft = await get_site_post_draft(db, org_id=org_id, draft_id=draft_id)

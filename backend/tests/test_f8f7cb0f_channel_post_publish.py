@@ -2,7 +2,7 @@
 승인·봉인 재검증 뒤 연결 토큰으로 발행·멱등·한도 잔량 조회·UTM 자동 부착·안정 에러코드.
 
 AC 매핑:
-- AC1: 휴먼 전용(에이전트 403 CHANNEL_POST_PUBLISH_HUMAN_ONLY) — 발행·한도 조회 둘 다.
+- AC1: 휴먼 전용(한도 조회는 에이전트 403 CHANNEL_CONNECTION_HUMAN_ONLY · 발행은 story 5041 B2부터 에이전트의 요청이 «사람이 누르는 승인 카드») — 발행·한도 조회 둘 다.
 - AC2: 발행 직전 게이트 approved·봉인 sha256 일치·connection active 재검증(fail-closed).
 - AC3: 멱등 — 같은 (gate_id, version_id) 재요청은 Threads에 새 POST 없이 기존 행 반환.
   부분 성공(컨테이너 생성 후 publish 실패)은 status="failed"+external_container_id 보존으로 남고 재시도는 그
@@ -247,8 +247,12 @@ async def test_agent_cannot_publish_returns_403():
                 client, s, org_id=org_id, connection_id=connection_id, story_id=story_id,
             )
             r_publish = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/drafts/{draft_id}/publish")
-        assert r_publish.status_code == 403, r_publish.text
-        assert r_publish.json()["error"]["code"] == "CHANNEL_POST_PUBLISH_HUMAN_ONLY"
+        # story 5041 B2 — an agent's publish is a card a person presses (tests/test_5041_publish_cards_realdb.py); this agent holds no grant on the draft's project, so it is the plain «not found» — and nothing went out
+        assert r_publish.status_code == 404, r_publish.text
+        async with Session() as s:
+            from sqlalchemy import text
+
+            assert (await s.execute(text("SELECT count(*) FROM publication_commands WHERE gate_id = :g"), {"g": gate_id})).scalar_one() == 0
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

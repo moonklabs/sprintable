@@ -8,7 +8,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -148,12 +148,23 @@ _SCHEDULED_TO_QUERY = Depends(aware_datetime_query(
     ))
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+async def _agent_caller_or_none(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, request: Request | None):
+    """story 5041 B2 — the calling AGENT (its member), or None for a person (or a caller that has no request in hand: a direct call from a test keeps the old refusal)"""
+    resolved = await resolve_member(auth, org_id, db)
+    return resolved if resolved.type == "agent" and request is not None else None
+
+
+def _draft_not_found(draft_id: uuid.UUID) -> HTTPException:
+    return HTTPException(status_code=404, detail={"code": "CHANNEL_POST_DRAFT_NOT_FOUND", "message": str(draft_id)})
+
+
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, *, agent_ok: bool = False):
     """AC1(발행 human-only) — channel_connections.py::_require_human과 동형(별도 role
     제한 없음, publish보다 좁은 owner/admin 축이 아니다 — site_posts.py의 publish
     엔드포인트와 같은 권한 폭: org 멤버인 휴먼이면 누구나)."""
     resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
+    # story 5041 B2 — `agent_ok` is passed ONLY by a road whose agent call the user's setting let through (`auto`): it then runs as the agent, under the agent's own rights (the checks below stay)
+    if resolved.type != "human" and not (agent_ok and resolved.type == "agent"):
         # story #3615 — 이미 사람 문장(3601 allowlist 등재분)이라 그대로 user_message로.
         raise HTTPException(
             status_code=403,
@@ -2127,6 +2138,7 @@ class PublishChannelPostResponse(BaseModel):
     "/{org_id}/channel-posts/drafts/{draft_id}/publish", response_model=PublishChannelPostResponse,
 )
 async def publish_channel_post_draft_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -2162,7 +2174,21 @@ async def publish_channel_post_draft_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
 
-    resolved = await _require_human(db, auth, org_id)
+    # story 5041 B2 — an AGENT's publish is a card a person presses (their name, their rights), or what the user's setting says (`block` → 403 · `auto` → it goes on as the agent)
+    agent = await _agent_caller_or_none(db, auth, org_id, request)
+    if agent is not None:
+        from app.services import agent_action
+
+        _draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+        if _draft is None:
+            raise _draft_not_found(draft_id)
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=agent, org_id=org_id, work_item_id=_draft.work_item_id, action_key="channel_post.publish",
+            label_suffix=f" → {_draft.channel}", not_found=_draft_not_found(draft_id),
+        )
+        if _decision is not None:
+            return _decision
+    resolved = await _require_human(db, auth, org_id, agent_ok=agent is not None)
 
     from app.services.channel_posts import resolve_command_target
     from app.services.publication_command import (
@@ -2542,14 +2568,32 @@ class RetryPublicationCommandRequest(BaseModel):
 
 async def _retry_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, auth: AuthContext,
-    confirmed_no_campaign: bool = False,
-) -> RetryPublicationCommandResponse:
+    confirmed_no_campaign: bool = False, request: Request | None = None,
+) -> RetryPublicationCommandResponse | JSONResponse:
     """story #3414 AC5·#3476(페드루 보정②, 미르코 FE 그라운딩 2026-09-05) — 휴먼
     전용, `dead_letter`/`blocked` 상태인 command만 `pending`으로 되돌린다(그 외는
     404로 존재 비노출). `retry_dead_letter_command` 자체가 `content_kind`를 안
     본다(org_id+command_id로만 조회) — channel_post·site_post 양쪽 어느 경로에서
     호출돼도 그대로 맞는다, 이 함수 자체엔 분기 코드가 없다(불필요)."""
-    await _require_human(db, auth, org_id)
+    # story 5041 B2 — an AGENT's retry of a stopped publication is a card a person presses (the body — a person's «I checked the ad account» confirmation — is never carried: the card keeps no body), or the user's setting
+    agent = await _agent_caller_or_none(db, auth, org_id, request)
+    if agent is not None:
+        from app.models.gate import Gate
+        from app.models.publication_command import PublicationCommand as _Command
+        from app.services import agent_action
+        from app.services.gate_service import resolve_gate_project_ids_batch
+
+        _row = (await db.execute(select(_Command.gate_id, _Command.operation).where(_Command.id == command_id, _Command.org_id == org_id))).first()
+        _gate = (await db.execute(select(Gate).where(Gate.id == _row[0], Gate.org_id == org_id))).scalar_one_or_none() if _row is not None else None
+        _project_id = (await resolve_gate_project_ids_batch(db, org_id, [_gate])).get(_gate.id) if _gate is not None else None
+        if _project_id is None:
+            raise HTTPException(status_code=404, detail="publication command not found")  # the same word a command that is not there gets below
+        _decision = await agent_action.gate_agent_call(
+            request, db, auth=auth, agent=agent, org_id=org_id, project_id=_project_id, action_key="publication.retry", target_label=_row[1] or "—",
+        )
+        if _decision is not None:
+            return _decision
+    await _require_human(db, auth, org_id, agent_ok=agent is not None)
 
     from app.models.publication_command import PublicationCommand
     from app.services.ads_boost_execution import AdsBoostCampaignCheckRequiredError, prepare_ads_boost_retry
@@ -2579,6 +2623,7 @@ async def _retry_publication_command(
     response_model=RetryPublicationCommandResponse,
 )
 async def retry_publication_command_shared_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     command_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -2594,7 +2639,7 @@ async def retry_publication_command_shared_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
     return await _retry_publication_command(
         db, org_id=org_id, command_id=command_id, auth=auth,
-        confirmed_no_campaign=bool(body and body.confirmed_no_campaign),
+        confirmed_no_campaign=bool(body and body.confirmed_no_campaign), request=request,
     )
 
 
@@ -2603,6 +2648,7 @@ async def retry_publication_command_shared_endpoint(
     response_model=RetryPublicationCommandResponse,
 )
 async def retry_publication_command_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     command_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -2625,7 +2671,7 @@ async def retry_publication_command_endpoint(
         raise HTTPException(status_code=403, detail="org_id mismatch")
     return await _retry_publication_command(
         db, org_id=org_id, command_id=command_id, auth=auth,
-        confirmed_no_campaign=bool(body and body.confirmed_no_campaign),
+        confirmed_no_campaign=bool(body and body.confirmed_no_campaign), request=request,
     )
 
 
@@ -2640,6 +2686,7 @@ class CancelScheduledCommandResponse(BaseModel):
     response_model=CancelScheduledCommandResponse,
 )
 async def cancel_scheduled_command_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -2653,6 +2700,19 @@ async def cancel_scheduled_command_endpoint(
     정직하게 알린다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    agent = await _agent_caller_or_none(db, auth, org_id, request)
+    if agent is not None:
+        from app.services import agent_action
+
+        _draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+        if _draft is None:
+            raise _draft_not_found(draft_id)
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=agent, org_id=org_id, work_item_id=_draft.work_item_id, action_key="channel_post.cancel_scheduled",
+            label_suffix=f" → {_draft.channel}", not_found=_draft_not_found(draft_id),
+        )
+        if _decision is not None:
+            return _decision  # (this road demands an organisation owner / admin — an agent never is one — so the setting never lets it through: always a card or a block)
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
     try:
@@ -2724,6 +2784,7 @@ class UnpublishChannelPostResponse(BaseModel):
     "/{org_id}/channel-posts/drafts/{draft_id}/unpublish", response_model=UnpublishChannelPostResponse,
 )
 async def unpublish_channel_post_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -2738,6 +2799,19 @@ async def unpublish_channel_post_endpoint(
     만료 409, 그 외→502)를 각각 명시 코드로 구분한다."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    agent = await _agent_caller_or_none(db, auth, org_id, request)
+    if agent is not None:
+        from app.services import agent_action
+
+        _draft = await get_channel_post_draft(db, org_id=org_id, draft_id=draft_id)
+        if _draft is None:
+            raise _draft_not_found(draft_id)
+        _decision = await agent_action.gate_agent_on_story(
+            request, db, auth=auth, agent=agent, org_id=org_id, work_item_id=_draft.work_item_id, action_key="channel_post.unpublish",
+            label_suffix=f" → {_draft.channel}", not_found=_draft_not_found(draft_id),
+        )
+        if _decision is not None:
+            return _decision
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
     try:
