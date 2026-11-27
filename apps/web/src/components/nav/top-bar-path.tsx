@@ -55,7 +55,7 @@ export function TopBarPath({ crumbs, title, stale }: { crumbs: readonly PathCrum
       <ol role="list" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-ds-2">
         {crumbs.map((crumb, i) => (
           <li key={crumb.key} role="listitem" data-crumb={crumb.key} className="hidden min-w-0 items-center gap-ds-2 lg:flex">
-            {i > 0 ? <Icon name="chevron_right" size={16} className="text-ds-ink-3" /> : null}
+            {i > 0 ? <Icon name="chevron_right" size="sm" className="text-ds-ink-3" /> : null}
             {crumb.key === 'place' && crumb.href ? <Link href={crumb.href} className={CRUMB_LINK}>{crumb.label}</Link> : <TopBarSwitcherTrigger kind={crumb.key === 'project' ? 'project' : 'org'} label={crumb.label} />}
           </li>
         ))}

@@ -156,7 +156,7 @@ for (const win of DESKTOP) {
     expect(m.fieldBorder).toBe('1px');
     expect(m.fieldPad).toEqual(['12px', '16px']);
     expect(m.fieldFont).toEqual(['16px', '400']);
-    expect(Math.round(m.fieldIcon!.w), 'icon 24').toBe(24);
+    expect(Math.round(m.fieldIcon!.w), 'icon 20 (story 5048 ④-⑯ — 막대 요소 = md · was 24)').toBe(20);
     expect(Math.round(m.fieldText!.l - m.fieldIcon!.r), '12 between the icon and the text').toBe(12);
     expect(m.fieldHint, 'the ⌘K / Ctrl K hint is drawn').not.toBeNull();
     expect(m.fieldHint!.r, 'the hint ends before the 16 right padding').toBeLessThanOrEqual(m.field!.r - 16 + 0.5);

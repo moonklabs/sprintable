@@ -52,7 +52,7 @@ export function NavRail({ account, listColumn, todayCount = 0, todayCountAtLeast
   // 아이콘 한 칸(40px · 낮은 창 높이 520px 이하에선 32px). 켜짐 = action-soft 바탕 + action-text 글, 꺼짐 = ink-3.
   const railIcon = (iconKey: string, lit: boolean) => (
     <span className={cn('flex size-10 items-center justify-center rounded-ds-control transition-colors [@media(max-height:520px)]:size-8', lit ? 'bg-ds-action-soft text-ds-action-text' : 'text-ds-ink-3')}>
-      <Icon name={RAIL_ICON_BY_ITEM_ID[iconKey]!} size={20} className="size-5" />
+      <Icon name={RAIL_ICON_BY_ITEM_ID[iconKey]!} size="md" className="size-ds-icon-md" />
     </span>
   );
   // 링크의 aria-label이 이름을 덮으므로 건수 > 0이면 이름에 «이름 · 건수 뜻 N»을 싣는다(배지 안 sr-only 글만으로는 스크린리더가 못 읽는다).

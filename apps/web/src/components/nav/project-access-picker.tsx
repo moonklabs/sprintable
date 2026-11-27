@@ -56,7 +56,7 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
       <p className="text-xs text-muted-foreground">{t('switcherAccessHint')}</p>
       {agents === null ? (
         <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground" data-testid="project-access-loading">
-          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden />
           <span>{tCommon('loading')}</span>
         </div>
       ) : loadError ? (

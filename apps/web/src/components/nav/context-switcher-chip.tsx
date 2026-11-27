@@ -137,7 +137,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               className="size-11 min-h-0 min-w-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={t('switcherOrgSettingsAria')}
             >
-              <Settings className="h-3.5 w-3.5" />
+              <Settings className="size-ds-icon-md" />
             </Button>
           </SheetHeader>
 
@@ -145,7 +145,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             {/* story #3147 §③ 검색(신규) — 현 조직 프로젝트만 필터(9+ 대응). */}
             <div className="sticky top-0 z-10 bg-background px-1 pb-2 pt-2">
               <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-ds-icon-sm -translate-y-1/2 text-muted-foreground" aria-hidden />
                 <Input
                   type="search"
                   value={s.searchQuery}
@@ -162,7 +162,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             </div>
             {s.currentOrgLoading && (
               <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="size-ds-icon-sm animate-spin" />
                 <span>{tCommon('loading')}</span>
               </div>
             )}
@@ -187,7 +187,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     />
                     <span className="min-w-0 flex-1 truncate text-editorial-ui text-foreground">{project.projectName}</span>
                     {/* 유나 규격 — 색만 의존 금지(브랜드 배경+글리프 이중 표식). */}
-                    {isCurrent && <Check className="h-4 w-4 shrink-0 text-brand" />}
+                    {isCurrent && <Check className="size-ds-icon-sm shrink-0 text-brand" />}
                   </Button>
                 );
               })
@@ -198,7 +198,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               onClick={() => s.setCreateProjectOpen(true)}
               className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand-text hover:bg-accent hover:text-brand-text"
             >
-              <Plus className="h-4 w-4 shrink-0" />
+              <Plus className="size-ds-icon-md shrink-0" />
               <span className="text-sm">{t('switcherNewProject')}</span>
             </Button>
 
@@ -225,7 +225,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   </div>
                   {isLoading ? (
                     <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="size-ds-icon-sm animate-spin" />
                       <span>{tCommon('loading')}</span>
                     </div>
                   ) : orgProjects && orgProjects.length > 0 ? (
@@ -239,7 +239,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                         className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60"
                       >
                         <span className="min-w-0 flex-1 truncate text-editorial-ui">{project.projectName}</span>
-                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                        <ChevronRight className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                       </Button>
                     ))
                   ) : (
@@ -251,7 +251,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal text-muted-foreground hover:bg-accent hover:text-muted-foreground disabled:opacity-60"
                     >
                       <span className="flex-1 text-editorial-ui">{t('switcherSwitchToOrg')}</span>
-                      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <ChevronRight className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                     </Button>
                   )}
                 </div>
@@ -265,7 +265,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 onClick={() => s.setCreateOrgOpen(true)}
                 className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent"
               >
-                <Plus className="h-4 w-4 shrink-0" />
+                <Plus className="size-ds-icon-md shrink-0" />
                 <span className="text-sm">{t('switcherNewOrganization')}</span>
               </Button>
             </div>
@@ -308,8 +308,8 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                           )
                         )}
                       </span>
-                      {isActive && <Check className="h-4 w-4 shrink-0 text-brand" />}
-                      {acc.busy === account.account_id && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
+                      {isActive && <Check className="size-ds-icon-sm shrink-0 text-brand" />}
+                      {acc.busy === account.account_id && <Loader2 className="size-ds-icon-sm shrink-0 animate-spin text-muted-foreground" />}
                     </Button>
                   );
                 })}
@@ -320,7 +320,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   onClick={() => void acc.handleAdd()}
                   className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-brand-text hover:bg-accent hover:text-brand-text disabled:opacity-60"
                 >
-                  {acc.busy === 'add' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                  {acc.busy === 'add' ? <Loader2 className="size-ds-icon-md animate-spin" /> : <Plus className="size-ds-icon-md" />}
                   <span className="flex-1 text-sm">{acc.t('addAccount')}</span>
                   {acc.atCap && <span className="text-xs text-muted-foreground">{acc.t('capReached')}</span>}
                 </Button>
@@ -331,7 +331,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   onClick={() => void acc.handleSignOut('this')}
                   className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-destructive hover:bg-muted"
                 >
-                  <LogOut className="size-4" />
+                  <LogOut className="size-ds-icon-md" />
                   <span className="text-sm">{acc.others.length > 0 ? acc.t('signOutThis') : acc.tc('logout')}</span>
                 </Button>
                 {acc.others.length > 0 && (
@@ -342,7 +342,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     onClick={() => void acc.handleSignOut('all')}
                     className="min-h-11 w-full justify-start gap-2 rounded-lg px-3.5 py-2.5 text-left font-normal text-destructive hover:bg-muted"
                   >
-                    <LogOut className="size-4" />
+                    <LogOut className="size-ds-icon-md" />
                     <span className="text-sm">{acc.t('signOutAll')}</span>
                   </Button>
                 )}

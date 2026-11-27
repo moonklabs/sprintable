@@ -66,7 +66,7 @@ export function TopBarSwitcherTrigger({ kind, label }: { kind: Kind; label: stri
       {/* the name = the crumb's visible words first (label-in-name), then what the button does */}
       <DropdownMenuTrigger disabled={s.pending} className={TRIGGER} aria-label={`${label}, ${t('topBarSwitcher')}`} data-testid={`top-bar-switcher-${kind}`}>
         <span className="min-w-0 truncate">{label}</span>
-        <Icon name="expand_more" size={16} className={cn('shrink-0')} />
+        <Icon name="expand_more" size="sm" className={cn('shrink-0')} />
       </DropdownMenuTrigger>
       <SwitcherMenuContent s={s} />
     </DropdownMenu>

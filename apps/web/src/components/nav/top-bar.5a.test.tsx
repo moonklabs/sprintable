@@ -168,12 +168,12 @@ describe('TopBar 5a — the search field (a button that opens the ⌘K palette)'
     expect(container.querySelector('[data-testid="top-bar-search"]')).toBeNull();
   });
 
-  it('the face uses only design-system tokens: height 40 · radius 8 · 1px line · left 12 / right 16 · icon 24 · 12 between · 16 Regular third-grade ink — no raw colour, no alpha, no shadow, no arbitrary pixel', async () => {
+  it('the face uses only design-system tokens: height 40 · radius 8 · 1px line · left 12 / right 16 · icon 20 · 12 between · 16 Regular third-grade ink — no raw colour, no alpha, no shadow, no arbitrary pixel', async () => {
     await mount({ pathname: '/org-briefing' });
     const cls = field()!.className.split(/\s+/);
     expect(cls).toEqual(expect.arrayContaining(['h-ds-control', 'rounded-ds-control', 'border', 'border-ds-line-control', 'bg-ds-surface', 'pl-ds-3', 'pr-ds-4', 'gap-ds-3', 'text-base', 'font-normal', 'text-ds-ink-3']));
     expect(field()!.className).not.toMatch(/shadow|\[[^\]]*px\]|#[0-9a-f]{3,6}|\/\d{1,3}\b|rgb|oklch/i);
-    expect(field()!.querySelector('svg')!.getAttribute('width')).toBe('24');
+    expect(field()!.querySelector('svg')!.getAttribute('width')).toBe('20'); // 검색 아이콘 20 — story 5048 ④-⑯(PO 11-27 «막대 요소 = md»): C1 5a 시험 한 줄 · 범위 표 따름 · 전엔 24
   });
 });
 

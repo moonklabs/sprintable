@@ -35,7 +35,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
           >
-            <Icon className="size-4" />
+            <Icon className="size-ds-icon-md" />
           </button>
         );
       })}

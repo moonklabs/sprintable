@@ -34,7 +34,7 @@ export function TopBarSearch({ onOpen, className }: { onOpen: () => void; classN
         className,
       )}
     >
-      <Icon name="search" size={24} />
+      <Icon name="search" size="md" />
       <span className="min-w-0 flex-1 truncate">{t('topBarSearch')}</span>
       {hint ? <Kbd className="shrink-0">{hint}</Kbd> : null}
     </ButtonPrimitive>

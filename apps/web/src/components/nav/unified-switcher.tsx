@@ -90,7 +90,7 @@ export function SwitcherMenuContent({ s, align = 'start', className }: { s: Retu
             이 org 소속인 것처럼 보여줄 수 있다. */}
         {s.currentOrgLoading && (
           <div className="flex items-center gap-2 px-5 py-1.5 text-sm text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="size-ds-icon-sm animate-spin" />
             <span>{tCommon('loading')}</span>
           </div>
         )}
@@ -103,12 +103,12 @@ export function SwitcherMenuContent({ s, align = 'start', className }: { s: Retu
           >
             <span className="flex-1 truncate text-sm">{project.projectName}</span>
             {project.projectId === s.currentProjectId && (
-              <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <Check className="size-ds-icon-sm shrink-0 text-primary" />
             )}
           </DropdownMenuItem>
         ))}
         <DropdownMenuItem className="pl-5 text-muted-foreground" onClick={() => s.setCreateProjectOpen(true)}>
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="size-ds-icon-sm" />
           <span className="text-sm">{t('switcherNewProject')}</span>
         </DropdownMenuItem>
       </DropdownMenuGroup>
@@ -164,7 +164,7 @@ export function SwitcherMenuContent({ s, align = 'start', className }: { s: Retu
 
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={() => s.setCreateOrgOpen(true)}>
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="size-ds-icon-sm" />
         <span className="text-sm">{t('switcherNewOrganization')}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>

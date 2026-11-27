@@ -75,8 +75,8 @@ describe('막대의 ds-* 클래스는 @theme에 실제로 있다', () => {
 });
 
 describe('막대 아이콘 크기', () => {
-  it('Button 안의 아이콘은 Button의 «svg 크기 규칙»에 줄지 않게 size-5 클래스를 단다(codex 권고)', () => {
-    expect(code('nav-rail.tsx')).toContain('className="size-5"');
-    expect(code('rail-account.tsx')).toContain('className="size-5"');
+  it('Button 안의 아이콘은 Button의 «svg 크기 규칙»에 줄지 않게 size-ds-icon-md 클래스를 단다(codex 권고 · story 5048 ④-⑯: 값 20 그대로 토큰으로)', () => {
+    expect(code('nav-rail.tsx')).toContain('className="size-ds-icon-md"');
+    expect(code('rail-account.tsx')).toContain('className="size-ds-icon-md"');
   });
 });

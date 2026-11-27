@@ -162,11 +162,11 @@ export function getEntityHref(
 function getEventIcon(n: Pick<EventNotification, 'event_type' | 'payload'>) {
   // story #4520 — dispatched 줄은 실어 온 꼴로(결재 요청 = 결재함 진입점과 같은 Inbox 아이콘 · ⚡는 진짜 작업 전달만).
   const eventType = dispatchedInnerType(n.event_type, n.payload) ?? n.event_type;
-  if (eventType.startsWith('gate')) return <Inbox className="size-4" />;
-  if (eventType.startsWith('story') || eventType.startsWith('status')) return <FolderKanban className="size-4" />;
-  if (eventType === 'dispatched') return <Zap className="size-4" />;
-  if (eventType.startsWith('doc')) return <BookOpen className="size-4" />;
-  return <Bell className="size-4" />;
+  if (eventType.startsWith('gate')) return <Inbox className="size-ds-icon-sm" />;
+  if (eventType.startsWith('story') || eventType.startsWith('status')) return <FolderKanban className="size-ds-icon-sm" />;
+  if (eventType === 'dispatched') return <Zap className="size-ds-icon-sm" />;
+  if (eventType.startsWith('doc')) return <BookOpen className="size-ds-icon-sm" />;
+  return <Bell className="size-ds-icon-sm" />;
 }
 
 // story #2192 — 30건에서 조용히 잘리던 결함의 회귀가드. NOTIFICATIONS_PAGE_SIZE만큼 요청해
@@ -361,7 +361,7 @@ function NotificationPanel({
         <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('panelTitle')}</h2>
         <div className="flex items-center gap-1">
           {hasUnread && (
-            <Button variant="quiet" onClick={onMarkAllRead} iconStart={<Icon name="done_all" size={16} />} className="text-ds-small">
+            <Button variant="quiet" onClick={onMarkAllRead} iconStart={<Icon name="done_all" size="md" />} className="text-ds-small">
               {t('markAllRead')}
             </Button>
           )}
@@ -724,7 +724,7 @@ export function NotificationBell() {
         }
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground touch:size-11"
       >
-        <Bell className="size-4" />
+        <Bell className="size-ds-icon-md" />
         {/* story #3431(공용, PO 確定 2026-09-05) — 공용 배지로 통합(4890부터 ds CountBadge · team-presence-
             toggle.tsx와 동일 정의). 색 계산 근거(story 3466이 이미 확保)와 크기(9→10px,
             AC4)는 ds/count-badge.tsx 참고 — 정의를 두 곳에 중복하지 않는다. */}

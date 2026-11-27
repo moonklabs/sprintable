@@ -29,9 +29,9 @@ export function BusinessInfoDisclosure() {
         // v3 ink 재조정 후 실 대비 미달 실측(#777776/#ffffff=4.49:1, 순백 사이드바 배경).
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
       >
-        <Building2 className="size-4 shrink-0" />
+        <Building2 className="size-ds-icon-sm shrink-0" />
         <span className="flex-1 truncate text-xs">{t('businessInfoHeading')}</span>
-        <ChevronDown className={`size-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`size-ds-icon-sm shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div id={panelId} className="max-h-[45vh] overflow-y-auto px-2 py-2">
