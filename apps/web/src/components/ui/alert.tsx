@@ -7,7 +7,7 @@ const alertVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-border bg-ds-background text-foreground',
+        default: 'border-border bg-ds-surface-sunk text-foreground',
         // story #2513 — 글자는 text-foreground로 통일(라이트 테마 AA 미달 fix, warning과
         // 동형). variant 정체성은 border-*-border·아이콘·bg-*-tint로만 표현한다.
         // story #2969 §2 PR-2(doc proofline-system-layer-2969) — 좌측 2px 상태 액센트
