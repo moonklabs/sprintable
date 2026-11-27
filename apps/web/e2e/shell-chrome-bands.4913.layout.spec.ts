@@ -82,12 +82,11 @@ const workTabsH = (width: number) => (width < 1024 ? 56 : 44); // the band: pt-3
 const AFTER_H = 40; // the closed «승인 흐름에서 멈춘 것» box
 const BAND_BOX = BAND_H + 12; // a band's wrapper has `pt-3` (12px) — the box the shell measures
 
-/** the shell as dashboard-shell renders it around one anchored page (a TopBar, the bands wrapper, the grid/cell, the anchor with an inner scroller and a press at its bottom-right corner) */
+/** the shell as dashboard-shell renders it around one anchored page (story 5031 5a: EVERY screen has the TopBar now — /settings used to be drawn without one (`data-topbar-hidden`), the premise this fixture had for it is gone; a TopBar, the bands wrapper, the grid/cell, the anchor with an inner scroller and a press at its bottom-right corner) */
 async function mount(page: Page, o: Opts) {
   const c = shellClasses();
   const anchor = o.anchor === 'page' ? '' : anchorClass(o.anchor);
   const all = [...Object.values(c), anchor].join(' ').split(/\s+/).filter(Boolean);
-  const noTopBar = o.anchor !== 'page' && o.anchor.name === 'settings'; // /settings draws no TopBar (data-topbar-hidden)
   const phone = o.width < 1024;
   await page.setViewportSize({ width: o.width, height: o.height });
   const bands = Array.from({ length: o.bands }, (_, i) => `<div class="${c.band}" data-band="${i}"><div style="height:${BAND_H}px">band ${i}</div></div>`).join('');
@@ -103,11 +102,11 @@ async function mount(page: Page, o: Opts) {
         : padded;
     })();
   await page.setContent(`<!doctype html><html${o.launcher ? ' data-support-launcher=""' : ''}><head><style>html,body{margin:0}${await css(all)}</style></head><body>
-    <div class="${c.wrapper}"${noTopBar ? ' data-topbar-hidden=""' : ''}>
+    <div class="${c.wrapper}">
       <div class="${c.peer}" data-state="expanded" data-collapsible="" data-variant="inset" data-side="left"><div style="width:256px"></div></div>
       <main id="inset" class="${c.inset}">
         <div id="scroller" class="${c.scroller}">
-          ${noTopBar ? '' : `<div id="topbar" class="${c.topBar}">TopBar</div>`}
+          <div id="topbar" class="${c.topBar}">TopBar</div>
           <div id="bands" data-shell-bands>${bands}</div>
           <div class="${c.grid}"><div class="${c.content}">${body}</div></div>
         </div>

@@ -1121,3 +1121,14 @@
   }
   /* --shell-bands-h: 셸 스크롤러 맨 위의 «있을 때만» 띠 셋이 먹은 높이 — 값은 셸이 잰다(components/nav/shell-bands-height.ts · ResizeObserver) — 서버가 그린 첫 값은 없음(0). */
 }
+
+/* story 5031 (C1 step 5a · PO 11-27) — inside the desktop app (top-bar.tsx puts `data-desktop-app` on the strip) the whole top bar is the window's drag area; everything pressable inside it must NOT drag, or a press on a button would move the window.
+   `-webkit-app-region` is read by Electron (Chromium) only; a browser ignores it. The list is every pressable the bar can hold: links · buttons · fields · menu items / switches / tabs by role · anything given a tab stop. Layer: components (no utility competes for this property). */
+@layer components {
+  [data-desktop-app] {
+    -webkit-app-region: drag;
+  }
+  [data-desktop-app] :where(a, button, input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="switch"], [role="tab"], [role="combobox"], [contenteditable], [tabindex]:not([tabindex="-1"])) {
+    -webkit-app-region: no-drag;
+  }
+}

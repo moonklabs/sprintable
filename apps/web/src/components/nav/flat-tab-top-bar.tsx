@@ -73,6 +73,12 @@ export function ChannelTopBarTitle() {
   return <OrgTitle>{tChannel('title')}</OrgTitle>;
 }
 
+/** «설정»(/settings) 상단바 제목 — story 5031 (5a): 막대의 길(조직 › 설정 › 지금 칸)은 lg부터라 폴백도 lg부터만 그린다(폰은 목록 · 뒤로 줄이 이름을 말한다). 화면이 붙으면 지금 탭 이름이 이 자리를 대신한다(그때 «설정»은 길의 자리 칸이 말한다). */
+export function SettingsTopBarTitle() {
+  const tSettings = useTranslations('settings');
+  return <span className="hidden text-sm font-medium lg:block">{tSettings('title')}</span>;
+}
+
 /** «보상»(/rewards) 상단바 제목 — 화면과 폴백이 같이 쓴다. */
 export function RewardsTopBarTitle() {
   const tRewards = useTranslations('rewards');
@@ -225,6 +231,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   chats: { Title: ChatsTopBarTitle, showContextChip: true },
   channel: { Title: ChannelTopBarTitle, showContextChip: true },
   rewards: { Title: RewardsTopBarTitle, showContextChip: true },
+  settings: { Title: SettingsTopBarTitle, showContextChip: false }, // story 5031 (5a) — /settings has the bar now; the page publishes the tab's name (lg), this holds «설정» while it loads
   '[ws]/[proj]/goals': { Title: GoalsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/loops': { Title: LoopsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/docs': { Title: DocsTopBarTitle, showContextChip: true },

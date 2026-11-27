@@ -450,6 +450,8 @@ export default function ConversationPage() {
   return (
     <>
       {/* story 4887 (UI-4) — a PHONE (below lg) puts the room's name · people · «⋯» into the shell's own header row (no second head under it: 135 px of reading column); lg up keeps the in-column head below. */}
+      {/* story 5031 (C1 step 5a): from lg the bar's path ends with the room's name — org › 채팅 › room — as a plain span (NOT a heading: the room head below still draws the page's h1 until step 5b). The text only; the name's in-place edit stays in the head. */}
+      {isBelowLg ? null : <TopBarSlot title={<span className="text-sm font-medium">{headerTitle}</span>} actions={null} />}
       {isBelowLg ? (
         <TopBarSlot
           title={(

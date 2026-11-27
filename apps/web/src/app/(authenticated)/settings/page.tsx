@@ -63,6 +63,8 @@ import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useIsBelowLg } from '@/hooks/use-mobile';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { withProjectParam } from '@/lib/with-project-param';
 import { returnHrefAfterProjectCreate } from '@/lib/return-after-project-create';
 import { resolveChatsHref } from '@/lib/nav-v3-destinations';
@@ -152,6 +154,7 @@ export default function SettingsPage() {
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
   const tOnboarding = useTranslations('onboarding');
   const router = useRouter();
+  const isBelowLg = useIsBelowLg(); // story 5031 (5a): from lg the top bar's path ends with the current tab's name
   const searchParamsHook = useSearchParams();
   // story 4906 (PO 11-12): a project made from the chat list's empty state («프로젝트 만들기» there) sends the person BACK where they came from — the list, where «에이전트 추가» already stands. A whitelist of one
   // word (not a free address: no open redirect); made from settings itself (no `return`) the person stays here as before.
@@ -781,12 +784,14 @@ export default function SettingsPage() {
 
   return (
     <>
+      {/* story 5031 (C1 step 5a · PO 11-27): /settings has the same top bar as every screen — from lg its path reads «조직 › 설정 › 지금 칸» and the last crumb is the current tab's name (a plain span: the nav column's «설정» below stays the page's h1).
+          A phone keeps the nav list / the back row's own name (the bar's title stays empty there — one name, not two). */}
+      {isBelowLg ? null : <TopBarSlot title={<span className="text-sm font-medium">{activeLabelKey ? t(activeLabelKey) : t('title')}</span>} />}
       {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스) LNB+
           콘텐츠 split(각자 독립 overflow-y-auto)이 자기 높이를 잃는다 — 여기서 직접 앵커
           (h-[calc(100svh-var(--shell-chrome-h))] — story #4131, --shell-chrome-h가 TopBar
-          표시 여부+모바일 탭바를 CSS만으로 합성한 SSOT. /settings는 showTopBar=false라
-          이 값이 0으로 떨어져 TopBar 몫을 안 뺀다 — #4130의 하드코딩 3rem이 여기서
-          48px를 과다 차감하던 것도 같이 해소). */}
+          높이(lg 64 · 폰 48) + 모바일 탭바를 CSS만으로 합성한 SSOT. story 5031 (5a) 전에는 /settings가 막대를
+          안 그려 이 값에 TopBar 몫이 0이었고, 지금은 다른 화면과 같이 막대 몫을 뺀다). */}
       <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
         {/* story 4891 (UI-8 AC4) — the section list drawn with the ds parts (settings-nav-list.tsx · which sections: settings-nav.ts). ≥lg (1024 — the breakpoint SSOT): always beside the pane. Below it (a phone · a tablet): the list FIRST — the whole screen
             while `lnbOpen` (no `?tab=` on arrival) — and the pane with a back row after a section is picked (it used to be a hamburger over a 208px column squeezed next to the pane) */}

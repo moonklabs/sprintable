@@ -117,6 +117,8 @@
     "workList": "List",
     "hypothesis": "Hypothesis",
     "search": "Search…",
+    "topBarSearch": "Find",
+    "topBarPath": "You are here",
     "help": "Help",
     "openGlobalNav": "Open menu",
     "toggleSidebar": "Toggle sidebar",

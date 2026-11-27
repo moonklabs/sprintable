@@ -197,11 +197,10 @@ function isTabRootPage(pathname: string): boolean {
 // 훅 호출도 함께 옮기면 mux 컨텍스트를 정상적으로 받는다(chat-list-view.tsx·chat-view.tsx의
 // useChatSse 호출과 동일한 위치 조건이 된다).
 function ShellBody({
-  currentTeamMemberId, showTopBar, tabletCentered, orgId, orgMemberships, projectId, projectMemberships,
+  currentTeamMemberId, tabletCentered, orgId, orgMemberships, projectId, projectMemberships,
   currentProjectSlug, userName, navV3Flags, children,
 }: {
   currentTeamMemberId?: string;
-  showTopBar: boolean;
   tabletCentered: boolean;
   orgId?: string;
   orgMemberships: OrgSwitcherItem[];
@@ -244,7 +243,6 @@ function ShellBody({
         navV3Flags={navV3Flags}
       />
       <ScrollShell
-        showTopBar={showTopBar}
         tabletCentered={tabletCentered}
         chatUnreadTotal={chatUnreadTotal}
         orgId={orgId}
@@ -260,9 +258,8 @@ function ShellBody({
 }
 
 function ScrollShell({
-  showTopBar, tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, navV3Flags, children,
+  tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, navV3Flags, children,
 }: {
-  showTopBar: boolean;
   tabletCentered: boolean;
   chatUnreadTotal: number;
   orgId?: string;
@@ -299,15 +296,14 @@ function ScrollShell({
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panelVisible }}>
     <SidebarInset className={cn('relative flex flex-col overflow-hidden', LAYER.page)}>
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[var(--shell-launcher-clear,0px)]">
-        {showTopBar && (
-          <TopBar
-            orgId={orgId}
-            orgMemberships={orgMemberships}
-            projectId={projectId}
-            projectMemberships={projectMemberships}
-            userName={userName}
-          />
-        )}
+        {/* story 5031 (C1 step 5a · PO 11-27): every screen of the shell has the bar — /settings too (it used to hide it: `showTopBar` + `data-topbar-hidden`). */}
+        <TopBar
+          orgId={orgId}
+          orgMemberships={orgMemberships}
+          projectId={projectId}
+          projectMemberships={projectMemberships}
+          userName={userName}
+        />
         {/* 4913 셸 — 띠 셋을 한 칸에 담아 높이를 잰다(useShellBandsHeight → --shell-bands-h → --shell-chrome-h). 칸 자체는 모양이 없다: 띠마다 `empty:hidden`이라 다 비면 높이 0. */}
         <div ref={bandsRef} data-shell-bands>
         <div className="px-3 pt-3 empty:hidden">
@@ -465,7 +461,6 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const showTopBar = !pathname.startsWith('/settings');
   const tabletCentered = isTabRootPage(pathname);
 
   // ⚠️카디르 라이브 재QA(2026-08-10, qa:changes) — 세션의 "현재 org" 정본은 `orgId`(me?.org_id)가
@@ -617,15 +612,14 @@ export function DashboardShell({
           {/* story #3756 — dashboard-shell-root가 --bottom-dock-inset·--mobile-tab-bar-h를
               소유(globals.css). MobileTabBar·BottomDock 둘 다 이 아래 자손이라 상속으로 그
               값을 읽는다.
-              story #4131 — 같은 요소가 --shell-chrome-h도 소유한다. TopBar 렌더 여부는 JS
-              불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — data 속성으로 다리를
-              놓는다(globals.css가 `[data-topbar-hidden]`로 분기, JS 측정 없이 CSS만으로
-              --shell-chrome-h를 계산하기 위한 유일한 JS 개입). */}
+              story #4131 — 같은 요소가 --shell-chrome-h도 소유한다(TopBar 몫 포함).
+              story 5031 (5a): 모든 화면이 TopBar를 그리므로(/settings 포함) 이 요소는 더 이상
+              `data-topbar-hidden`을 싣지 않는다 — globals.css의 그 분기는 «막대 없는 화면»이 다시
+              생길 때를 위한 손잡이로만 남아 있다. */}
           {/* e2e/shell-chrome-overflow.4534.layout.spec.ts가 이 className을 소스에서 정규식으로 읽는다 — `className`이 `<SidebarProvider ` 바로 뒤여야 한다(다른 prop은 그 뒤). */}
-          <SidebarProvider className="h-svh dashboard-shell-root" open={listColumnOpen} onOpenChange={setListColumnOpen} data-topbar-hidden={showTopBar ? undefined : ''}>
+          <SidebarProvider className="h-svh dashboard-shell-root" open={listColumnOpen} onOpenChange={setListColumnOpen}>
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
-              showTopBar={showTopBar}
               tabletCentered={tabletCentered}
               orgId={effectiveOrgId}
               orgMemberships={orgMemberships}
