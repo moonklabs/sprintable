@@ -147,7 +147,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
     return (
       <section aria-label={t('sectionLabel')} className="space-y-2">
         <h3 className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
-          <GitPullRequest className="size-3.5" />
+          <GitPullRequest className="size-ds-icon-sm" />
           {t('sectionLabel')}
         </h3>
         {/* 중립 tint(가디언 ④): GitHub=옵셔널 통합·미연결은 "문제" 아님 → amber 금지(비-GitHub org 노이즈 차단). */}
@@ -159,7 +159,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             className="h-7 gap-1"
             onClick={() => { window.location.href = '/api/integrations/github/connect'; }}
           >
-            <GitPullRequest className="size-3.5" />
+            <GitPullRequest className="size-ds-icon-md" />
             {t('connectCta')}
           </Button>
         </div>
@@ -173,7 +173,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
   return (
     <section aria-label={t('sectionLabel')} className="space-y-2">
       <h3 className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
-        <GitPullRequest className="size-3.5" />
+        <GitPullRequest className="size-ds-icon-sm" />
         {t('sectionLabel')}
       </h3>
 
@@ -194,7 +194,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               >
                 <GitPullRequest className="size-3 shrink-0" />
                 <span className="truncate">{l.repo_full_name} #{l.pr_number}</span>
-                <ExternalLink className="size-2.5 shrink-0 text-muted-foreground" />
+                <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
               </a>
               {l.link_source === 'explicit' ? (
                 <Chip tone="action" className="shrink-0">{t('sourceExplicit')}</Chip>
@@ -237,7 +237,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 >
                   <GitPullRequest className="size-3 shrink-0" />
                   <span className="truncate">{l.repo_full_name} #{l.pr_number}</span>
-                  <ExternalLink className="size-2.5 shrink-0" />
+                  <ExternalLink className="size-3 shrink-0" />
                 </a>
                 <span className="inline-flex shrink-0 items-center gap-1 text-warning-strong">
                   <span aria-hidden className="size-1.5 rounded-full bg-warning" />
@@ -250,7 +250,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                   onClick={() => void promote(l)}
                   aria-label={t('promoteAriaLabel', { n: index + 1, label: t('promoteCta') })}
                 >
-                  {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+                  {busyId === l.id ? <Loader2 className="size-ds-icon-md animate-spin" /> : <Plus className="size-ds-icon-md" />}
                   {t('promoteCta')}
                 </Button>
               </li>
@@ -293,7 +293,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
           disabled={adding || !repoName.trim() || !prNum.trim()}
           onClick={() => void onAddSubmit()}
         >
-          {adding ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+          {adding ? <Loader2 className="size-ds-icon-md animate-spin" /> : <Plus className="size-ds-icon-md" />}
           {t('addCta')}
         </Button>
       </div>

@@ -302,7 +302,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
             aria-label={tc('close')}
             className="rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <X className="size-4" />
+            <X className="size-ds-icon-sm" />
           </button>
         </div>
         {/* Scrollable body — long forms (outcome 추가 등) overflow the viewport otherwise;
@@ -623,7 +623,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       {sortable && hasCurated ? (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ds-line px-4 py-2">
           <span className="min-w-0 truncate text-ds-small text-ds-ink-3">{t('steerCommitHint')}</span>
-          <DsButton type="button" variant="secondary" className="shrink-0" iconStart={<Send className="size-3.5" aria-hidden="true" />} onClick={() => setShowDispatch(true)}>
+          <DsButton type="button" variant="secondary" className="shrink-0" iconStart={<Send className="size-ds-icon-md" aria-hidden="true" />} onClick={() => setShowDispatch(true)}>
             {t('steerCommit')}
           </DsButton>
         </div>
@@ -649,14 +649,14 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
           <div className="p-4">
             {epics.length === 0 ? (
               <EmptyState
-                icon={<Flag className="size-8" />}
+                icon={<Flag className="size-ds-icon-lg" />}
                 title={t('noGoals')}
                 description={t('noGoalsDescription')}
                 action={
                   <div className="flex flex-col items-center gap-4">
                     <GoalGroupHint />
                     <Button size="sm" onClick={() => setShowCreate(true)}>
-                      <Plus className="size-4" />
+                      <Plus className="size-ds-icon-md" />
                       {t('newGoal')}
                     </Button>
                   </div>
@@ -667,7 +667,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
                 title={t('noGoalsFiltered')}
                 action={
                   <Button size="sm" onClick={() => setShowCreate(true)}>
-                    <Plus className="size-4" />
+                    <Plus className="size-ds-icon-md" />
                     {t('newGoal')}
                   </Button>
                 }
@@ -709,7 +709,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
         actions={
           // story #4277 — 402폭에서 글자 버튼이 상단바를 가로로 넘쳤다(410/402 · 가드가 잡음). 스프린트 상단바 관례: 폰은 아이콘만 · 접근 이름 aria-label.
           // story #4888 — the ds Button carries the touch 44 floor (the old ui/Button size=sm stayed 36×28 on a phone); the icon alone on a phone, icon + words from `sm` up
-          <DsButton type="button" variant="secondary" onClick={() => setShowCreate(true)} aria-label={t('newGoal')} iconStart={<Plus className="size-3.5" aria-hidden="true" />}>
+          <DsButton type="button" variant="secondary" onClick={() => setShowCreate(true)} aria-label={t('newGoal')} iconStart={<Plus className="size-ds-icon-md" aria-hidden="true" />}>
             <span className="hidden sm:inline">{t('newGoal')}</span>
           </DsButton>
         }

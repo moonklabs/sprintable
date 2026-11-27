@@ -302,7 +302,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
           </div>
           {/* 실행 계획(calm 라벨·Target lucide·장식 글리프 제거) */}
           <Card className="space-y-2 p-3">
-            <p className="flex items-center gap-1.5 text-ds-small font-medium text-ds-ink-3"><Target className="size-3.5" />{t('planSection')}</p>
+            <p className="flex items-center gap-1.5 text-ds-small font-medium text-ds-ink-3"><Target className="size-ds-icon-sm" />{t('planSection')}</p>
             <Field label={t('goalLabel')}>
               {(control) => (
                 <DsInput
@@ -316,7 +316,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
               )}
             </Field>
             <div className="grid grid-cols-2 gap-2">
-              <Field label={<span className="flex items-center gap-1"><Clock className="size-3.5" />{t('capacityLabel')}</span>}>
+              <Field label={<span className="flex items-center gap-1"><Clock className="size-ds-icon-sm" />{t('capacityLabel')}</span>}>
                 {(control) => (
                   <div className="relative">
                     <DsInput
@@ -332,7 +332,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                   </div>
                 )}
               </Field>
-              <Field label={<span className="flex items-center gap-1"><Users className="size-3.5" />{t('teamSizeLabel')}</span>}>
+              <Field label={<span className="flex items-center gap-1"><Users className="size-ds-icon-sm" />{t('teamSizeLabel')}</span>}>
                 {(control) => (
                   <div className="relative">
                     <DsInput
@@ -406,7 +406,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
       <DialogContent role="alertdialog" className="max-w-sm" showCloseButton={false}>
         <div className="mb-3 flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive-tint text-destructive">
-            <AlertTriangle className="size-5" />
+            <AlertTriangle className="size-ds-icon-md" />
           </span>
           <div className="min-w-0">
             <DialogTitle className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</DialogTitle>
@@ -417,7 +417,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
         {error ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <DsButton type="button" variant="quiet" onClick={onClose} disabled={deleting}>{t('cancel')}</DsButton>
-          <DsButton type="button" variant="danger" iconStart={<Trash2 className="size-4" />} onClick={onConfirm} disabled={deleting}>
+          <DsButton type="button" variant="danger" iconStart={<Trash2 className="size-ds-icon-md" />} onClick={onConfirm} disabled={deleting}>
             {deleting ? '...' : t('deleteConfirm')}
           </DsButton>
         </div>
@@ -793,7 +793,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
           // story #4888 — 폰 폭에서는 글자(span)가 숨어 아이콘(+)만 남는다: aria-label이 이름을 주고, 폰 누름 영역은 44 이상.
-          <DsButton variant="primary" aria-label={t('newSprint')} iconStart={<Plus className="size-4" />} onClick={() => setShowCreate(true)}>
+          <DsButton variant="primary" aria-label={t('newSprint')} iconStart={<Plus className="size-ds-icon-md" />} onClick={() => setShowCreate(true)}>
             <span className="hidden sm:inline">{t('newSprint')}</span>
           </DsButton>
         }
@@ -818,14 +818,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       <div className={`flex flex-col gap-3 overflow-y-auto p-4 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
           <EmptyState
-            icon={<Target className="size-8" />}
+            icon={<Target className="size-ds-icon-lg" />}
             title={t('noSprints')}
             description={t('noSprintsDescription')}
             action={
               <div className="flex flex-col items-center gap-4">
                 <SprintCycleBar startLabel={t('noSprintsBarStart')} endLabel={t('noSprintsBarEnd')} />
                 <div className="flex flex-col items-center gap-1.5">
-                  <DsButton variant="primary" iconStart={<Plus className="size-3.5" />} onClick={() => setShowCreate(true)}>
+                  <DsButton variant="primary" iconStart={<Plus className="size-ds-icon-md" />} onClick={() => setShowCreate(true)}>
                     {t('noSprintsCta')}
                   </DsButton>
                   <p className="text-xs text-muted-foreground">{t('noSprintsHint')}</p>
@@ -867,7 +867,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                         // variant 자체는 다른 4개 색 계열과 함께 #2420에서 다룬다.
                         <Badge variant="warning" className="text-foreground">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
                       ) : null}
-                      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+                      <ChevronRight className="size-ds-icon-sm text-muted-foreground" aria-hidden />
                     </>
                   }
                 />
@@ -915,7 +915,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         // story #4888 — 손 카드(rounded-lg border bg-ds-background) → ds Card + 토큰(ds에 짝이 없는 자리라 장 주인이 꼴을 정함: 한 단계 올린 면 + 헤어라인, 라벨은 ink-3).
         <Card className="mb-3 px-3 py-2 text-ds-body">
           {/* story #3776(1층B) — "목표", sprints ns의 기존 goalLabel 키 재사용(같은 화면의 스프린트 목표). */}
-          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-ds-small font-medium text-ds-ink-3"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>
+          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-ds-small font-medium text-ds-ink-3"><Target className="size-ds-icon-sm shrink-0" />{t('goalLabel')}</span>
           {selected.goal}
         </Card>
       ) : null}
@@ -935,16 +935,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         // 종료 못 함(선생님 제보 Sprint 13 overdue) — BE #1698 planning→closed 경로에 취소 버튼 노출.
         <div className="mb-4 flex flex-col gap-2">
           {/* story #4888 — ds Button: 주 행동(시작) = primary, 보조(취소) = secondary, 폰 누름 영역 44(옛 ui/button sm은 28). 진행 중 «...» + 비활성은 그대로. */}
-          <DsButton variant="primary" className="w-full" iconStart={<Play className="size-4" />} onClick={() => void handleActivate()} disabled={activating}>
+          <DsButton variant="primary" className="w-full" iconStart={<Play className="size-ds-icon-md" />} onClick={() => void handleActivate()} disabled={activating}>
             {activating ? '...' : t('activate')}
           </DsButton>
-          <DsButton variant="secondary" className="w-full" iconStart={<Ban className="size-4" />} onClick={() => void handleClose()} disabled={closing}>
+          <DsButton variant="secondary" className="w-full" iconStart={<Ban className="size-ds-icon-md" />} onClick={() => void handleClose()} disabled={closing}>
             {closing ? '...' : t('cancelSprint')}
           </DsButton>
         </div>
       ) : null}
       {selected.status === 'active' ? (
-        <DsButton variant="secondary" className="mb-4 w-full" iconStart={<StopCircle className="size-4" />} onClick={() => void handleClose()} disabled={closing}>
+        <DsButton variant="secondary" className="mb-4 w-full" iconStart={<StopCircle className="size-ds-icon-md" />} onClick={() => void handleClose()} disabled={closing}>
           {closing ? '...' : t('close')}
         </DsButton>
       ) : null}

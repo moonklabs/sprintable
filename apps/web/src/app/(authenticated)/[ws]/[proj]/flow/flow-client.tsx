@@ -288,7 +288,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 재료라 그대로 살아 있다.
           loading ? (
             <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden="true" />
               {t('loading')}
             </div>
           ) : (

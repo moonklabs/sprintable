@@ -175,7 +175,7 @@ export function EntityDispatchPanel({
           aria-describedby={needsAssignee ? reasonId : undefined}
           onClick={() => void handleDispatch()}
           title={needsAssignee ? undefined : t('dispatchTooltip')}
-          iconStart={<Zap className="size-3.5" />}
+          iconStart={<Zap className="size-ds-icon-md" />}
           // 4908 — ds Button(주 단추 · 비활성 = 점선 윤곽). 담당자가 없으면 눌러도 안 가는 «꺼진» 모양(aria-disabled)이고 까닭 줄이 아래에 선다.
           className={cn('shrink-0', mobileMode === 'assignee-only' ? 'hidden md:inline-flex' : 'inline-flex')}
         >
@@ -194,7 +194,7 @@ export function EntityDispatchPanel({
               className="px-2"
               aria-label={t('moreOptionsAria')}
             >
-              <MoreHorizontal className="size-4" />
+              <MoreHorizontal className="size-ds-icon-md" />
             </Button>
             {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
             {moreOpen && (
@@ -215,7 +215,7 @@ export function EntityDispatchPanel({
                       : 'cursor-not-allowed text-muted-foreground',
                   )}
                 >
-                  <Zap className="size-3.5" />
+                  <Zap className="size-ds-icon-sm" />
                   {dispatching ? t('dispatching') : t('dispatch')}
                 </button>
                 {needsAssignee && (

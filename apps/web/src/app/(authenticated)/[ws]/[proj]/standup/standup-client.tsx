@@ -722,7 +722,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
                     <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                      <Users className="h-4 w-4" aria-hidden />
+                      <Users className="size-ds-icon-sm" aria-hidden />
                       {t('people')}
                     </h2>
                   </div>
@@ -736,7 +736,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                      <Users className="h-4 w-4" aria-hidden />
+                      <Users className="size-ds-icon-sm" aria-hidden />
                       {t('people')}
                     </h2>
                     <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
@@ -904,7 +904,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                      <Bot className="h-4 w-4" aria-hidden />
+                      <Bot className="size-ds-icon-sm" aria-hidden />
                       {t('agents')}
                     </h2>
                     <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>

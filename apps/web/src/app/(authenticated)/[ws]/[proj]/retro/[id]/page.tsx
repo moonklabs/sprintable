@@ -895,7 +895,7 @@ export default function RetroSessionPage() {
                                 isDone ? 'border-success bg-success-tint text-success' : 'border-input bg-transparent',
                               )}
                             >
-                              {isDone ? <Check className="h-3.5 w-3.5" aria-hidden /> : null}
+                              {isDone ? <Check className="size-ds-icon-sm" aria-hidden /> : null}
                             </button>
                             <p className={cn('min-w-0 flex-1 basis-[12rem] break-keep text-sm', isDone ? 'text-muted-foreground line-through' : 'text-foreground')}>
                               {action.title}
