@@ -74,10 +74,10 @@ const STATUS_LABEL_KEY: Record<TriageStatus, string> = {
 
 // 유나 §절7 — 강조(주의)·정보·성공(muted)·중립. 빨강 금지(빨강=파괴/kill 전용).
 const STATUS_TONE: Record<TriageStatus, { bg: string; text: string; dot: string }> = {
-  open: { bg: 'bg-amber-100 dark:bg-amber-950/40', text: 'text-amber-800 dark:text-amber-300', dot: 'bg-amber-500' },
-  in_progress: { bg: 'bg-sky-100 dark:bg-sky-950/40', text: 'text-sky-800 dark:text-sky-300', dot: 'bg-sky-500' },
-  done: { bg: 'bg-emerald-100/70 dark:bg-emerald-950/30', text: 'text-emerald-700/90 dark:text-emerald-400/90', dot: 'bg-emerald-500' },
-  skipped: { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-muted-foreground' },
+  open: { bg: 'bg-warning-tint', text: 'text-foreground', dot: 'bg-warning' },
+  in_progress: { bg: 'bg-info-tint', text: 'text-foreground', dot: 'bg-info' },
+  done: { bg: 'bg-success-tint', text: 'text-foreground', dot: 'bg-success' },
+  skipped: { bg: 'bg-muted', text: 'text-ds-ink-2', dot: 'bg-muted-foreground' },
 };
 
 interface EngagementItem {
@@ -329,7 +329,7 @@ export default function ChannelPostsEngagementPage() {
       <div className="flex items-center gap-3">
         <h1 className="font-heading text-lg font-medium text-foreground">{t('engagementPageTitle')}</h1>
         {openCountBadge ? (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          <span className="rounded-full bg-warning-tint px-2 py-0.5 text-xs font-medium text-foreground">
             {openCountBadge}
           </span>
         ) : null}

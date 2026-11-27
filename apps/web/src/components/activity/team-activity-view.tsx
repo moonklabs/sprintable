@@ -384,13 +384,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 정규화됨 pill + 캡션 바 (팀활동 탭만 — 시각/의미 차별화 생명선) */}
         <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-ds-background px-[22px] py-[11px]">
-          <span
-            className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-info"
-            style={{
-              border: '1px solid color-mix(in oklch, var(--info) 35%, transparent)',
-              backgroundColor: 'color-mix(in oklch, var(--info) 8%, transparent)',
-            }}
-          >
+          <span className="shrink-0 rounded-full border border-info bg-info-tint px-2 py-0.5 text-xs font-semibold text-foreground">
             {t('normalizedPill')}
           </span>
           <span className="text-xs text-muted-foreground">{t('caption')}</span>
