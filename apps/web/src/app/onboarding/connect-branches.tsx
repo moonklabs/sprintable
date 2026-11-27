@@ -15,6 +15,7 @@ import { Chip } from '@/components/ds/chip';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
 import { appSetupLink } from '@/lib/auth/native-return-app';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { AdvancedConnect } from './advanced-connect';
 import { ConnectedAgentLine } from './connected-agent-line';
 import { emitOnboardingEvent } from './onboarding-telemetry';
@@ -29,7 +30,7 @@ interface ConnectBranchesProps {
   projectId: string;
   /** false: a computer that is not a Mac — the two app ways say why they are not offered */
   isMac: boolean;
-  /** story 5036: this page runs inside the Mac app — the two app ways are done HERE (their press hands the app's start screen over, which the shell takes as its own link), so «데스크톱 앱에서 해요» · the download · the phone's card are not drawn */
+  /** story 5036: this page runs inside the Mac app — the two app ways are done HERE (their press goes to this web's own start page — the app starts the setup there), so «데스크톱 앱에서 해요» · the download · the phone's card are not drawn */
   inApp?: boolean;
   /** the key way's agent connected (its first call was seen) */
   onConnected: (agentId: string) => void;
@@ -41,6 +42,7 @@ export function ConnectBranches({ orgId, projectId, isMac, inApp = false, onConn
   const t = useTranslations('onboarding.line');
   const tFirst = useTranslations('onboarding.first');
   const tDownload = useTranslations('onboarding.download');
+  const flatHref = useFlatHref();
   const [downloaded, setDownloaded] = useState(false); // the download was pressed — «after the download» is said from here (not before: the screen before the press is read for «what do I press»)
 
   /** a way that only the app does: its words · the app-open link on THAT way · or, off a Mac, why it is not offered */
@@ -53,7 +55,10 @@ export function ConnectBranches({ orgId, projectId, isMac, inApp = false, onConn
       <p className="break-keep text-ds-body text-ds-ink-2">{t(id === 'new' ? 'branchNewBody' : 'branchMoveBody')}</p>
       {isMac ? (
         <Button asChild variant="secondary" size="lg" className="w-full">
-          <a href={id === 'new' ? appSetupLink(null) : appSetupLink(null, 'move')} data-testid={`connect-branch-${id}-open`}>
+          {/* Inside the Mac app the press is an ordinary link to THIS web's start page (story 5036 · the first real walk, PO 11-27): the app-scheme link (`ai.sprintable:/desktop/setup`) was never taken by the
+              window when pressed, so the way was dead. The app's own rule — «the start page reached with no values and no setup waiting → a new setup» (and `?intent=move` → a move) — does the rest in the same window.
+              Off the app (a browser) the link stays the app-open link: it hands the browser over to the installed app. */}
+          <a href={inApp ? flatHref(id === 'new' ? '/desktop/setup' : '/desktop/setup?intent=move') : id === 'new' ? appSetupLink(null) : appSetupLink(null, 'move')} data-testid={`connect-branch-${id}-open`}>
             {inApp ? t(id === 'new' ? 'startNew' : 'startMove') : t(id === 'new' ? 'openAppNew' : 'openAppMove')}
           </a>
         </Button>

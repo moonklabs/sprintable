@@ -406,15 +406,18 @@ describe('[SID:5036] the places that are not a browser: the phone app and a work
     expect(replaced()).not.toHaveBeenCalled();
     await click(byTestId('onboarding-project-create'));
     expect(posts('/api/projects').length).toBe(1);
-    // ② in the app: the three ways, the first two are done HERE (no «데스크톱 앱에서 해요» chip · no download · no phone card), their press hands the app's start screen over
+    // ② in the app: the three ways, the first two are done HERE (no «데스크톱 앱에서 해요» chip · no download · no phone card), their press is an ordinary link to the web's own start page
     expect(h1()).toBe(line.connectTitle);
     expect(branchRoots().map((e) => e.getAttribute('data-testid'))).toEqual(['connect-branch-new', 'connect-branch-move', 'connect-branch-key']);
     expect(container.textContent).not.toContain(line.inApp);
     expect(byTestId('connect-branches-download')).toBeNull();
     expect(byTestId('connect-branch-new-open')?.textContent).toBe(line.startNew);
     expect(byTestId('connect-branch-move-open')?.textContent).toBe(line.startMove);
-    expect(byTestId('connect-branch-new-open')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup');
-    expect(byTestId('connect-branch-move-open')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=move');
+    // the first real Mac walk (PO 11-27): an app-scheme link was never taken when pressed inside the window — the press is an ordinary link to THIS web's start page (the app's own arrival rule starts the setup there)
+    expect(byTestId('connect-branch-new-open')?.getAttribute('href')).toMatch(/^\/desktop\/setup(\?p=[^&]+)?$/); // reverted (the app-scheme link) → "ai.sprintable:/desktop/setup"
+    expect(byTestId('connect-branch-move-open')?.getAttribute('href')).toMatch(/^\/desktop\/setup\?(intent=move|.*[?&]intent=move)/);
+    expect(byTestId('connect-branch-new-open')?.getAttribute('href')).not.toContain('ai.sprintable');
+    expect(byTestId('connect-branch-move-open')?.getAttribute('href')).not.toContain('ai.sprintable');
     // the start screen is told which project is the line's — reverted (no mark) it would make a second project from the folder's name
     expect(readLineProject()).toEqual({ orgId: 'org-1', projectId: 'proj-new' });
     expect(replaced()).not.toHaveBeenCalled();
