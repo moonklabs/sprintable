@@ -9,6 +9,7 @@ import { AgentTag, Chip, Tag } from '../chip';
 import { CountBadge } from '../count-badge';
 import { DataText } from '../data-text';
 import { EmptyState } from '../empty-state';
+import { ErrorState } from '../error-state';
 import { Field } from '../field';
 import { FilterBar } from '../filter-bar';
 import { IconButton } from '../icon-button';
@@ -149,6 +150,10 @@ export function ShowcasePartsA() {
           <Banner tone="failed" onDismiss={noop}>저장하지 못했어요.</Banner>
           <Banner tone="note">일부만 불러왔어요.</Banner>
         </div>
+      </Block>
+      <Block title="ErrorState — 영역 전체를 못 그릴 때(EmptyState와 같은 뼈대 · 제목은 잉크 · 색은 아이콘에만) · inline">
+        <ErrorState title="일감을 불러오지 못했어요" description="잠시 뒤에 다시 해 주세요" onRetry={noop} />
+        <ErrorState size="inline" title="목록 사이 에러 칸" onRetry={noop} />
       </Block>
       <Block title="ToastCard — 오류 · 되돌리기 · 정보">
         <div className="flex flex-col gap-2">
