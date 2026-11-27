@@ -105,6 +105,8 @@ RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "design-system",
     # story 4915 — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (new top-level web route)
     "session-unconfirmed",
+    # story 5047 (C14) — the page the Mac app's quick-ask window shows (new top-level web route /quick, a public exact path); unlisted, an organization whose address is `quick` would meet the window's page.
+    "quick",
 })
 
 
