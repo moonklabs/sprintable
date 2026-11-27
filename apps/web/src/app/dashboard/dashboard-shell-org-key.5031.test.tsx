@@ -9,6 +9,7 @@
 //     the toast provider (a toast kept across the switch, read through the real `useToast`). MOCKED parts (their mount counts are all this file says of them; the real ones are read from the code only): the icon bar, the list column's
 //     content (AppSidebar), the top bar, the bottom dock's own drawing, the presence panel's content, the command palette and the switcher dialog (they live inside AppSidebar / TopBar, which are outside the key by the shell's tree).
 // (d) the ORDER: a switch is `push` (the new page mounts under the OLD organization: same key, old header — the known cost) THEN `router.refresh()` (the organization changes: the body is mounted anew, new header) — not one render that changes everything.
+// The `?next=` way of the switcher (an organization picked at /org-briefing?next=…) does the same two steps — `router.push(next)` then `router.refresh()` — pinned as calls in hooks/use-unified-switcher.test.tsx; (d) below is what those two steps do to the shell.
 // The context is built from props (no real two-organization account): the tests re-render the real shell with other props, as the server layout does after `router.refresh()`.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, type ReactNode, useEffect, useState } from 'react';
