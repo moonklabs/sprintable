@@ -88,6 +88,9 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("meeting.delete", "meeting_delete", "DELETE", rf"^/api/v2/meetings/{_UUID}$", "no"),
     _spec("reward.give", "reward_give", "POST", r"^/api/v2/rewards$", "no", takes_body=True),
     _spec("spec_pin.delete", "spec_pin_delete", "DELETE", rf"^/api/v2/visual-artifacts/{_UUID}/pins/{_UUID}$", "no"),
+    # story 5041 B4 — settings an agent may ASK for (rows 41 · 14): both roads are a person's / an organisation admin's, so there is no `auto` slot. The run profile's «work without asking» (`unattended`) is NOT here: it stays a person's own switch.
+    _spec("content_rules.update", "content_rules_update", "PUT", rf"^/api/v2/organizations/{_UUID}/content-rules$", "partly", takes_body=True),
+    _spec("agent_run_profile.update", "agent_run_profile_update", "PUT", rf"^/api/v2/agents/{_UUID}/run-profile$", "partly", takes_body=True),
     # story 5041 B1 — the ads boost (PO 11-27 seq 20558, rows 4 · 5 · 7 · 8 · 10 · 11): money goes out, so a person presses and it runs as them. The request carries a budget — the body is kept and the card names the amount.
     _spec("ads_boost.request", "ads_boost_request", "POST", rf"^/api/v2/organizations/{_UUID}/publications/{_UUID}/boosts$", "partly", takes_body=True),
     _spec("ads_boost.start", "ads_boost_start", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/start$", "partly"),
@@ -118,6 +121,17 @@ async def gate_agent_on_story(
     return await gate_agent_call(
         request, session, auth=auth, agent=agent, org_id=org_id, project_id=row[0], action_key=action_key, target_label=f"{row[1] or '—'}{label_suffix}",
     )
+
+
+async def gate_agent_for_org(
+    request: Request, session: AsyncSession, *, auth: Any, agent: Any, org_id: uuid.UUID, action_key: str, target_label: Any, refuse: HTTPException,
+) -> JSONResponse | None:
+    """story 5041 B4 — `gate_agent_call` for a road that belongs to the ORGANISATION (a setting), not to one project: the card is filed under the agent's working project (the project of the room its run started in, else its first granted project — the same as
+    a «화면 열기» card). An agent that holds no project cannot be asked of anyone: it gets the road's own refusal (`refuse`)."""
+    project_id = await _screen_project_id(session, request, agent=agent, org_id=org_id)
+    if project_id is None:
+        raise refuse
+    return await gate_agent_call(request, session, auth=auth, agent=agent, org_id=org_id, project_id=project_id, action_key=action_key, target_label=target_label)
 
 
 def snapshot_hash(snap: dict[str, Any]) -> str:

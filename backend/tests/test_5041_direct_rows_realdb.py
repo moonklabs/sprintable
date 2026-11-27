@@ -127,8 +127,11 @@ async def test_an_agent_reads_a_run_profile_but_cannot_change_it():
             assert r.status_code == 200, r.text
             assert r.json()["can_change"] is False, "worked out for this caller: an agent never changes a run profile"
             assert r.json()["can_change_unattended"] is False
+            # story 5041 B4: the write still never happens on the agent's own rights (can_change stays False) — its call is kept as an approval card a person presses (202), and the «work without asking» switch stays a person's own (403)
             put = await c.put(f"/api/v2/agents/{other.id}/run-profile", json={"model": "opus", "effort": None})
-            assert put.status_code == 403, "the write stays with a person's own session"
+            assert put.status_code == 202 and put.json()["status"] == "pending_approval", put.text
+            unattended = await c.put(f"/api/v2/agents/{other.id}/run-profile", json={"model": None, "effort": None, "unattended": True})
+            assert unattended.status_code == 403, "the write stays with a person's own session"
     finally:
         await engine.dispose()
 

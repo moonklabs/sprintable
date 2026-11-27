@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,14 +134,46 @@ async def put_many_profiles(
     return {"profiles": views}
 
 
+def _one_line(value: str | None, fallback: str, limit: int = 40) -> str:
+    """a value the caller typed, as it may stand on an approval card: one line, printable characters only, short — never a line break or control text that could pass for the card's own words"""
+    text = "".join(ch if ch.isprintable() else " " for ch in (value or ""))
+    text = " ".join(text.split())
+    return (text[:limit] if text else fallback)
+
+
+def run_profile_card_label(agent_name: str, body: "OneChange") -> str:
+    return f"{_one_line(agent_name, '—', 60)} → runtime {_one_line(body.runtime, '—')} · model {_one_line(body.model, 'default')} · effort {_one_line(body.effort, 'default')}"
+
+
 @router.put("/agents/{agent_id}/run-profile")
 async def put_agent_profile(
+    request: Request,
     agent_id: uuid.UUID,
     body: OneChange,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
+    # story 5041 B4 — an AGENT may ASK for a change of another agent's runtime · model · effort (a card a person presses); «work without asking» (`unattended`) is NOT one of them — it stays a person's own switch (403 as before) — and the bulk road
+    # stays a person's. The road is a person's session, so the setting never lets an agent through (no auto slot): always a card or a block.
+    _caller = await resolve_member(auth, org_id, db)
+    if _caller.type == "agent":
+        from app.services import agent_action
+
+        _refuse = HTTPException(status_code=403, detail={"code": "person_session_required"})
+        if body.unattended is not None:
+            raise _refuse
+        _target = await db.get(Member, agent_id)
+        _name = _target.name if _target is not None and _target.org_id == org_id and _target.deleted_at is None and _target.type == "agent" else None
+        if _name is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        _decision = await agent_action.gate_agent_for_org(
+            request, db, auth=auth, agent=_caller, org_id=org_id, action_key="agent_run_profile.update", refuse=_refuse,
+            target_label=run_profile_card_label(_name, body),
+        )
+        if _decision is None:  # never: «no auto slot» — and were it ever, the agent does not walk into the person path
+            raise _refuse
+        return _decision
     person = await _person_session(db, auth, org_id)
     actor_is_owner = await is_active_owner(db, person)  # story #4598: the resolver's owner, as «원격 제어» (4585)
     views = await profiles.change(

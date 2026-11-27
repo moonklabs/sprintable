@@ -911,7 +911,7 @@ def test_every_registered_action_is_asked_for_by_exactly_one_route():
     for path in pathlib.Path("app/routers").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             # a route asks the USER's setting first (`gate_agent_call`: ask → the approval card · block · auto) — it is the one call a road makes; `request_approval` is what it does for `ask`
-            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("gate_agent_call", "gate_agent_on_story"):  # (story 5041 B2: the second is `gate_agent_call` for a road whose object is a story's draft)
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("gate_agent_call", "gate_agent_on_story", "gate_agent_for_org"):  # (story 5041 B2: `gate_agent_on_story` is for a road whose object is a story's draft · B4: `gate_agent_for_org` is for a road that belongs to the organisation — a setting)
                 for kw in node.keywords:
                     if kw.arg == "action_key" and isinstance(kw.value, ast.Constant):
                         named[kw.value.value] = named.get(kw.value.value, 0) + 1

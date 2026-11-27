@@ -11,7 +11,7 @@ import uuid
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -149,6 +149,25 @@ class ContentRulesFields(BaseModel):
     channel_connector_map: dict[str, str] | None = None
 
 
+def _rules_card_label(rules: dict) -> str:
+    """what a person reads on the approval card of an agent's save: the rules it touches, and the two that move money with their numbers.
+    The body is not validated yet when the card is made, so only the schema's own key names are ever printed (an unknown key shows as «?»), and a budget shows only a plain integer and a short letters-only currency — never free text from the caller."""
+    if not isinstance(rules, dict) or not rules:
+        return "—"
+    known = set(ContentRulesFields.model_fields)
+    parts: list[str] = []
+    for key in sorted(rules, key=str):
+        name = key if isinstance(key, str) and key in known else "?"
+        value = rules[key]
+        if name in ("generation_budget", "api_usage_budget") and isinstance(value, dict) and isinstance(value.get("limit_minor"), int) and not isinstance(value.get("limit_minor"), bool):
+            cur = value.get("currency")
+            cur = cur if isinstance(cur, str) and cur.isascii() and cur.isalpha() and len(cur) <= 8 else "?"
+            parts.append(f"{name} {value['limit_minor']} {cur}")
+        else:
+            parts.append(name)
+    return ", ".join(parts)[:300]
+
+
 class PutContentRulesRequest(BaseModel):
     rules: dict
     # story #3501(PO 確定, doc a0da40c9 §20) — 낙관적 잠금. 필수 필드라 누락 시
@@ -198,6 +217,7 @@ async def get_content_rules_endpoint(
 
 @router.put("/{org_id}/content-rules", response_model=ContentRulesResponse)
 async def put_content_rules_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     body: PutContentRulesRequest,
     db: AsyncSession = Depends(get_db),
@@ -206,6 +226,19 @@ async def put_content_rules_endpoint(
 ) -> ContentRulesResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
+    # story 5041 B4 — an AGENT's save of the content rules (word bans · UTM · the generation budget · the monthly API spend cap) is a card a person presses, or a block by the user's setting. The road demands an organisation owner / admin — an agent never
+    # is one — so the setting can never let it through (no auto slot): always a card or a block. An agent that holds no project keeps the road's own refusal.
+    _caller = await resolve_member(auth, org_id, db)
+    if _caller.type == "agent":
+        from app.services import agent_action
+
+        _decision = await agent_action.gate_agent_for_org(
+            request, db, auth=auth, agent=_caller, org_id=org_id, action_key="content_rules.update", target_label=_rules_card_label(body.rules),
+            refuse=HTTPException(status_code=403, detail={"code": "CONTENT_RULES_ADMIN_ONLY", "message": "콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다."}),
+        )
+        if _decision is None:  # never: «no auto slot» — and were it ever, the agent does not walk into the owner / admin path, it gets the road's own refusal
+            raise HTTPException(status_code=403, detail={"code": "CONTENT_RULES_ADMIN_ONLY", "message": "콘텐츠 규칙 편집은 조직 owner·admin만 가능합니다."})
+        return _decision
     resolved = await _require_owner_or_admin(db, auth, org_id)
 
     # story #3471(페드루 PO 確定) — 이 리소스는 org_id 자신이 식별자라 target org가

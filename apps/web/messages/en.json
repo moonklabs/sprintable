@@ -4965,6 +4965,8 @@
     "actionPolicyAction_site_post_publish": "Publish a site post (with its body)",
     "actionPolicyAction_site_post_publish_draft": "Publish a site post draft",
     "actionPolicyAction_site_post_unpublish": "Unpublish a site post",
+    "actionPolicyAction_content_rules_update": "Save the content rules (word bans · UTM · generation budget · monthly API spend cap)",
+    "actionPolicyAction_agent_run_profile_update": "Change another agent's model · effort",
     "actionPolicyAction_org_delete": "Delete the organization",
     "actionPolicyAction_project_delete": "Delete a project",
     "actionPolicyAction_agent_permission_answer": "Answer an agent's permission request with a signature",
