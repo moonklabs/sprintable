@@ -182,21 +182,23 @@ async def members_holding_channel_project(db, *, is_project_channel: bool, proje
     from sqlalchemy.orm import aliased
 
     from app.models.project import OrgMember
-    from app.services.project_auth import project_access_holders
+    from app.services.project_auth import chunks_of_access_ids, project_access_holders
 
-    # TWO statements however many members (story 5049; it was one per member): (1) who each member is for the access question, (2) which of those ids hold the project — the same predicate as `has_project_access`,
+    # TWO statements for a channel (up to `ACCESS_CHUNK_SIZE` members; one more pair per further chunk — story 5049; it was one per member): (1) who each member is for the access question, (2) which of those ids hold the project — the same predicate as `has_project_access`,
     # set-based (`project_access_holders`). (1): the id access is asked with is the member's USER (a person's `members` anchor), else the member's own id (an agent); a grant-only person has the org seat and no
     # `members` anchor — the seat's id IS their member id and access is asked with the seat's user. The anchor wins when both exist; a seat that was deleted is nobody.
-    cand = values(column("mid", PG_UUID(as_uuid=True)), name="cand").data([(m,) for m in member_ids])
     anchor, seat = aliased(Member), aliased(OrgMember)
-    rows = (await db.execute(
-        select(cand.c.mid, case((anchor.id.is_not(None), func.coalesce(anchor.user_id, anchor.id)), else_=seat.user_id))
-        .select_from(cand)
-        .outerjoin(anchor, and_(anchor.id == cand.c.mid, anchor.org_id == org_id))
-        .outerjoin(seat, and_(seat.id == cand.c.mid, seat.org_id == org_id, seat.deleted_at.is_(None)))
-        .where(or_(anchor.id.is_not(None), seat.id.is_not(None)))
-    )).all()
-    ids = {mid: access_id for mid, access_id in rows}
+    ids: dict[uuid.UUID, uuid.UUID] = {}
+    for chunk in chunks_of_access_ids(member_ids):  # one statement per chunk (a channel is one chunk: see `ACCESS_CHUNK_SIZE`)
+        cand = values(column("mid", PG_UUID(as_uuid=True)), name="cand").data([(m,) for m in chunk])
+        rows = (await db.execute(
+            select(cand.c.mid, case((anchor.id.is_not(None), func.coalesce(anchor.user_id, anchor.id)), else_=seat.user_id))
+            .select_from(cand)
+            .outerjoin(anchor, and_(anchor.id == cand.c.mid, anchor.org_id == org_id))
+            .outerjoin(seat, and_(seat.id == cand.c.mid, seat.org_id == org_id, seat.deleted_at.is_(None)))
+            .where(or_(anchor.id.is_not(None), seat.id.is_not(None)))
+        )).all()
+        ids.update({mid: access_id for mid, access_id in rows})
     holders = await project_access_holders(db, project_id, org_id, set(ids.values()))
     return {mid for mid, access_id in ids.items() if access_id in holders}
 

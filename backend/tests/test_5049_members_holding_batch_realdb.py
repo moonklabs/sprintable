@@ -8,6 +8,12 @@ first attempt, 5032). So this matrix is the first thing: every kind of candidate
   01 the matrix: each candidate kind × each project kind — the whole set, each member alone, and mixed subsets — equals the loop; some are certain to pass and some certain to fail (a «nobody» or an «everybody» answer cannot satisfy it)
   02 a room that is not a channel passes all · a channel with no project passes none · an empty set is empty
   03 the statement count is constant: the same for 1 · 5 · 20 · 50 candidates
+  05 chunks: the matrix is the same with a tiny chunk size, and the statements are ceil(N/chunk) × 2
+  06 a very large set (40,000 ids — past the 32,767 bind-parameter limit of one statement) answers exactly, without error
+  07 the holders that fall in DIFFERENT chunks are both found
+  08 the bind-parameter limit: 32,757 · 32,766 · 32,767 · 32,768 candidates (real Postgres, as members and as access ids) answer exactly, no error — and one UNCHUNKED statement of 32,768 does fail (the limit is real)
+  09 chunk edges: 0 · 1 · chunk−1 · chunk · chunk+1 · 2×chunk±1 candidates answer exactly with ceil(N/chunk)×2 statements (no empty last chunk)
+  10 holders on either side of a chunk edge (last cell of one chunk / first of the next) are both found, in both steps
   04 the compiled statement correlates (no member table joined into the inner branches): compiled text + EXPLAIN
 """
 from __future__ import annotations
@@ -144,6 +150,15 @@ async def _world():
         await human("h_owner", org_id=o1.id, role="owner")
         await human("h_admin", org_id=o1.id, role="admin")
         await human("h_plain_member", org_id=o1.id)
+        # … people whose `members` row has NO user (access is asked with the member's own id: `coalesce(user_id, id)`) — one holds the project, one does not
+        for name, grants in (("h_no_user_id_grant", ("P",)), ("h_no_user_id_none", ())):
+            m = Member(id=uuid.uuid4(), org_id=o1.id, type="human", user_id=None, name=name)
+            s.add(m)
+            await s.flush()
+            for pr in grants:
+                s.add(ProjectAccess(id=uuid.uuid4(), project_id=w.p[pr], org_member_id=None, member_id=m.id, permission="granted", role="member"))
+            await s.flush()
+            w.m[name] = m.id
         # … a grant-only person (the org seat is their member id; access is asked with the seat's user) …
         await human("go_grant", org_id=o1.id, grants=("P",), anchor=False)
         await human("go_none", org_id=o1.id, anchor=False)
@@ -168,8 +183,8 @@ async def _world():
     return w
 
 
-MUST_PASS_P = {"h_grant", "a_grant", "go_grant", "h_owner", "h_admin", "go_admin"}
-MUST_FAIL_P = {"h_other_project", "h_plain_member", "a_inactive", "a_deleted", "a_profile_only", "a_other_project", "go_none", "go_seat_deleted", "x_other_org", "x_other_org_agent_on_P", "x_other_org_human_on_P", "unknown"}  # (a person whose org seat is deleted but who still has a members anchor + a grant row passes — the team-member branch does not ask the seat; the loop says so and so does the set)
+MUST_PASS_P = {"h_grant", "a_grant", "go_grant", "h_owner", "h_admin", "go_admin", "h_no_user_id_grant"}
+MUST_FAIL_P = {"h_no_user_id_none", "h_other_project", "h_plain_member", "a_inactive", "a_deleted", "a_profile_only", "a_other_project", "go_none", "go_seat_deleted", "x_other_org", "x_other_org_agent_on_P", "x_other_org_human_on_P", "unknown"}  # (a person whose org seat is deleted but who still has a members anchor + a grant row passes — the team-member branch does not ask the seat; the loop says so and so does the set)
 
 
 async def _both(w, project, ids):
@@ -182,35 +197,40 @@ async def _both(w, project, ids):
     return want, got
 
 
+async def _run_matrix(w) -> int:
+    everyone = set(w.m.values())
+    names = {v: k for k, v in w.m.items()}
+    rows = 0
+    for pkey, project in w.p.items():
+        want, got = await _both(w, project, everyone)
+        assert got == want, (pkey, {names[i] for i in got ^ want})
+        rows += len(everyone)
+        # each member alone: the answer must not depend on who else is asked about
+        for name, mid in w.m.items():
+            one_want, one_got = await _both(w, project, {mid})
+            assert one_got == one_want, (pkey, name)
+            rows += 1
+        # mixed subsets: pairs of one who passes and one who does not (a cross-join leaks the passer's verdict to the other)
+        if pkey == "P":
+            passers = [w.m[n] for n in MUST_PASS_P]
+            failers = [w.m[n] for n in MUST_FAIL_P]
+            for a, b in itertools.product(passers[:3], failers):
+                pw, pg = await _both(w, project, {a, b})
+                assert pg == pw and b not in pg, (names[a], names[b])
+                rows += 2
+    # the reference itself is not trivial: some certainly pass, some certainly fail (so «everybody» and «nobody» are both wrong)
+    want_p, got_p = await _both(w, w.p["P"], everyone)
+    assert MUST_PASS_P <= {names[i] for i in want_p}, {names[i] for i in want_p}
+    assert not (MUST_FAIL_P & {names[i] for i in want_p}), {names[i] for i in want_p}
+    assert got_p == want_p
+    assert rows >= 150, rows
+    return rows
+
+
 async def test_01_the_set_answer_equals_the_per_member_loop_for_every_kind_of_member_and_project():
     w = await _world()
     try:
-        everyone = set(w.m.values())
-        names = {v: k for k, v in w.m.items()}
-        rows = 0
-        for pkey, project in w.p.items():
-            want, got = await _both(w, project, everyone)
-            assert got == want, (pkey, {names[i] for i in got ^ want})
-            rows += len(everyone)
-            # each member alone: the answer must not depend on who else is asked about
-            for name, mid in w.m.items():
-                one_want, one_got = await _both(w, project, {mid})
-                assert one_got == one_want, (pkey, name)
-                rows += 1
-            # mixed subsets: pairs of one who passes and one who does not (a cross-join leaks the passer's verdict to the other)
-            if pkey == "P":
-                passers = [w.m[n] for n in MUST_PASS_P]
-                failers = [w.m[n] for n in MUST_FAIL_P]
-                for a, b in itertools.product(passers[:3], failers):
-                    pw, pg = await _both(w, project, {a, b})
-                    assert pg == pw and b not in pg, (names[a], names[b])
-                    rows += 2
-        # the reference itself is not trivial: some certainly pass, some certainly fail (so «everybody» and «nobody» are both wrong)
-        want_p, got_p = await _both(w, w.p["P"], everyone)
-        assert MUST_PASS_P <= {names[i] for i in want_p}, {names[i] for i in want_p}
-        assert not (MUST_FAIL_P & {names[i] for i in want_p}), {names[i] for i in want_p}
-        assert got_p == want_p
-        assert rows >= 150, rows
+        await _run_matrix(w)
     finally:
         await w.engine.dispose()
 
@@ -299,5 +319,187 @@ async def test_04_the_candidates_are_named_once_in_the_statement_and_in_its_plan
         assert plan.count("Values Scan") == 1, plan
         top = plan.split("SubPlan 1\n")[0]
         assert "on members" not in top and "on org_members" not in top and "on team_members" not in top, plan
+    finally:
+        await w.engine.dispose()
+
+
+async def _statements_of(w, project, ids) -> tuple[set, int]:
+    from app.services.conversation_auth import members_holding_channel_project
+
+    seen = []
+
+    def hook(conn, cursor, statement, params, context, executemany):
+        seen.append(statement)
+
+    event.listen(w.engine.sync_engine, "before_cursor_execute", hook)
+    try:
+        async with w.Session() as s:
+            got = await members_holding_channel_project(s, is_project_channel=True, project_id=project, org_id=w.org, member_ids=set(ids))
+    finally:
+        event.remove(w.engine.sync_engine, "before_cursor_execute", hook)
+    return got, len(seen)
+
+
+async def _bulk_holders(w, n) -> list:
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+
+    out = []
+    async with w.Session() as s:
+        for i in range(n):
+            m = Member(id=uuid.uuid4(), org_id=w.org, type="agent", name=f"chunk-{i}")
+            s.add(m)
+            await s.flush()
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=w.p["P"], org_member_id=None, member_id=m.id, permission="granted", role="member"))
+            out.append(m.id)
+        await s.commit()
+    return out
+
+
+async def test_05_with_a_tiny_chunk_the_matrix_is_the_same_and_the_statements_are_ceil_n_over_chunk_times_two(monkeypatch):
+    import math
+
+    from app.services import project_auth
+
+    w = await _world()
+    try:
+        monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 7)
+        await _run_matrix(w)  # the whole matrix: loop == set, now through chunks of 7
+        extra = await _bulk_holders(w, 50)
+        got, n_statements = await _statements_of(w, w.p["P"], extra)
+        assert got == set(extra)
+        assert n_statements == math.ceil(50 / 7) * 2, n_statements
+        monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 5000)
+        got, n_statements = await _statements_of(w, w.p["P"], extra)
+        assert got == set(extra) and n_statements == 2, n_statements  # a real channel: two statements
+    finally:
+        await w.engine.dispose()
+
+
+async def test_06_a_set_larger_than_the_bind_parameter_limit_answers_exactly_without_error():
+    """40,000 ids (one bind parameter each — past PostgreSQL's 32,767 per statement), none of them a member, plus a few real ones: no error and exactly the real holders. The ids are asked both ways: as MEMBERS
+    (`members_holding_channel_project`, the mapping step) and as ACCESS IDS (`project_access_holders`, the holders step)."""
+    from app.services.project_auth import project_access_holders
+
+    w = await _world()
+    try:
+        noise = {uuid.uuid4() for _ in range(40_000)}
+        holders = {w.m["h_grant"], w.m["a_grant"], w.m["h_owner"]}
+        not_holders = {w.m["h_other_project"], w.m["a_inactive"]}
+        got, _n = await _statements_of(w, w.p["P"], noise | holders | not_holders)
+        assert got == holders, {k for k, v in w.m.items() if v in (got ^ holders)}
+        # the access ids themselves (a person's user id · an agent's member id): the holders step alone gets 40,000 too
+        async with w.Session() as s:
+            from sqlalchemy import select as _select
+
+            from app.models.member import Member
+
+            access = {mid: uid for mid, uid in (await s.execute(_select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(holders | not_holders)))).all()}
+            held = await project_access_holders(s, w.p["P"], w.org, set(access.values()) | noise)
+        assert held == {access[m] for m in holders}, held
+    finally:
+        await w.engine.dispose()
+
+
+async def test_07_holders_that_fall_in_different_chunks_are_both_found(monkeypatch):
+    from app.services import project_auth
+
+    w = await _world()
+    try:
+        monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 1)  # every id is a chunk of its own: any two holders are in different chunks
+        a, b = w.m["a_grant"], w.m["h_grant"]
+        ids = {a, b, w.m["h_other_project"], w.m["a_inactive"], w.m["unknown"]}
+        got, n_statements = await _statements_of(w, w.p["P"], ids)
+        assert got == {a, b}, got
+        assert n_statements == 5 + 4, n_statements  # 5 mapping chunks (the unknown id maps to nothing) + one holders chunk for each of the 4 mapped ids
+    finally:
+        await w.engine.dispose()
+
+
+@pytest.mark.parametrize("n", [32757, 32766, 32767, 32768])
+async def test_08_around_the_bind_parameter_limit_the_answer_is_exact_and_one_unchunked_statement_really_fails(n, monkeypatch):
+    from sqlalchemy.exc import DBAPIError
+
+    from app.models.member import Member
+    from app.services import project_auth
+    from app.services.project_auth import project_access_holders, project_access_holders_statement
+
+    w = await _world()
+    try:
+        holders = {w.m["h_grant"], w.m["a_grant"], w.m["h_owner"]}
+        not_holders = {w.m["h_other_project"], w.m["a_inactive"]}
+        real = holders | not_holders
+        noise = {uuid.uuid4() for _ in range(n - len(real))}
+        everyone = noise | real
+        assert len(everyone) == n
+        # as MEMBERS (the mapping step and the holders step)
+        got, _stmts = await _statements_of(w, w.p["P"], everyone)
+        assert got == holders, n
+        # as ACCESS IDS (the holders step alone)
+        async with w.Session() as s:
+            access = {mid: uid for mid, uid in (await s.execute(select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(real)))).all()}
+            held = await project_access_holders(s, w.p["P"], w.org, {access[m] for m in real} | noise)
+        assert held == {access[m] for m in holders}, n
+        # the limit is real: the same ids in ONE statement (no chunking) fail at 32,768 (and the statement carries two more parameters, so at 32,766 and up)
+        if n >= 32766:
+            monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 10**9)
+            with pytest.raises(DBAPIError):
+                async with w.Session() as s:
+                    await project_access_holders(s, w.p["P"], w.org, everyone)
+            monkeypatch.undo()
+    finally:
+        await w.engine.dispose()
+
+
+@pytest.mark.parametrize("n", [0, 1, 6, 7, 8, 13, 14, 15, 21])
+async def test_09_at_the_edges_of_a_chunk_the_answer_is_exact_and_the_statements_are_ceil_n_over_chunk_times_two(n, monkeypatch):
+    import math
+
+    from app.services import project_auth
+
+    w = await _world()
+    try:
+        monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 7)
+        extra = await _bulk_holders(w, 21)
+        ids = extra[:n]
+        got, n_statements = await _statements_of(w, w.p["P"], ids)
+        assert got == set(ids), n
+        assert n_statements == math.ceil(n / 7) * 2, (n, n_statements)  # a multiple of the chunk makes no empty last chunk; 0 candidates ask nothing
+    finally:
+        await w.engine.dispose()
+
+
+async def test_10_holders_on_either_side_of_a_chunk_edge_are_both_found_in_both_steps(monkeypatch):
+    from app.models.member import Member
+    from app.services import project_auth
+    from app.services.conversation_auth import members_holding_channel_project
+    from app.services.project_auth import chunks_of_access_ids, project_access_holders
+
+    w = await _world()
+    try:
+        monkeypatch.setattr(project_auth, "ACCESS_CHUNK_SIZE", 7)
+        # the partition itself, on an ORDERED list: 14 ids → two chunks of 7, no third; 15 → 7 · 7 · 1
+        assert [len(c) for c in chunks_of_access_ids(range(14))] == [7, 7]
+        assert [len(c) for c in chunks_of_access_ids(range(15))] == [7, 7, 1]
+        assert [len(c) for c in chunks_of_access_ids([])] == []
+        a, b, c = w.m["h_grant"], w.m["a_grant"], w.m["h_owner"]
+        for positions in ((6, 7), (0, 13), (6, 7, 0)):  # last cell of chunk 1 · first of chunk 2 · the two outer ends · all three at once
+            real = [a, b, c][: len(positions)]
+            order = [uuid.uuid4() for _ in range(14)]  # ids nobody holds (they map to nothing)
+            for pos, mid in zip(positions, real):
+                order[pos] = mid
+            # step 1 + 2 as members: a LIST, so the chunks are exactly these cells
+            async with w.Session() as s:
+                got = await members_holding_channel_project(s, is_project_channel=True, project_id=w.p["P"], org_id=w.org, member_ids=order)
+            assert got == set(real), positions
+            # step 2 alone as access ids, the holders again on either side of an edge
+            async with w.Session() as s:
+                access = {mid: uid for mid, uid in (await s.execute(select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(real)))).all()}
+            access_order = [uuid.uuid4() for _ in range(14)]
+            for pos, mid in zip(positions, real):
+                access_order[pos] = access[mid]
+            async with w.Session() as s:
+                held = await project_access_holders(s, w.p["P"], w.org, access_order)
+            assert held == {access[m] for m in real}, positions
     finally:
         await w.engine.dispose()

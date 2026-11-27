@@ -449,13 +449,27 @@ def project_access_holders_statement(project_id: uuid.UUID, org_id: uuid.UUID, u
     return select(cand.c.uid).where(_project_access_predicate(project_id, user_id=cand.c.uid, org_id=org_id, correlate=cand))
 
 
+# story 5049: PostgreSQL takes at most 32,767 bind parameters in one statement and a VALUES row is one — a channel of 32,757 members would make ONE statement of 32,768 and fail whole, where the per-member loop it replaced
+# went on to 32,766. So the candidates go in CHUNKS of this size (a real channel has tens to hundreds: ONE statement per step); every chunk is the same set-based statement and the answers are united.
+ACCESS_CHUNK_SIZE = 5000
+
+
+def chunks_of_access_ids(ids, size: "int | None" = None) -> "list[list]":
+    """`ids` in chunks of at most `size` (default: `ACCESS_CHUNK_SIZE`, read at call time so a test can shrink it) — the unit of one set-based statement."""
+    n = ACCESS_CHUNK_SIZE if size is None else size
+    ordered = list(ids)
+    return [ordered[i:i + n] for i in range(0, len(ordered), n)]
+
+
 async def project_access_holders(
     session: AsyncSession, project_id: uuid.UUID, org_id: uuid.UUID, user_ids: "set[uuid.UUID]",
 ) -> set[uuid.UUID]:
-    """the ids of `user_ids` that hold the project now — one statement (`project_access_holders_statement`); the same answer as `{u for u in user_ids if await has_project_access(session, u, project_id, org_id)}`."""
-    if not user_ids:
-        return set()
-    return set((await session.execute(project_access_holders_statement(project_id, org_id, user_ids))).scalars().all())
+    """the ids of `user_ids` that hold the project now — one statement per chunk of `ACCESS_CHUNK_SIZE` ids (`project_access_holders_statement`), the answers united; the same answer as
+    `{u for u in user_ids if await has_project_access(session, u, project_id, org_id)}`."""
+    holders: set[uuid.UUID] = set()
+    for chunk in chunks_of_access_ids(user_ids):
+        holders |= set((await session.execute(project_access_holders_statement(project_id, org_id, chunk))).scalars().all())
+    return holders
 
 
 async def project_org_and_access(
