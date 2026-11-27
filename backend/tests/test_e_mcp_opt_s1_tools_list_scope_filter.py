@@ -100,7 +100,10 @@ async def test_list_tools_fail_open_on_manifest_error(monkeypatch):
     with patch.object(srv.client, "get", new=AsyncMock(side_effect=_boom)):
         names = {t.name for t in await srv.mcp.list_tools()}
         assert "sprintable_add_story" in names        # 비파괴 → 노출(fail-open)
-        assert "sprintable_delete_story" not in names  # destructive → 여전히 숨김(레거시 비파괴셋)
+        # story 5041: a delete tool that is VISIBLE here is no way to delete alone — the tool only sends the call, and the server answers an agent's delete with a request a person presses
+        # (202 pending_approval, nothing deleted; pinned on the real server in tests/test_5041_agent_action_realdb.py::test_agent_delete_story_is_kept_not_run_and_not_refused and, for a least-privilege
+        # key, tests/test_4424_desktop_setup_realdb.py). So the fail-open list showing it adds no reach.
+        assert "sprintable_delete_story" in names
 
 
 @pytest.mark.anyio

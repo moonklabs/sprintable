@@ -124,11 +124,18 @@ async def _seed(s, *, include_grant_only: bool) -> uuid.UUID:
     return sprint_id
 
 
+def _request():
+    """story 5041: the handlers take the `Request` (an agent's ask is re-played from it); a person's call never reads it"""
+    from starlette.requests import Request
+
+    return Request({"type": "http", "method": "DELETE", "path": "/x", "headers": [], "query_string": b""})
+
+
 async def _close_sprint_and_collect_notified_user_ids(s, sprint_id: uuid.UUID) -> set[uuid.UUID]:
     from app.models.notification import Notification
     from app.routers.sprints import close_sprint
 
-    await close_sprint(id=sprint_id, db=s, org_id=ORG, auth=_actor_auth())
+    await close_sprint(id=sprint_id, request=_request(), db=s, org_id=ORG, auth=_actor_auth())
     await s.commit()
     rows = (await s.execute(
         select(Notification.user_id).where(Notification.org_id == ORG, Notification.type == "sprint_closed")

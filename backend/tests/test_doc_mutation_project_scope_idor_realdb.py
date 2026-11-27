@@ -97,6 +97,13 @@ async def _engine():
 
 # ───────────────────────── delete ─────────────────────────
 
+def _request():
+    """story 5041: the handlers take the `Request` (an agent's ask is re-played from it); a person's call never reads it"""
+    from starlette.requests import Request
+
+    return Request({"type": "http", "method": "DELETE", "path": "/x", "headers": [], "query_string": b""})
+
+
 @pytest.mark.anyio
 async def test_delete_cross_project_forbidden_same_project_ok():
     from app.repositories.doc import DocRepository
@@ -108,11 +115,11 @@ async def test_delete_cross_project_forbidden_same_project_ok():
         # cross-project(PROJ_B·USER 무접근) → 403
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await delete_doc(id=docs["b_del"], repo=DocRepository(s, ORG), auth=_auth())
+                await delete_doc(request=_request(), id=docs["b_del"], repo=DocRepository(s, ORG), auth=_auth())
             assert ei.value.status_code == 403
         # same-project(PROJ_A·USER grant) → 통과
         async with Session() as s:
-            out = await delete_doc(id=docs["a_del"], repo=DocRepository(s, ORG), auth=_auth())
+            out = await delete_doc(request=_request(), id=docs["a_del"], repo=DocRepository(s, ORG), auth=_auth())
             await s.commit()
             assert out == {"ok": True}
     finally:
@@ -238,7 +245,7 @@ async def test_agent_without_grant_cross_project_forbidden():
             docs = await _seed(s)
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await delete_doc(id=docs["b_agent"], repo=DocRepository(s, ORG), auth=_agent_auth())
+                await delete_doc(request=_request(), id=docs["b_agent"], repo=DocRepository(s, ORG), auth=_agent_auth())
             assert ei.value.status_code == 403
     finally:
         await eng.dispose()
