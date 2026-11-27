@@ -258,7 +258,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
               <Button variant="secondary" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
-                {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                {installCopied === rt ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <><Copy className="size-ds-icon-md" />{t('copy')}</>}
               </Button>
             </div>
             {/* SID:4906 — the command used to share one narrow line with the label and the button and broke inside a word («http» / «s://claude.ai/ins» / «tall.sh»). It has its own full-width line now and may break only after a «/»
@@ -285,8 +285,8 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
             data-testid="advanced-make"
           >
             {phase === 'working'
-              ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden />{t('making')}</>
-              : revoked ? t('remake') : <><Terminal className="h-4 w-4" aria-hidden />{t('make')}</>}
+              ? <><Loader2 className="size-ds-icon-md animate-spin" aria-hidden />{t('making')}</>
+              : revoked ? t('remake') : <><Terminal className="size-ds-icon-md" aria-hidden />{t('make')}</>}
           </Button>
           {revoked ? <p role="status" className="break-keep text-xs text-foreground" data-testid="advanced-revoked">{t('revokedNote')}</p> : null}
           {phase === 'failed' && failure ? (
@@ -321,7 +321,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
             <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
               <span className="text-xs text-foreground">{t('lineLabel')}</span>
               <Button variant="secondary" onClick={() => void copyLine(made, runtime)} data-testid="advanced-copy" className="shrink-0 whitespace-nowrap">
-                {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                {copied ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <><Copy className="size-ds-icon-md" />{t('copy')}</>}
               </Button>
             </div>
             <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-ds-surface-sunk p-3 font-mono text-xs leading-relaxed" data-testid="advanced-line">{shownLine}</pre>
@@ -330,7 +330,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
 
           {/* the key's places, by name — the same place as the revoke button (Kadir's lens (1)) */}
           <div className="flex flex-wrap items-start gap-2 rounded-md border border-warning-border bg-warning-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-key-line">
-            <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <KeyRound className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 break-keep">{keyLine}</span>
             <Button variant="secondary" onClick={() => void revoke()} disabled={revoking} data-testid="advanced-revoke" className="shrink-0 whitespace-nowrap">
               {revoking ? t('revoking') : t('revoke')}
@@ -365,7 +365,7 @@ export function AdvancedConnect({ orgId, projectId, onConnected, onWorking }: Ad
             <VerifyRail steps={rail.displaySteps} />
             {rail.awaitingVerification && !rail.timedOut ? (
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                <Loader2 className="size-ds-icon-sm shrink-0 animate-spin" aria-hidden />
                 {tOnb('verifyWaiting')}
               </p>
             ) : null}

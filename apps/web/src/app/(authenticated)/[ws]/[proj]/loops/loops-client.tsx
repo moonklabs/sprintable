@@ -190,7 +190,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
       actions={withActions ? (
         // story #4277(민 기기 #6) — 402폭에서 «새 실행 시작하기» 글자 버튼이 상단 제목을 «실.»로 밀었다. 스프린트 상단바 관례: 폰은 아이콘만 ·
         // 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
-        <Button variant="primary" onClick={() => setCreateOpen(true)} aria-label={t('createLoopCta')} iconStart={<Icon name="add" />}>
+        <Button variant="primary" onClick={() => setCreateOpen(true)} aria-label={t('createLoopCta')} iconStart={<Icon name="add" size="md" />}>
           <span className="hidden sm:inline">{t('createLoopCta')}</span>
         </Button>
       ) : undefined}
@@ -270,7 +270,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
               <div className="flex flex-col items-center gap-4">
                 <LoopCycleFlow t={t} />
                 <div className="flex flex-col items-center gap-1.5">
-                  <Button variant="primary" onClick={() => setCreateOpen(true)} iconStart={<Icon name="add" />}>{t('noLoopsCta')}</Button>
+                  <Button variant="primary" onClick={() => setCreateOpen(true)} iconStart={<Icon name="add" size="md" />}>{t('noLoopsCta')}</Button>
                   <p className="m-0 text-ds-small text-ds-ink-3">{t('noLoopsAiHint')}</p>
                 </div>
               </div>

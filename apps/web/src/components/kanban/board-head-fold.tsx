@@ -99,7 +99,7 @@ export function HeadFilterFold({ folded, count, label, labelActive, popoverLabel
     <div data-slot="board-head-filters" data-folded="true" className="flex shrink-0 items-center gap-1">
       <PopoverPrimitive.Root>
         <PopoverPrimitive.Trigger
-          render={<Button type="button" variant="secondary" data-testid="board-filter-fold" iconStart={<Icon name="filter_list" />} />}
+          render={<Button type="button" variant="secondary" data-testid="board-filter-fold" iconStart={<Icon name="filter_list" size="md" />} />}
         >
           {count > 0 ? labelActive : label}
         </PopoverPrimitive.Trigger>

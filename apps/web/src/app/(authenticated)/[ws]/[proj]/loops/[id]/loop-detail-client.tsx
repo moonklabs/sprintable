@@ -217,7 +217,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
           // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
           // 쌓지 않아 브라우저 BACK 재진입 트랩을 없앤다(§3.2). back()류 직접호출 금지
           // ([[feedback-history-back-nextjs]]) 준수.
-          <Button variant="quiet" onClick={backToList} iconStart={<Icon name="arrow_back" />}>{t('backToList')}</Button>
+          <Button variant="quiet" onClick={backToList} iconStart={<Icon name="arrow_back" size="md" />}>{t('backToList')}</Button>
         }
       />
       <PageFrame width="wide">

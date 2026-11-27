@@ -420,7 +420,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             transport === 'http' && 'bg-background text-foreground shadow-sm',
           )}
         >
-          <Cloud className="h-3.5 w-3.5" aria-hidden />
+          <Cloud className="size-ds-icon-sm" aria-hidden />
           {t('transportHosted')}
           <Badge variant="info" className="px-1.5 py-0 text-micro">{t('transportRecommended')}</Badge>
         </button>
@@ -433,7 +433,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             transport === 'stdio' && 'bg-background text-foreground shadow-sm',
           )}
         >
-          <Terminal className="h-3.5 w-3.5" aria-hidden />
+          <Terminal className="size-ds-icon-sm" aria-hidden />
           {t('transportLocal')}
         </button>
       </div>
@@ -443,7 +443,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         <div className="overflow-hidden rounded-md border border-border">
           <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
-              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <FileText className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
               <span className="font-mono text-xs text-foreground">.mcp.json</span>
               <Badge variant="outline" className="shrink-0 text-xs">Claude Code</Badge>
             </div>
@@ -456,9 +456,9 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
               className="shrink-0 whitespace-nowrap"
             >
               {justCopied ? (
-                <><Check className="h-3.5 w-3.5" />{t('copied')}</>
+                <><Check className="size-ds-icon-md" />{t('copied')}</>
               ) : (
-                <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>
+                <><Copy className="size-ds-icon-md" />{t('copyConfig')}</>
               )}
             </Button>
           </div>
@@ -513,18 +513,18 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         {transport === 'http' && !isHostedUnavailable && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
-            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <Sparkles className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
             <span>{t('hostedBenefit')}</span>
           </div>
         )}
         {transport === 'stdio' && (
           <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
             {t('localGuideNote')}
           </p>
         )}
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
@@ -536,7 +536,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             (실유저 5회 재시도). 설정 저장 뒤 «Claude Code 재시작»이 연결 적용의 필수 단계라 그
             자리에 명시한다. info 톤(안내·연결 미확認≠에러). */}
         <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
-          <RotateCw className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <RotateCw className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
           <span>{t('restartAfterConfig')}</span>
         </div>
       </section>
@@ -558,7 +558,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             aria-label={t('verifyRetry')}
             className="shrink-0 whitespace-nowrap"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', verifying && 'animate-spin')} />
+            <RefreshCw className={cn('size-ds-icon-md', verifying && 'animate-spin')} />
             {t('verifyRetry')}
           </Button>
         </div>
@@ -567,7 +567,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             느껴 재시도한다. 확인 중임을 명시한다. verified/timeout이면 자동으로 사라진다. */}
         {awaitingVerification && !timedOut && (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            <Loader2 className="size-ds-icon-sm shrink-0 animate-spin" aria-hidden />
             {t('verifyWaiting')}
           </p>
         )}
@@ -581,7 +581,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         )}
         {transport === 'http' && (
           <p className="flex items-start gap-1.5 text-xs text-info">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
             {t('hostedVerifyNote')}
           </p>
         )}
@@ -592,7 +592,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
                 {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
               </span>
               <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="connect-step-verify-prompt-copy">
-                {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
+                {rail.copiedVerifyPrompt ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <><Copy className="size-ds-icon-md" />{t('copyConfig')}</>}
               </Button>
             </div>
             {/* story #3986 CHANGES(페드루 PO C2·2회차) — 위 인용부호 안 문구는
@@ -632,7 +632,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             <span className="block text-xs text-muted-foreground">{t('advancedSubtitle')}</span>
           </span>
           <ChevronRight
-            className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', advancedOpen && 'rotate-90')}
+            className={cn('size-ds-icon-sm shrink-0 text-muted-foreground transition-transform', advancedOpen && 'rotate-90')}
             aria-hidden
           />
         </button>
@@ -668,7 +668,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             className="whitespace-nowrap"
           >
             {startingInstruction ? (
-              <><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('firstInstructionStarting')}</>
+              <><Loader2 className="size-ds-icon-md animate-spin" />{t('firstInstructionStarting')}</>
             ) : (
               t('firstInstructionCta')
             )}

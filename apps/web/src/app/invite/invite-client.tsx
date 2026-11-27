@@ -160,7 +160,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
     return (
       <Frame>
         <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin" />
+          <Loader2 className="size-ds-icon-lg animate-spin" />
           <p className="text-sm">{t('loading')}</p>
         </div>
       </Frame>
@@ -189,7 +189,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
       <Frame>
         <div className="space-y-3 py-8 text-center animate-in fade-in duration-500">
           <Loader2 className={cn(
-            'mx-auto h-6 w-6',
+            'mx-auto size-ds-icon-lg',
             pageState === 'accepting' && 'animate-spin text-muted-foreground',
             pageState === 'success' && 'text-success',
           )} />
@@ -329,7 +329,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
                 : (!email.trim() || !password.trim()))}
               className="flex w-full min-h-ds-touch items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-ds-ink-2 disabled:opacity-50"
             >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {submitting ? <Loader2 className="size-ds-icon-sm animate-spin" /> : null}
               {submitting ? t('joining') : t('submit')}
             </button>
           </div>

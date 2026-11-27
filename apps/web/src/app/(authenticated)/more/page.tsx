@@ -124,7 +124,7 @@ export default function MorePage() {
               return (
                 <ListRow key={item.id} asChild className="items-start last:border-b-0">
                   <Link href={href} data-testid="more-menu-link">
-                    {glyph ? <Icon name={glyph} size={20} className="mt-0.5 text-ds-ink-3" /> : null}
+                    {glyph ? <Icon name={glyph} size="md" className="mt-0.5 text-ds-ink-3" /> : null}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-ds-body font-semibold text-ds-ink">{t(item.labelKey)}</span>
                       {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가 조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목 줄만 truncate, 설명은 줄바꿈 허용. */}
@@ -173,7 +173,7 @@ function ShellShortcuts() {
       {presence ? (
         <ListRow asChild>
           <Button type="button" variant="quiet" onClick={presence.toggle} aria-pressed={presence.open} aria-label={presence.workingCount > 0 ? tPresence('fabLabelWorking', { count: presence.workingCount }) : tPresence('panelTitle')} data-testid="more-shortcut-presence" className="h-auto w-full justify-start gap-3 rounded-none border-0 border-b px-4 py-2 text-left last:border-b-0">
-            <Icon name="groups" size={20} className="text-ds-ink-3" />
+            <Icon name="groups" size="md" className="text-ds-ink-3" />
             <span className="min-w-0 flex-1 text-left text-ds-body font-semibold text-ds-ink">{tPresence('panelTitle')}</span>
             {/* the button's own name carries the number (as the header button did) — the badge is only the picture of it */}
             {presence.workingCount > 0 ? <CountBadge count={presence.workingCount} aria-hidden /> : null}
@@ -183,7 +183,7 @@ function ShellShortcuts() {
       {notes ? (
         <ListRow asChild className="last:border-b-0">
           <Button type="button" variant="quiet" onClick={notes.open} data-testid="more-shortcut-news" className="h-auto w-full justify-start gap-3 rounded-none border-0 border-b px-4 py-2 text-left last:border-b-0">
-            <Icon name="auto_awesome" size={20} className="text-ds-ink-3" />
+            <Icon name="auto_awesome" size="md" className="text-ds-ink-3" />
             <span className="min-w-0 flex-1 text-left text-ds-body font-semibold text-ds-ink">{tNotes('openButtonAriaLabel')}</span>
             {notes.hasUnseen ? <span className="size-2 rounded-full bg-ds-action" aria-hidden /> : null}
           </Button>

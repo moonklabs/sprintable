@@ -108,7 +108,7 @@ function AgentJoinedDetailPanel({
     <div className="flex flex-1 flex-col gap-4 px-6 py-6">
       <div className="flex items-start gap-3">
         <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-overlay-fill-1 text-muted-foreground">
-          <Bot className="size-6" />
+          <Bot className="size-ds-icon-lg" />
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -533,7 +533,7 @@ export default function InboxPage() {
         actions={
           // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
           // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
-          <DsButton variant="secondary" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')} iconStart={<CheckCheck className="size-4 sm:hidden" aria-hidden="true" />}>
+          <DsButton variant="secondary" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')} iconStart={<CheckCheck className="size-ds-icon-md sm:hidden" aria-hidden="true" />}>
             <span className="hidden sm:inline">{t('markAllRead')}</span>
           </DsButton>
         }
@@ -591,9 +591,9 @@ export default function InboxPage() {
                   {exec.status === 'matched' ? (
                     // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달
                     // (실측, #2420 doc) — text-foreground로 잠정 통일.
-                    <Zap className="h-3.5 w-3.5 shrink-0 text-foreground" />
+                    <Zap className="size-ds-icon-sm shrink-0 text-foreground" />
                   ) : (
-                    <ZapOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <ZapOff className="size-ds-icon-sm shrink-0 text-muted-foreground" />
                   )}
                   <span className="min-w-0 flex-1 truncate text-foreground">
                     {exec.rule_name ?? exec.event_type}
@@ -657,7 +657,7 @@ export default function InboxPage() {
                                 aria-label={expanded ? t('collapseHistory') : t('expandHistory')}
                                 className="flex shrink-0 items-center px-2 text-muted-foreground transition hover:text-foreground"
                               >
-                                {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                                {expanded ? <ChevronDown className="size-ds-icon-sm" /> : <ChevronRight className="size-ds-icon-sm" />}
                               </button>
                               <button
                                 type="button"
@@ -666,7 +666,7 @@ export default function InboxPage() {
                                 className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-3 text-left"
                               >
                                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
-                                  <NotifIcon type={item.latest.type} fallback={Bell} className="size-4" />
+                                  <NotifIcon type={item.latest.type} fallback={Bell} className="size-ds-icon-sm" />
                                 </div>
                                 <div className="min-w-0 flex-1 space-y-0.5">
                                   <div className="flex items-start justify-between gap-2">
@@ -763,7 +763,7 @@ export default function InboxPage() {
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
                           {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
-                            <NotifIcon type={notification.type} fallback={Info} className="size-4" />
+                            <NotifIcon type={notification.type} fallback={Info} className="size-ds-icon-sm" />
                           </div>
                           <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex items-start justify-between gap-2">
@@ -820,7 +820,7 @@ export default function InboxPage() {
               onClick={() => setSelectedId(null)}
               className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:hidden"
             >
-              <ArrowLeft className="size-4" />
+              <ArrowLeft className="size-ds-icon-md" />
               {t('backToList')}
             </button>
           ) : null}
@@ -836,7 +836,7 @@ export default function InboxPage() {
             <div className="flex flex-1 flex-col gap-4 px-6 py-6">
               <div className="flex items-start gap-3">
                 <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-overlay-fill-1 text-muted-foreground">
-                  <NotifIcon type={selectedNotification.type} fallback={Info} className="size-5" />
+                  <NotifIcon type={selectedNotification.type} fallback={Info} className="size-ds-icon-md" />
                 </div>
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -881,7 +881,7 @@ export default function InboxPage() {
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
               <div className="flex size-14 items-center justify-center rounded-xl bg-ds-surface-sunk">
-                <InboxIcon className="size-6 text-muted-foreground" />
+                <InboxIcon className="size-ds-icon-lg text-muted-foreground" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">{t('selectToView')}</p>
             </div>

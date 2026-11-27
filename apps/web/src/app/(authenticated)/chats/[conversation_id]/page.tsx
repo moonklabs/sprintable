@@ -422,7 +422,7 @@ export default function ConversationPage() {
       aria-label={t('editRoomName')}
     >
       <span className="min-w-0 truncate">{headerTitle}</span>
-      <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
+      <Pencil className="size-ds-icon-sm flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
     </button>
   ) : (
     <span className="min-w-0 truncate">{headerTitle}</span>

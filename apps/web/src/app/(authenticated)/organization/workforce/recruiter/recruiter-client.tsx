@@ -270,11 +270,11 @@ function CopyDownloadButtons({
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <Button variant="outline" size="sm" onClick={() => void handleCopy()}>
-        {copied ? <><Check className="size-ds-icon-sm" />{t('copied')}</> : <><Copy className="size-ds-icon-sm" />{t('copy')}</>}
+        {copied ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <><Copy className="size-ds-icon-md" />{t('copy')}</>}
       </Button>
       {copyFailed ? <span role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</span> : null}
       <Button variant="outline" size="sm" onClick={() => downloadTextFile(filename, content)}>
-        <Download className="size-ds-icon-sm" />{t('download')}
+        <Download className="size-ds-icon-md" />{t('download')}
       </Button>
     </div>
   );
@@ -1874,7 +1874,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">🔑 {t('scopeTitle')}</span>
                   <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(true)}>
-                    <RefreshCw className="size-ds-icon-sm" />{t('rotate')}
+                    <RefreshCw className="size-ds-icon-md" />{t('rotate')}
                   </Button>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -1948,7 +1948,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
                     </span>
                     <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="recruiter-verify-prompt-copy">
-                      {rail.copiedVerifyPrompt ? <><Check className="size-ds-icon-sm" />{t('copied')}</> : <><Copy className="size-ds-icon-sm" />{t('copy')}</>}
+                      {rail.copiedVerifyPrompt ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <><Copy className="size-ds-icon-md" />{t('copy')}</>}
                     </Button>
                   </div>
                   {/* story #4372 — 복사가 실패해도 버튼만 «복사»로 남던 자리(훅의 copyVerifyPromptFailed를 안 읽음). 온보딩 연결 화면과 같은 패널. */}
@@ -1969,7 +1969,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </span>
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => void handleVerify()} disabled={verifying}>
-                  <RefreshCw className={cn('size-ds-icon-sm', verifying && 'animate-spin')} />{t('verifyRetry')}
+                  <RefreshCw className={cn('size-ds-icon-md', verifying && 'animate-spin')} />{t('verifyRetry')}
                 </Button>
               </div>
               <VerifyRail steps={displaySteps} />
