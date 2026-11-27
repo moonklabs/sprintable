@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { LAYER } from '@/components/ds/layers';
@@ -12,6 +13,9 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useIsTablet } from '@/hooks/use-mobile';
 import { IconButton } from '@/components/ds/icon-button';
 import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
+import { TopBarPath, useTopBarCrumbs } from './top-bar-path';
+import { TopBarSearch } from './top-bar-search';
+import { desktopApp } from '@/lib/desktop-app';
 import type { OrgSwitcherItem } from './unified-switcher';
 
 interface TopBarProps {
@@ -29,18 +33,25 @@ interface TopBarProps {
   userName?: string;
 }
 
+const noopSubscribe = () => () => {};
+
 export function TopBar({ className, orgId, orgMemberships = [], projectId, projectMemberships = [], userName }: TopBarProps) {
-  const { title, actions, hidden, showContextChip } = useTopBar();
+  const { title, titleText, titleStale, actions, hidden, showContextChip } = useTopBar();
   const t = useTranslations('nav');
   const isTablet = useIsTablet();
   // story 5031 (C1 step 4, PO 11-26): with the phone tab bar at four places there is no «전체» tab — the way to every other screen is the palette (⌘K on a desktop; here the same door, drawn below lg only). No provider (a test of the bar alone) = no button.
   const openPalette = useCommandPaletteOpener();
+  // story 5031 (C1 step 5a): inside the desktop app the whole strip is the window's drag area (globals.css `[data-desktop-app]` rules: the strip drags, every pressable inside does not). Read after hydration — the server does not know the app.
+  const inDesktopApp = useSyncExternalStore(noopSubscribe, () => desktopApp() !== undefined, () => false);
+  const crumbs = useTopBarCrumbs({ orgId, orgMemberships, projectId, projectMemberships, title, titleText });
   return (
     <div
       data-testid="top-bar"
+      data-desktop-app={inDesktopApp ? '' : undefined}
       className={cn(
         // story #4277(유나 판단 ②) — 컨테이너 쿼리 기준(칩의 태블릿 바닥 @[40rem]:min-w-[7.5rem]가 이 막대 폭을 본다).
-        '@container flex h-12 shrink-0 items-center gap-2 border-b px-4 lg:h-16',
+        // story 5031 (5a): from lg the bar is three zones — path · search · buttons — and 64 high (h-ds-bar) with its bottom border inside (border-box).
+        '@container flex h-12 shrink-0 items-center gap-2 border-b px-4 lg:h-ds-bar lg:gap-ds-4',
         // 4913 — 쪽 바탕 층(LAYER.page = ds-background): 막대는 화면과 같은 바탕 위에 서야 한다(옛 bg-background는 따뜻한 옛 바탕이라 새 바탕과 색이 어긋남).
         'sticky top-0 z-30 transition-transform', LAYER.page,
         '[transition-duration:var(--gnb-hide-duration)]',
@@ -87,21 +98,31 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           «칩이 먼저 · 제목은 칩이 최소 폭(44px)에 닿은 뒤에» 우선순위는 칩 쪽 shrink-[10000]이 맡는다(칩 파일 주석). 제목 shrink는 기본 1로 둔다 —
           1 미만(예: 0.001)이면 flex 규칙상(줄어들 항목들의 shrink 합이 1 미만이면 부족분에 그 합을 곱해 일부만 줄인다) 칩이 바닥에 닿은 뒤에도
           제목이 거의 안 줄어 넘쳤다(스토리지 상단바 420/402 실측). */}
-      <div className="flex min-w-0 flex-auto items-center gap-2 [&>*]:min-w-0 [&>*]:truncate">
-        {title}
+      {/* story 5031 (5a): the LEFT zone — below lg `contents` (the title is a direct child of the bar exactly as before); from lg the path (org › project-or-place) then the title as the path's last crumb. The title keeps its own element (an h1 where the screen made it one). */}
+      <div data-testid="top-bar-left" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:basis-0 lg:items-center lg:gap-ds-2">
+        <TopBarPath crumbs={crumbs} title={title} stale={titleStale} />
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {actions}
-        {openPalette ? (
-          <span className="contents lg:hidden">
-            <IconButton icon="search" label={t('search')} onClick={openPalette} data-testid="top-bar-search" />
-          </span>
-        ) : null}
-        {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지.
-            story 4890 (UI-7 · 폰 머리줄): 탭 바가 있는 폭(<lg)의 머리줄은 «칩 · 제목 · 알림» 하나로 — 팀 현황 · 새 소식은 «전체» 맨 위 두 줄로 옮겼다(손가락 폭 아이콘 셋이 한 줄에 몰리던 것). 탭 바 없는 폭(lg+)은 그대로. */}
-        <span className="hidden lg:contents"><PresenceToggleButton /></span>
-        <span className="hidden lg:contents"><WhatsNewButton /></span>
-        <NotificationBell />
+      {/* story 5031 (5a): the MIDDLE zone — the field that opens ⌘K (grows twice as fast as the sides until its 480 cap, so the field is as wide as the room allows and the two sides stay equal → it is centred) (lg up; below lg the icon in the right zone is the door). No palette provider (a test of the bar alone) = no field. */}
+      {openPalette ? (
+        <div data-testid="top-bar-center" className="hidden min-w-0 lg:block lg:max-w-120 lg:flex-2 lg:basis-0">
+          <TopBarSearch onOpen={openPalette} />
+        </div>
+      ) : null}
+      <div data-testid="top-bar-right" className="flex shrink-0 items-center lg:min-w-fit lg:flex-1 lg:basis-0 lg:justify-end">
+        {/* story 5031 (5a): the buttons' group is marked `data-no-drag` — in the desktop app the whole group (the page's `actions` slot, a popover control, anything a screen puts there) is a press area, never a window handle; the empty room around it still drags */}
+        <div data-testid="top-bar-buttons" data-no-drag="" className="flex shrink-0 items-center gap-1">
+          {actions}
+          {openPalette ? (
+            <span className="contents lg:hidden">
+              <IconButton icon="search" label={t('search')} onClick={openPalette} data-testid="top-bar-search" />
+            </span>
+          ) : null}
+          {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지.
+              story 4890 (UI-7 · 폰 머리줄): 탭 바가 있는 폭(<lg)의 머리줄은 «칩 · 제목 · 알림» 하나로 — 팀 현황 · 새 소식은 «전체» 맨 위 두 줄로 옮겼다(손가락 폭 아이콘 셋이 한 줄에 몰리던 것). 탭 바 없는 폭(lg+)은 그대로. */}
+          <span className="hidden lg:contents"><PresenceToggleButton /></span>
+          <span className="hidden lg:contents"><WhatsNewButton /></span>
+          <NotificationBell />
+        </div>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { nodeText } from '@/lib/top-bar-path';
 
 /** 조직 구역 화면 제목의 «모양» 한 곳 — 화면(OrgScreenTitle)과 로딩 폴백(flat-tab-top-bar의 조직 제목)이 같이 쓴다(둘이 갈리지 않게 · story 4326 방식). */
 export function OrgTitle({ children }: { children: ReactNode }) {
@@ -16,5 +17,5 @@ export function OrgTitle({ children }: { children: ReactNode }) {
  * 화면 제목 글은 사이드바 이름과 같은 한 가지 이름이다(`verify-nav-label-matches-title`).
  */
 export function OrgScreenTitle({ children, showContextChip = false }: { children: ReactNode; /** 프로젝트 안 화면(리워드)은 프로젝트 칩을 켠다 — 조직 화면은 기본 꺼짐. */ showContextChip?: boolean }) {
-  return <TopBarSlot title={<OrgTitle>{children}</OrgTitle>} showContextChip={showContextChip} />;
+  return <TopBarSlot title={<OrgTitle>{children}</OrgTitle>} titleText={nodeText(children)} showContextChip={showContextChip} />;
 }

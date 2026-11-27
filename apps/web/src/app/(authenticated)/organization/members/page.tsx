@@ -1,7 +1,7 @@
 'use client';
 
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { OrgMembersTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { OrgMembersTopBarTitle, TitleTopBarSlot, useOrgMembersTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 
@@ -12,7 +12,7 @@ export default function OrganizationMembersPage() {
   if (!orgId) {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
-        <TopBarSlot title={<OrgMembersTopBarTitle />} showContextChip />
+        <TitleTopBarSlot title={<OrgMembersTopBarTitle />} useText={useOrgMembersTopBarTitleText} showContextChip />
         {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
       </div>
     );
@@ -20,7 +20,7 @@ export default function OrganizationMembersPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6">
-      <TopBarSlot title={<OrgMembersTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<OrgMembersTopBarTitle />} useText={useOrgMembersTopBarTitleText} showContextChip />
       <OrgMembersSection orgId={orgId} currentRole={currentRole} />
     </div>
   );

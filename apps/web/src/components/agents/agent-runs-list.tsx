@@ -15,7 +15,7 @@ import { NativeSelect } from '@/components/ds/select';
 import { SectionHeader } from '@/components/ds/section-header';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { AgentRunsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { AgentRunsTopBarTitle, TitleTopBarSlot, useAgentRunsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { handleListKeys } from '@/lib/list-keys';
 import { parseCursorMeta } from '@/lib/pagination';
 import {
@@ -353,7 +353,7 @@ export function AgentRunsList({ agentId }: { agentId?: string } = {}) {
 
   return (
     <>
-      <TopBarSlot title={<AgentRunsTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<AgentRunsTopBarTitle />} useText={useAgentRunsTopBarTitleText} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters — one line: the status (the same values as before) and the period (the same two dates) */}

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useChatRail } from './chat-rail-context';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { isNoProjectAtAll } from './no-project';
-import { ChatsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { ChatsTopBarTitle, TitleTopBarSlot, useChatsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 
 /**
  * story #2921 S1 — 리스트 본체는 `chats/layout.tsx`(영구 좌측 레일)로 이관됐다. 이 페이지는
@@ -43,7 +43,7 @@ export default function ChatsPage() {
           진짜 <h1 id="chat-rail-heading">(대화 목록 레일 제목)이 있고, App Router에서
           layout+page는 항상 동시 마운트라(goals/retro/loops의 loading/loaded
           mutually-exclusive 분기와 다름) 이 자리가 세 번째 h1이었다 — 비-헤딩으로. */}
-      <TopBarSlot title={<ChatsTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<ChatsTopBarTitle />} useText={useChatsTopBarTitleText} showContextChip />
       <div className="flex h-full items-center justify-center">
         {!conversationsLoading && (
           conversationsLoadError ? (

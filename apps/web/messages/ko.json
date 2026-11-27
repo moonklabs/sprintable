@@ -117,6 +117,8 @@
     "workList": "목록",
     "hypothesis": "가설",
     "search": "검색…",
+    "topBarSearch": "찾기",
+    "topBarPath": "현재 위치",
     "help": "도움말",
     "openGlobalNav": "전체 메뉴 열기",
     "toggleSidebar": "사이드바 접기·펼치기",

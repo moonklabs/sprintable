@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ArtifactsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { ArtifactsTopBarTitle, TitleTopBarSlot, useArtifactsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
 import { Button } from '@/components/ds/button';
@@ -327,7 +327,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   return (
     <PageFrame width="wide" data-testid="artifact-gallery">
       {/* 4910 — 제목은 위 막대 한 곳(`ArtifactsTopBarTitle` — 로딩 폴백 loading.tsx와 같은 정의). 본문에 제목(h1)은 없다. */}
-      <TopBarSlot title={<ArtifactsTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<ArtifactsTopBarTitle />} useText={useArtifactsTopBarTitleText} showContextChip />
 
       {creating ? (
         <ArtifactEditor

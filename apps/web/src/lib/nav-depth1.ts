@@ -20,12 +20,17 @@ const MATCHERS = Object.keys(ROUTE_PLACEMENT)
   }))
   .sort((a, b) => b.literals - a.literals || b.route.length - a.route.length);
 
+/** The placement-table route (`/[ws]/[proj]/flow` · `/chats/[conversation_id]` …) a pathname is — the key of its row in nav-placement.json; `undefined` when no screen matches. `?query` and `#hash` are ignored. */
+export function placementRouteForPath(pathname: string): string | undefined {
+  const path = pathname.split(/[?#]/)[0] || '/';
+  if (path === '/') return ROUTE_PLACEMENT['/'] ? '/' : undefined;
+  return MATCHERS.find((m) => m.re.test(path))?.route;
+}
+
 /** The place a pathname belongs to (`outside` for login / public / flow pages; `undefined` when no screen matches). `?query` and `#hash` are ignored. */
 export function placementSlotForPath(pathname: string): PlacementSlot | undefined {
-  const path = pathname.split(/[?#]/)[0] || '/';
-  if (path === '/') return ROUTE_PLACEMENT['/']?.slot;
-  const hit = MATCHERS.find((m) => m.re.test(path));
-  return hit ? ROUTE_PLACEMENT[hit.route]!.slot : undefined;
+  const route = placementRouteForPath(pathname);
+  return route ? ROUTE_PLACEMENT[route]!.slot : undefined;
 }
 
 /** Which of the four is lit for a pathname: the place it belongs to; a page of the shell that is `outside`, or an unknown one, lights nothing. */

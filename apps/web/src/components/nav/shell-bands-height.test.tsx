@@ -142,10 +142,10 @@ describe('셸 연결(소스 핀) — 값이 실제로 셸에서 쓰이고 CSS가
     expect(code('app/dashboard/dashboard-shell.tsx')).toMatch(/<div ref=\{setRef\} className="[^"]*pb-\[var\(--shell-launcher-clear,0px\)\]/);
   });
 
-  it('⭐--shell-chrome-h의 네 가지 값 모두 띠 높이와 단추 여백을 더한다(하나라도 빠지면 그 모양의 앵커가 넘친다)', () => {
+  it('⭐--shell-chrome-h의 다섯 가지 값 모두 띠 높이와 단추 여백을 더한다(하나라도 빠지면 그 모양의 앵커가 넘친다) — story 5031 5a 후속: 다섯째 = 폰 설정(막대 없음 · data-topbar-hidden-phone)', () => {
     const css = src('app/globals.css');
     const rules = [...css.matchAll(/--shell-chrome-h:\s*([^;]+);/g)].map((m) => m[1]!);
-    expect(rules.length).toBe(4);
+    expect(rules.length).toBe(5); // story 5031 (5a follow-up): was 4 — + the phone settings value (no bar)
     for (const r of rules) {
       expect(r, r).toContain('var(--shell-bands-h, 0px)');
       expect(r, r).toContain('var(--shell-launcher-clear, 0px)');

@@ -17,6 +17,8 @@ const { useDashboardContextMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
 }));
 
+// story 5031 (5a): the page now puts the current tab's name into the shell's top bar (TopBarSlot needs the shell's TopBarProvider) — this test is not about the bar, so the slot is a no-op here (page.top-bar.5031.test.tsx pins what it publishes)
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));

@@ -7,7 +7,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useIsTablet } from './use-mobile';
+import { renderToString } from 'react-dom/server';
+import { useIsTablet, useWidthClass } from './use-mobile';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -60,5 +61,33 @@ describe('useIsTablet — story #2683 768~1023 경계', () => {
 
   it('375px(일반 폰 폭)는 false', async () => {
     expect(await readResult(375)).toBe('false');
+  });
+});
+
+// story 5031 (C1 step 5a · codex round 1) — the width's third answer. The server (and React's hydrating render) cannot know the window: `unknown`. A client says `below-lg` at 1023 and `lg-up` at 1024 (the boundary), and follows a resize.
+describe('useWidthClass — unknown · below-lg · lg-up (story 5031)', () => {
+  function WidthProbe() { return <span data-testid="w">{useWidthClass()}</span>; }
+  function follow(initial: number) {
+    const listeners = new Set<() => void>();
+    const state = { width: initial };
+    vi.stubGlobal('matchMedia', (q: string) => ({ get matches() { return state.width <= Number(/max-width:\s*(\d+)px/.exec(q)![1]); }, addEventListener: (_: string, l: () => void) => listeners.add(l), removeEventListener: (_: string, l: () => void) => listeners.delete(l) }));
+    return { set: (w: number) => { state.width = w; for (const l of [...listeners]) l(); } };
+  }
+  it('⭐the server render says «unknown» (never «lg-up» for a phone that is still loading)', () => {
+    expect(renderToString(<WidthProbe />)).toContain('unknown');
+  });
+  it('⭐a client: 1023 → below-lg · 1024 → lg-up · and it follows a resize across the boundary', async () => {
+    const w = follow(1023);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<WidthProbe />); });
+    expect(container.textContent).toBe('below-lg');
+    await act(async () => { w.set(1024); });
+    expect(container.textContent).toBe('lg-up');
+    await act(async () => { w.set(1023); });
+    expect(container.textContent).toBe('below-lg');
+    await act(async () => { root.unmount(); });
+    container.remove();
   });
 });

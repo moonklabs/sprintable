@@ -9,6 +9,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 
 const { useDashboardContextMock, params } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), params: { current: new URLSearchParams('') } }));
+// story 5031 (5a): the page now puts the current tab's name into the shell's top bar (TopBarSlot needs the shell's TopBarProvider) — this test is not about the bar, so the slot is a no-op here (page.top-bar.5031.test.tsx pins what it publishes)
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),

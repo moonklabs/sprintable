@@ -10,7 +10,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story 5031 (5a): the bar now reads the path (its left zone is «org › place › title»), so the mock also answers usePathname — these tests are about the phone-width pieces (trigger · title wrapper · bell · layer), not the path (top-bar.5a.test.tsx).
 vi.mock('next/navigation', () => ({
+  usePathname: () => '/org-briefing',
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 

@@ -7,7 +7,6 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, Bell, Bot, CheckCheck, ChevronDown, ChevronRight, Inbox as InboxIcon, Info, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
@@ -28,7 +27,7 @@ import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
+import { InboxTopBarSlot, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { dayKeyIn, formatViewerDate, shiftDayKey } from '@/lib/viewer-time-zone';
 
@@ -528,8 +527,9 @@ export default function InboxPage() {
 
   return (
     <>
-      <TopBarSlot
-        title={<InboxTopBarTitle tab={activeTab} unreadCount={unreadCount} />}
+      <InboxTopBarSlot
+        tab={activeTab}
+        unreadCount={unreadCount}
         actions={
           // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
           // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
@@ -537,7 +537,6 @@ export default function InboxPage() {
             <span className="hidden sm:inline">{t('markAllRead')}</span>
           </DsButton>
         }
-        showContextChip
       />
 
       {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스)

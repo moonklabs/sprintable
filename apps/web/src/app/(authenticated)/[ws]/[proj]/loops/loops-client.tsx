@@ -23,7 +23,7 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { LoopsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { LoopsTopBarTitle, TitleTopBarSlot, useLoopsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { LOOP_FILTER_STICKY, LOOP_ROW_FACE, LOOP_ROW_HOVER, LOOP_STATE_COLUMN } from './loops-layer';
 
 // story 1eb18bd8(doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실 파일럿): 빈
@@ -185,8 +185,9 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   };
 
   const topBar = (withActions: boolean) => (
-    <TopBarSlot
+    <TitleTopBarSlot
       title={<LoopsTopBarTitle />}
+      useText={useLoopsTopBarTitleText}
       actions={withActions ? (
         // story #4277(민 기기 #6) — 402폭에서 «새 실행 시작하기» 글자 버튼이 상단 제목을 «실.»로 밀었다. 스프린트 상단바 관례: 폰은 아이콘만 ·
         // 글자는 sm 이상 · 접근 이름은 aria-label로 유지.

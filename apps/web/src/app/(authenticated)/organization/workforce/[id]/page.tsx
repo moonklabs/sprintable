@@ -31,7 +31,7 @@ import { PageFrame } from '@/components/ds/page-frame';
 import { PageSplit } from '@/components/ds/page-split';
 import { SummaryCard } from '@/components/ds/summary-card';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { AgentsTopBarTitle, TitleTopBarSlot, useAgentsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
@@ -602,7 +602,7 @@ export default function AgentDetailPage() {
 
   return (
     <PageFrame width="wide">
-      <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<AgentsTopBarTitle />} useText={useAgentsTopBarTitleText} showContextChip />
       {/* story 5035 (C5): no «← 에이전트» link here any more — the list is on the left (wide) or the sheet's own ✕ closes to it (phone); a back link beside its own list is a second door to the same place. */}
 
       <PageSplit asideLabel={ta('detailSideLabel')} aside={<SummaryCard title={ta('detailSummaryTitle')} items={summaryItems} emptyText={ta('detailSummaryEmpty')} emptyLabel={ta('detailSummaryEmptyLabel')} />}>

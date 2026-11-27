@@ -25,3 +25,11 @@ export function isRealShortcut(keys: readonly string[] | undefined): boolean {
   if (!keys || keys.length === 0) return false;
   return REAL_SHORTCUTS.some((s) => s.keys.length === keys.length && s.keys.every((k, i) => k === keys[i]));
 }
+
+/**
+ * story 5031 (C1 step 5a) — the text a shortcut hint shows on this computer: «⌘K» on a Mac, «Ctrl K» elsewhere (the handlers take Cmd OR Ctrl — see use-command-palette-shortcut). `null` when the keys are not a real shortcut (nothing is drawn for a key nobody receives).
+ */
+export function shortcutHint(keys: readonly string[], mac: boolean): string | null {
+  if (!isRealShortcut(keys)) return null;
+  return mac ? keys.join('') : keys.map((k) => (k === '⌘' ? 'Ctrl' : k)).join(' ');
+}

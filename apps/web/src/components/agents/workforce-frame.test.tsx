@@ -27,7 +27,8 @@ vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
 vi.mock('@/hooks/use-org-admin', () => ({ useOrgAdmin: () => ({ isAdmin: admin, loaded: true }) }));
 vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => <div data-testid="top-bar-slot-stub" /> }));
-vi.mock('@/components/nav/flat-tab-top-bar', () => ({ AgentsTopBarTitle: () => null }));
+// story 5031 (C1 5a, codex round 1): the frame publishes its narrow-screen title through `TitleTopBarSlot` (title + `titleText`) — the stub keeps the same test id the old direct `TopBarSlot` stub had
+vi.mock('@/components/nav/flat-tab-top-bar', () => ({ AgentsTopBarTitle: () => null, useAgentsTopBarTitleText: () => '에이전트', TitleTopBarSlot: () => <div data-testid="top-bar-slot-stub" /> }));
 vi.mock('@/hooks/use-list-detail-wide', () => ({ useListDetailWide: () => wide }));
 let onAdd: () => void = () => {};
 vi.mock('@/components/agents/agent-management-tab', () => ({

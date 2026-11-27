@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
 import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { AgentsTopBarTitle, TitleTopBarSlot, useAgentsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useOrgAdmin } from '@/hooks/use-org-admin';
@@ -47,7 +47,7 @@ export function AgentsPageTabs() {
 
   return (
     <>
-      <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<AgentsTopBarTitle />} useText={useAgentsTopBarTitleText} showContextChip />
       {/* story 4912 D6 — the statistics are per project: without a project the panel never loads and stayed on «불러오는 중…» for good. Same notice as the Recruit tab (create a project / try again / pick one). */}
       {tab === 'stats' ? (
         !projectId ? (
