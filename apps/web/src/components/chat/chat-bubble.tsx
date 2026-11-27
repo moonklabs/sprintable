@@ -37,6 +37,7 @@ import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { DeliveryDecisionLine } from './delivery-decision-line';
+import { DeliveryTimingLine } from './delivery-timing';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { ChatCard } from './cards/card-catalog';
@@ -948,6 +949,7 @@ export function ChatBubble({
           {!isDeleted && <WithheldDeliveryLine withheld={message.delivery_withheld} isMine={isMine} />}
           {/* story 5032 (C2) — who the server really delivered it to (agents by name · people as a count) */}
           {!isDeleted && <DeliveryDecisionLine decision={message.delivery_decision} isMine={isMine} nameOf={deliveryNameOf ?? (() => undefined)} />}
+          {!isDeleted && <DeliveryTimingLine mode={message.delivery_mode} log={message.delivery_log} isMine={isMine} nameOf={deliveryNameOf ?? (() => undefined)} />}
 
           {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
               "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다

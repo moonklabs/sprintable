@@ -26,7 +26,7 @@ import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
 import { ReadingPanelProvider } from './reading-panel-context';
 import { readingPanelLayout } from './reading-panel-layout';
-import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
+import type { ChatMessage, DeliveryMode, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
@@ -449,6 +449,21 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     fetchMessages();
   }, [fetchMessages]);
 
+  // story 5046 (C13): the server's record of how a «끝나고 이어서» message of mine went in arrives AFTER the send (the agent's host reports when it hands the message in) and nothing pushes it — so while one is still
+  // waiting for its record the list is read again every 5 s (the newest 50 are replaced by what the server has, which is how a late field reaches the screen). Not for ever: a message older than 15 minutes is no longer waited for.
+  const awaitingDeliveryRecord = messages.some((m) => m.created_by === currentTeamMemberId && m.delivery_mode === 'after_turn' && !m.delivery_log && m.deleted_at === null);
+  const messagesForRecordRef = useRef(messages);
+  useEffect(() => { messagesForRecordRef.current = messages; }, [messages]);
+  useEffect(() => {
+    if (!awaitingDeliveryRecord) return;
+    const timer = window.setInterval(() => {
+      const stillWaiting = messagesForRecordRef.current.some((m) => m.created_by === currentTeamMemberId && m.delivery_mode === 'after_turn' && !m.delivery_log && m.deleted_at === null && Date.now() - Date.parse(m.created_at) < 15 * 60 * 1000);
+      if (stillWaiting) void fetchMessages();
+      else window.clearInterval(timer); // nothing is waited for any more (the only one left was past the 15 minutes): the loop ends here instead of ticking for ever
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [awaitingDeliveryRecord, currentTeamMemberId, fetchMessages]);
+
   useEffect(() => {
     if (!loading && isFirstLoad.current) {
       // Deeplink (ade2d6d5): scrollToMessageId가 있으면 하단 자동스크롤을 건너뛴다
@@ -790,8 +805,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     );
   }, []);
 
-  const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => {
+  const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[], deliveryMode?: DeliveryMode) => {
     const body: Record<string, unknown> = { content, client_nonce: newClientNonce() }; // story #4440 — its echo is dropped here
+    if (deliveryMode === 'after_turn') body.delivery_mode = 'after_turn'; // story 5046 (C13): «끝나고 이어서» — «지금» is the server's default, never sent
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     if (attachments && attachments.length > 0) body.attachments = attachments;
     const res = await fetch(`${apiPrefix}/${threadId}/messages`, {
@@ -1274,6 +1290,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               prefillCommand={prefillCommand}
               incomingFiles={incomingFiles}
               onDraftChange={handleDraftChange}
+              workingAgents={typingAgents.map((a) => ({ id: a.id, name: a.name, runtimeType: (commandTargets ?? []).find((tg) => tg.agentId === a.id)?.runtimeType ?? null }))}
             />
           </SupportLauncherClearance>
 
