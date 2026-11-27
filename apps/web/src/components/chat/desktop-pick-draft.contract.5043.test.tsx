@@ -27,7 +27,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 
 const ROOT = path.resolve(__dirname, '../../../../..');
 const RAW = readFileSync(path.join(ROOT, 'contracts', 'desktop-pick-draft.json'));
-const SHA = 'c8f11c69a1a2554443fc64b8612914c137a3a68b7a33a2a789a208ee4fdba05a'; // the mobile repository's contracts/desktop-pick-draft.json — a copy that drifts is a failure, not a quiet divergence
+const SHA = '23cc1704e98729319f42132e1d7a7cebb429cdcbb717ce29e32e1d39ea92105b'; // the mobile repository's contracts/desktop-pick-draft.json — a copy that drifts is a failure, not a quiet divergence
 const C = JSON.parse(RAW.toString('utf8')) as { cases: Array<{ name: string; draft: { ko: string; en: string } }> };
 
 let container: HTMLDivElement; let root: Root;
