@@ -163,6 +163,8 @@ async def _view(session: AsyncSession, req: HitlRequest, locale: str = "ko", *, 
         "execution": {k: execution.get(k) for k in ("state", "http_status", "reason")} if execution else None,
         # the card's second button (story 5041 ② step 3): only for an organisation owner / admin looking at an ask whose action can be allowed for good
         "always_allow_available": always_allow_available and _state(req) == "pending",
+        # story 5041 B6 — a «화면 열기» card: no stored call, nothing to approve — a button to the screen (the key is a closed list; the href is the web route)
+        "screen": ({"key": meta["screen"]["key"], "href": svc.SCREENS[meta["screen"]["key"]]} if (meta.get("screen") or {}).get("key") in svc.SCREENS else None),
     }
 
 
@@ -238,6 +240,9 @@ async def decide_agent_action(
         return await _view(session, await _load(session, auth, org_id, rid), _locale_of(request))
 
     # approve ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    if (req.hitl_metadata or {}).get("screen"):
+        # a «화면 열기» card has nothing stored to run: only dismissing it (a rejection) is a decision
+        raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_OPEN_SCREEN_NOT_APPROVABLE", "message": "AGENT_ACTION_OPEN_SCREEN_NOT_APPROVABLE"})
     was_retry = _state(req) == "retry"  # pressed before and it never finished
     if not svc.snapshot_is_sound(action_key, snap):
         logger.error("agent_action snapshot unsound request=%s action=%s", rid, action_key)

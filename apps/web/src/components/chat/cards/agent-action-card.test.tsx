@@ -13,6 +13,7 @@ import { parseAgentAction } from './agent-action-access';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
+vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (h: string) => h }));
 
 const REQ = '5c1f0a52-3b7e-4e0d-9a6f-1d2c3b4a5e6f';
 let container: HTMLDivElement;
@@ -239,6 +240,35 @@ describe('reads that are not a card', () => {
     stub(); await show({ kind: 'agent_action', ref: '../x' });
     expect(container.querySelector('[data-testid="chat-card-unknown"]')).toBeTruthy();
     expect(log).toEqual([]);
+  });
+});
+
+describe('«화면 열기» (story 5041 B6)', () => {
+  const screenView = (over: Record<string, unknown> = {}) => view({ action_key: 'screen.channel_connections', title: '채널 연결은 화면에서 직접 해요', prompt: '이 일은 사람이 화면에서 직접 해야 해요.', screen: { key: 'channel_connections', href: '/organization/channels' }, target: null, ...over });
+  it('is a link to the screen and a way to close — no approve, no «늘 허용», no 24-hour hint; closing sends ONE reject', async () => {
+    stub({ read: () => json(200, screenView({ always_allow_available: true })) }); await show();
+    const link = container.querySelector('[data-testid="agent-action-open-screen"]') as HTMLAnchorElement;
+    expect(link.textContent).toBe('화면 열기');
+    expect(link.getAttribute('href')).toBe('/organization/channels');
+    expect(btn('승인하기')).toBeUndefined();
+    expect(btn('이 에이전트는 이 프로젝트에서 늘 허용')).toBeUndefined();
+    expect(container.textContent).not.toContain('24시간');
+    expect(writes()).toEqual([]);
+    await press('닫기');
+    expect(writes()).toEqual([{ method: 'POST', url: `/api/agent-actions/${REQ}/decision`, body: { decision: 'reject' } }]);
+  });
+  it('a closed screen card has no button to the screen', async () => {
+    stub({ read: () => json(200, screenView({ state: 'rejected', decided_by: { id: 'p', name: '민' } })) }); await show();
+    expect(container.querySelector('[data-testid="agent-action-open-screen"]')).toBeNull();
+    expect(btn('닫기')).toBeUndefined();
+  });
+  it('parseAgentAction takes only an app-internal path — never another site, a scheme or a protocol-relative link', () => {
+    const base = { id: REQ, state: 'pending', title: 't', prompt: 'p', reversible: 'no' };
+    expect(parseAgentAction({ ...base, screen: { key: 'k', href: '/organization/channels' } })?.screen).toEqual({ key: 'k', href: '/organization/channels' });
+    for (const href of ['https://evil.example/x', '//evil.example', 'javascript:alert(1)', 'organization/channels', '/Organization', '/', 5, null]) {
+      expect(parseAgentAction({ ...base, screen: { key: 'k', href } })?.screen).toBeNull();
+    }
+    expect(parseAgentAction({ ...base })?.screen).toBeNull();
   });
 });
 
