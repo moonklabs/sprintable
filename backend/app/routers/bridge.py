@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 
 from app.dependencies.database import get_db
 from app.repositories.bridge_inbound import BridgeInboundRepository, build_bridge_metadata, check_rate_limit
@@ -19,9 +20,70 @@ from app.utils.slack_verify import verify_slack_signature
 from app.utils.teams_verify import verify_teams_request
 
 router = APIRouter(prefix="/api/v2/bridge", tags=["bridge", "Organization"])
+logger = logging.getLogger(__name__)
+
+# story 5049 — an inbound line the mapping's project does not own: the audit row an organization's admin reads (`GET /api/v2/audit-logs`), at most one per (mapping, reason) an hour
+BRIDGE_SKIPPED_ACTION = "bridge.inbound_skipped"
+_BRIDGE_SKIP_AUDIT_WINDOW = timedelta(hours=1)
 
 
 # ─── S-D2: conversation inbound helper ────────────────────────────────────────
+
+async def _skip_inbound(
+    session: AsyncSession,
+    reason: str,
+    *,
+    conv,
+    author_id: uuid.UUID,
+    org_id: uuid.UUID,
+    mapping_project_id: uuid.UUID,
+    mapping_id: uuid.UUID | None,
+    platform: str | None,
+) -> dict:
+    """story 5049 — the mapping's project does not own this room (or, in a project's channel, the author may not speak in it): the line is dropped — no participant row, no message — and the request still ends
+    200 (an error would make the external side resend, and `_inbound_to_conversation`'s callers fall to the retired memo path on one). The skip is logged and leaves ONE audit row for the organization's admin
+    (no message words, no external user name: ids and the reason only), at most one per (mapping, reason) in an hour so a busy channel does not flood the log. A failure to write the row never changes the answer."""
+    from app.models.audit import AuditLog
+
+    logger.warning(
+        "bridge inbound skipped platform=%s mapping=%s conversation=%s conversation_project=%s mapping_project=%s author=%s reason=%s",
+        platform, mapping_id, conv.id, conv.project_id, mapping_project_id, author_id, reason,
+    )
+    try:
+        async with session.begin_nested():
+            # one (mapping, reason) at a time: two inbound lines that skip together would both find no recent row and both write one. The lock is held to the end of the transaction — the commit below —
+            # so a waiter reads the committed row.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"{org_id}:{mapping_id}:{reason}"},
+            )
+            recent = (await session.execute(
+                select(AuditLog.id).where(
+                    AuditLog.org_id == org_id,
+                    AuditLog.action == BRIDGE_SKIPPED_ACTION,
+                    AuditLog.created_at > datetime.now(timezone.utc) - _BRIDGE_SKIP_AUDIT_WINDOW,
+                    AuditLog.audit_metadata["mapping_id"].astext == str(mapping_id),
+                    AuditLog.audit_metadata["reason"].astext == reason,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if recent is None:
+                session.add(AuditLog(
+                    org_id=org_id, actor_id=author_id, action=BRIDGE_SKIPPED_ACTION,
+                    audit_metadata={
+                        "platform": platform, "mapping_id": str(mapping_id) if mapping_id else None,
+                        "mapping_project_id": str(mapping_project_id), "conversation_id": str(conv.id),
+                        "conversation_project_id": str(conv.project_id) if conv.project_id else None, "reason": reason,
+                    },
+                ))
+                await session.flush()
+        await session.commit()
+    except Exception:  # noqa: BLE001 — the trace is best effort; the inbound answer stays 200
+        logger.warning("bridge inbound skip audit row failed mapping=%s reason=%s", mapping_id, reason, exc_info=True)
+        try:
+            await session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"action": "skipped", "detail": reason}
+
 
 async def _inbound_to_conversation(
     session: AsyncSession,
@@ -32,10 +94,17 @@ async def _inbound_to_conversation(
     message_ts: str | None = None,
     *,
     org_id: uuid.UUID,
+    mapping_project_id: uuid.UUID,
+    mapping_id: uuid.UUID | None = None,
+    platform: str | None = None,
 ) -> dict:
     """external inbound → ConversationMessage 생성.
 
     RC1: root 저장 시 external_message_ts=message_ts, reply 탐색 시 동일 키로 root 검색.
+
+    story 5049 — the author is a member of the MAPPING's project (that is how the author is found), so the room must be that project's too: a room of another project, or one with no project, is skipped
+    (`conversation_project_mismatch`), and so is a DM of the mapping's own project (`conversation_is_dm`). A project's CHANNEL is stricter: only an author who is already seated in it and holds the project NOW may write there (`channel_author_not_seated` ·
+    `channel_author_lost_project`) — the bridge never seats anyone in a channel. An ordinary room of the same project keeps what it always did (the author joins it by speaking).
     """
     from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 
@@ -49,13 +118,32 @@ async def _inbound_to_conversation(
         # in a 500 and the message is lost — the same as for a missing conversation (Qadir 4916; not new with this check)
         return {"action": "error", "detail": "conversation_not_in_org"}
 
+    # story 5049 — nothing below (the seat, the message) happens in a room the mapping's project does not own
+    skip = dict(conv=conv, author_id=author_id, org_id=org_id, mapping_project_id=mapping_project_id, mapping_id=mapping_id, platform=platform)
+    if conv.project_id is None or conv.project_id != mapping_project_id:
+        return await _skip_inbound(session, "conversation_project_mismatch", **skip)
+    if conv.type == "dm":  # a DM's participant rows ARE «the two of them» — an external line must never seat a third (even in the mapping's own project)
+        return await _skip_inbound(session, "conversation_is_dm", **skip)
+
     # 참여자 등록 (없으면 추가)
-    existing_participant = (await session.execute(
-        select(ConversationParticipant.id).where(
-            ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.member_id == author_id,
-        )
-    )).scalar_one_or_none()
+    seat_query = select(ConversationParticipant.id).where(
+        ConversationParticipant.conversation_id == conversation_id,
+        ConversationParticipant.member_id == author_id,
+    )
+    if conv.is_project_channel:
+        # a channel's access is taken away by deleting the seat (+ the access row) in one transaction: lock the seat row FOR SHARE until THIS transaction ends, so a revoke that comes between the check
+        # below and the message's commit waits for the message («message first, revoke after») — and one already running is waited for here, so the seat is gone when it is read
+        seat_query = seat_query.with_for_update(read=True, of=ConversationParticipant)
+    existing_participant = (await session.execute(seat_query)).scalar_one_or_none()
+    if conv.is_project_channel:
+        if existing_participant is None:
+            return await _skip_inbound(session, "channel_author_not_seated", **skip)
+        from app.services.conversation_auth import members_holding_channel_project
+
+        if author_id not in await members_holding_channel_project(
+            session, is_project_channel=True, project_id=conv.project_id, org_id=org_id, member_ids={author_id},
+        ):
+            return await _skip_inbound(session, "channel_author_lost_project", **skip)
     if existing_participant is None:
         session.add(ConversationParticipant(conversation_id=conversation_id, member_id=author_id))
         await session.flush()
@@ -200,7 +288,12 @@ async def slack_events(request: Request, session: AsyncSession = Depends(get_db)
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
                 org_id=org_id,
+                mapping_project_id=project_id,
+                mapping_id=uuid.UUID(str(mapping.id)),
+                platform="slack",
             )
+            if result.get("action") == "skipped":  # story 5049 — answered 200 at once: no memo fallback, no workflow hook, no resend storm
+                return _ok(result)
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
             await session.commit()
@@ -411,7 +504,12 @@ async def teams_events(request: Request, session: AsyncSession = Depends(get_db)
                 norm_event.get("threadTs"),
                 message_ts=norm_event.get("messageTs"),
                 org_id=org_id,
+                mapping_project_id=project_id,
+                mapping_id=uuid.UUID(str(mapping.id)),
+                platform="teams",
             )
+            if result.get("action") == "skipped":  # story 5049 — see the Slack entrance
+                return JSONResponse({"ok": True, "skipped": result["detail"], "result": result})
             if result.get("action") == "error":
                 raise ValueError(result["detail"])
             await session.commit()
