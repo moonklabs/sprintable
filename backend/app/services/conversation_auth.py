@@ -177,27 +177,28 @@ async def members_holding_channel_project(db, *, is_project_channel: bool, proje
         return set(member_ids)
     if project_id is None:
         return set()
-    from sqlalchemy import func
+    from sqlalchemy import and_, case, column, func, or_, values
+    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+    from sqlalchemy.orm import aliased
 
-    from app.services.project_auth import has_project_access
-
-    # one access question per member (a channel has a handful): `_project_access_predicate` nests its EXISTS branches two levels deep, and SQLAlchemy auto-correlates only to the
-    # immediately enclosing SELECT, so a single statement correlated on the member rows makes the inner branches cross-join `members` (measured: every member passed). A set-based
-    # version needs `_project_access_predicate` reshaped with explicit `.correlate()` — left as a follow-up.
     from app.models.project import OrgMember
+    from app.services.project_auth import project_access_holders
 
+    # TWO statements however many members (story 5049; it was one per member): (1) who each member is for the access question, (2) which of those ids hold the project — the same predicate as `has_project_access`,
+    # set-based (`project_access_holders`). (1): the id access is asked with is the member's USER (a person's `members` anchor), else the member's own id (an agent); a grant-only person has the org seat and no
+    # `members` anchor — the seat's id IS their member id and access is asked with the seat's user. The anchor wins when both exist; a seat that was deleted is nobody.
+    cand = values(column("mid", PG_UUID(as_uuid=True)), name="cand").data([(m,) for m in member_ids])
+    anchor, seat = aliased(Member), aliased(OrgMember)
     rows = (await db.execute(
-        select(Member.id, func.coalesce(Member.user_id, Member.id)).where(Member.id.in_(member_ids), Member.org_id == org_id)
+        select(cand.c.mid, case((anchor.id.is_not(None), func.coalesce(anchor.user_id, anchor.id)), else_=seat.user_id))
+        .select_from(cand)
+        .outerjoin(anchor, and_(anchor.id == cand.c.mid, anchor.org_id == org_id))
+        .outerjoin(seat, and_(seat.id == cand.c.mid, seat.org_id == org_id, seat.deleted_at.is_(None)))
+        .where(or_(anchor.id.is_not(None), seat.id.is_not(None)))
     )).all()
     ids = {mid: access_id for mid, access_id in rows}
-    # a grant-only person has the org seat and no `members` anchor: the seat's id is their member id, access is asked with the seat's user (as `has_project_access` knows them)
-    for mid, uid in (await db.execute(
-        select(OrgMember.id, OrgMember.user_id).where(
-            OrgMember.id.in_(member_ids - set(ids)), OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None),
-        )
-    )).all():
-        ids[mid] = uid
-    return {mid for mid, access_id in ids.items() if await has_project_access(db, access_id, project_id, org_id)}
+    holders = await project_access_holders(db, project_id, org_id, set(ids.values()))
+    return {mid for mid, access_id in ids.items() if access_id in holders}
 
 
 async def members_holding_rooms_channel_project(db, conversation_id: uuid.UUID, org_id: uuid.UUID, member_ids: set[uuid.UUID]) -> set[uuid.UUID]:
