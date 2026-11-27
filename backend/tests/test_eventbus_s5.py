@@ -57,6 +57,11 @@ def _room_gate_is_not_under_test_here(monkeypatch):
 
     monkeypatch.setattr("app.routers.event_notifications.room_words_lines_readable_clause", _always)
 
+    async def _no_statement(db):  # `SET LOCAL jit = off` is one more statement on the session; these tests feed it a fixed list of results (the real session: `test_5049_bell_jit_realdb.py`)
+        return None
+
+    monkeypatch.setattr("app.routers.event_notifications._jit_off", _no_statement)
+
 
 @pytest.fixture
 async def client(mock_session, auth_ctx, org_id, member_id):

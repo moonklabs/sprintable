@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -34,6 +34,14 @@ _APPROVALS_INBOX_SIGNAL_TYPES = (
 # whose payload.event_type is `conversation.message`. Measured on dev: 2 messages → 4 lines and a badge of 4. The `dispatched` row also carries the push / personal-webhook delivery (outbox) — that
 # stays; only the BELL READ leaves the row out, and the hiding rules below (mute · spectator) decide on the message_created row alone — so for every account «lines = messages, unread = messages».
 _CHAT_MESSAGE_DISPATCHED = "conversation.message"
+
+
+async def _jit_off(db: AsyncSession) -> None:
+    """story 5049 — the bell's three statements (count · list · «read all») are priced by the planner far above `jit_above_cost` (100,000; each row of the recipient is charged every sub-plan of the hiding and room rules), so
+    with `jit = on` (the Postgres default, on in dev) PostgreSQL COMPILES them with LLVM on every call: on dev the unread-count was ~84 ms of work and ~2.2 s of compiling, and the LLVM memory (outside the backend's memory contexts)
+    ~50–85 MB a backend until the backend died of memory (OOM, four times in 15 minutes). The statements are short interpreted work; compiling them never pays. `SET LOCAL`: in force until THIS transaction ends (commit or
+    rollback), then the connection goes back to the pool exactly as it was — nothing leaks to the next request on it; the database-wide setting is the operator's, not ours."""
+    await db.execute(text("SET LOCAL jit = off"))
 
 
 def _is_hidden_notification(member_id: uuid.UUID):
@@ -267,6 +275,7 @@ async def list_notifications(
     project_id 필터: 해당 프로젝트의 member_id로 조회 (multi-project 사용자 대응).
     """
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
+    await _jit_off(db)
     result = await db.execute(
         select(Event)
         .where(
@@ -307,6 +316,7 @@ async def get_unread_count(
     project_id 필터: 해당 프로젝트 알림만 집계.
     """
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
+    await _jit_off(db)
     result = await db.execute(
         select(func.count()).where(
             Event.org_id == org_id,
@@ -365,6 +375,7 @@ async def mark_all_read(
     """PATCH /api/v2/event-notifications/read-all — 전체 읽음 처리."""
     member_id = await _resolve_member_id(auth, org_id, db, project_id=project_id)
     now = datetime.now(timezone.utc)
+    await _jit_off(db)
     result = await db.execute(
         update(Event)
         .where(
