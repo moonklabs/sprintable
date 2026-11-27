@@ -131,6 +131,7 @@ export function QuickAsk() {
         {view.target && !picking ? (
           <span className="max-w-[45%] shrink-0" data-testid="quick-chip"><Chip className="max-w-full"><span className="truncate">@{targetName(view.target)}</span></Chip></span>
         ) : null}
+        {/* 16px under the lg width (small-text-input guard: a text box under 16px is zoomed by iOS WebKit on focus) — the window is 560 wide, so always 16; `lg:` keeps the body size where the page is wider */}
         <input
           ref={input}
           value={value}
@@ -143,7 +144,7 @@ export function QuickAsk() {
           aria-expanded={picking}
           aria-controls="quick-places"
           aria-activedescendant={picking && list[cursor] ? `quick-place-${list[cursor]!.kind}-${list[cursor]!.id}` : undefined}
-          className="min-w-0 flex-1 bg-transparent text-ds-body text-ds-ink outline-none placeholder:text-ds-ink-3 disabled:text-ds-ink-3"
+          className="min-w-0 flex-1 bg-transparent text-base text-ds-ink outline-none placeholder:text-ds-ink-3 disabled:text-ds-ink-3 lg:text-ds-body"
           data-testid="quick-input"
           autoComplete="off"
           spellCheck={false}
