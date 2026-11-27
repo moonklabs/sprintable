@@ -14,7 +14,7 @@ type ListRowBase = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
   /** 오른쪽 행동 · 상태(Button · Chip …). */
   trailing?: ReactNode;
   selected?: boolean;
-  /** 줄 높이 — 기본 56, `compact` 40(236px 레일 같은 좁은 목록), `chat` 88(키트 대화 목록 줄: 아바타 64 · 이름 20 Medium · 미리보기 16 — story 5048 T0 ②b). 폰(coarse 포인터)은 모두 누름 영역 44 이상. */
+  /** 줄 높이 — 기본 56, `compact` 40(236px 레일 같은 좁은 목록), `chat` 60(대화 목록 줄: 아바타 32 · 이름 14 Medium · 미리보기 13 — story 5048 ②b → 채팅 밀도 11-27: 88 → 60). 폰(coarse 포인터)은 모두 누름 영역 44 이상. */
   density?: 'default' | 'compact' | 'chat';
 };
 type ListRowNeeds = { needsHand?: false; needsHandLabel?: never } | { needsHand: true; /** 화면에 안 보이는 이름(예: «내 손이 필요»). 막대 색만으로 뜻을 싣지 않는다. */ needsHandLabel: string };
@@ -43,7 +43,7 @@ export function ListRow({ leading, leadingClassName, title, subtitle, trailing, 
       {needsHandCue}
       {leading ? <div data-slot="ds-list-row-leading" className={cn('shrink-0', leadingClassName)}>{leading}</div> : null}
       <div className="min-w-0 flex-1 basis-24">
-        <div className={cn('truncate text-ds-ink', density === 'chat' ? 'text-ds-card-title' : 'text-ds-body font-semibold')}>{title}</div>
+        <div className={cn('truncate text-ds-ink', density === 'chat' ? 'text-ds-body' : 'text-ds-body font-semibold')}>{title}</div>
         {subtitle ? <div data-slot="ds-list-row-subtitle" className={cn('truncate font-sans tabular-nums text-ds-ink-3', density === 'chat' ? 'text-ds-small' : 'text-ds-mono-md')}>{subtitle}</div> : null}
       </div>
       {trailing ? <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
@@ -59,7 +59,7 @@ export function ListRow({ leading, leadingClassName, title, subtitle, trailing, 
         'relative flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ds-line px-4 text-left outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none',
         'hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
         density === 'compact' && 'min-h-ds-control py-ds-1 touch:min-h-ds-touch',
-        density === 'chat' && 'min-h-ds-chat-row py-ds-3 touch:min-h-ds-touch',
+        density === 'chat' && 'min-h-ds-chat-row py-ds-2 touch:min-h-ds-touch',
         density === 'default' && 'min-h-ds-row py-ds-2',
         selected && 'bg-ds-surface-high', // 고른 줄의 면은 그대로(탐색 줄 NavRow가 이 면을 입는다 — C1)
         needsHand && 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-ds-needs-hand-bar',

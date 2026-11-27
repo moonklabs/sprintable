@@ -54,7 +54,7 @@ const RADII: Array<{ name: string; cls: string; px: string }> = [
   { name: 'control', cls: 'rounded-ds-control', px: '8' },
   { name: 'panel', cls: 'rounded-ds-panel', px: '8' },
   { name: 'pill', cls: 'rounded-ds-pill', px: '16' },
-  { name: 'bubble', cls: 'rounded-ds-bubble', px: '16' },
+  { name: 'bubble', cls: 'rounded-ds-bubble', px: '12' },
   { name: 'tail', cls: 'rounded-ds-tail', px: '4' },
   { name: 'circle', cls: 'rounded-ds-circle', px: '원' },
 ];
@@ -69,7 +69,7 @@ const DENSITY: Array<{ name: string; cls: string; px: string; use: string }> = [
   { name: 'tag', cls: 'h-ds-tag', px: '28', use: '태그' },
   { name: 'bar', cls: 'h-ds-bar', px: '64', use: '상단 막대' },
   { name: 'head', cls: 'h-ds-head', px: '80', use: '대화 머리' },
-  { name: 'chat-row', cls: 'h-ds-chat-row', px: '88', use: '대화 목록 줄' },
+  { name: 'chat-row', cls: 'h-ds-chat-row', px: '60', use: '대화 목록 줄' },
 ];
 
 /** 토큰 한눈에 — 색(밝음/어둠은 바깥 틀이 가른다) · 글자 · 모서리 · 밀도 · 그림자 · 움직임. 이름 = 코드의 이름. */
