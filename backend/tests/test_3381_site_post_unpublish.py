@@ -335,8 +335,8 @@ async def test_agent_gets_403_human_only():
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r_unpub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/unpublish")
-        assert r_unpub.status_code == 403, r_unpub.text
-        assert r_unpub.json()["error"]["code"] == "SITE_POST_UNPUBLISH_HUMAN_ONLY", r_unpub.text
+        # story 5041 B2 — an agent's unpublish is a card a person presses (tests/test_5041_publish_cards_realdb.py); this agent holds no grant on the draft's project, so it is the plain «not found» (a project it cannot see)
+        assert r_unpub.status_code == 404, r_unpub.text
 
         async with Session() as s:
             from app.models.site_post import SitePost

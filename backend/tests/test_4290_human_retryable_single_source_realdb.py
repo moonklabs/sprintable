@@ -201,7 +201,7 @@ async def test_an_agent_viewer_never_gets_a_retryable_command():
                 retry = await client.post(f"{base}/publication-commands/{command_id}/retry") if agent else None
             seen[who] = (detail["command_retryable"], listed["command_retryable"], [r["command_retryable"] for r in rows])
             if retry is not None:
-                assert retry.status_code == 403, retry.text
+                assert retry.status_code == 202 and retry.json()["status"] == "pending_approval", retry.text  # story 5041 B2 — an agent's retry is a card a person presses; the command itself stays as it was (the read below)
         assert seen["human"][:2] == (True, True) and seen["human"][2] in ([True], []), seen
         assert seen["agent"][:2] == (False, False) and seen["agent"][2] in ([False], []), seen
         assert seen["human"][2] == [True], f"성과 보드에 이 발행 행이 있어야 한다(공허 통과 방지): {seen}"

@@ -1,7 +1,7 @@
 """story 5041 (C0b) ② — the «바로» rows (PO 11-27 seq 20558): an agent may do what a person does on screen for these, and nothing else changes.
 
 For each lifted road: the agent key is NOT answered with the old «human only» 403 (put the guard back and this goes RED), and the person is answered as before.
-For the siblings in the same files that stay a person's (publishing a channel post — the ad boost's start · resume · cancel are a card since B1): the agent is STILL refused (the lift did not leak sideways).
+The siblings of these roads that used to stay a person's (publishing · the ad boost's start · resume · cancel) became approval cards (B1 · B2) and have their own tests.
 The owner/admin · role-cap · rate-limit · organisation-boundary checks are not touched — only the «who is it» 403 went.
 """
 from __future__ import annotations
@@ -56,13 +56,7 @@ def _roads(org_id, project_id):
     ]
 
 
-def _stays_with_a_person(org_id):
-    o = f"/api/v2/organizations/{org_id}"
-    nobody = uuid.uuid4()
-    return [
-        # (the ads boost's start · resume · cancel are no longer here: since B1 an agent's call is a card a person presses — tests/test_5041_ads_cards_realdb.py)
-        ("channel post publish", "POST", f"{o}/channel-posts/drafts/{nobody}/publish", {}),
-    ]
+# (the siblings that used to stay a person's — the ad boost's start · resume · cancel and a channel post's publish — are cards a person presses since B1 / B2: tests/test_5041_ads_cards_realdb.py · tests/test_5041_publish_cards_realdb.py)
 
 
 async def _call(c, method, path, body):
@@ -87,24 +81,6 @@ async def test_the_lifted_roads_do_not_answer_an_agent_with_the_human_only_403()
                     if _refused_as_human_only(r):
                         refused.append((who, name, r.status_code, r.text[:120]))
         assert refused == [], f"still answered as «human only»: {refused}"
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.anyio
-async def test_the_siblings_that_stay_with_a_person_still_refuse_an_agent():
-    from app.main import app
-
-    engine, Session = await _session_factory()
-    try:
-        async with Session() as s:
-            d = await _seed(s)
-        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
-        async with _client_for(app) as c:
-            for name, method, path, body in _stays_with_a_person(d["org_id"]):
-                r = await _call(c, method, path, body)
-                assert r.status_code == 403, f"{name}: the agent got {r.status_code} {r.text[:160]}"
-                assert "HUMAN_ONLY" in r.text, f"{name}: {r.text[:160]}"
     finally:
         await engine.dispose()
 

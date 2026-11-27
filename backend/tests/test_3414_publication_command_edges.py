@@ -137,7 +137,8 @@ async def test_retry_command_endpoint_agent_caller_forbidden():
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/channel-posts/publication-commands/{cmd_id}/retry")
-        assert r.status_code == 403, r.text
+        # story 5041 B2 — an agent's retry is a card a person presses (tests/test_5041_publish_cards_realdb.py); this command's gate is not one the agent can reach, so it is the road's plain «not found» and nothing is retried
+        assert r.status_code == 404, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

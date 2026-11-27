@@ -94,7 +94,30 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("ads_boost.adopt", "ads_boost_adopt", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/adopt-existing$", "partly"),
     _spec("ads_boost.resume", "ads_boost_resume", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/resume$", "partly"),
     _spec("ads_boost.cancel", "ads_boost_cancel", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/cancel$", "no"),
+    # story 5041 B2 — what goes out to the world (rows 35 · 36 · 38 · 39 · 85 · 86 · 87): a person presses and it goes out in their name. The cancel / unpublish roads demand an organisation owner / admin — an agent is never one — so they have no `auto` slot (always a card).
+    _spec("channel_post.publish", "channel_post_publish", "POST", rf"^/api/v2/organizations/{_UUID}/channel-posts/drafts/{_UUID}/publish$", "partly"),
+    _spec("channel_post.cancel_scheduled", "channel_post_cancel_scheduled", "POST", rf"^/api/v2/organizations/{_UUID}/channel-posts/drafts/{_UUID}/cancel-scheduled$", "partly"),
+    _spec("channel_post.unpublish", "channel_post_unpublish", "POST", rf"^/api/v2/organizations/{_UUID}/channel-posts/drafts/{_UUID}/unpublish$", "no"),
+    _spec("publication.retry", "publication_retry", "POST", rf"^/api/v2/organizations/{_UUID}/(?:channel-posts/)?publication-commands/{_UUID}/retry$", "partly"),
+    _spec("site_post.publish", "site_post_publish", "POST", rf"^/api/v2/organizations/{_UUID}/site-posts$", "partly", takes_body=True),
+    _spec("site_post.publish_draft", "site_post_publish_draft", "POST", rf"^/api/v2/organizations/{_UUID}/site-posts/drafts/{_UUID}/publish$", "partly"),
+    _spec("site_post.unpublish", "site_post_unpublish", "POST", rf"^/api/v2/organizations/{_UUID}/site-posts/drafts/{_UUID}/unpublish$", "partly"),
 )}
+
+
+async def gate_agent_on_story(
+    request: Request, session: AsyncSession, *, auth: Any, agent: Any, org_id: uuid.UUID, work_item_id: uuid.UUID, action_key: str, label_suffix: str = "", not_found: HTTPException,
+) -> JSONResponse | None:
+    """story 5041 B2 — `gate_agent_call` for a road whose object belongs to a story's project (a channel / site post draft: `work_item_id` → the story → its project). The card names the story and what the road adds (`label_suffix`). A story that is
+    not there (or not this organisation's) answers with `not_found` — the road's own «not found», the same one a missing draft gets."""
+    from app.models.pm import Story
+
+    row = (await session.execute(select(Story.project_id, Story.title).where(Story.id == work_item_id, Story.org_id == org_id))).first()
+    if row is None:
+        raise not_found
+    return await gate_agent_call(
+        request, session, auth=auth, agent=agent, org_id=org_id, project_id=row[0], action_key=action_key, target_label=f"{row[1] or '—'}{label_suffix}",
+    )
 
 
 def snapshot_hash(snap: dict[str, Any]) -> str:

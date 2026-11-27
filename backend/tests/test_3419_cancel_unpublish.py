@@ -429,7 +429,8 @@ async def test_cancel_agent_caller_forbidden():
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{uuid.uuid4()}/cancel-scheduled",
             )
-        assert r.status_code == 403, r.text
+        # story 5041 B2 — an agent's call is a card a person presses (tests/test_5041_publish_cards_realdb.py); a draft that is not there is the road's plain «not found»
+        assert r.status_code == 404, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -700,7 +701,8 @@ async def test_unpublish_agent_caller_forbidden():
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/channel-posts/drafts/{uuid.uuid4()}/unpublish",
             )
-        assert r.status_code == 403, r.text
+        # story 5041 B2 — an agent's call is a card a person presses (tests/test_5041_publish_cards_realdb.py); a draft that is not there is the road's plain «not found»
+        assert r.status_code == 404, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
