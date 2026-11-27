@@ -331,9 +331,11 @@ async def delete_task(
         _project_id = (await session.execute(select(Story.project_id).where(Story.id == _asked.story_id))).scalar_one_or_none()
         if _project_id is None:
             raise HTTPException(status_code=404, detail="Task not found")
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=resolved, org_id=org_id, project_id=_project_id, action_key="task.delete", target_label=_asked.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
     task = await repo.get(id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")

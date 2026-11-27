@@ -363,6 +363,46 @@ async def request_approval(
     return _pending_response(req, locale, card_delivered=bool(cards))
 
 
+async def gate_agent_call(
+    request: Request,
+    session: AsyncSession,
+    *,
+    auth: Any,
+    agent: Any,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    action_key: str,
+    target_label: Any,
+    locale: str | None = None,
+) -> JSONResponse | None:
+    """what an agent's call to an approvable road gets, by the USER's setting (services/agent_action_policy.py — the product decides only the default):
+         `ask`   → the ask is kept and a person presses it (`request_approval`, as before)
+         `block` → 403 `AGENT_ACTION_BLOCKED` — nothing is kept, no card
+         `auto`  → None: the road goes on, as the AGENT, under the agent's own rights (the road's own checks stay — an action that needs an organisation admin is refused by them) and one activity row says
+                   which setting let it through
+       The agent must see the project in every case (404, the app's one judgement for a project it cannot see)."""
+    from app.services.agent_action_policy import resolve_action_level
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id)
+    level, source = await resolve_action_level(session, org_id=org_id, project_id=project_id, agent_id=agent.id, action_key=action_key)
+    if level == "auto":
+        from app.services.activity_log import ActivityLogService
+
+        await ActivityLogService(session).record(
+            org_id=org_id, action="agent_action.auto_allowed", actor_type="agent", actor_id=agent.id, project_id=project_id,
+            entity_type="agent_action_policy", entity_id=agent.id, context={"action_key": action_key, "setting": source},
+        )
+        return None
+    if level == "block":
+        locale = locale or resolve_locale_from_request(None, request.headers.get("accept-language"))
+        raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_BLOCKED", "message": t("agent_action.blocked", locale)})
+    return await request_approval(
+        request, session, auth=auth, agent=agent, org_id=org_id, project_id=project_id, action_key=action_key, target_label=target_label, locale=locale,
+    )
+
+
 def _pending_response(req: HitlRequest, locale: str, *, card_delivered: bool) -> JSONResponse:
     hours = int(EXPIRES_AFTER.total_seconds() // 3600)
     return JSONResponse(

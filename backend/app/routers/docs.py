@@ -933,9 +933,11 @@ async def delete_doc(
         _asked = await repo.get(id)
         if _asked is None:
             raise HTTPException(status_code=404, detail="Doc not found")
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, repo.session, auth=auth, agent=deleter, org_id=repo.org_id, project_id=_asked.project_id, action_key="doc.delete", target_label=_asked.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
     doc = await repo.get(id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")

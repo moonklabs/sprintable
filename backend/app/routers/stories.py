@@ -2739,9 +2739,11 @@ async def delete_story(
         _asked = await repo.get(id)
         if _asked is None:
             raise HTTPException(status_code=404, detail="Story not found")
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=resolved, org_id=org_id, project_id=_asked.project_id, action_key="story.delete", target_label=_asked.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
 
     story = await repo.get(id)
     if story is None:

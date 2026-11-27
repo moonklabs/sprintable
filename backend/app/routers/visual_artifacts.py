@@ -916,11 +916,13 @@ async def delete_spec_pin(
 
     _caller = await resolve_member(auth, org_id, session, project_id=project_id)
     if _caller.type != "human":
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=_caller, org_id=org_id, project_id=project_id, action_key="spec_pin.delete",
             # WHICH pin: the artifact's pins look alike by its title — name the pin's own words and its short id (the agent's own text is not here: the pin's description was written by a person)
             target_label=f"{(getattr(artifact, 'title', '') or '').strip()[:80]} · “{(getattr(pin, 'description', '') or '').strip()[:60]}” ({str(pin_id)[:8]})",
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
     await session.delete(pin)
     await session.flush()
     return _ok({"ok": True, "id": str(pin_id)})
