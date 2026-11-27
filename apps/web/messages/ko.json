@@ -8733,5 +8733,36 @@
         "incomplete": "파일이 온전히 오지 않았어요. 다시 받아 보세요."
       }
     }
+  },
+  "quick": {
+    "onlyInApp": "빠른 묻기는 Sprintable 앱에서만 열려요",
+    "placeholder": "무엇이든 물어봐요",
+    "inputLabel": "보낼 말",
+    "placesLabel": "보낼 곳",
+    "hintNoTarget": "@로 보낼 곳을 골라요 · Enter로 보내요 · Esc로 닫아요",
+    "hintReady": "Enter로 보내요 · Esc로 닫아요",
+    "sending": "보내는 중…",
+    "loading": "불러오는 중…",
+    "loadFailed": "보낼 곳을 불러오지 못했어요",
+    "noMatch": "맞는 곳이 없어요",
+    "kindAgent": "에이전트",
+    "kindChannel": "채널",
+    "channelFallback": "프로젝트 채널",
+    "loginNeeded": "로그인이 필요해요",
+    "openApp": "앱 열기",
+    "retry": "다시 보내기",
+    "retryAnyway": "그래도 다시 보내기",
+    "discard": "보내지 못한 글이 사라져요 — Esc를 한 번 더 누르면 닫아요",
+    "attachLabel": "지금 창 함께 보내기",
+    "attachDenied": "화면 기록을 허용해야 해요",
+    "openSettings": "설정 열기",
+    "capturing": "창을 담는 중…",
+    "previewAlt": "함께 보낼 창 미리보기",
+    "removePicture": "빼기",
+    "failure": {
+      "rejected": "서버가 보내기를 받지 않았어요 — 쓴 글은 그대로 두었어요",
+      "server": "서버에 문제가 생겨 보내지 못했어요 — 쓴 글은 그대로 두었어요",
+      "offline": "연결이 끊겨 보냈는지 확인하지 못했어요 — 대화에서 먼저 확인해 주세요"
+    }
   }
 }
