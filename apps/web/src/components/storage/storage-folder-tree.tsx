@@ -73,7 +73,7 @@ function FolderNode({
         )}
       >
         <span
-          className="grid w-[14px] place-items-center text-xs opacity-55"
+          className="grid w-ds-icon-sm place-items-center text-xs opacity-55"
           aria-hidden="true"
           onClick={(e) => {
             if (hasChildren) {
@@ -82,10 +82,10 @@ function FolderNode({
             }
           }}
         >
-          {hasChildren ? (expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />) : null}
+          {hasChildren ? (expanded ? <ChevronDown className="size-ds-icon-sm" /> : <ChevronRight className="size-ds-icon-sm" />) : null}
         </span>
-        <span className="grid size-[15px] place-items-center opacity-80">
-          <FolderIcon className="size-[15px]" />
+        <span className="grid size-ds-icon-sm place-items-center opacity-80">
+          <FolderIcon className="size-ds-icon-sm" />
         </span>
         <span className="truncate">{folder.name}</span>
       </div>
@@ -191,7 +191,7 @@ export function StorageFolderTree({
           {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}
           <span className="size-2 shrink-0 rounded-full bg-ds-action" />
           <span className="truncate">{projectName ?? 'Sprintable'}</span>
-          <ChevronDown className="ml-auto size-3.5 shrink-0 opacity-50" />
+          <ChevronDown className="ml-auto size-ds-icon-sm shrink-0 opacity-50" />
         </button>
       </div>
 
@@ -199,7 +199,7 @@ export function StorageFolderTree({
       <div className="mx-3 mb-1.5 flex items-center gap-1.5">
         {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
         <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-[9px] py-[7px] text-xs text-ds-ink-3 focus-within:border-ds-ink-2">
-          <Search className="size-3.5 shrink-0 opacity-60" />
+          <Search className="size-ds-icon-sm shrink-0 opacity-60" />
           <input
             value={folderSearch}
             onChange={(e) => onFolderSearchChange(e.target.value)}
@@ -214,7 +214,7 @@ export function StorageFolderTree({
           onClick={startCreating}
           className="grid size-[30px] shrink-0 place-items-center rounded-[0.5rem] text-ds-ink-3 hover:bg-ds-surface-high hover:text-ds-ink"
         >
-          <FolderPlus className="size-[15px]" />
+          <FolderPlus className="size-ds-icon-sm" />
         </button>
       </div>
 
@@ -276,8 +276,8 @@ export function StorageFolderTree({
           )}
         >
           <span className="w-[14px]" />
-          <span className="grid size-[15px] place-items-center opacity-80">
-            <Archive className="size-[15px]" />
+          <span className="grid size-ds-icon-sm place-items-center opacity-80">
+            <Archive className="size-ds-icon-sm" />
           </span>
           <span className="truncate">{t('allAssets')}</span>
         </div>
@@ -302,8 +302,8 @@ export function StorageFolderTree({
                 )}
               >
                 <span className="w-[14px]" />
-                <span className="grid size-[15px] place-items-center opacity-80">
-                  <FolderIcon className="size-[15px]" />
+                <span className="grid size-ds-icon-sm place-items-center opacity-80">
+                  <FolderIcon className="size-ds-icon-sm" />
                 </span>
                 <span className="truncate">{f.name}</span>
               </div>

@@ -63,7 +63,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
     if (state === 'confirmed') return null;
     return (
       <span title={t(meta.labelKey)} aria-label={t(meta.labelKey)} className="inline-flex shrink-0 items-center">
-        <MetaIcon className={`size-3.5 ${state === 'rejected' ? 'text-destructive' : 'text-warning-strong'}`} />
+        <MetaIcon className={`size-ds-icon-sm ${state === 'rejected' ? 'text-destructive' : 'text-warning-strong'}`} />
       </span>
     );
   }
@@ -100,23 +100,23 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
         {/* owner/drafted_by/confirmed_by 구분 미니 evidence */}
         {draftedBy ? (
           <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
-            <Sparkles className="size-3 shrink-0" />
+            <Sparkles className="size-ds-icon-sm shrink-0" />
             {t('gateDraftedBy', { name: resolveName(draftedBy) })}
           </span>
         ) : null}
         {actorId && (state === 'confirmed' || state === 'rejected') ? (
           <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
-            <User className="size-3 shrink-0" />
+            <User className="size-ds-icon-sm shrink-0" />
             {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(actorId) })}
           </span>
         ) : null}
         {/* approve/reject = GateInbox action 재사용(requires_human·pending 시만) */}
         {canAct && rejectNote === null ? (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <Button type="button" variant="secondary" disabled={resolving} onClick={() => void transition('approved')} iconStart={<CheckCircle className="size-3.5" aria-hidden />}>
+            <Button type="button" variant="secondary" disabled={resolving} onClick={() => void transition('approved')} iconStart={<CheckCircle className="size-ds-icon-md" aria-hidden />}>
               {t('gateApprove')}
             </Button>
-            <Button type="button" variant="danger" disabled={resolving} onClick={() => setRejectNote('')} iconStart={<XCircle className="size-3.5" aria-hidden />}>
+            <Button type="button" variant="danger" disabled={resolving} onClick={() => setRejectNote('')} iconStart={<XCircle className="size-ds-icon-md" aria-hidden />}>
               {t('gateReject')}
             </Button>
           </div>

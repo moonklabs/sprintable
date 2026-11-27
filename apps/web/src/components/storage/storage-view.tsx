@@ -426,9 +426,9 @@ export function StorageView({ projectId }: { projectId: string }) {
           className="h-auto min-h-ds-touch min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
           data-testid="storage-folder-drawer-trigger"
         >
-          <FolderIcon className="size-4 shrink-0 text-ds-ink-3" aria-hidden="true" />
+          <FolderIcon className="size-ds-icon-md shrink-0 text-ds-ink-3" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium">{currentFolderLabel}</span>
-          <ChevronDown className="size-3.5 shrink-0 text-ds-ink-3" aria-hidden="true" />
+          <ChevronDown className="size-ds-icon-md shrink-0 text-ds-ink-3" aria-hidden="true" />
         </Button>
       </div>
 

@@ -117,7 +117,7 @@ export function StorageCapacityBanner() {
       {/* story #2513 — Alert 글자가 text-foreground로 통일된 후 색-미지정 아이콘은
           currentColor를 상속해 variant 색을 잃는다. destructive 분기만 명시 필요
           (warning은 이미 text-foreground라 무영향). */}
-      {isBlock ? <AlertOctagon className="size-4 text-destructive" /> : <AlertTriangle className="size-4" />}
+      {isBlock ? <AlertOctagon className="size-ds-icon-sm text-destructive" /> : <AlertTriangle className="size-ds-icon-sm" />}
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription>{desc}</AlertDescription>
 
@@ -167,7 +167,7 @@ export function StorageCapacityBanner() {
           aria-label={t('capacityDismiss')}
           onClick={handleDismiss}
         >
-          <X className="size-4" />
+          <X className="size-ds-icon-md" />
         </Button>
       )}
     </Alert>

@@ -152,7 +152,7 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
       <div className="absolute inset-0">
         <Skeleton className="absolute inset-0 rounded-none" />
         <div className="absolute inset-0 grid place-items-center">
-          <Loader2 className="size-5 animate-spin text-info" aria-label={t('previewLoading')} />
+          <Loader2 className="size-ds-icon-md animate-spin text-info" aria-label={t('previewLoading')} />
         </div>
       </div>
     );
@@ -161,7 +161,7 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
   if (state === 'no-access') {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-4 text-center text-muted-foreground">
-        <Lock className="size-6" aria-hidden />
+        <Lock className="size-ds-icon-lg" aria-hidden />
         <span className="text-xs font-medium">{t('previewNoAccessTitle')}</span>
         <span className="text-xs">{t('previewNoAccessDesc')}</span>
       </div>
@@ -171,7 +171,7 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
   if (state === 'phantom' || !signedUrl) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-4 text-center text-muted-foreground">
-        <ImageOff className="size-6" aria-hidden />
+        <ImageOff className="size-ds-icon-lg" aria-hidden />
         <span className="text-xs font-medium">{t('previewPhantomTitle')}</span>
         <span className="text-xs">{t('previewPhantomDesc')}</span>
       </div>

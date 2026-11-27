@@ -66,10 +66,10 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
         if (Object.keys(ALLOWED).some((k) => key.startsWith(k))) continue;
         hits.push(key);
       }
-      // `iconStart={<아이콘 …/>}`는 ds Button(높이 40)의 자리 — 단추 안 아이콘은 md뿐이다(sm 16 · 14 · 16 숫자는 RED). 아이콘 이름에 숫자가 든 것(`Trash2` · `Share2`)도 본다.
+      // `iconStart={<아이콘 …/>}`는 ds Button(높이 40)의 자리 — 단추 안 아이콘은 md뿐이다(sm 16 · 12 · 14 · 16 숫자는 RED). 아이콘 이름에 숫자가 든 것(`Trash2` · `Share2`)도 본다.
       for (const m of text.matchAll(/iconStart=\{\s*</g)) {
         const tag = openingTag(text, m.index! + m[0].length - 1);
-        if (/size-ds-icon-sm|size="sm"|size=\{(?:14|16)\}|(?<![\w:-])(?:size|h|w)-(?:3\.5|4)(?![\w.-])/.test(tag)) {
+        if (/size-ds-icon-sm|size="sm"|size=\{(?:14|16)\}|(?<![\w:-])(?:size|h|w)-(?:3\.5|3|4)(?![\w.-])/.test(tag)) {
           const key = `${rel}::iconStart ${tag.replace(/\s+/g, ' ').slice(0, 60)}`;
           if (!Object.keys(ALLOWED).some((k) => key.startsWith(k))) hits.push(key);
         }

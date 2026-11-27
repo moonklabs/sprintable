@@ -131,7 +131,7 @@ export function StoryHypothesesSection({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{t('linkedTitle')}</h3>
         {!pickerOpen ? (
-          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-3.5" />} className="h-auto px-2.5 py-1 text-xs font-medium hover:bg-ds-surface-highest">
+          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-ds-icon-md" />} className="h-auto px-2.5 py-1 text-xs font-medium hover:bg-ds-surface-highest">
             {t('linkHypothesis')}
           </Button>
         ) : null}
@@ -149,7 +149,7 @@ export function StoryHypothesesSection({
               key={h.id}
               className="flex items-center gap-2 rounded-lg border border-ds-line bg-ds-surface px-2.5 py-1.5"
             >
-              <Link2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Link2 className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={h.statement}>
                 {h.statement}
               </span>
@@ -173,7 +173,7 @@ export function StoryHypothesesSection({
                 title={t('unlink')}
                 className="shrink-0 rounded p-0.5 text-muted-foreground transition hover:bg-ds-surface-high hover:text-destructive disabled:opacity-50"
               >
-                <X className="size-3.5" />
+                <X className="size-ds-icon-sm" />
               </button>
             </li>
           ))}
@@ -191,11 +191,11 @@ export function StoryHypothesesSection({
               aria-label={t('cancel')}
               className="rounded p-0.5 text-muted-foreground transition hover:bg-ds-surface-high hover:text-foreground"
             >
-              <X className="size-3.5" />
+              <X className="size-ds-icon-sm" />
             </button>
           </div>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-ds-icon-sm -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
               type="text"
               value={query}

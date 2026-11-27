@@ -57,7 +57,7 @@ function HypothesisDraftPreview({
     // 4909 AC3 (가설 칸 1단계) — the preview is the AI-marked face of the ds (info tone) inside the card; the two buttons are ds Buttons (the same texts, the same handlers).
     <div className="space-y-3 rounded-ds-control border border-ds-line bg-ds-info-soft p-3">
       <div className="flex items-center gap-1.5 text-ds-small font-semibold text-ds-info">
-        <Sparkles className="size-3.5" aria-hidden />
+        <Sparkles className="size-ds-icon-sm" aria-hidden />
         {t('draftReviewTitle')}
       </div>
 
@@ -339,10 +339,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
         </h2>
         {!formOpen && !draft ? (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="hypotheses-head-actions">
-            <Button type="button" variant="secondary" onClick={() => void handleDraft()} disabled={drafting} iconStart={<Sparkles className="size-3.5" aria-hidden />}>
+            <Button type="button" variant="secondary" onClick={() => void handleDraft()} disabled={drafting} iconStart={<Sparkles className="size-ds-icon-md" aria-hidden />}>
               {drafting ? t('drafting') : t('draftCta')}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => setFormOpen(true)} iconStart={<Plus className="size-3.5" aria-hidden />}>
+            <Button type="button" variant="secondary" onClick={() => setFormOpen(true)} iconStart={<Plus className="size-ds-icon-md" aria-hidden />}>
               {t('add')}
             </Button>
           </div>
