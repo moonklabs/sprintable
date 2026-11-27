@@ -1279,6 +1279,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     "agent_action.what.meeting_delete": {"ko": "회의 «{target}» 삭제", "en": "Delete meeting «{target}»"},
     "agent_action.what.reward_give": {"ko": "보상 지급 — {target}", "en": "Give a reward — {target}"},
     "agent_action.what.spec_pin_delete": {"ko": "스펙 핀 삭제 — {target}", "en": "Delete spec pin — {target}"},
+    "agent_action.what.content_rules_update": {"ko": "콘텐츠 규칙 저장 — {target}", "en": "Save the content rules — {target}"},
+    "agent_action.what.agent_run_profile_update": {"ko": "에이전트 실행 설정 바꾸기 — {target}", "en": "Change an agent's run settings — {target}"},
     "agent_action.what.ads_boost_request": {"ko": "광고 부스트 요청 — {target}", "en": "Request an ads boost — {target}"},
     "agent_action.what.ads_boost_start": {"ko": "광고 부스트 시작 — {target}", "en": "Start the ads boost — {target}"},
     "agent_action.what.ads_boost_adopt": {"ko": "광고 계정에 이미 있는 캠페인 연결 — {target}", "en": "Adopt the campaign already in the ad account — {target}"},

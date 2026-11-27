@@ -279,10 +279,15 @@ async def test_07_who_may_read_and_change(world):
             await s.commit()
         try:
             for headers in ({"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)}, _key(device)):
-                r = await c.put(_one(agent), json={"model": "opus", "effort": None}, headers=headers)
-                assert _code(r) == (403, "person_session_required")
+                # a person's script key is still refused (a script key is not a person's pressed button)
                 r = await c.put(MANY, json={"agent_ids": [agent], "effort": "low"}, headers=headers)
                 assert _code(r) == (403, "person_session_required")
+            r = await c.put(_one(agent), json={"model": "opus", "effort": None}, headers={"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)})
+            assert _code(r) == (403, "person_session_required")
+            # story 5041 (B4): an AGENT's own call to change a profile is no longer refused outright — it is kept as an approval card (202), the profile is untouched, and a person presses it;
+            # only the «unattended» switch stays a person-session-only act (see test_4598_unattended_realdb)
+            r = await c.put(_one(agent), json={"model": "opus", "effort": None}, headers=_key(device))
+            assert r.status_code == 202 and r.json()["status"] == "pending_approval", r.text
         finally:
             await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
         # story 5041 (PO 11-27 · row 16): an agent key may READ a profile through this road too — and is told it cannot change it (can_change is worked out for the caller)

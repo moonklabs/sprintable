@@ -4965,6 +4965,8 @@
     "actionPolicyAction_site_post_publish": "사이트 글 공개(본문과 함께)",
     "actionPolicyAction_site_post_publish_draft": "사이트 글 초안 공개",
     "actionPolicyAction_site_post_unpublish": "공개한 사이트 글 비공개로",
+    "actionPolicyAction_content_rules_update": "콘텐츠 규칙 저장(금칙어·UTM·생성 예산·월 API 지출 상한)",
+    "actionPolicyAction_agent_run_profile_update": "다른 에이전트의 모델·노력 수준 바꾸기",
     "actionPolicyAction_org_delete": "조직 삭제",
     "actionPolicyAction_project_delete": "프로젝트 삭제",
     "actionPolicyAction_agent_permission_answer": "에이전트 권한 요청에 사람이 서명해 답하기",
