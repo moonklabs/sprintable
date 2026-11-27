@@ -149,11 +149,17 @@ describe('the record of how it went in reaches the screen', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     stubFetch(true);
     listAnswer = () => [mine({ delivery_mode: 'after_turn', created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString() })];
+    const setSpy = vi.spyOn(window, 'setInterval');
+    const clearSpy = vi.spyOn(window, 'clearInterval');
     await mount();
     const before = listReads();
     await act(async () => { await vi.advanceTimersByTimeAsync(5100); });
     await settle();
     expect(listReads()).toBe(before);
+    // the 5 s loop was started for the waiting message … and cleared by itself once it found nothing it still waits for
+    const started = setSpy.mock.calls.map((c, i) => ({ delay: c[1], id: setSpy.mock.results[i]!.value })).filter((c) => c.delay === 5000);
+    expect(started.length).toBeGreaterThan(0);
+    for (const { id } of started) expect(clearSpy, 'the 5 s loop ended itself — it does not tick on for ever').toHaveBeenCalledWith(id);
   });
   it('a message sent «지금» (no mode) is never polled for a record', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

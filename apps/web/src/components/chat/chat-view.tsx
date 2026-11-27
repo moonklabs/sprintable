@@ -459,6 +459,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     const timer = window.setInterval(() => {
       const stillWaiting = messagesForRecordRef.current.some((m) => m.created_by === currentTeamMemberId && m.delivery_mode === 'after_turn' && !m.delivery_log && m.deleted_at === null && Date.now() - Date.parse(m.created_at) < 15 * 60 * 1000);
       if (stillWaiting) void fetchMessages();
+      else window.clearInterval(timer); // nothing is waited for any more (the only one left was past the 15 minutes): the loop ends here instead of ticking for ever
     }, 5000);
     return () => window.clearInterval(timer);
   }, [awaitingDeliveryRecord, currentTeamMemberId, fetchMessages]);

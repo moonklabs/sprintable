@@ -62,11 +62,11 @@ describe('the line under the sender\'s bubble', () => {
     await draw(<DeliveryTimingLine mode={undefined} log={{ [A1]: { via: 'turn', at: 'x' } }} isMine nameOf={nameOf} />);
     expect(container.textContent).toBe('미르코 · 하던 턴에 바로 들어갔어요');
   });
-  it('more than three agents: the first three and «… 외 N»; an agent the room does not name is «에이전트», never an id', async () => {
+  it('more than three agents: the first three and «… 외 N»; an agent the room does not name is «이름 없는 구성원», never an id', async () => {
     const log = Object.fromEntries(['a1', 'a2', 'a3', 'a4', 'a5'].map((k, i) => [`${k}-0000-4000-8000-00000000000${i}`, { via: 'turn' as const, at: 'x' }]));
     await draw(<DeliveryTimingLine mode="after_turn" log={log} isMine nameOf={() => undefined} />);
     expect(container.textContent).toContain('… 외 2'); expect(container.textContent).not.toMatch(/a1-0000/);
-    expect(container.textContent).toContain('에이전트 · 하던 턴에 바로 들어갔어요');
+    expect(container.textContent).toContain('이름 없는 구성원 · 하던 턴에 바로 들어갔어요');
   });
 });
 

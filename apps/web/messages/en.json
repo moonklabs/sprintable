@@ -5982,7 +5982,7 @@
     "deliveryTimingTurn": "{name} · went into the running turn",
     "deliveryTimingNext": "{name} · went in after the turn ended",
     "deliveryTimingMore": "… and {n} more",
-    "deliveryTimingUnnamed": "The agent",
+    "deliveryTimingUnnamed": "Unnamed member",
     "deliveryDecisionNoAgent": "→ Agents did not get it",
     "agentWakeLeadOne": "This agent ({name}) can't notice new messages on its own. After you send a message, type the sentence below in the terminal where the agent is running.",
     "agentWakeLeadMany": "{name} and {n} more agents can't notice new messages on their own. After you send a message, type the sentence below in the terminal where each agent is running.",
