@@ -47,11 +47,12 @@ describe('키트 규칙 ① 글자 — 글꼴 하나 · 굵기 셋 · 가장 작
     expect([size('card-title'), lh('card-title'), weight('card-title')]).toEqual([16, 24, 500]);
   });
 
-  it('⭐줄높이는 모든 단에서 글자의 1.33 ~ 1.5배(고정폭 칩 · 배지 자리까지) — 읽히는 줄 간격', () => {
-    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) {
-      const r = lh(n) / size(n);
-      expect(r, n).toBeGreaterThanOrEqual(1.33);
-      expect(r, n).toBeLessThanOrEqual(1.5);
+  it('⭐줄높이는 단마다 정확한 값 — 제목 28 · 24 / 본문 20 · 보조 18 / 고정폭 20 · 18 · 16(모두 글자의 1.33 ~ 1.5배)', () => {
+    const want: Record<string, number> = { title: 28, 'card-title': 24, body: 20, small: 18, 'mono-lg': 20, 'mono-md': 18, 'mono-sm': 16 };
+    for (const [n, h] of Object.entries(want)) {
+      expect(lh(n), n).toBe(h);
+      expect(lh(n) / size(n), n).toBeGreaterThanOrEqual(1.33);
+      expect(lh(n) / size(n), n).toBeLessThanOrEqual(1.5);
     }
   });
 
@@ -136,10 +137,27 @@ describe('키트 규칙 — 글자 내림: 가장 작은 글자 12 · 폰 입력
   it('⭐xs · micro는 12 · sm은 14 — Tailwind 눈금으로 한 곳에서 다시 정의(호출부 0곳 변경), 옛 micro 10 · editorial-meta 11은 12로', () => {
     expect([sizeOf('xs'), sizeOf('sm'), sizeOf('micro'), sizeOf('editorial-meta')]).toEqual([12, 14, 12, 12]);
   });
-  it('⭐폰 입력칸(input · textarea · select)은 16 — iOS가 16 미만 입력칸을 누르면 화면을 확대하므로 text-base를 그대로 둔다', () => {
-    for (const f of ['components/ui/input.tsx', 'components/ui/textarea.tsx', 'components/ui/select.tsx', 'components/ds/input.tsx', 'components/ds/select.tsx']) {
+  it('⭐폰 입력칸(input · textarea · select)은 16 — 기본(폰)은 `text-base`, 데스크톱(`lg:`)부터 14로 내려간다. 5개 부품 파일마다 «변형 없는 text-base» + «lg:text-sm 또는 lg:text-ds-body»가 한 className에 같이 있다(iOS가 16 미만 입력칸에 초점이 가면 화면을 확대)', () => {
+    const files = ['components/ui/input.tsx', 'components/ui/textarea.tsx', 'components/ui/select.tsx', 'components/ds/input.tsx', 'components/ds/select.tsx'];
+    for (const f of files) {
       const src = readFileSync(join(__dirname, '..', f), 'utf8');
-      expect(/(?<![\w:-])text-base(?![\w-])/.test(src), f).toBe(true);
+      const classStrings = [...src.matchAll(/(["'`])((?:(?!\1).)*(?<![\w:-])text-base(?![\w-])(?:(?!\1).)*)\1/g)].map((m) => m[2]!);
+      expect(classStrings.length, `${f}: text-base 클래스 문자열`).toBeGreaterThan(0);
+      expect(classStrings.some((c) => /(?<![\w:-])lg:text-(?:sm|ds-body)(?![\w-])/.test(c)), `${f}: 같은 className에 lg:text-sm|lg:text-ds-body`).toBe(true);
+    }
+  });
+});
+
+describe('키트 규칙 ③a — 그림자 0 · 정의 한 곳', () => {
+  const globalsCss = readFileSync(join(__dirname, '..', 'app', 'globals.css'), 'utf8');
+  it('⭐Tailwind 그림자 단 xs · sm · md · lg · xl · 2xl은 none — 호출부 `shadow-*`가 그대로 «없음»을 읽는다', () => {
+    for (const n of ['2xs', 'xs', 'sm', 'md', 'lg', 'xl', '2xl']) expect(new RegExp(`--shadow-${n}:\\s*none;`).test(themeStatic), n).toBe(true);
+  });
+  it('⭐옛 elevation 변수 셋(--elev-overlay · card · inset)은 라이트 · 다크 모두 none', () => {
+    for (const n of ['overlay', 'card', 'inset']) {
+      const all = [...globalsCss.matchAll(new RegExp(`--elev-${n}:\\s*([^;]*);`, 'g'))].map((m) => m[1]!.trim().split(' ')[0]);
+      expect(all.length, n).toBeGreaterThanOrEqual(2);
+      expect(all.every((v) => v === 'none'), `${n}: ${all.join(' | ')}`).toBe(true);
     }
   });
 });

@@ -374,7 +374,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
               readOnly
               value={copyFailedOnboardingMessage}
               onFocus={(e) => e.currentTarget.select()}
-              className="resize-none p-2 font-mono text-ds-small"
+              className="resize-none p-2 font-mono text-base lg:text-ds-small"
               rows={4}
               data-testid="agent-api-key-copy-failed-raw-onboarding-message"
             />

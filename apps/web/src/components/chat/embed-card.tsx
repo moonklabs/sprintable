@@ -206,13 +206,13 @@ const makeMdBodyComponents = (withProject: (href: string) => string) => ({
     }
     return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 [overflow-wrap:anywhere]">{children}</a>;
   },
-  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-6">{children}</p>,
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-5">{children}</p>,
   h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
   h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold">{children}</h2>,
   h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 text-sm font-bold">{children}</h3>,
   ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
-  li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-5">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
   pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg p-3 text-editorial-ui bg-muted">{children}</pre>,
   // story 4707: 긴 경로 · `GET /api/…/{id}` 토큰이 표 칸의 최소 폭을 키워 본문을 옆으로 미는 것을 막는다 — 어디서든 줄을 바꾼다.

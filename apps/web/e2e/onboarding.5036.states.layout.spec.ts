@@ -249,9 +249,9 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('connect-branch-move')).toBeVisible();
       await expect(page.getByTestId('connect-branch-key')).toBeVisible();
       await clean(page, 'connect default', phone);
-      // the prerequisite note of the key way is read at the kit's smallest-text floor: no text of it under 12 px (rebaselined 11-27, 선생님 «독거노인용 같다» type-scale cut: the floor moved 14 → 12 — the note is the 13 px aux size now)
+      // the prerequisite note of the key way is read at the kit's smallest-text floor: no text of it under 13 px (rebaselined 11-27, 선생님 «독거노인용 같다» type-scale cut: the floor moved 14 → 13 — the note is the 13 px aux size, so pin it)
       const noteSizes = await page.getByTestId('advanced-prereq').locator('p').evaluateAll((els) => els.map((e) => parseFloat(getComputedStyle(e).fontSize)));
-      expect(Math.min(...noteSizes), `the prerequisite note is drawn under 12 px: ${noteSizes.join(' · ')}`).toBeGreaterThanOrEqual(12);
+      expect(Math.min(...noteSizes), `the prerequisite note is drawn under 13 px: ${noteSizes.join(' · ')}`).toBeGreaterThanOrEqual(13);
       await expect(page.getByTestId('connect-branches-connected')).toHaveCount(0); // no agent is verified → no line (nothing is asserted that is not known)
       await shot(page, card(page), `5036-2-connect-default-${tag}`);
     });

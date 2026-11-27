@@ -24,7 +24,7 @@ const SHARED_TAGS = new Set(['Input', 'Textarea']);
 /** 래퍼 «정의»가 그릴 수 있는 공용 부품 — SHARED_TAGS에 `Select`를 더한 것. `Select`는 호출부 쪽에서는 자동 발견된 래퍼로 계속 읽고(데스크톱 무변 검사 포함), 래퍼 정의가 그 위에 얹힐 때(OperatorSelect)만 밑단 클래스로 읽는다. */
 const WRAPPER_BODY_SHARED = new Set([...SHARED_TAGS, 'Select']);
 /**
- * 프로젝트 자신의 글자 눈금 — globals.css `@theme`의 `--text-<이름>: <n>px`(editorial-meta 11 · editorial-ui 13 · micro 10 …)을 그대로 읽는다(숫자를 여기 또 박지 않음).
+ * 프로젝트 자신의 글자 눈금 — globals.css `@theme`의 `--text-<이름>: <n>px`(editorial-meta 12 · editorial-ui 13 · micro 12 … — 글자 내림 11-27 이후 값)을 그대로 읽는다(숫자를 여기 또 박지 않음).
  * 이게 없으면 `lg:text-editorial-meta` 같은 클래스가 «크기 없음»으로 읽혀, 공용 부품(text-base lg:text-sm)과 합쳐질 때 데스크톱 크기가 틀리게 계산된다
  * (4831: 날 `<select>`를 `Select` 부품으로 바꾼 자리가 «데스크톱 14 → 16»이라는 가짜 바뀜으로 잡힘 — 실제 cn() 결과는 11px 그대로).
  */
@@ -33,6 +33,9 @@ function themeSizes(): Record<string, number> {
   const out: Record<string, number> = {};
   // story 5048 T0 글자 내림: xs · sm · micro는 이제 rem으로 정의돼 있다(xs 0.75rem · sm 0.875rem · micro 0.75rem) — rem을 16px로 읽어 12 · 14 · 12로 센다(②d의 «xs · sm 건너뛰기»는 걷음 — 실제 값이 다시 12 · 14).
   for (const m of css.matchAll(/^\s*--text-([a-z][a-z-]*): (\d+(?:\.\d+)?)(px|rem);/gm)) out[`text-${m[1]}`] = parseFloat(m[2]!) * (m[3] === 'rem' ? 16 : 1);
+  // story 5048 T0 글자 내림: ds 글자 단(`text-ds-body` 14 · `text-ds-small` 13 …)도 읽는다 — 이제 16 미만이라, 폰 입력칸에 `text-ds-*`만 쓰면 iOS가 확대한다(이전엔 전부 16이라 안 읽어도 안전했음).
+  const ds = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/design-system.css'), 'utf8');
+  for (const m of ds.matchAll(/^\s*--text-(ds-[a-z-]+): (\d+(?:\.\d+)?)px;/gm)) out[`text-${m[1]}`] = parseFloat(m[2]!);
   return out;
 }
 const NAMED_SIZES: Record<string, number> = { 'text-xs': 12, 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24, 'text-3xl': 30, ...themeSizes() };

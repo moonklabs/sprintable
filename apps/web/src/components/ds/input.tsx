@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { DISABLED_INPUT_FACE } from './disabled-face';
 import { FIELD_FOCUS } from './field-focus';
 
-// 글자 크기: 폰(기본)은 16px(text-base) — iOS Safari는 16px 미만 입력칸을 누르면 화면을 확대한다(story #4410, 현행 `ui/input`과 같은 규칙). lg 이상은 본문 13(ds-body).
+// 글자 크기: 폰(기본)은 16px(text-base) — iOS Safari는 16px 미만 입력칸을 누르면 화면을 확대한다(story #4410, 현행 `ui/input`과 같은 규칙). lg 이상은 본문 14(ds-body — 글자 내림 11-27).
 // `color-scheme`: 브라우저 기본 날짜 · 시간 칸의 달력 아이콘이 어두운 화면에서도 보이게 한다(앱 테마는 `.dark` 클래스라 브라우저에 따로 알려야 한다).
 const FIELD =
   '[color-scheme:light] dark:[color-scheme:dark] w-full min-w-0 rounded-ds-control border border-ds-line-control bg-ds-surface px-4 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body ' +

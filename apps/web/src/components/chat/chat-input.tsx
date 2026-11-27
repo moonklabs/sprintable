@@ -824,7 +824,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             aria-label={t('steerPanelTargetLabel')}
             value={steerTargetId}
             onChange={(e) => { setSteerTargetId(e.target.value); if (e.target.value) setSteerError(null); }}
-            className="h-auto min-w-[7rem] flex-1 border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+            className="h-auto min-w-[7rem] flex-1 border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-sm"
           >
             <option value="">{t('steerPanelTargetPlaceholder')}</option>
             {steerTargets.map((p) => (
@@ -847,7 +847,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
               placeholder={t('steerPanelWorkItemPlaceholder')}
               aria-label={t('steerPanelWorkItemLabel')}
-              className="h-auto border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+              className="h-auto border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-sm"
             />
             {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
                 멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
