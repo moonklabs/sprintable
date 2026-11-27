@@ -286,7 +286,7 @@ export function HistoryDrilldownTrigger({
       aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
     >
       {t('trustHistoryToggle')}
-      <Icon name={open ? 'expand_less' : 'expand_more'} size={14} />
+      <Icon name={open ? 'expand_less' : 'expand_more'} size="md" />
     </Button>
   );
 }

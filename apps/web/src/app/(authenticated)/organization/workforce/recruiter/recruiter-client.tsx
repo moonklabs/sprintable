@@ -270,11 +270,11 @@ function CopyDownloadButtons({
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <Button variant="outline" size="sm" onClick={() => void handleCopy()}>
-        {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+        {copied ? <><Check className="size-ds-icon-sm" />{t('copied')}</> : <><Copy className="size-ds-icon-sm" />{t('copy')}</>}
       </Button>
       {copyFailed ? <span role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</span> : null}
       <Button variant="outline" size="sm" onClick={() => downloadTextFile(filename, content)}>
-        <Download className="h-3.5 w-3.5" />{t('download')}
+        <Download className="size-ds-icon-sm" />{t('download')}
       </Button>
     </div>
   );
@@ -630,7 +630,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'hover:border-ds-line-control',
             )}
           >
-            {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+            {sel && <Check className="absolute right-2 top-2 size-ds-icon-sm text-primary" aria-hidden />}
             <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
             <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
             <span className="w-full truncate font-mono text-micro text-muted-foreground" title={found.executable}>{found.executable}</span>
@@ -660,7 +660,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             data-testid={`recruiter-found-${found.runtime}`}
             className={cn('h-auto min-w-0 gap-1.5 rounded-lg px-2.5 py-1.5', sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'hover:border-ds-line-control')}
           >
-            {sel && <Check className="h-3.5 w-3.5 text-primary" aria-hidden />}
+            {sel && <Check className="size-ds-icon-sm text-primary" aria-hidden />}
             <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
             <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
           </Button>
@@ -705,7 +705,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           ) : null}
           {bridge && foundHere.length === 0 ? (
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="recruiter-found-none">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
               <span>
                 {t('foundHereNone')}{' '}
                 <a href={appSetupLink(null)} className="font-medium text-primary hover:underline" data-testid="recruiter-found-install">{t('foundHereInstall')}</a>
@@ -727,7 +727,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                     )}
                   >
-                    {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                    {sel && <Check className="absolute right-2 top-2 size-ds-icon-sm text-primary" aria-hidden />}
                     <span className={cn(
                       'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
                       sel && 'bg-ds-action-soft text-primary',
@@ -758,12 +758,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
         </>
       )}
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
         {t('runtimeGuide')}
       </p>
       {runtime === 'connector' && (
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
           {t('runtimeCustomOtherGuide')}
         </p>
       )}
@@ -1156,7 +1156,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {mode === 'org' ? tSettings('agentScopeAllProjectsBody') : tSettings('agentScopeSpecificProjectsBody')}
                     </p>
                   </div>
-                  {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                  {selected ? <CheckCircle2 className="size-ds-icon-md shrink-0 text-primary" aria-hidden /> : null}
                 </div>
               </button>
             );
@@ -1184,7 +1184,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="truncate text-sm font-semibold text-foreground">{project.name}</p>
-                    {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                    {selected ? <CheckCircle2 className="size-ds-icon-md shrink-0 text-primary" aria-hidden /> : null}
                   </div>
                 </button>
               );
@@ -1197,7 +1197,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
         )}
 
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
           {t('scopeStepGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{tSettings('agentSeatCaption')}</p>
@@ -1215,7 +1215,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
   return (
     <div className={cn('mx-auto flex w-full flex-1 flex-col gap-4 p-4', oneScreen ? 'max-w-2xl' : 'max-w-5xl')}>
       {showTopBar ? (
-        <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} showContextChip />
+        <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="size-ds-icon-sm" aria-hidden />{t('title')}</h1>} showContextChip />
       ) : null}
       {onExit ? (
         <button
@@ -1223,7 +1223,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           onClick={onExit}
           className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ChevronLeft className="h-3.5 w-3.5" />
+          <ChevronLeft className="size-ds-icon-sm" />
           {tAgents('backToList')}
         </button>
       ) : null}
@@ -1275,7 +1275,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <>
                   {/* 선생님 피드백(2026-07-07, ~110직군): 플랫 리스트 탐색 불가 — 검색 + division 그루핑. */}
                   <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Search className="absolute left-2.5 top-1/2 size-ds-icon-sm -translate-y-1/2 text-muted-foreground" aria-hidden />
                     <Input
                       type="text"
                       value={roleQuery}
@@ -1306,9 +1306,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                                   sel ? 'border-ds-action ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                                 )}
                               >
-                                {sel && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary" aria-hidden />}
+                                {sel && <Check className="absolute right-2.5 top-2.5 size-ds-icon-sm text-primary" aria-hidden />}
                                 <span className="flex items-center gap-2 text-sm font-bold text-foreground">
-                                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                                  <Icon className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                                   {role.name}
                                 </span>
                                 {role.description && <span className="text-xs leading-relaxed text-muted-foreground">{role.description}</span>}
@@ -1345,12 +1345,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   <p className="text-xs text-muted-foreground">{t('equipSkipCardBody')}</p>
                 </div>
                 {equipSkip
-                  ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden />
+                  ? <CheckCircle2 className="size-ds-icon-md shrink-0 text-primary" aria-hidden />
                   : <Badge variant="chip" className="shrink-0 text-micro">{t('equipSkipBadge')}</Badge>}
               </button>
 
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 {t('roleGuide')}
               </p>
               {oneScreen ? (
@@ -1465,7 +1465,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               ) : null}
 
               <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
-                <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="size-ds-icon-md" />{t('back')}</Button>
                 {equipSkip ? (
                   <Button
                     variant="hero"
@@ -1538,7 +1538,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </Select>
                   )}
                   <p className="flex items-start gap-1.5 text-xs text-foreground">
-                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <Sparkles className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                     {t('agentInlineNote')}
                   </p>
                 </div>
@@ -1607,12 +1607,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     <p className="break-keep text-xs text-muted-foreground">{t('connectElsewhereNote')}</p>
                   </div>
                   <div className="flex justify-start pt-1">
-                    <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                    <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="size-ds-icon-md" />{t('back')}</Button>
                   </div>
                 </div>
               ) : (
               <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
-                <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="size-ds-icon-md" />{t('back')}</Button>
                 <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
                   {recruiting ? t('recruiting') : t('recruitCta')}
                 </Button>
@@ -1630,7 +1630,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <p className="text-sm font-semibold text-foreground">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipRuntimeSaveWarning && (
                   <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
-                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                     {t('equipRuntimeSaveWarning')}
                   </p>
                 )}
@@ -1667,7 +1667,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         {t('equipMcpConfigLabel')} <span className="font-mono font-normal text-foreground">{mcpConfigFilename}</span>
                       </p>
                       <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
-                        {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
+                        {equipMcpCopied ? <><Check className="size-ds-icon-md" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>
                     </div>
                     {equipMcpCopyFailed ? <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p> : null}
@@ -1856,7 +1856,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
                 </div>
                 <p className="flex items-start gap-1.5 border-b border-border bg-ds-background px-3 py-2 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                   {/* story 5ea9bafe(P1-b): "전달하세요"만으론 HOW가 없다는 유나 UX 지적 — 런타임-aware
                       구체적 방법(MCP-native=작업폴더에 두고 읽으라 지시 / 커넥터=수동 연결 完 後 전달). */}
                   {recruitResult.mcp_config
@@ -1874,7 +1874,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">🔑 {t('scopeTitle')}</span>
                   <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(true)}>
-                    <RefreshCw className="h-3.5 w-3.5" />{t('rotate')}
+                    <RefreshCw className="size-ds-icon-sm" />{t('rotate')}
                   </Button>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -1923,7 +1923,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   stdio는 세션 연결만으로 SSE ack가 자동 진행)를 이 안내에도 적용한다 — stdio는
                   "tool을 호출해야 완료된다"가 아니라 "연결되면 자동 완료된다"가 맞는 문장이다. */}
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 {t(
                   resolveVerifyGuideKey(Boolean(recruitResult.mcp_config), recruitResult.default_transport),
                   { runtime: currentRuntimeDisplayName, josa: pickEulReulJosa(currentRuntimeDisplayName) },
@@ -1934,7 +1934,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   connect-step(#3114)에만 넣었던 「Claude Code 재시작」 명시 안내를 여기에도 둔다 —
                   설정만 붙이고 재시작 안 하면 검증이 영원히 pending(무한 폴링). info 톤(미확認≠에러). */}
               <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
-                <RotateCw className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <RotateCw className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 <span>{tOnboarding('restartAfterConfig')}</span>
               </div>
 
@@ -1948,7 +1948,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
                     </span>
                     <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0" data-testid="recruiter-verify-prompt-copy">
-                      {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                      {rail.copiedVerifyPrompt ? <><Check className="size-ds-icon-sm" />{t('copied')}</> : <><Copy className="size-ds-icon-sm" />{t('copy')}</>}
                     </Button>
                   </div>
                   {/* story #4372 — 복사가 실패해도 버튼만 «복사»로 남던 자리(훅의 copyVerifyPromptFailed를 안 읽음). 온보딩 연결 화면과 같은 패널. */}
@@ -1969,7 +1969,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </span>
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => void handleVerify()} disabled={verifying}>
-                  <RefreshCw className={cn('h-3.5 w-3.5', verifying && 'animate-spin')} />{t('verifyRetry')}
+                  <RefreshCw className={cn('size-ds-icon-sm', verifying && 'animate-spin')} />{t('verifyRetry')}
                 </Button>
               </div>
               <VerifyRail steps={displaySteps} />
@@ -1977,7 +1977,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   재시도한다(prod 5회). 확인 중임을 명시. verified/timeout이면 자동으로 사라진다. */}
               {awaitingVerification && !timedOut && (
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                  <Loader2 className="size-ds-icon-sm shrink-0 animate-spin" aria-hidden />
                   {tOnboarding('verifyWaiting')}
                 </p>
               )}
@@ -2025,7 +2025,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               </div>
 
               <p className="flex items-start gap-1.5 text-xs text-info">
-                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <Sparkles className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 {t('executionBoundaryNote')}
               </p>
 
@@ -2058,7 +2058,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               ) : null}
 
               <div className="flex justify-between gap-2 pt-2">
-                <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="size-ds-icon-md" />{t('back')}</Button>
                 {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. story 4680: glass while [이 컴퓨터에서
                     시작] is the hero; the old rule (hero once verified) otherwise */}
                 <Link href={chatsHref} onClick={handleFinish}><Button variant={startHereMode(Boolean(bridge), currentCapability) ? 'glass' : verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>

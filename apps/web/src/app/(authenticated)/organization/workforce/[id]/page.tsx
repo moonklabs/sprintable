@@ -625,10 +625,10 @@ export default function AgentDetailPage() {
                 className="max-w-32"
               />
               <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} aria-label={tc('save')} className="text-success transition hover:opacity-80 disabled:opacity-50">
-                <Check className="h-4 w-4" />
+                <Check className="size-ds-icon-sm" />
               </button>
               <button type="button" onClick={() => setEditingName(false)} aria-label={tc('cancel')} className="text-muted-foreground hover:text-foreground">
-                <X className="h-4 w-4" />
+                <X className="size-ds-icon-sm" />
               </button>
             </div>
           ) : (
@@ -650,7 +650,7 @@ export default function AgentDetailPage() {
                       aria-label={tc('edit')}
                       className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <Pencil className="h-3.5 w-3.5" />
+                      <Pencil className="size-ds-icon-sm" />
                     </button>
                   )}
                 </div>
@@ -833,7 +833,7 @@ export default function AgentDetailPage() {
             description={t('agentFakechatDescription')}
             action={freshApiKey ? (
               <DsButton variant="secondary" onClick={() => void handleCopyFakechatEnvKey()}>
-                {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="mr-1 h-3.5 w-3.5" />{ta('fakechatEnvCopyExport')}</>}
+                {fakechatEnvKeyCopied ? <Check className="size-ds-icon-md" /> : <><Copy className="mr-1 size-ds-icon-md" />{ta('fakechatEnvCopyExport')}</>}
               </DsButton>
             ) : undefined}
           >
