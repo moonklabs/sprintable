@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { TopBarSwitcherTrigger } from './top-bar-switcher';
 import { Icon } from '@/components/ds/icon';
 import { DEPTH1_ITEMS } from '@/lib/nav-depth1';
 import { leadingCrumbs, nodeText, placeFirstPath, type PathCrumb } from '@/lib/top-bar-path';
@@ -55,7 +56,7 @@ export function TopBarPath({ crumbs, title, stale }: { crumbs: readonly PathCrum
         {crumbs.map((crumb, i) => (
           <li key={crumb.key} role="listitem" data-crumb={crumb.key} className="hidden min-w-0 items-center gap-ds-2 lg:flex">
             {i > 0 ? <Icon name="chevron_right" size={16} className="text-ds-ink-3" /> : null}
-            {crumb.href ? <Link href={crumb.href} className={CRUMB_LINK}>{crumb.label}</Link> : <span className={CRUMB}>{crumb.label}</span>}
+            {crumb.key === 'place' && crumb.href ? <Link href={crumb.href} className={CRUMB_LINK}>{crumb.label}</Link> : <TopBarSwitcherTrigger kind={crumb.key === 'project' ? 'project' : 'org'} label={crumb.label} />}
           </li>
         ))}
         <li

@@ -73,7 +73,7 @@ async function build() {
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'),
-    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"' },
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"', 'process.env.NEXT_PUBLIC_EE_ENABLED': '"false"' }, // story 5031 (5a-2): the bar now holds the project switcher (its dialogs read the EE flag)
     plugins: [
       { name: 'phone-bar-4887-stubs', setup(b) {
         b.onResolve({ filter }, (a) => ({ path: a.path, namespace: 'stub4887p' }));

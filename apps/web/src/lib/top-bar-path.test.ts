@@ -48,11 +48,11 @@ describe('the path rule — org › (project when the screen is project-scoped, 
     expect(pathScopeFor('/login')).toEqual({ kind: 'none' });
   });
 
-  it('crumb destinations: the organization → 홈 first screen, the place → its first screen, the project → none', () => {
+  it('crumb destinations: only the place is a link (its first screen); the organization and the project are switcher buttons (no destination)', () => {
     const crumbs = leadingCrumbs({ pathname: '/organization/workforce/runs', orgName: ORG, projectName: PROJECT, placeName: (p) => NAMES[p]!, placeHref: placeFirstPath });
-    expect(crumbs.map((c) => [c.key, c.href])).toEqual([['org', '/org-briefing'], ['place', '/organization/workforce']]);
+    expect(crumbs.map((c) => [c.key, c.href])).toEqual([['org', undefined], ['place', '/organization/workforce']]); // 5a-2: the organization is a button that opens the project switcher, not a link
     const proj = leadingCrumbs({ pathname: '/acme/sprintable/flow', orgName: ORG, projectName: PROJECT, placeName: (p) => NAMES[p]!, placeHref: placeFirstPath });
-    expect(proj.map((c) => [c.key, c.href])).toEqual([['org', '/org-briefing'], ['project', undefined]]);
+    expect(proj.map((c) => [c.key, c.href])).toEqual([['org', undefined], ['project', undefined]]);
   });
 
   it('nodeText reads the words inside a title element (h1 · span · nested), and nothing from a component that renders on its own', () => {

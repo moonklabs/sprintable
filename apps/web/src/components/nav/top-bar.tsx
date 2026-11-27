@@ -14,6 +14,7 @@ import { useIsTablet } from '@/hooks/use-mobile';
 import { IconButton } from '@/components/ds/icon-button';
 import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 import { TopBarPath, useTopBarCrumbs } from './top-bar-path';
+import { TopBarSwitcherHost } from './top-bar-switcher';
 import { TopBarSearch } from './top-bar-search';
 import { desktopApp } from '@/lib/desktop-app';
 import type { OrgSwitcherItem } from './unified-switcher';
@@ -100,7 +101,10 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           제목이 거의 안 줄어 넘쳤다(스토리지 상단바 420/402 실측). */}
       {/* story 5031 (5a): the LEFT zone — below lg `contents` (the title is a direct child of the bar exactly as before); from lg the path (org › project-or-place) then the title as the path's last crumb. The title keeps its own element (an h1 where the screen made it one). */}
       <div data-testid="top-bar-left" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:basis-0 lg:items-center lg:gap-ds-2">
-        <TopBarPath crumbs={crumbs} title={title} stale={titleStale} />
+        {/* story 5031 (5a-2): the «조직» / «프로젝트» crumbs open the project switcher's menu — the host holds its one state (and the new-project dialog) */}
+        <TopBarSwitcherHost orgs={orgMemberships} currentOrgId={orgId} projects={projectMemberships} currentProjectId={projectId}>
+          <TopBarPath crumbs={crumbs} title={title} stale={titleStale} />
+        </TopBarSwitcherHost>
       </div>
       {/* story 5031 (5a): the MIDDLE zone — the field that opens ⌘K (grows twice as fast as the sides until its 480 cap, so the field is as wide as the room allows and the two sides stay equal → it is centred) (lg up; below lg the icon in the right zone is the door). No palette provider (a test of the bar alone) = no field. */}
       {openPalette ? (

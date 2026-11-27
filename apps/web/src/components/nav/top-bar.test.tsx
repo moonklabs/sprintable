@@ -13,6 +13,7 @@ import koMessages from '../../../messages/ko.json';
 // story 5031 (5a): the bar now reads the path (its left zone is «org › place › title»), so the mock also answers usePathname — these tests are about the phone-width pieces (trigger · title wrapper · bell · layer), not the path (top-bar.5a.test.tsx).
 vi.mock('next/navigation', () => ({
   usePathname: () => '/org-briefing',
+  useSearchParams: () => new URLSearchParams(), // story 5031 (5a-2): the bar holds the project switcher's state (useUnifiedSwitcher reads the query)
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 

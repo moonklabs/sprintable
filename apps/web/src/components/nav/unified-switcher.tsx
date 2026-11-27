@@ -20,8 +20,7 @@ import { CreateProjectDialog } from '@/components/nav/create-project-dialog';
 import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { NEW_PROJECT_PARAM, OPEN_NEW_PROJECT_EVENT } from '@/components/nav/new-project-entry';
-import { desktopApp } from '@/lib/desktop-app';
+import { registerNewProjectOwner } from '@/components/nav/new-project-owner';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -45,6 +44,133 @@ function OrgInitial({ name }: { name: string }) {
   );
 }
 
+/**
+ * story 5031 (5a-2): the «새 프로젝트» door of the desktop app (the event · the ⌘N flag) opens THIS switcher's dialog when this instance is the owner (new-project-owner.ts decides, by priority).
+ * The setter is a new function each render — the registered opener reads the latest (kept after render, never during it).
+ */
+export function useNewProjectOwner(setCreateProjectOpen: (open: boolean) => void, priority: number): void {
+  const latest = useRef(setCreateProjectOpen);
+  useEffect(() => { latest.current = setCreateProjectOpen; });
+  useEffect(() => registerNewProjectOwner(() => latest.current(true), priority), [priority]);
+}
+
+/**
+ * story 5031 (5a-2): the INSIDE of the project switcher's menu — the current organization's project lines (check on the current one) · «새 프로젝트» · the other organizations with their projects · «새 조직». One part for the list column's switcher and the desktop top bar's path
+ * (its «조직» and «프로젝트» crumbs open this same menu): the menu is written once. The state is the hook's (`useUnifiedSwitcher`) — the part only draws it.
+ * `-webkit-app-region: no-drag`: in the desktop app the top bar is the window's drag area and a menu opened under it must not be one (a press on a line would move the window).
+ */
+export function SwitcherMenuContent({ s, align = 'start', className }: { s: ReturnType<typeof useUnifiedSwitcher>; align?: 'start' | 'center' | 'end'; className?: string }) {
+  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
+  const t = useTranslations('nav');
+  const tCommon = useTranslations('common');
+  const tSettings = useTranslations('settings');
+  return (
+    <DropdownMenuContent className={cn('w-auto min-w-64 [-webkit-app-region:no-drag]', className)} align={align} side="bottom" sideOffset={4}>
+      {/* 현재 조직 */}
+      <DropdownMenuGroup>
+        <div className="flex items-center justify-between px-2 py-1.5">
+          <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
+            <span className="flex items-center gap-1.5">
+              <OrgInitial name={s.displayOrg} />
+              {s.displayOrg}
+            </span>
+          </DropdownMenuLabel>
+          <button
+            type="button"
+            onClick={() => { window.location.href = flatHref('/settings?tab=organization'); }}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={t('switcherOrgSettingsAria')}
+          >
+            <Settings className="h-3 w-3" />
+          </button>
+        </div>
+        {/* story #2093 후속 — s.currentOrgProjects(X-Org-Id로 방금 조회한 정본)를 쓴다.
+            raw projects prop은 서버 /me/memberships가 JWT "현재 org" 클레임 스코프라
+            URL org와 계정 상태 org가 갈리면(cross-org 진입) 다른 org의 프로젝트를
+            이 org 소속인 것처럼 보여줄 수 있다. */}
+        {s.currentOrgLoading && (
+          <div className="flex items-center gap-2 px-5 py-1.5 text-sm text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>{tCommon('loading')}</span>
+          </div>
+        )}
+        {s.currentOrgProjects.map((project) => (
+          <DropdownMenuItem
+            key={project.projectId}
+            disabled={s.pending}
+            className="pl-5"
+            onClick={() => void s.switchProject(project.projectId)}
+          >
+            <span className="flex-1 truncate text-sm">{project.projectName}</span>
+            {project.projectId === s.currentProjectId && (
+              <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+            )}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem className="pl-5 text-muted-foreground" onClick={() => s.setCreateProjectOpen(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          <span className="text-sm">{t('switcherNewProject')}</span>
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+
+      {/* 다른 조직들 — 각 조직 아래에 프로젝트 표시 */}
+      {s.otherOrgs.map((org) => {
+        const orgProjects = s.otherOrgProjects[org.orgId];
+        const isLoading = s.loadingOrgIds.has(org.orgId);
+        return (
+          <div key={org.orgId}>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <div className="px-2 py-1.5">
+                <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
+                  <span className="flex items-center gap-1.5">
+                    <OrgInitial name={org.orgName} />
+                    {org.orgName}
+                    {org.role && (
+                      <span className="text-micro font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
+                    )}
+                  </span>
+                </DropdownMenuLabel>
+              </div>
+              {isLoading ? (
+                <div className="flex items-center gap-2 pl-5 py-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>{tCommon('loading')}</span>
+                </div>
+              ) : orgProjects && orgProjects.length > 0 ? (
+                orgProjects.map((project) => (
+                  <DropdownMenuItem
+                    key={project.projectId}
+                    disabled={s.pending}
+                    className="pl-5"
+                    onClick={() => void s.switchOrgAndProject(org.orgId, project.projectId)}
+                  >
+                    <span className="flex-1 truncate text-sm">{project.projectName}</span>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem
+                  disabled={s.pending}
+                  className="pl-5 text-muted-foreground"
+                  onClick={() => void s.switchOrg(org.orgId)}
+                >
+                  <span className="text-sm">{t('switcherSwitchToOrg')}</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </div>
+        );
+      })}
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={() => s.setCreateOrgOpen(true)}>
+        <Plus className="h-3.5 w-3.5" />
+        <span className="text-sm">{t('switcherNewOrganization')}</span>
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+}
+
 // story #2076: 사이드바 트리거(≥1024)용 UI. 로직은 useUnifiedSwitcher 훅 — 신규
 // ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이 같은 훅을 쓰되 컨테이너만 Sheet로 갈아낀다.
 export function UnifiedSwitcher({
@@ -54,27 +180,10 @@ export function UnifiedSwitcher({
   currentProjectId,
   className,
 }: UnifiedSwitcherProps) {
-  const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
-  const t = useTranslations('nav');
-  const tCommon = useTranslations('common');
-  const tSettings = useTranslations('settings');
   const s = useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId });
-  // story 4832: the sidebar's «새 프로젝트» line (desktop app) opens this dialog — only THIS instance listens (the top-bar chip would open a second one)
-  const openCreateProject = useRef(s.setCreateProjectOpen);
-  useEffect(() => { openCreateProject.current = s.setCreateProjectOpen; }); // the hook's setter is a new function each render — the listener reads the latest (kept after render, never during it)
-  useEffect(() => {
-    if (!desktopApp()) return; // the line and the menu's flag are the desktop app's: a browser link carrying the flag opens nothing
-    const open = () => openCreateProject.current(true);
-    window.addEventListener(OPEN_NEW_PROJECT_EVENT, open);
-    // the app menu's ⌘N (story 4832): the flag on the page address — read once, then taken off (a reload must not open it again)
-    const here = new URL(window.location.href);
-    if (here.searchParams.get(NEW_PROJECT_PARAM) === '1') {
-      here.searchParams.delete(NEW_PROJECT_PARAM);
-      window.history.replaceState(window.history.state, '', `${here.pathname}${here.search}${here.hash}`);
-      open();
-    }
-    return () => window.removeEventListener(OPEN_NEW_PROJECT_EVENT, open);
-  }, []);
+  // story 4832: the sidebar's «새 프로젝트» line (desktop app) opens a project dialog. Story 5031 (5a-2): several switchers can be mounted together (this column · the account popover · the desktop top bar's path) — the event reaches ONE of them (new-project-owner.ts);
+  // this one is an ordinary candidate (priority 0), the top bar's is the preferred owner.
+  useNewProjectOwner(s.setCreateProjectOpen, 0);
 
   return (
     <>
@@ -101,109 +210,7 @@ export function UnifiedSwitcher({
             </SidebarMenuButton>
           }
         />
-        <DropdownMenuContent className="w-auto min-w-64" align="start" side="bottom" sideOffset={4}>
-          {/* 현재 조직 */}
-          <DropdownMenuGroup>
-            <div className="flex items-center justify-between px-2 py-1.5">
-              <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
-                <span className="flex items-center gap-1.5">
-                  <OrgInitial name={s.displayOrg} />
-                  {s.displayOrg}
-                </span>
-              </DropdownMenuLabel>
-              <button
-                type="button"
-                onClick={() => { window.location.href = flatHref('/settings?tab=organization'); }}
-                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label={t('switcherOrgSettingsAria')}
-              >
-                <Settings className="h-3 w-3" />
-              </button>
-            </div>
-            {/* story #2093 후속 — s.currentOrgProjects(X-Org-Id로 방금 조회한 정본)를 쓴다.
-                raw projects prop은 서버 /me/memberships가 JWT "현재 org" 클레임 스코프라
-                URL org와 계정 상태 org가 갈리면(cross-org 진입) 다른 org의 프로젝트를
-                이 org 소속인 것처럼 보여줄 수 있다. */}
-            {s.currentOrgLoading && (
-              <div className="flex items-center gap-2 px-5 py-1.5 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>{tCommon('loading')}</span>
-              </div>
-            )}
-            {s.currentOrgProjects.map((project) => (
-              <DropdownMenuItem
-                key={project.projectId}
-                disabled={s.pending}
-                className="pl-5"
-                onClick={() => void s.switchProject(project.projectId)}
-              >
-                <span className="flex-1 truncate text-sm">{project.projectName}</span>
-                {project.projectId === s.currentProjectId && (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
-                )}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem className="pl-5 text-muted-foreground" onClick={() => s.setCreateProjectOpen(true)}>
-              <Plus className="h-3.5 w-3.5" />
-              <span className="text-sm">{t('switcherNewProject')}</span>
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-
-          {/* 다른 조직들 — 각 조직 아래에 프로젝트 표시 */}
-          {s.otherOrgs.map((org) => {
-            const orgProjects = s.otherOrgProjects[org.orgId];
-            const isLoading = s.loadingOrgIds.has(org.orgId);
-            return (
-              <div key={org.orgId}>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <div className="px-2 py-1.5">
-                    <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
-                      <span className="flex items-center gap-1.5">
-                        <OrgInitial name={org.orgName} />
-                        {org.orgName}
-                        {org.role && (
-                          <span className="text-micro font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
-                        )}
-                      </span>
-                    </DropdownMenuLabel>
-                  </div>
-                  {isLoading ? (
-                    <div className="flex items-center gap-2 pl-5 py-1.5 text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      <span>{tCommon('loading')}</span>
-                    </div>
-                  ) : orgProjects && orgProjects.length > 0 ? (
-                    orgProjects.map((project) => (
-                      <DropdownMenuItem
-                        key={project.projectId}
-                        disabled={s.pending}
-                        className="pl-5"
-                        onClick={() => void s.switchOrgAndProject(org.orgId, project.projectId)}
-                      >
-                        <span className="flex-1 truncate text-sm">{project.projectName}</span>
-                      </DropdownMenuItem>
-                    ))
-                  ) : (
-                    <DropdownMenuItem
-                      disabled={s.pending}
-                      className="pl-5 text-muted-foreground"
-                      onClick={() => void s.switchOrg(org.orgId)}
-                    >
-                      <span className="text-sm">{t('switcherSwitchToOrg')}</span>
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuGroup>
-              </div>
-            );
-          })}
-
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => s.setCreateOrgOpen(true)}>
-            <Plus className="h-3.5 w-3.5" />
-            <span className="text-sm">{t('switcherNewOrganization')}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
+        <SwitcherMenuContent s={s} />
       </DropdownMenu>
 
       {/* story #2544 — org 전환 실패를 명시(침묵 실패 금지, #2468과 동일 원칙). DropdownMenuItem

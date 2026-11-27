@@ -31,7 +31,7 @@ export function nodeText(node: ReactNode): string {
 export interface PathCrumb {
   key: 'org' | 'project' | 'place';
   label: string;
-  /** where pressing it goes; none for the project (the project switcher lives in the icon bar's account) */
+  /** where pressing it goes: the place → its first screen. The organization and the project have none: they are buttons that open the project switcher's menu (components/nav/top-bar-switcher.tsx) — going home is the place crumb's and the icon bar's job */
   href?: string;
 }
 
@@ -50,7 +50,7 @@ export interface LeadingCrumbsInput {
 /** The crumbs BEFORE the screen's own title. */
 export function leadingCrumbs({ pathname, orgName, projectName, placeName, placeHref, titleText }: LeadingCrumbsInput): PathCrumb[] {
   const out: PathCrumb[] = [];
-  if (orgName) out.push({ key: 'org', label: orgName, href: placeHref('home') });
+  if (orgName) out.push({ key: 'org', label: orgName });
   const scope = pathScopeFor(pathname);
   if (scope.kind === 'project') {
     if (projectName) out.push({ key: 'project', label: projectName });

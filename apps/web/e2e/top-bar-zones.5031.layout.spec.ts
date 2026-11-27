@@ -65,7 +65,7 @@ async function build() {
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'),
-    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"' },
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"', 'process.env.NEXT_PUBLIC_EE_ENABLED': '"false"' }, // (5a-2: the switcher's dialogs read the EE flag)
     plugins: [routerPlugin(), layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
@@ -89,6 +89,8 @@ async function open(page: Page, cfg: Cfg, o: { win: number; desktopApp?: boolean
   await page.route('http://preview.test/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` });
+    // story 5031 (5a-2): the switcher's menu reads the projects of an organization
+    if (url.pathname === '/api/projects') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'p1', name: '스프린터블' }, { id: 'p2', name: '랜딩' }] }) });
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
   });
   if (o.desktopApp) {
@@ -267,3 +269,40 @@ for (const [win, frame] of [[390, 390], [1280, barWidth(1280)]] as const) {
     expect(await nav.getByRole('listitem').last().getAttribute('aria-current')).toBe('page');
   });
 }
+
+// story 5031 (5a-2 · PO 11-27): the «조직» / «프로젝트» crumbs open the project switcher's menu. Real keyboard in Chromium (jsdom has no native Enter → click): Enter and Space open it, Esc closes it, focus comes back to the crumb. And in the desktop app the trigger AND the open menu are no-drag.
+for (const key of ['Enter', 'Space'] as const) {
+  test(`[SID:5031] 1280: the project crumb opens its menu with ${key}; Esc closes it and the focus comes back to the crumb; the organization crumb opens the same menu`, async ({ page }) => {
+    await open(page, { pathname: '/acme/sprintable/flow', titleKind: 'span', title: '흐름', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280 });
+    const project = page.getByTestId('top-bar-switcher-project');
+    await expect(project).toHaveAttribute('aria-haspopup', 'menu');
+    await project.focus();
+    await page.keyboard.press(key);
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: '랜딩' })).toBeVisible();
+    const lines = await menu.getByRole('menuitem').allTextContents();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(project, 'the focus returns to the crumb that opened the menu').toBeFocused();
+    const org = page.getByTestId('top-bar-switcher-org');
+    await org.focus();
+    await page.keyboard.press(key);
+    await expect(page.getByRole('menu')).toBeVisible();
+    expect(await page.getByRole('menu').getByRole('menuitem').allTextContents(), 'the same menu').toEqual(lines);
+    await page.keyboard.press('Escape');
+    await expect(org).toBeFocused();
+  });
+}
+
+test('[SID:5031] desktop app: both crumb triggers and the OPEN menu compute `-webkit-app-region: no-drag` (a menu opened under the drag strip must not move the window)', async ({ page }) => {
+  await open(page, { pathname: '/acme/sprintable/flow', titleKind: 'span', title: '흐름', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280, desktopApp: true });
+  const region = (sel: string) => page.evaluate((q) => getComputedStyle(document.querySelector(q)!).getPropertyValue('-webkit-app-region').trim(), sel);
+  expect(await region('[data-testid="top-bar-switcher-org"]')).toBe('no-drag');
+  expect(await region('[data-testid="top-bar-switcher-project"]')).toBe('no-drag');
+  await page.getByTestId('top-bar-switcher-project').click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  expect(await region('[data-slot="dropdown-menu-content"]'), 'the open menu').toBe('no-drag');
+  // and the trigger is a pressable of the strip like the others (the strip itself still drags)
+  expect(await region('[data-testid="top-bar"]')).toBe('drag');
+});

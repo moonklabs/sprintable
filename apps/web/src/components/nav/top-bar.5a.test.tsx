@@ -109,23 +109,26 @@ describe('TopBar 5a — the path (the rule: org › project-or-place › title; 
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 
-  it('the path is a labelled navigation with the crumbs as a list; the organization and the place are links to their first screens, the project is plain text', async () => {
+  it('the path is a labelled navigation with the crumbs as a list; the place is a link to its first screen; the organization and the project are switcher buttons (5a-2), not links', async () => {
     await mount({ pathname: '/organization/workforce/runs', title: <span>실행 기록</span> });
     const nav = container.querySelector('[data-testid="top-bar-path"]')!;
     expect(nav.tagName).toBe('NAV');
     expect(nav.getAttribute('aria-label')).toBe('현재 위치');
-    expect([...nav.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['올리베이라 조직', '/org-briefing?p=p1'], ['에이전트', '/organization/workforce?p=p1']]);
+    // (5a-2: the organization crumb used to be a link home; going home is the place crumb's and the icon bar's job now)
+    expect([...nav.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['에이전트', '/organization/workforce?p=p1']]);
+    expect(nav.querySelector('[data-testid="top-bar-switcher-org"]')!.getAttribute('aria-haspopup')).toBe('menu');
     await mount({ pathname: '/acme/sprintable/flow', title: <span>흐름</span> });
     const crumbs = container.querySelectorAll('[data-testid="top-bar-path"] li[data-crumb]');
     expect(crumbs[1]!.querySelector('a')).toBeNull();
+    expect(crumbs[1]!.querySelector('[data-testid="top-bar-switcher-project"]')).not.toBeNull();
   });
 
   it('a breadcrumb control is a real, enabled link: pressing it goes to the crumb\'s place (a jsdom press cannot prove the OS drag — see the layout spec for `no-drag`)', async () => {
     await mount({ pathname: '/organization/workforce/runs', title: <span>실행 기록</span> });
     const links = container.querySelectorAll<HTMLAnchorElement>('[data-testid="top-bar-path"] a');
-    await act(async () => { links[1]!.click(); });
+    expect(links).toHaveLength(1); // the place; the organization is a switcher button (5a-2)
     await act(async () => { links[0]!.click(); });
-    expect(navigated).toEqual(['/organization/workforce?p=p1', '/org-briefing?p=p1']);
+    expect(navigated).toEqual(['/organization/workforce?p=p1']);
   });
 
   it('English messages carry the same keys (a Korean word is never the only copy)', async () => {
@@ -215,7 +218,7 @@ describe('TopBar 5a — the desktop app: the strip is the window\'s drag area', 
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="top-bar-search-field"]')!.click(); });
     expect(container.querySelector('[data-testid="palette-open"]')!.textContent).toBe('true');
     await act(async () => { container.querySelector<HTMLAnchorElement>('[data-testid="top-bar-path"] a')!.click(); });
-    expect(navigated).toEqual(['/org-briefing?p=p1']);
+    expect(navigated).toEqual(['/organization/workforce?p=p1']);
   });
 });
 
