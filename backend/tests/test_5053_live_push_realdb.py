@@ -137,6 +137,49 @@ async def test_control_with_the_bare_dispatch_the_open_list_hears_nothing(monkey
 
 
 @pytest.mark.anyio
+async def test_a_person_without_a_project_grant_gets_the_live_frame_on_the_real_connection_queue(monkeypatch):
+    """dev 11-27 (live-lift, 6013 served): the frame was pushed only to recipients the `team_members` VIEW calls «human» — and the view lists a person only once they hold a project
+    grant. The organisation's owner (the QA person) holds none, so the owner's open list heard nothing. Here the person has NO grant, the real registry of open streams is used (a queue
+    registered the way `/events/stream` registers one), and the frame must arrive on THAT queue — the road the browser listens on."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.main import app
+    from app.routers.events import _agent_connections
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            await s.execute(text("DELETE FROM project_access WHERE org_member_id = :o"), {"o": d["admin_om"]})
+            await s.commit()
+            in_view = (await s.execute(text("SELECT count(*) FROM team_members WHERE id = :i"), {"i": d["admin_om"]})).scalar_one()
+        assert in_view == 0, "the premise: without a grant the person is not in the team_members view"
+        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        _agent_connections[str(d["admin_om"])].add(queue)
+        agent_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        _agent_connections[str(d["agent_id"])].add(agent_queue)
+        try:
+            await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+            async with _client_for(app) as c:
+                ask = await c.delete(f"/api/v2/stories/{d['story_id']}")
+            assert ask.status_code == 202, ask.text
+            await asyncio.sleep(0.2)
+            got = []
+            while not queue.empty():
+                got.append(queue.get_nowait())
+            assert [p for p in got if p.get("event_type") == "conversation.message_created" and p.get("conversation_id")], f"the owner's open stream received the card (got {[p.get('event_type') for p in got]})"
+            assert agent_queue.empty(), "and the agent's own stream received nothing"
+        finally:
+            _agent_connections[str(d["admin_om"])].discard(queue)
+            _agent_connections[str(d["agent_id"])].discard(agent_queue)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_a_rolled_back_savepoint_pushes_nothing(monkeypatch):
     """a best-effort delivery that fails inside its savepoint must not tell the list about a message that does not exist"""
     from sqlalchemy import select

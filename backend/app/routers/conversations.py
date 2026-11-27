@@ -1161,11 +1161,16 @@ async def dispatch_conversation_event_live(
     if not pushes:
         return
     # PEOPLE only (PO 11-27 · C0 5030 «an agent is delivered only a word that calls it»): these roads kept the agent's Event row as before (it is read on the agent's own schedule); the
-    # live frame is for the open web lists of the people in the room — an agent's wake is not widened by this function
-    people = {r[0] for r in (await db.execute(
-        select(TeamMember.id).where(TeamMember.id.in_([uuid.UUID(pid) for pid, _ in pushes]), TeamMember.type == "human")
+    # live frame is for the open web lists of the people in the room — an agent's wake is not widened by this function.
+    # The agents are named from the ANCHOR table (`members`), never the `team_members` VIEW: the view lists a person only once they hold a project grant, and an organisation's owner often
+    # has none — a filter «type == human» over the view dropped exactly that person (dev 11-27: the owner's open list never heard of the card). `_dispatch_conversation_event` itself
+    # treats a recipient the view does not know as a person (`member_type_map.get(pid, "human")`); so does this.
+    from app.models.member import Member
+
+    agents = {r[0] for r in (await db.execute(
+        select(Member.id).where(Member.id.in_([uuid.UUID(pid) for pid, _ in pushes]), Member.type == "agent")
     )).all()}
-    live = [(pid, payload) for pid, payload in pushes if uuid.UUID(pid) in people]
+    live = [(pid, payload) for pid, payload in pushes if uuid.UUID(pid) not in agents]
     if live:
         schedule_after_commit(db, [functools.partial(_push_to_agent, pid, payload) for pid, payload in live])
 
