@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -56,36 +56,54 @@ export interface TeamPresenceItem {
  */
 const PRESENCE_EVENT_DEBOUNCE_MS = 300;
 
-export function useTeamPresence(active: boolean): TeamPresenceItem[] {
+export function useTeamPresence(active: boolean, orgId?: string): TeamPresenceItem[] {
   const [items, setItems] = useState<TeamPresenceItem[]>([]);
   const mux = useSseMultiplexerContext();
 
+  // story 5031 — the snapshot belongs to ONE organization (the ask `/api/team-presence` carries no organization in its URL: it rides on the session / the fetch interceptor's X-Org-Id), and the shell that holds this hook is NOT remounted by an
+  // organization switch (the top bar and the working-count badge are outside the page body's key). When the shell's organization really changes the old number is dropped IN THE RENDER (no frame shows the old organization's count) and the effect
+  // below asks again; an organization first known late (it was empty at mount) is only recorded — not a switch.
+  const [snapshotOrgId, setSnapshotOrgId] = useState(orgId);
+  if (orgId && orgId !== snapshotOrgId) {
+    setSnapshotOrgId(orgId);
+    if (snapshotOrgId) setItems([]);
+  }
+  const lastOrgIdRef = useRef(orgId);
+
   const seqRef = useRef(0);
-  const inFlightRef = useRef(false);
+  // story 5031 — every ask belongs to a GENERATION (= one organization's stretch). The guards below only ever compare asks of the SAME generation: an ask of an organization we have left can neither block the new organization's ask
+  // (the in-flight guard), nor have its answer applied, nor touch the new organization's bookkeeping when it ends (its `finally`). The generation is bumped in a layout effect — synchronously in the commit that shows the new
+  // organization, before any answer of the old one can be handled and also while the tab is hidden (no ask is started then, so a sequence number alone would not move).
+  const genRef = useRef(0);
+  const inFlightGenRef = useRef<number | null>(null); // the generation of the ask in flight (null = none)
   const pendingRef = useRef(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // story #2139 — in-flight 가드(②) + 레이스 가드(③). 실제 네트워크 호출은 여기서만 한다.
   const fetchPresence = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (inFlightRef.current) { pendingRef.current = true; return; }
-    inFlightRef.current = true;
+    const gen = genRef.current;
+    if (inFlightGenRef.current === gen) { pendingRef.current = true; return; }
+    inFlightGenRef.current = gen;
     const mySeq = ++seqRef.current;
     try {
       const res = await fetchWithAuth('/api/team-presence');
       if (!res.ok) return;
       const json = (await res.json()) as TeamPresenceItem[] | { data?: TeamPresenceItem[] };
       // 이 응답을 보낸 뒤에 더 최신 요청이 나갔다면(seqRef가 더 커졌다면) stale이므로 버린다.
-      if (seqRef.current === mySeq) {
+      if (seqRef.current === mySeq && genRef.current === gen) {
         setItems(Array.isArray(json) ? json : (json.data ?? []));
       }
     } catch {
       /* non-critical */
     } finally {
-      inFlightRef.current = false;
-      if (pendingRef.current) {
-        pendingRef.current = false;
-        void fetchPresence();
+      // an ask of a generation we have left must not clear the in-flight mark or start the follow-up of the NEW generation
+      if (genRef.current === gen) {
+        inFlightGenRef.current = null;
+        if (pendingRef.current) {
+          pendingRef.current = false;
+          void fetchPresence();
+        }
       }
     }
   }, []);
@@ -100,6 +118,15 @@ export function useTeamPresence(active: boolean): TeamPresenceItem[] {
       void fetchPresence();
     }, PRESENCE_EVENT_DEBOUNCE_MS);
   }, [fetchPresence]);
+
+  // story 5031 — an organization switch starts a new generation (see `genRef`): the ask in flight is the OLD organization's, its answer is dropped and it does not block the new ask. A late-known organization (empty at mount) is not a switch.
+  useLayoutEffect(() => {
+    if (orgId && lastOrgIdRef.current && orgId !== lastOrgIdRef.current) {
+      genRef.current += 1;
+      pendingRef.current = false;
+    }
+    if (orgId) lastOrgIdRef.current = orgId;
+  }, [orgId]);
 
   useEffect(() => {
     if (!active || typeof window === 'undefined') return;
@@ -120,7 +147,7 @@ export function useTeamPresence(active: boolean): TeamPresenceItem[] {
       document.removeEventListener('visibilitychange', onVisible);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [active, fetchPresence, scheduleFetchPresence, mux]);
+  }, [active, fetchPresence, scheduleFetchPresence, mux, orgId]);
 
   return items;
 }
