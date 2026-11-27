@@ -7,6 +7,7 @@ Real database + the real app (the auth / org dependencies are overridden the way
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -808,6 +809,42 @@ async def test_an_action_without_arguments_stores_no_query_and_no_body():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+def test_text_from_elsewhere_becomes_one_plain_line():
+    """codex pass: an agent's reward reason must not fake the card's own structure (line breaks, direction marks, control characters)"""
+    from app.services.agent_action import plain_text
+
+    assert plain_text("a\nb\r\n\tc  d", 80) == "a b c d"
+    assert plain_text("ok\u202eevil\u200b", 80) == "okevil", "direction / zero-width format characters go"
+    assert plain_text("x" * 500, 120) == "x" * 120
+    assert plain_text(None, 10) == ""
+
+
+@pytest.mark.anyio
+async def test_a_replay_that_hangs_is_cancelled_so_a_stale_running_request_has_no_live_replay():
+    import httpx
+    from starlette.requests import Request
+
+    from app.services import agent_action
+
+    class _Hang(httpx.AsyncClient):
+        async def request(self, method, url, **kw):  # noqa: ANN001
+            await asyncio.sleep(30)
+
+    scope = {"type": "http", "method": "POST", "path": "/x", "headers": [(b"authorization", b"Bearer p")], "app": object()}
+    snap = {"method": "DELETE", "path": "/api/v2/stories/1", "query": "", "org_id": "o", "project_id": "p", "body_b64": ""}
+    orig, orig_t = agent_action.httpx.AsyncClient, agent_action.EXECUTE_TIMEOUT
+    agent_action.httpx.AsyncClient = lambda **kw: _Hang()  # type: ignore[assignment]
+    agent_action.EXECUTE_TIMEOUT = timedelta(milliseconds=200)
+    try:
+        with pytest.raises(TimeoutError):
+            await agent_action.execute_as_presser(Request(scope), snap, request_id=uuid.uuid4())
+        assert agent_action.replaying_request_id() is None, "the idempotency context is reset even when the replay is cancelled"
+    finally:
+        agent_action.httpx.AsyncClient = orig  # type: ignore[assignment]
+        agent_action.EXECUTE_TIMEOUT = orig_t
+    assert agent_action.EXECUTE_TIMEOUT > timedelta(seconds=60) and agent_action.RUNNING_STALE_AFTER > agent_action.EXECUTE_TIMEOUT
 
 
 def test_every_registered_action_is_asked_for_by_exactly_one_route():

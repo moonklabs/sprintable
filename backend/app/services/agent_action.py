@@ -18,12 +18,14 @@ What this module keeps true:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextvars
 import hashlib
 import json
 import logging
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -46,6 +48,7 @@ EXPIRES_AFTER = timedelta(hours=24)
 MAX_OPEN_PER_AGENT_PER_HOUR = 20
 MAX_CARD_RECIPIENTS = 3
 SNAPSHOT_BODY_LIMIT = 64 * 1024
+EXECUTE_TIMEOUT = timedelta(seconds=120)  # the replay is CANCELLED after this (its transaction rolls back) — so a request «running» for longer than RUNNING_STALE_AFTER (> this) has no live replay behind it
 RUNNING_STALE_AFTER = timedelta(minutes=5)  # a press whose execution has not finished by then is taken as not finished (the process may have died) — it can be pressed again; the replay is idempotent
 
 # The id of the request whose stored call is being replayed RIGHT NOW, set only by `execute_as_presser` in this process (a context variable — no client can set it: it is not read from any header). The one
@@ -234,8 +237,15 @@ async def _room_of_request(session: AsyncSession, request: Request, *, agent: An
     return conv, asker
 
 
+def plain_text(text_: str | None, limit: int) -> str:
+    """text that came from somewhere else (an agent's reason, a title) as ONE plain line: control, line-break and invisible direction / format characters become spaces or go, whitespace collapses —
+    so it cannot fake the structure of the card's own sentence"""
+    cleaned = "".join(" " if (ch.isspace() or unicodedata.category(ch) in ("Cc", "Zl", "Zp")) else ("" if unicodedata.category(ch) == "Cf" else ch) for ch in (text_ or ""))
+    return " ".join(cleaned.split())[:limit]
+
+
 def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
-    return t(spec.what_key, locale, target=(target_label or "").strip()[:120] or "—")
+    return t(spec.what_key, locale, target=plain_text(target_label, 120) or "—")
 
 
 async def request_approval(
@@ -397,8 +407,9 @@ async def execute_as_presser(request: Request, snap: dict[str, Any], *, request_
     body = base64.b64decode(snap["body_b64"]) if snap.get("body_b64") else None
     token = _REPLAYING.set(request_id)
     try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url="http://agent-action.internal", timeout=60.0) as client:
-            return await client.request(snap["method"], url, content=body, headers=headers)
+        async with asyncio.timeout(EXECUTE_TIMEOUT.total_seconds()):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url="http://agent-action.internal", timeout=60.0) as client:
+                return await client.request(snap["method"], url, content=body, headers=headers)
     finally:
         _REPLAYING.reset(token)
 
