@@ -50,26 +50,27 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
     // story 5048 T0 ①: the controls are 40 px — the kit head is 80 (min-h-20). Folded (short window) the content is two rows of 40-px controls (62), so py-2 (16) lands it on exactly 80; py-3 would make it 86
-    <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'pb-1.5 pt-2' : 'pb-2.5 pt-3'}`}>
+    // story 5048 (chat row · PO 11-27): the head is TWO lines — name · tag · the line of facts · «⋯» on the first, the people chips on the second (it was name / facts / chips = three, ≈170 px with the chip rows). The numbers in the facts line are the text's own font (tabular), not the fixed-width one.
+    <header data-testid="room-head" className={`min-h-20 flex-shrink-0 border-b border-ds-line px-6 max-lg:hidden ${folded ? 'pb-1.5 pt-2' : 'pb-2 pt-2'}`}>
       <div className="flex min-w-0 items-center gap-2">
-        <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
+        <h1 className="m-0 min-w-0 shrink truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
+        {subline ? <p className="m-0 min-w-0 shrink-[3] truncate text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="room-head-subline">{subline}</p> : null}
         {/* story 4946 — only in a short window: the people button that the chip row folds into */}
         {folded ? (
           <RoomPeoplePopover peopleLabel={peopleLabel!} peopleCount={peopleCount!} peopleParts={peopleParts} chips={chips} moreCount={moreCount} addLabel={addLabel} onAdd={onAdd} />
         ) : null}
         {trailing ? <div className="ml-auto flex flex-shrink-0 items-center gap-1">{trailing}</div> : null}
       </div>
-      {subline ? <p className={`truncate font-mono text-ds-mono-md text-ds-ink-3 ${folded ? 'mt-0' : 'mt-0.5'}`} data-testid="room-head-subline">{subline}</p> : null}
       {folded ? null : (
-      <ul className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="room-head-chips">
+      <ul className="mt-1 flex flex-wrap items-center gap-1.5" data-testid="room-head-chips">
         {chips.map((c) => (
           <li key={c.id} data-testid="room-head-chip" className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-ds-control border border-ds-line px-2 text-ds-small text-ds-ink">
             {c.who}
             {c.state ?? null}
           </li>
         ))}
-        {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
+        {moreCount > 0 ? <li data-testid="room-head-more" className="text-ds-mono-md tabular-nums text-ds-ink-3">+{moreCount}</li> : null}
         {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" className="size-ds-tag" /></li> : null}
       </ul>
       )}
@@ -109,11 +110,11 @@ export function RoomPeoplePopover({ peopleLabel, peopleCount, peopleParts, chips
         {peopleParts ? (
           <span className="flex items-center gap-1.5" data-testid="room-bar-people-parts">
             <span className="sr-only">{peopleParts.spoken}</span>
-            <span className="flex items-center gap-0.5" aria-hidden="true"><Icon name="person" size={14} /><span className="font-mono text-ds-mono-md" data-testid="room-bar-people-humans">{peopleParts.people}</span></span>
-            <span className="flex items-center gap-0.5" aria-hidden="true"><Icon name="smart_toy" size={14} /><span className="font-mono text-ds-mono-md" data-testid="room-bar-people-agents">{peopleParts.agents}</span></span>
+            <span className="flex items-center gap-0.5" aria-hidden="true"><Icon name="person" size={14} /><span className="text-ds-mono-md tabular-nums" data-testid="room-bar-people-humans">{peopleParts.people}</span></span>
+            <span className="flex items-center gap-0.5" aria-hidden="true"><Icon name="smart_toy" size={14} /><span className="text-ds-mono-md tabular-nums" data-testid="room-bar-people-agents">{peopleParts.agents}</span></span>
           </span>
         ) : (
-          <span className="font-mono text-ds-mono-md">{peopleCount}</span>
+          <span className="text-ds-mono-md tabular-nums">{peopleCount}</span>
         )}
       </PopoverTrigger>
       <PopoverContent align="start" aria-label={peopleLabel} className="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 p-3" data-testid="room-bar-people-popup">
@@ -125,7 +126,7 @@ export function RoomPeoplePopover({ peopleLabel, peopleCount, peopleParts, chips
               {c.state ?? null}
             </li>
           ))}
-          {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
+          {moreCount > 0 ? <li data-testid="room-head-more" className="text-ds-mono-md tabular-nums text-ds-ink-3">+{moreCount}</li> : null}
         </ul>
         {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size={16} />} onClick={() => { setOpen(false); onAdd(); }} data-testid="room-head-add">{addLabel}</Button> : null}
       </PopoverContent>
@@ -174,7 +175,7 @@ export function RoomBarTitle({ backLabel, onBack, title, tag, subline, peopleLab
         header={tag || subline ? (
           <p className="flex min-w-0 items-center gap-2 text-ds-small text-ds-ink-3">
             {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
-            {subline ? <span className="min-w-0 truncate font-mono text-ds-mono-md" data-testid="room-head-subline">{subline}</span> : null}
+            {subline ? <span className="min-w-0 truncate text-ds-mono-md tabular-nums" data-testid="room-head-subline">{subline}</span> : null}
           </p>
         ) : null}
       />

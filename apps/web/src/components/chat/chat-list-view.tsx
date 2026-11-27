@@ -267,30 +267,19 @@ function ConversationRow({
   const dmNameRepeatsTitle = dmOtherLabel !== '' && dmOtherLabel === displayName;
   const showDmOtherName = conv.type === 'dm' && !dmNameRepeatsTitle;
 
-  const participantLayer = conv.participants && conv.participants.length > 0 ? (
+  // story 5048 (chat row, PO 11-27: the row was 84 px — the chips took their own lines): a row is TWO lines, about 60 — the name line (name · the «에이전트» mark / a group's «N명 · names» sentence · time · unread) and the preview line.
+  // Who gives way first: the group sentence clips before the name (`shrink-[3]` on the sentence vs the name's 1 — never a factor under 1: a flex row whose factors sum below 1 absorbs only that fraction of the overflow and runs past its column), the DM's other-name before the computer chip, the chip to an ellipsis before the preview; the «에이전트» mark keeps its size. Nothing is dropped (the group sentence and the computer name are also the `title`).
+  // The COMPUTER chip (story 4675 F2) leads the PREVIEW line, not the name line: measured at the real 248 / 270 list the name line has no width left for it (0 of 44 px of «SYJ-Mac» was read — the 4887 layout spec «a short computer name is READ in full» still stands).
+  const groupLine = `${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })}${groupNames ? ` · ${groupNames}` : ''}`;
+  // a person's DM whose title already says who it is with has no layer at all
+  const hasDmLine = Boolean(conv.participants && conv.participants.length > 0) && conv.type === 'dm' && (showDmOtherName || isAgentInConv);
+  const nameLineExtra = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      !showDmOtherName && !isAgentInConv ? null : // a person's DM whose title already says who it is with: no line at all
-      // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: the other's name is one plain text segment that gives way first, the «에이전트» chip keeps its size,
-      // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped. (P2-e: the segment is there only when the title does not already say it.)
-      <div className="mt-0.5 flex max-h-12 min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line"> {/* story 5048 T0 ②d: the chips are 16 px now — at a 248–280 px list the agent mark and the computer chip no longer fit side by side, so the chip drops to its own line instead of being cut — at most TWO lines (max-h-12 = 2 × 24; PO 11-26: the row heights must not grow without end), the rest is clipped */}
-        {showDmOtherName ? (
-          // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
-          <span className="min-w-0 truncate font-medium" data-testid="room-dm-other">{dmOtherLabel}</span>
-        ) : null}
-        {/* story 4930 follow-up (PO): the «agent» mark is ONE shared part (ui/agent-identity.tsx — hairline + blue signal dot + muted word, the same one the bubble · inbox · participant window use), not a hand copy of a tinted chip here. */}
-        {isAgentInConv && <AgentIdentity className="shrink-0" />}
-        {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
-        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="min-w-0 shrink text-micro" /> : null}
-      </div>
+      // story 4930 follow-up (PO): the «agent» mark is ONE shared part (ui/agent-identity.tsx — hairline + blue signal dot + muted word, the same one the bubble · inbox · participant window use), not a hand copy of a tinted chip here.
+      isAgentInConv ? <AgentIdentity className="shrink-0 py-0" /> : null
     ) : (
-      <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
-        {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10). The line says how many (the agents' count when there are agents, else the people's)
-            AND who: the first two names + «외 N명» — for a group with agents too (the old stack showed three initials + an agent dot; a count alone would name nobody) */}
-        <span className="truncate">
-          {/* a group with nobody but the viewer (the server allows it) has no names: the count stands alone — no dangling « · » */}
-          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })}${groupNames ? ` · ${groupNames}` : ''}`}
-        </span>
-      </div>
+      // story 4887 (UI-4 P2-b) — the group's participants are one line of text: how many (the agents' count when there are agents, else the people's) AND who: the first two names + «외 N명». A group with nobody but the viewer (the server allows it) has no names: the count stands alone — no dangling « · ».
+      <span className="min-w-0 shrink-[3] truncate text-editorial-meta text-muted-foreground" title={groupLine} data-testid="room-group-line">{groupLine}</span>
     )
   ) : null;
 
@@ -331,13 +320,14 @@ function ConversationRow({
 
       {/* Info */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-1">
+        <div className="flex items-center gap-1.5">
           {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
-          <span className="truncate text-ds-body text-foreground">{displayName}</span>
+          <span className="min-w-0 shrink truncate text-ds-body text-foreground">{displayName}</span>
+          {nameLineExtra}
           {/* story 4887 (UI-4 P2-b) — the time and the unread count share the title line (B3 row); the preview below keeps the whole width */}
-          <span className="flex flex-shrink-0 items-center gap-1.5">
+          <span className="ml-auto flex flex-shrink-0 items-center gap-1.5">
             <span className="text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
             {unread > 0 && (
               <span className="rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground" data-testid="room-unread">
@@ -346,8 +336,15 @@ function ConversationRow({
             )}
           </span>
         </div>
-        {participantLayer}
-        <p className="truncate text-ds-small text-muted-foreground">{preview}</p>
+        {/* story 4887 (UI-4 P2-c · 5048) — the DM line: ONE line that never runs past the column. The other's name is one plain text segment that gives way first (P2-e: only when the title does not already say it), then the computer chip (story 4675 F2: it may shrink to an ellipsis, its whole name is its `title`) before the preview. A group row says nothing here (several · Q-b). */}
+        <div className="flex min-w-0 items-center gap-1.5" data-testid={hasDmLine ? 'room-dm-line' : undefined}>
+          {hasDmLine && showDmOtherName ? (
+            // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
+            <span className="min-w-0 max-w-24 shrink truncate text-editorial-meta font-medium text-muted-foreground" data-testid="room-dm-other">{dmOtherLabel}</span>
+          ) : null}
+          {hasDmLine && isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="h-4 !min-h-4 max-w-28 min-w-0 shrink py-0 text-micro leading-none" /> : null}
+          <p className="min-w-12 flex-1 truncate text-ds-small text-muted-foreground" data-testid="room-preview">{preview}</p>
+        </div>
       </div>
     </Button>
     </div>
@@ -1008,7 +1005,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     <SectionHeader
       level={3}
       title={<span id="chat-list-channels-h">{t('channelsSection')}</span>}
-      count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-channels-count">{grouped.channels.length}</span>}
+      count={<span className="text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="chat-list-channels-count">{grouped.channels.length}</span>}
       trailing={canStartRoom ? <IconButton icon="add" label={t('newChannel')} data-testid="chat-list-new-channel" onClick={() => setChannelDialogOpen(true)} /> : undefined}
     />
   );
@@ -1065,7 +1062,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         <SectionHeader
           level={3}
           title={<span id="chat-list-rooms-h">{t('roomsSection')}</span>}
-          count={<span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-rooms-count">{grouped.rooms.length}</span>}
+          count={<span className="text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="chat-list-rooms-count">{grouped.rooms.length}</span>}
         />
         {grouped.rooms.map((conv) => (
           <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
@@ -1206,7 +1203,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-1" data-testid="chat-list-head">
         {/* one h1 per page: the list owns it on /chats only; beside an open room the room head owns it and this is an h2 (codex round 1) */}
         {headingLevel === 2 ? <h2 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h2> : <h1 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h1>}
-        <span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-count">{headCount}</span>
+        <span className="text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="chat-list-count">{headCount}</span>
         <div className="ml-auto flex items-center gap-1">
           {canStartRoom ? <IconButton icon="add" label={t('newConversation')} data-testid="chat-list-new" onClick={() => setShowModal(true)} /> : null}
           <Popover>

@@ -180,7 +180,12 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await head.locator('[data-testid="room-head-chip"]').count()).toBe(4);
       expect(await head.locator('[data-slot="ds-status-label"]').count(), 'the two agents carry a connection word, the two people do not').toBe(2);
       const hb = (await box(page, '[data-testid="room-head"]'))!;
-      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(152); // name + one line + at most two chip rows at this width (a thread is open beside it) — was 140 before T0 ① (5936) made the controls 40 px: the rows are 9 px taller (measured 149), nothing overflows or clips; the kit head is 80 at minimum, this is its ceiling
+      // story 5048 (chat row · PO 11-27): the head is TWO lines — name · tag · the facts line · «⋯» on the first, the chips on the second (it was name / facts / chips, 109–170 px)
+      expect(hb.h, `the room head is ${hb.h}px`).toBeLessThanOrEqual(120); // name row (40) + at most two chip rows at this width · reverted (facts on their own line) → one more row, ≥ 150
+      const h1b = (await box(page, '[data-testid="room-head"] h1'))!;
+      const subb = (await box(page, '[data-testid="room-head-subline"]'))!;
+      expect(Math.abs((subb.y + subb.h / 2) - (h1b.y + h1b.h / 2)), 'the facts line sits on the name row').toBeLessThanOrEqual(8);
+      expect(await page.locator('[data-testid="room-head-subline"]').evaluate((e) => getComputedStyle(e).fontFamily.toLowerCase().includes('mono')), 'the numbers in the facts line are not fixed-width').toBe(false);
 
       // ③ the composer is ONE bordered box holding the clip, the text and «⏎ 보내기»
       const cb = (await box(page, '[data-testid="chat-composer-box"]'))!;

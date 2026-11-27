@@ -31,6 +31,8 @@ const CONVERSATIONS = [
   room('c-long', null, [ME, LONG_AGENT], '2026-11-10T03:30:00Z'), // the same with the long names of the dev measurement
   room('c-long-named', '점검 도우미', [ME, { ...LONG_AGENT, member_id: 'a-4' }], '2026-11-10T03:15:00Z'), // the SAME agent and computer in a DM the people named → the name stays on the line, so the chip gets less
   room('c-named', '배포 도우미', [ME, { ...AGENT, member_id: 'a-2' }], '2026-11-10T02:00:00Z'), // a DM the people named → the agent's name stays
+  { ...room('c-group', '결제 연동 · 오늘 할 일', [ME, AGENT, LONG_AGENT, { member_id: 'h-2', name: '민서', type: 'human' }], '2026-11-10T00:30:00Z'), type: 'group' }, // a group with people AND agents → its «N명 · names» sentence is on the name line, no third line (5048)
+  { ...room('c-verylong', '아주 긴 방 이름이 목록 칸을 한참 넘어가는 경우 — 시각 · 안 읽음 수가 밀려 나가면 안 돼요', [ME, AGENT, LONG_AGENT], '2026-11-10T00:15:00Z'), type: 'group', unread_count: 12 }, // a name far wider than the column + agent people → the time and the unread badge must stay inside the row (5048: a flex row whose shrink factors sum below 1 let them run out)
   room('c-human', null, [ME, { member_id: 'h-1', name: '지우', type: 'human' }], '2026-11-10T01:00:00Z'), // a person → no line at all
 ];
 
@@ -108,12 +110,12 @@ const rowOf = (page: Page, text: string) => page.locator('button', { hasText: te
 async function chipOf(page: Page, title: string) {
   return page.evaluate(({ t }) => {
     const row = [...document.querySelectorAll('button')].find((b) => b.querySelector('.truncate.text-ds-body')?.textContent === t) as HTMLElement;
+    // story 5048 (chat row): the DM line is the PREVIEW line's front — the other's name · the computer chip · the preview; the «에이전트» mark moved up to the name line
     const line = row.querySelector('[data-testid="room-dm-line"]') as HTMLElement;
     const chip = line.querySelector('[data-testid="device-chip"]') as HTMLElement;
     const text = chip.querySelector('.truncate') as HTMLElement;
-    const col = (row.querySelector('p.truncate.text-ds-small') as HTMLElement).getBoundingClientRect();
     const lr = line.getBoundingClientRect(); const cr = chip.getBoundingClientRect();
-    return { other: line.querySelector('[data-testid="room-dm-other"]') !== null, textCut: text.scrollWidth > text.clientWidth, textW: Math.round(text.clientWidth), fullW: Math.round(text.scrollWidth), chipW: Math.round(cr.width), chipInsideLine: cr.right <= lr.right + 0.5, lineW: Math.round(lr.width), colW: Math.round(col.width), lineOverflow: line.scrollWidth > line.clientWidth, title: chip.getAttribute('title') };
+    return { other: line.querySelector('[data-testid="room-dm-other"]') !== null, rowH: Math.round(row.getBoundingClientRect().height), textCut: text.scrollWidth > text.clientWidth, textW: Math.round(text.clientWidth), fullW: Math.round(text.scrollWidth), chipW: Math.round(cr.width), chipInsideLine: cr.right <= lr.right + 0.5, lineW: Math.round(lr.width), colW: Math.round(lr.width), lineOverflow: line.scrollWidth > line.clientWidth, title: chip.getAttribute('title') };
   }, { t: title });
 }
 
@@ -140,7 +142,8 @@ test('[SID:4887] dropping the repeated name gives the computer chip the width: t
   // story 5048 T0 ②d: the 16 px chips no longer share one line with the name — the DM line wraps (chips on their own line), so the chip text gets the line's whole width in BOTH rows; dropping the repeated name still never gives the chip LESS
   expect(unnamed.textW, `unnamed ${unnamed.textW}px vs named ${named.textW}px of ${unnamed.fullW}px`).toBeGreaterThanOrEqual(named.textW);
   expect(unnamed.chipInsideLine && named.chipInsideLine).toBe(true);
-  expect(unnamed.lineOverflow || named.lineOverflow).toBe(false);
+  expect(unnamed.lineOverflow || named.lineOverflow, 'no line runs past its column').toBe(false);
+  expect(unnamed.rowH + named.rowH, 'both rows are two lines (60 each) — the chips no longer take a third line').toBe(120);
 });
 
 test('[SID:4887] the DM the people named keeps the agent\'s NAME on the line (never «나 ↔»), inside the column', async ({ page }) => {
@@ -152,12 +155,18 @@ test('[SID:4887] the DM the people named keeps the agent\'s NAME on the line (ne
   expect(over, 'the line does not run past its column').toBe(false);
 });
 
-test('[SID:4887] a person\'s DM has no participant line at all and is the shortest row', async ({ page }) => {
-  await open(page);
-  const h = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-body')).map((b) => [b.querySelector('.truncate.text-ds-body')!.textContent, Math.round(b.getBoundingClientRect().height)])));
-  const human = rowOf(page, '지우');
-  await expect(human.getByTestId('room-dm-line')).toHaveCount(0);
-  expect(h['지우']!, 'a row without the participant line is shorter than one with it').toBeLessThan(h[AGENT_NAME]!);
+// story 5048 (chat row · PO 11-27: the rows were 78–90 on dev — the participant / computer chips took a third line): EVERY row is two lines — name line · preview line — 60 high at the real list widths, the agent DM and the group too.
+test('[SID:5048] every row is 60 high at the 270 and the narrower lg list — a person\'s DM, an agent DM (named or not), a group · no third line', async ({ page }) => {
+  for (const w of [undefined, LG_LIST_WIDTH]) {
+    await open(page, w);
+    const h = await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-body')).map((b) => `${b.querySelector('.truncate.text-ds-body')!.textContent}:${Math.round(b.getBoundingClientRect().height)}`));
+    expect(h.length, 'the seven fixture rows are there').toBe(7);
+    expect(h.filter((x) => !x.endsWith(':60')), `a row is not 60 high at ${w ?? 270}px: ${h.join(' · ')}`).toEqual([]);
+    const out = await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.querySelector('.truncate.text-ds-body')).filter((b) => { const r = b.getBoundingClientRect(); const t = [...b.querySelectorAll('span.text-micro')].map((e) => e.getBoundingClientRect().right); return t.some((x) => x > r.right + 0.5); }).map((b) => b.querySelector('.truncate.text-ds-body')!.textContent));
+    expect(out, `the time / unread badge runs past the row at ${w ?? 270}px`).toEqual([]);
+    const starved = await page.evaluate(() => [...document.querySelectorAll('[data-testid="room-preview"]')].map((e) => Math.round(e.getBoundingClientRect().width)).filter((x) => x < 48));
+    expect(starved, `a preview is squeezed under 48px by the chips of its line at ${w ?? 270}px`).toEqual([]);
+  }
 });
 
 // story 4887 (UI-4 P6-b) — the list slot is narrower between lg and xl (read from chats/layout.tsx, not typed here): at THAT width the list must read exactly as it does at 270 — the short computer name in full, the same cut rows.

@@ -243,7 +243,7 @@ export function ThreadPanel({
         {/* the phone's way back to the room: a thread is a full screen there */}
         <IconButton icon="arrow_back" label={t('title')} onClick={onClose} className="-ml-1 lg:hidden" data-testid="thread-back" />
         <h2 className="m-0 text-ds-body font-semibold text-ds-ink">{t('threadLabel')}</h2>
-        <p className="ml-auto min-w-0 truncate font-mono text-ds-mono-md text-ds-ink-3" data-testid="thread-meta">
+        <p className="ml-auto min-w-0 truncate text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="thread-meta">
           {parentKind} · {t('replyCount', { count: messages.length })}
         </p>
         <IconButton icon="close" label={t('closeThread')} onClick={onClose} />

@@ -27,7 +27,7 @@ function classesFromSource() {
     // story 4887 (UI-4 P2-b) — the unread count sits on the TITLE line, in one right-hand cluster with the time (the badge span carries a data-testid after its className)
     cluster: pick(list, /<span className="([^"]+)">\s*<span className="[^"]+">\{formatTime\(time, locale, displayTimezone\)\}<\/span>/, 'the right-hand cluster of the title line'),
     badge: pick(list, /\{unread > 0 && \(\s*<span className="([^"]+)"[^>]*>/, 'the unread badge'),
-    preview: pick(list, /<p className="([^"]+)">\{preview\}<\/p>/, 'the preview'),
+    preview: pick(list, /<p className="([^"]+)"[^>]*>\{preview\}<\/p>/, 'the preview'),
     button: pick(launcher, /className="(pointer-events-auto flex h-12 w-12[^"]*)"/, 'the launcher button'),
     attr: pick(launcher, /SUPPORT_LAUNCHER_ATTR = '([^']+)'/, 'the launcher attribute'),
   };
