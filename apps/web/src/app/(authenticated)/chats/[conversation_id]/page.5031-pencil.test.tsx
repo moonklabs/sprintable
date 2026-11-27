@@ -9,11 +9,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 
-const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+const { useDashboardContextMock, routeId } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), routeId: { current: 'conv-1' } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/chats/conv-1',
-  useParams: () => ({ conversation_id: 'conv-1' }),
+  usePathname: () => `/chats/${routeId.current}`,
+  useParams: () => ({ conversation_id: routeId.current }),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(''),
 }));
@@ -28,14 +28,15 @@ function stubRoom(type: 'group' | 'dm') {
   patches.length = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     const u = String(url);
-    if (u.endsWith('/api/conversations/conv-1') && init?.method === 'PATCH') { patches.push(JSON.parse(init.body ?? '{}')); return { ok: true, status: 200, json: async () => ({}) }; }
-    if (u.endsWith('/api/conversations/conv-1')) {
-      return { ok: true, status: 200, json: async () => ({ title: type === 'group' ? '점심 모임' : null, type, muted: false, last_read_at: null, free_response: false, project_id: 'proj-1', is_project_channel: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }, { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' }] }) };
+    if (/\/api\/conversations\/conv-\d$/.test(u) && init?.method === 'PATCH') { patches.push(JSON.parse(init.body ?? '{}')); return { ok: true, status: 200, json: async () => ({}) }; }
+    if (/\/api\/conversations\/conv-\d$/.test(u)) {
+      return { ok: true, status: 200, json: async () => ({ title: type === 'group' ? (u.endsWith('conv-2') ? '둘째 방' : '점심 모임') : null, type, muted: false, last_read_at: null, free_response: false, project_id: 'proj-1', is_project_channel: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }, { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' }] }) };
     }
     return { ok: true, status: 200, json: async () => ({ data: [] }) };
   }));
 }
 beforeEach(() => {
+  routeId.current = 'conv-1';
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -44,22 +45,22 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
+let makeTree: () => React.ReactElement = () => <></>;
 async function mountWithBar() {
   const { default: ConversationPage } = await import('./page');
   const { TopBar } = await import('@/components/nav/top-bar');
   const { TopBarProvider } = await import('@/components/nav/top-bar-context');
   const { SidebarProvider } = await import('@/components/ui/sidebar');
   const { ToastProvider } = await import('@/components/ui/toast');
-  await act(async () => {
-    root.render(
-      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <ToastProvider><TopBarProvider pathname="/chats/conv-1"><SidebarProvider>
-          <TopBar orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: '올리베이라 조직', orgSlug: 'acme' }]} projectId="proj-1" projectMemberships={[{ projectId: 'proj-1', projectName: '스프린터블' }]} />
-          <ConversationPage />
-        </SidebarProvider></TopBarProvider></ToastProvider>
-      </NextIntlClientProvider>,
-    );
-  });
+  makeTree = () => (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      <ToastProvider><TopBarProvider pathname={`/chats/${routeId.current}`}><SidebarProvider>
+        <TopBar orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: '올리베이라 조직', orgSlug: 'acme' }]} projectId="proj-1" projectMemberships={[{ projectId: 'proj-1', projectName: '스프린터블' }]} />
+        <ConversationPage />
+      </SidebarProvider></TopBarProvider></ToastProvider>
+    </NextIntlClientProvider>
+  );
+  await act(async () => { root.render(makeTree()); });
   await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
 }
 const pencil = () => container.querySelector(`[data-testid="room-head"] button[aria-label="${koMessages.chats.editRoomName}"]`) as HTMLButtonElement | null;
@@ -182,5 +183,110 @@ describe('[SID:5031 · pencil] «이름 바꾸기» in the head\'s «⋯» menu'
     await settle();
     expect(input()).toBeNull();
     expect(document.activeElement).toBe(trigger());
+  });
+});
+
+/** a matchMedia that follows a window width the way a browser's does — so the REAL page takes its phone shape (below lg: the room's name · people · «⋯» in the bar; no desktop head, no pencil) */
+function emulateWidth(width: number) {
+  const matches = (q: string) => {
+    const max = /max-width:\s*(\d+)px/.exec(q)?.[1];
+    const min = /min-width:\s*(\d+)px/.exec(q)?.[1];
+    return (max === undefined || width <= Number(max)) && (min === undefined || width >= Number(min));
+  };
+  vi.stubGlobal('matchMedia', (q: string) => ({ get matches() { return matches(q); }, addEventListener: () => {}, removeEventListener: () => {} }));
+  vi.stubGlobal('innerWidth', width);
+}
+const titleButton = () => container.querySelector(`[data-testid="room-bar"] button[aria-label="${koMessages.chats.editRoomName}"]`) as HTMLButtonElement | null;
+
+describe('[SID:5031 · pencil · codex] a PHONE: the focus after the rename goes back to the title button — never to the page body', () => {
+  async function toPhone() { stubRoom('group'); emulateWidth(390); await mountWithBar(); }
+
+  it('⭐phone shape: no pencil, the title button is the way in, and the menu has the line too', async () => {
+    await toPhone();
+    expect(pencil()).toBeNull();
+    expect(titleButton(), 'the phone\'s title button').not.toBeNull();
+    await openMenu();
+    expect(menuRename(), 'the «⋯» menu line on a phone').not.toBeNull();
+  });
+
+  it('⭐menu line → input → Enter: ONE PATCH, and the focus lands on the title button (not the body)', async () => {
+    await toPhone();
+    await openMenu();
+    await act(async () => { menuRename()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await vi.waitFor(() => expect(input()).not.toBeNull());
+    await settle();
+    expect(document.activeElement, 'the focus is on the input while editing').toBe(input());
+    await type(input()!, '저녁 모임');
+    await act(async () => { key(input()!, 'Enter'); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    await settle();
+    expect(patches).toEqual([{ title: '저녁 모임' }]);
+    expect(input()).toBeNull();
+    expect(titleButton()).not.toBeNull();
+    expect(document.activeElement, 'reverted (the pencil is the only target) → <body>').toBe(titleButton());
+  });
+
+  it('⭐menu line → input → Esc: nothing sent, the focus lands on the title button', async () => {
+    await toPhone();
+    await openMenu();
+    await act(async () => { menuRename()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await vi.waitFor(() => expect(input()).not.toBeNull());
+    await settle();
+    await act(async () => { key(input()!, 'Escape'); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    await settle();
+    expect(patches).toHaveLength(0);
+    expect(document.activeElement).toBe(titleButton());
+  });
+
+  it('⭐the title button\'s own way (the hole that was there before): button → input → Enter / Esc → the focus is back on the title button', async () => {
+    await toPhone();
+    await act(async () => { titleButton()!.click(); });
+    expect(input()).not.toBeNull();
+    await act(async () => { key(input()!, 'Escape'); });
+    await settle();
+    expect(document.activeElement, 'after Esc').toBe(titleButton());
+    await act(async () => { titleButton()!.click(); });
+    await type(input()!, '또 다른 이름');
+    await act(async () => { key(input()!, 'Enter'); });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    await settle();
+    expect(patches).toEqual([{ title: '또 다른 이름' }]);
+    expect(document.activeElement, 'after Enter').toBe(titleButton());
+  });
+});
+
+describe('[SID:5031 · pencil · codex] the opening that waits for the menu to close is cancelled when it goes stale', () => {
+  const click = (el: Element) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  it('⭐the room changes before the timer fires → the input does not open on the OTHER room (it would have opened with the first room\'s draft)', async () => {
+    stubRoom('group');
+    await mountWithBar();
+    await openMenu();
+    // one synchronous step: choose the line (the menu closes · the timer is set) and move to another room before the timer can fire
+    await act(async () => {
+      click(menuRename()!);
+      routeId.current = 'conv-2';
+      root.render(makeTree());
+    });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    await settle();
+    expect(barH1()!.textContent, 'we are in the other room').toBe('둘째 방');
+    expect(input(), 'reverted (no cancel · no re-check) → the rename input is open on the other room').toBeNull();
+    expect(patches).toHaveLength(0);
+  });
+
+  it('⭐the menu is opened again before the timer fires → the pending opening is cancelled (the input does not open under the open menu)', async () => {
+    stubRoom('group');
+    await mountWithBar();
+    await openMenu();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); // hold the one-tick timer so «before it fires» is a state, not a race
+    try {
+      await act(async () => { click(menuRename()!); }); // the menu closes; the opening waits for its tick
+      await act(async () => { trigger().dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); click(trigger()); }); // …and the person opens the menu again
+      await act(async () => { vi.advanceTimersByTime(50); }); // the tick comes
+    } finally { vi.useRealTimers(); }
+    await settle();
+    expect(input(), 'reverted (no cancel on re-open) → the input opens').toBeNull();
+    expect(trigger().getAttribute('aria-expanded'), 'the menu is the one that is open').toBe('true');
   });
 });

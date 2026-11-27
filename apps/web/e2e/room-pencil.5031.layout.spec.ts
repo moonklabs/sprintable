@@ -2,6 +2,9 @@
  * story 5031 (pencil follow-up) — the desktop head's rename pencil is QUIET until the hand is on the head's first line or the focus is inside it (where a mouse can hover: the repo's `mouse:` variant); a finger (coarse pointer) always sees it; while the name is being edited the input is always drawn.
  * The REAL RoomHead (its first line carries `group/head`) + the real ds IconButton + the real Tailwind build in Chromium. The pencil's wrapper classes are READ FROM the page's source (page.tsx), not retyped here — a change there is what is measured.
  * Quiet = `opacity: 0`, never `display: none` / `visibility: hidden`: a Tab still reaches the pencil (and shows it).
+ * WHAT THIS FILE IS NOT: the REAL room page (it needs a server). The scenes here are the REAL RoomHead / IconButton / Tailwind (the pencil's classes read from page.tsx) — and, for the menu's focus trap, a small HARNESS: the repo's real `DropdownMenu`
+ * (components/ui/dropdown-menu) with a COPY of the page's handler shape (open the input one tick AFTER the menu closed · `finalFocus` that does not hand the focus back for that one close · an input whose blur ends the edit). The copy can drift from page.tsx: it is a
+ * browser-level check of the TECHNIQUE (real exit animation, real focus return), not of the page; the page's own behaviour is page.5031-pencil.test.tsx (jsdom). A PHONE here is only «the desktop head is not drawn» — the phone's room bar and its menu are the jsdom tests' (emulated width, real bar).
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -31,6 +34,39 @@ async function build() {
         import { IconButton } from './src/components/ds/icon-button';
         const CHIPS = [{ id: 'm1', who: '지우(나)' }, { id: 'm2', who: '개발 에이전트' }];
         window.__editing = false;
+        import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './src/components/ui/dropdown-menu';
+        import { Input } from './src/components/ui/input';
+        // HARNESS (a copy of the page's handler shape — see the file's header). mode: 'product' | 'immediate' (open at once, default focus return) | 'deferOnly' (one tick later, default focus return) | 'finalFocusOnly' (at once, no focus return)
+        function MenuHarness({ mode }) {
+          const [open, setOpen] = React.useState(false);
+          const [editing, setEditing] = React.useState(false);
+          const [draft, setDraft] = React.useState('점심 모임');
+          const afterClose = React.useRef(false);
+          const skipReturn = React.useRef(false);
+          const deferred = mode === 'product' || mode === 'deferOnly';
+          const guarded = mode === 'product' || mode === 'finalFocusOnly';
+          const start = () => { setDraft('점심 모임'); setEditing(true); };
+          const onOpenChange = (next) => {
+            setOpen(next);
+            if (next) { afterClose.current = false; skipReturn.current = false; return; }
+            if (afterClose.current) {
+              afterClose.current = false;
+              if (guarded) skipReturn.current = true;
+              if (deferred) setTimeout(start, 0);
+            }
+          };
+          return React.createElement('div', { style: { padding: 24 } },
+            editing
+              ? React.createElement(Input, { autoFocus: true, value: draft, onChange: (e) => setDraft(e.target.value), 'aria-label': 'rename-input', onBlur: () => { window.__saved += 1; setEditing(false); } })
+              : React.createElement('span', { 'data-testid': 'harness-title' }, '점심 모임'),
+            React.createElement(DropdownMenu, { open, onOpenChange },
+              React.createElement(DropdownMenuTrigger, { type: 'button', 'aria-label': 'more', 'data-testid': 'harness-trigger' }, '⋯'),
+              React.createElement(DropdownMenuContent, { align: 'end', finalFocus: () => { if (skipReturn.current) { skipReturn.current = false; return false; } return true; } },
+                React.createElement(DropdownMenuItem, { 'data-testid': 'harness-rename', onClick: () => { afterClose.current = true; if (!deferred) start(); } }, '이름 바꾸기'),
+                React.createElement(DropdownMenuItem, null, '알림 끄기'))));
+        }
+        window.__saved = 0;
+        window.__mountHarness = (mode) => { createRoot(document.getElementById('root')).render(React.createElement(MenuHarness, { mode })); };
         window.__mount = (pencilClass) => {
           const rename = window.__editing
             ? React.createElement('input', { 'aria-label': '방 이름 바꾸기', defaultValue: '점심 모임', 'data-testid': 'rename-input' })
@@ -129,4 +165,54 @@ test('[SID:5031 · pencil] ⑥ a phone (390): the desktop head — and its penci
   await open(page, 390);
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-head"]')!).display)).toBe('none');
   expect(await page.evaluate(() => (document.querySelector('[data-testid="room-head-pencil"] button') as HTMLElement).getClientRects().length), 'the pencil takes no box').toBe(0);
+});
+
+// ── the menu's focus trap in a REAL browser (a HARNESS with the page's handler shape — not the page) ─────────────────────────────────────────────────
+async function openHarness(page: Page, mode: string) {
+  const { js, css } = await build();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.unrouteAll();
+  await page.route('http://preview.test/**', async (route) => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` }));
+  await page.goto('about:blank'); await page.goto('http://preview.test/');
+  await page.addScriptTag({ content: js });
+  await page.evaluate((m) => (window as unknown as { __mountHarness: (m: string) => void }).__mountHarness(m), mode);
+  await page.getByTestId('harness-trigger').waitFor();
+}
+async function chooseRename(page: Page) {
+  await page.getByTestId('harness-trigger').click();
+  await page.getByTestId('harness-rename').waitFor({ state: 'visible' });
+  await page.waitForTimeout(250); // the popup's opening animation
+  await page.getByTestId('harness-rename').click();
+  await page.waitForTimeout(600); // the exit animation (100 ms) and everything the library does after it
+}
+const harnessState = (page: Page) => page.evaluate(() => ({ saved: (window as unknown as { __saved: number }).__saved, hasInput: document.querySelector('input[aria-label="rename-input"]') !== null, focusOnInput: document.activeElement?.getAttribute('aria-label') === 'rename-input', focusOn: document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName }));
+
+test.describe('the menu line opens the rename input: the focus stays on it (HARNESS · real base-ui menu · real exit animation)', () => {
+  test('[SID:5031 · pencil] ⭐the page\'s technique (open one tick after the close + no focus return for that close): the input is open, has the focus, and was not closed by a blur', async ({ page }) => {
+    await openHarness(page, 'product');
+    await chooseRename(page);
+    expect(await harnessState(page)).toMatchObject({ saved: 0, hasInput: true, focusOnInput: true });
+  });
+  test('[SID:5031 · pencil] without the technique (open at once · the menu hands the focus back to «⋯»): the input is lost — the trap is real in a browser', async ({ page }) => {
+    await openHarness(page, 'immediate');
+    await chooseRename(page);
+    const st = await harnessState(page);
+    console.log('[5031 pencil harness] immediate', JSON.stringify(st));
+    expect(st.hasInput && st.focusOnInput && st.saved === 0, 'the focus return to «⋯» blurs the input (it saves = ends the edit)').toBe(false);
+  });
+  // measured in Chromium (not assumed — the jsdom tests cannot tell these two apart): the menu's focus return after its EXIT ANIMATION is what blurs the input, so the `finalFocus` guard is the half that matters; opening one tick later alone does not help
+  test('[SID:5031 · pencil] only the one-tick deferral (the menu still hands the focus back): lost — the focus-return guard is the half that matters in a browser', async ({ page }) => {
+    await openHarness(page, 'deferOnly');
+    await chooseRename(page);
+    const st = await harnessState(page);
+    console.log('[5031 pencil harness] deferOnly', JSON.stringify(st));
+    expect(st.hasInput && st.focusOnInput && st.saved === 0).toBe(false);
+  });
+  test('[SID:5031 · pencil] only the focus-return guard (the input opens at once): kept — measured; the page keeps both (the one-tick deferral is belt and braces: jsdom keeps the input only with one of them, a browser only with the guard)', async ({ page }) => {
+    await openHarness(page, 'finalFocusOnly');
+    await chooseRename(page);
+    const st = await harnessState(page);
+    console.log('[5031 pencil harness] finalFocusOnly', JSON.stringify(st));
+    expect(st).toMatchObject({ saved: 0, hasInput: true, focusOnInput: true });
+  });
 });
