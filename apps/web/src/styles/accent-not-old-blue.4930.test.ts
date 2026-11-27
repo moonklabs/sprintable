@@ -26,7 +26,7 @@ describe('강조 자리에 옛 파랑(info · proof-blue)이 없다 — 4930 AC3
   it('대화 목록 «에이전트» 표는 공용 부품 AgentIdentity다 — 손으로 복사한 틴트 칩(info든 ds action이든)이 없다(방 안 말풍선 · 받은함 · 참여자 창과 한 꼴)', () => {
     const code = strip(read('components/chat/chat-list-view.tsx'));
     expect(code).toMatch(/import \{ AgentIdentity \} from '@\/components\/ui\/agent-identity';/);
-    expect(code).toMatch(/\{isAgentInConv && <AgentIdentity\b/);
+    expect(code).toMatch(/isAgentInConv \? <AgentIdentity\b/); // the shared part, on the name line (5048)
     expect(code).not.toMatch(/border-(info|ds-action)\/30 bg-(info|ds-action)\/12/);
   });
 

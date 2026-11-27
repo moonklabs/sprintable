@@ -70,7 +70,7 @@ const geometry = (page: Page) => page.evaluate(() => {
 });
 
 test.describe('the room head folds its chips in a short window (story 4946)', () => {
-  test('[SID:4946] ⭐539 high (the Mac app\'s small window): the chip row is gone, a «people 3» button is there, the head is LOWER (3 rows → 2)', async ({ page }) => {
+  test('[SID:4946] ⭐539 high (the Mac app\'s small window): the chip row is gone, a «people 3» button is there, the head is LOWER (name row + chip row → the name row alone)', async ({ page }) => {
     await open(page, 539);
     const g = await geometry(page);
     expect(g.ulDisplay).toBe('none'); expect(g.chipLists, 'the chips are in the popup only once it is open').toBe(0); expect(g.peopleButtons).toBe(1);
@@ -78,13 +78,13 @@ test.describe('the room head folds its chips in a short window (story 4946)', ()
     expect(g.btnName).toContain('3');
     expect(g.headH, 'the folded head is exactly the kit minimum (80) — reverting min-h-20 turns this red').toBe(80); // story 5031 (C1 2b): min-h-20
   });
-  test('[SID:4946] ⭐647 · 900 high: the chip row is drawn as before and the people button is not (the head is the 3-row one)', async ({ page }) => {
+  test('[SID:4946] ⭐647 · 900 high: the chip row is drawn as before and the people button is not (the head is the two-row one: name row + chip row)', async ({ page }) => {
     for (const h of [647, 900]) {
       await open(page, h);
       const g = await geometry(page);
       expect(g.ulDisplay, `${h}`).not.toBe('none'); expect(g.ulH, `${h}`).toBeGreaterThan(20);
       expect(g.btnDisplay, `${h}`).toBeNull(); expect(g.peopleButtons, `${h}`).toBe(0); // not drawn at all (no hidden copy)
-      expect(g.headH, `${h}`).toBeGreaterThan(95);
+      expect(g.headH, `${h}`).toBeGreaterThanOrEqual(80); // story 5048: the unfolded head is two rows now (name row · chip row — it was three, > 95) and this harness has no «⋯» slot, so it sits at the kit minimum (80) like the folded one; the chip row itself is what the lines above pin
     }
   });
   test('[SID:4946] the threshold is exact: 600 high is folded, 601 is not', async ({ page }) => {
