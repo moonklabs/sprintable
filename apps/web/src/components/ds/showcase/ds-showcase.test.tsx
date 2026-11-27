@@ -58,7 +58,7 @@ describe('ds 견본 화면 (AC3)', () => {
     for (const r of ['tag 8', 'control 8', 'panel 8', 'pill 16', 'bubble 16', 'tail 4']) expect(text, r).toContain(r);
     for (const s of ['popup', 'overlay']) expect(text, s).toContain(s);
     // story 5048 T0 ①: 글자 눈금 값 · 원 · 그림자 «없음» 문구도 코드의 값 그대로(견본이 옛 값을 말하면 빨개진다)
-    for (const t of ['24 / 36 · 600 · -1%', '20 / 30 · 500', '16 / 24 · 500', '16 / 24 · 400', '16 / 24']) expect(text, t).toContain(t);
+    for (const t of ['20 / 28 · 600 · -1%', '16 / 24 · 500', '14 / 20 · 500', '13 / 18 · 400', '12 / 16']) expect(text, t).toContain(t);
     expect(text).toContain('circle 원');
     expect(text).toContain('없음(그림자 0 · 1px 선)');
     expect(text).toContain('fast 100ms');

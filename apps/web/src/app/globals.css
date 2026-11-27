@@ -166,20 +166,21 @@
   --text-editorial-body--line-height: 1.72;
   --text-editorial-ui: 13px;
   --text-editorial-ui--line-height: 1.45;
-  --text-editorial-meta: 11px;
-  --text-editorial-meta--line-height: 1.4;
+  --text-editorial-meta: 12px;
+  --text-editorial-meta--line-height: 1.34;
   --text-editorial-claim: 19px;
   --text-editorial-claim--line-height: 1.3;
   /* story 4831 (바탕 한 벌 규격 v1 §1) — 글자 눈금 10단 중 빈 두 단. 10px(micro)는 배지 · 단축키 kbd · 캔버스 노드 라벨에만,
      32px(display)는 큰 숫자 한 줄에만. 나머지 단은 Tailwind 기본(xs 12 · sm 14 · base 16 · lg 18 · xl 20 · 2xl 24)과
      위 editorial-meta(11) · editorial-ui(13)를 그대로 쓴다. 임의 `text-[Npx]`는 count_base.py가 센다. */
-  --text-micro: 1rem;
-  --text-micro--line-height: 1.5;
-  /* story 5048 T0 ②d(키트 결 · D1 = 가 · 선생님 11-26): «가장 작은 글자도 16» — Tailwind의 xs(12) · sm(14)와 위 micro(10)를 16/24로 한 곳에서 다시 정의한다(base는 이미 16). 호출부 3000곳은 손대지 않고, 위계는 크기가 아니라 굵기(400/500/600)와 색(ink · ink-2 · ink-3)이 진다. */
-  --text-xs: 1rem;
-  --text-xs--line-height: 1.5;
-  --text-sm: 1rem;
-  --text-sm--line-height: 1.5;
+  --text-micro: 0.75rem;
+  --text-micro--line-height: calc(1 / 0.75);
+  /* story 5048 T0 글자 내림(선생님 11-27 «독거노인용 같다»): ②d의 «가장 작은 글자도 16»을 되돌려, Tailwind xs(12) · sm(14) 기본 눈금으로 한 곳에서 다시 정의한다 — 본문 14/20 · 작은 글자 12/16, micro도 12(가장 작은 글자 12 · 한글 가독 하한).
+     폰 입력칸(input · textarea · select)만 16 — 그쪽은 `text-base`(1rem)로 따로 지킨다(iOS 확대 방지). 호출부 3000곳은 손대지 않는다. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
   --text-display: 32px;
   --text-display--line-height: 1.2;
   /* 제목 weight 780–850(에디토리얼) — 매핑표 §6. 중간값 820으로 확定(범위 안 어디든 매핑표
