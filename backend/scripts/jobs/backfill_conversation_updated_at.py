@@ -53,11 +53,14 @@ WITH batch AS (
 SELECT (SELECT count(*) FROM fixed) AS changed, (SELECT id FROM batch ORDER BY id DESC LIMIT 1) AS last_id, (SELECT count(*) FROM batch) AS looked_at
 """
 
-# dry-run: the same rule, nothing written
+# dry-run: the same rule, nothing written. A room with no live word has no last word to compare with: `LEAST` ignores a NULL, so the bare form counted every such room as
+# out of step (dev 11-27: 535 empty rooms) while the apply — which only looks at rooms that have a word — rightly left them. The join keeps only rooms that have one.
 _COUNT_SQL = """
 SELECT count(*) FROM conversations c
-WHERE c.updated_at < LEAST(
-    (SELECT max(m.created_at) FROM conversation_messages m WHERE m.conversation_id = c.id AND m.deleted_at IS NULL), clock_timestamp())
+JOIN LATERAL (
+    SELECT max(m.created_at) AS last_at FROM conversation_messages m WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
+) w ON w.last_at IS NOT NULL
+WHERE c.updated_at < LEAST(w.last_at, clock_timestamp())
 """
 
 

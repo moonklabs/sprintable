@@ -454,15 +454,22 @@ async def sweep(session: AsyncSession) -> dict[str, int]:
     return {"expired": len(expired), "unfinished": len(stuck)}
 
 
+_REASON_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")  # a bare code word: no `key:value` shape, no spaces, no path (codex on 6014)
+
+
 def _reason_of(resp: httpx.Response) -> str:
+    """why the replayed call did not go through — a CODE (or the HTTP status), never the response's sentence: the line is spoken to the asking agent
+    by the server, and a sentence written for the person who pressed can name things the agent may not read (Kadir 6012 L3)"""
     try:
         data = resp.json()
     except Exception:  # noqa: BLE001
         return f"HTTP {resp.status_code}"
     detail = data.get("detail") if isinstance(data, dict) else None
     if isinstance(detail, dict):
-        detail = detail.get("code") or detail.get("message")
-    return (str(detail) if detail else f"HTTP {resp.status_code}")[:200]
+        detail = detail.get("code")
+    if isinstance(detail, str) and _REASON_CODE.fullmatch(detail):
+        return detail
+    return f"HTTP {resp.status_code}"
 
 
 async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any, kind: str, reason: str = "", locale: str = "ko") -> None:
