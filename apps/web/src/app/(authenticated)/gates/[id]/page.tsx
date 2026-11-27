@@ -382,7 +382,7 @@ export default function GateDetailPage() {
             onClick={() => router.replace(flatHref('/inbox?tab=gates'))}
             className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="size-ds-icon-md" />
             {t('gateDetailBackToInbox')}
           </button>
         }
@@ -675,7 +675,7 @@ export default function GateDetailPage() {
                     disabled={resolving}
                     onClick={() => setRejectPanelOpen(true)}
                   >
-                    <XCircle className="size-4" />
+                    <XCircle className="size-ds-icon-md" />
                     {t('gateReject')}
                   </Button>
                   <Button
@@ -684,7 +684,7 @@ export default function GateDetailPage() {
                     // story #3113(AC3) — 선택안을 note에 실어 resolution_note로 영구 기록.
                     onClick={() => void transition('approved', requiresOptionChoice ? t('decisionSelectedNote', { option: selectedOption ?? '' }) : undefined)}
                   >
-                    <CheckCircle className="size-4" />
+                    <CheckCircle className="size-ds-icon-md" />
                     {resolving ? '...' : t(approveButtonLabelKey)}
                   </Button>
                 </div>

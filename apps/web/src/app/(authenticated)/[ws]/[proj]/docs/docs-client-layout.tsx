@@ -715,7 +715,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           >
             <DsButton variant="secondary" size="lg" onClick={() => setTreeDrawerOpen(true)} aria-label={t('openDocTree')} iconStart={<Icon name="description" size="md" />} className="min-w-0 max-w-full justify-start">
               <span className="min-w-0 truncate">{currentDocTitle ?? t('title')}</span>
-              <Icon name="expand_more" size="sm" className="shrink-0 text-ds-ink-3" />
+              <Icon name="expand_more" size="md" className="shrink-0 text-ds-ink-3" />
             </DsButton>
           </div>
           )}

@@ -30,7 +30,7 @@ export default function AuthResetRequiredPage() {
 
         <div className="space-y-4 text-center">
           <div className="flex justify-center text-info">
-            <ShieldCheck className="size-10" aria-hidden="true" />
+            <ShieldCheck className="size-ds-icon-lg" aria-hidden="true" />
           </div>
           <h1 className="text-lg font-semibold text-foreground">{t('heading')}</h1>
           <p className="text-sm text-muted-foreground">

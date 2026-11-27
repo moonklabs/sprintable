@@ -484,7 +484,7 @@ export function OnboardingForm({
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4" data-testid="onboarding-org-deleted-checking">
         <p role="status" aria-live="polite" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden />
           <span>{t('arriving')}</span>
         </p>
       </div>
@@ -573,7 +573,7 @@ export function OnboardingForm({
           <div className="space-y-4 text-center" data-testid="onboarding-arrive">
             {arrival === 'working' ? (
               <p role="status" aria-live="polite" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" aria-hidden />
+                <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden />
                 <span id="onboarding-step-title">{t('arriving')}</span>
               </p>
             ) : arrival === 'account-check-failed' ? (

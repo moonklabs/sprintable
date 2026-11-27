@@ -282,14 +282,14 @@ export default function ChannelPage() {
           )}
           {replyPreview !== null && (
             <div data-testid="channel-reply-strip" className={`flex items-center gap-2 rounded-ds-control px-3 py-1.5 text-ds-small text-ds-ink-2 ${LAYER.rowOthers}`}>
-              <Icon name="reply" size={14} className="shrink-0" />
+              <Icon name="reply" size="sm" className="shrink-0" />
               <span className="min-w-0 flex-1 truncate">{replyPreview}</span>
               <IconButton icon="close" label={t('cancelReply')} onClick={() => setReplyTo(null)} />
             </div>
           )}
           {pendingFile && (
             <div data-testid="channel-file-strip" className={`flex items-center gap-2 rounded-ds-control px-3 py-1.5 text-ds-small text-ds-ink-2 ${LAYER.rowOthers}`}>
-              <Icon name="attach_file" size={14} className="shrink-0" />
+              <Icon name="attach_file" size="sm" className="shrink-0" />
               <span className="min-w-0 flex-1 truncate">{pendingFile.name}</span>
               <IconButton icon="close" label={t('removeFile')} onClick={() => setPendingFile(null)} />
             </div>
