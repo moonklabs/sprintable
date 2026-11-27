@@ -161,6 +161,15 @@ describe('the settings of one agent in one project', () => {
     expect(writes().length).toBe(1);
   });
 
+  it('a project list that arrives after the first render is read at once — an empty first choice does not stick (codex)', async () => {
+    stub();
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentActionPolicySection agentId={AGENT} projects={[]} /></NextIntlClientProvider>); });
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentActionPolicySection agentId={AGENT} projects={[{ id: P1, name: 'One' }]} /></NextIntlClientProvider>); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(log.some((c) => c.method === 'GET' && c.url.includes(P1))).toBe(true);
+    expect(container.querySelector('[data-testid="action-policy-rows"]')).not.toBeNull();
+  });
+
   it('parsePolicy reads only a well-formed list (a literal true for locked / auto_allowed)', () => {
     expect(parsePolicy({ actions: [entry('story.delete', 'ask')] })).toEqual([{ actionKey: 'story.delete', level: 'ask', source: 'default', locked: false, autoAllowed: true }]);
     expect(parsePolicy({ actions: [entry('x', 'ask', 'default', { locked: 'yes', auto_allowed: 1 })] })).toEqual([{ actionKey: 'x', level: 'ask', source: 'default', locked: false, autoAllowed: false }]);

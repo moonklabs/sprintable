@@ -38,7 +38,9 @@ function levelLabel(t: T, level: PolicyLevel): string {
 
 export function AgentActionPolicySection({ agentId, projects }: { agentId: string; projects: ProjectOption[] }) {
   const t = useTranslations('agents');
-  const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
+  // the project shown: the one chosen while it is still on the list, else the first (the list may arrive after the first render — an empty first choice must not stick)
+  const [chosen, setChosen] = useState<string>('');
+  const projectId = projects.some((p) => p.id === chosen) ? chosen : (projects[0]?.id ?? '');
   const [entries, setEntries] = useState<PolicyEntry[] | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'forbidden' | 'fault'>('loading');
   const [saving, setSaving] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export function AgentActionPolicySection({ agentId, projects }: { agentId: strin
     if (!projectId) return;
     const mine = ++readSeq.current;
     void fetchPolicy(agentId, projectId).then((r) => apply(mine, r));
+    return () => { readSeq.current += 1; }; // leaving (another project · unmount): an answer still on its way is dropped
   }, [agentId, projectId, apply]);
 
   const label = (key: string) => {
@@ -92,7 +95,7 @@ export function AgentActionPolicySection({ agentId, projects }: { agentId: strin
       <p className="m-0 text-ds-small text-ds-ink-3">{t('actionPolicyHint')}</p>
       <label className="flex items-center gap-2 text-ds-small text-ds-ink-2">
         <span>{t('actionPolicyProject')}</span>
-        <NativeSelect value={projectId} disabled={saving !== null} onChange={(e) => { setState('loading'); setProjectId(e.target.value); }} data-testid="action-policy-project">
+        <NativeSelect value={projectId} disabled={saving !== null} onChange={(e) => { if (e.target.value !== projectId) { setState('loading'); setChosen(e.target.value); } }} data-testid="action-policy-project">
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </NativeSelect>
       </label>
