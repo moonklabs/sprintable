@@ -44,7 +44,7 @@ describe('ds Input', () => {
     expect(input().className).not.toMatch(/(^|\s)h-ds-control(\s|$)/);
   });
 
-  it('⭐폰은 16px(text-base)이고 lg부터 본문 13 — iOS가 16px 미만 칸에서 화면을 확대하지 않게', async () => {
+  it('⭐폰은 16px(text-base)이고 lg부터 본문 14 — iOS가 16px 미만 칸에서 화면을 확대하지 않게', async () => {
     await render(<Input aria-label="이름" />);
     expect(input().className).toMatch(/(^|\s)text-base(\s|$)/);
     expect(input().className).toContain('lg:text-ds-body');

@@ -36,7 +36,8 @@ describe('공용 Input 글자 크기(story #4410)', () => {
   it.each([
     [390, 16],
     [800, 16], // iPad 세로 — 예전 md:text-sm이면 14
-    [1280, 16], // story 5048 T0 ②d: 데스크톱의 text-sm도 16(가장 작은 글자 16)
+    [1280, 14], // story 5048 글자 내림: 데스크톱 text-sm 14(폰 입력은 16 그대로)
+    [1440, 14], // 넓은 화면 입력칸은 14(PO 11-27: 입력 16은 iOS 확대 막기용이라 폰 · 좁은 폭에서만) — 390 입력 16 · 1440 입력 14
   ])('⭐폭 %ipx → %ipx', async (width, px) => {
     await act(async () => { root.render(<Input aria-label="t" />); });
     const el = container.querySelector('input')!;

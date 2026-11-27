@@ -40,13 +40,13 @@ const COLORS: Array<{ name: string; swatch: string }> = [
 ];
 
 const TYPE_SCALE: Array<{ name: string; cls: string; spec: string }> = [
-  { name: 'title', cls: 'text-ds-title', spec: '24 / 36 · 600 · -1%' },
-  { name: 'card-title', cls: 'text-ds-card-title', spec: '20 / 30 · 500' },
-  { name: 'body', cls: 'text-ds-body', spec: '16 / 24 · 500' },
-  { name: 'small', cls: 'text-ds-small', spec: '16 / 24 · 400' },
-  { name: 'mono-lg', cls: 'font-mono text-ds-mono-lg', spec: '16 / 24' },
-  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '16 / 24' },
-  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '16 / 24' },
+  { name: 'title', cls: 'text-ds-title', spec: '20 / 28 · 600 · -1%' },
+  { name: 'card-title', cls: 'text-ds-card-title', spec: '16 / 24 · 500' },
+  { name: 'body', cls: 'text-ds-body', spec: '14 / 20 · 500' },
+  { name: 'small', cls: 'text-ds-small', spec: '13 / 18 · 400' },
+  { name: 'mono-lg', cls: 'font-mono text-ds-mono-lg', spec: '14 / 20' },
+  { name: 'mono-md', cls: 'font-mono text-ds-mono-md', spec: '13 / 18' },
+  { name: 'mono-sm', cls: 'font-mono text-ds-mono-sm', spec: '12 / 16' },
 ];
 
 const RADII: Array<{ name: string; cls: string; px: string }> = [

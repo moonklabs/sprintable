@@ -220,29 +220,29 @@
   --color-ds-pin: var(--ds-pin);
   --color-ds-on-pin: var(--ds-on-pin);
 
-  /* 글자 눈금 — 키트 규칙(story 5048 T0 ①): 글꼴 하나 · 굵기 셋(400 · 500 · 600) · 줄높이 모두 1.5. 가장 작은 글자가 16이다(작은 글자를 쓰지 않는 결).
-   *   쪽 제목 24 Semibold -1% · 칸 제목 / 목록의 이름 20 Medium · 기본 UI 글자(단추 · 탐색 · 탭 · 말풍선 · 값) 16 Medium · 설명 · 미리보기 · 자리글 · 시각 16 Regular.
-   * 굵기 · 자간은 단 이름에 붙어 있다(`text-ds-body`가 16 / 24 / Medium) — 호출부가 `font-semibold` · `font-normal`로 바꾸는 것은 그대로 된다.
-   * 고정폭(mono) 세 단은 키트에 없는 «칩 · 알약 · 숫자 배지» 자리: 키트 태그(28)에 들어가는 14까지 — 16 아래는 이 셋뿐이다. */
-  --text-ds-title: 24px;
-  --text-ds-title--line-height: 36px;
+  /* 글자 눈금 — 키트 규칙(story 5048 T0 ①)을 «독거노인용으로 크다»는 선생님 피드백(11-27)대로 내림: 글꼴 하나 · 굵기 셋(400 · 500 · 600). 가장 작은 글자는 12(한글 가독 하한).
+   *   쪽 제목(큰 제목) 20 Semibold -1% · 칸 제목 / 목록의 이름(중간 제목) 16 Medium · 기본 UI 글자(본문 — 단추 · 탐색 · 탭 · 말풍선 · 값) 14 Medium · 설명 · 미리보기 · 자리글 · 시각(보조) 13 Regular.
+   * 굵기 · 자간은 단 이름에 붙어 있다(`text-ds-body`가 14 / 20 / Medium) — 호출부가 `font-semibold` · `font-normal`로 바꾸는 것은 그대로 된다.
+   * 고정폭(mono) 세 단은 칩 · 알약 · 숫자 배지 자리: 본문 14 · 보조 13 · 작은 글자 12(키트 태그 28 안에 들어감). 폰 입력칸(input · textarea · select)만 16 유지(iOS 확대 방지) — 그쪽은 text-base. */
+  --text-ds-title: 20px;
+  --text-ds-title--line-height: 28px;
   --text-ds-title--font-weight: 600;
   --text-ds-title--letter-spacing: -0.01em;
-  --text-ds-card-title: 20px;
-  --text-ds-card-title--line-height: 30px;
+  --text-ds-card-title: 16px;
+  --text-ds-card-title--line-height: 24px;
   --text-ds-card-title--font-weight: 500;
-  --text-ds-body: 16px;
-  --text-ds-body--line-height: 24px;
+  --text-ds-body: 14px;
+  --text-ds-body--line-height: 20px;
   --text-ds-body--font-weight: 500;
-  --text-ds-small: 16px;
-  --text-ds-small--line-height: 24px;
+  --text-ds-small: 13px;
+  --text-ds-small--line-height: 18px;
   --text-ds-small--font-weight: 400;
-  --text-ds-mono-lg: 16px;
-  --text-ds-mono-lg--line-height: 24px;
-  --text-ds-mono-md: 16px;
-  --text-ds-mono-md--line-height: 24px;
-  --text-ds-mono-sm: 16px;
-  --text-ds-mono-sm--line-height: 24px;
+  --text-ds-mono-lg: 14px;
+  --text-ds-mono-lg--line-height: 20px;
+  --text-ds-mono-md: 13px;
+  --text-ds-mono-md--line-height: 18px;
+  --text-ds-mono-sm: 12px;
+  --text-ds-mono-sm--line-height: 16px;
 
   /* 모서리 단계: 8(모든 조작 · 카드 · 태그) · 16(말풍선 — 꼬리 쪽 한 귀만 4) · 원(아바타). 선은 1px 하나. */
   --radius-ds-tag: 8px;

@@ -65,7 +65,7 @@ export function HypothesisVerdictCard({
         ) : null}
       </div>
 
-      <p className="mt-3 text-ds-body leading-6 text-ds-ink">{hypothesis.statement}</p>
+      <p className="mt-3 text-ds-body leading-5 text-ds-ink">{hypothesis.statement}</p>
 
       {result && typeof result.target === 'number' && typeof result.actual === 'number' ? (
         <>

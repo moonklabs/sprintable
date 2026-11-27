@@ -35,25 +35,30 @@ function chroma(hex: string): number {
   return Math.hypot(1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s);
 }
 
-describe('키트 규칙 ① 글자 — 글꼴 하나 · 굵기 셋 · 줄높이 1.5 · 가장 작은 글자가 16', () => {
-  it('⭐기본 UI 글자 16 · Medium(500) · 줄높이 24(1.5) / 설명 · 미리보기 · 자리글 16 · Regular(400)', () => {
-    expect([size('body'), lh('body'), weight('body')]).toEqual([16, 24, 500]);
-    expect([size('small'), lh('small'), weight('small')]).toEqual([16, 24, 400]);
+describe('키트 규칙 ① 글자 — 글꼴 하나 · 굵기 셋 · 가장 작은 글자가 12(story 5048: 선생님 11-27 «독거노인용 같다» → 16 → 본문 14 · 보조 13 · 작은 12로 내림)', () => {
+  it('⭐기본 UI 글자(본문) 14/20 · Medium(500) / 설명 · 미리보기 · 자리글(보조) 13/18 · Regular(400)', () => {
+    expect([size('body'), lh('body'), weight('body')]).toEqual([14, 20, 500]);
+    expect([size('small'), lh('small'), weight('small')]).toEqual([13, 18, 400]);
   });
 
-  it('⭐쪽 제목 24 · Semibold(600) · 자간 -1% / 칸 제목 · 목록의 이름 20 · Medium(500)', () => {
-    expect([size('title'), lh('title'), weight('title')]).toEqual([24, 36, 600]);
+  it('⭐쪽 제목(큰 제목) 20/28 · Semibold(600) · 자간 -1% / 칸 제목 · 목록의 이름(중간 제목) 16/24 · Medium(500)', () => {
+    expect([size('title'), lh('title'), weight('title')]).toEqual([20, 28, 600]);
     expect(theme).toMatch(/--text-ds-title--letter-spacing:\s*-0\.01em;/);
-    expect([size('card-title'), lh('card-title'), weight('card-title')]).toEqual([20, 30, 500]);
+    expect([size('card-title'), lh('card-title'), weight('card-title')]).toEqual([16, 24, 500]);
   });
 
-  it('⭐줄높이는 모든 단에서 1.5(고정폭 칩 · 배지 자리까지)', () => {
-    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) expect(lh(n) / size(n), n).toBe(1.5);
+  it('⭐줄높이는 단마다 정확한 값 — 제목 28 · 24 / 본문 20 · 보조 18 / 고정폭 20 · 18 · 16(모두 글자의 1.33 ~ 1.5배)', () => {
+    const want: Record<string, number> = { title: 28, 'card-title': 24, body: 20, small: 18, 'mono-lg': 20, 'mono-md': 18, 'mono-sm': 16 };
+    for (const [n, h] of Object.entries(want)) {
+      expect(lh(n), n).toBe(h);
+      expect(lh(n) / size(n), n).toBeGreaterThanOrEqual(1.33);
+      expect(lh(n) / size(n), n).toBeLessThanOrEqual(1.5);
+    }
   });
 
-  it('⭐ds 글자 단은 전부 16 이상 — 쪽 제목 · 이름 · 기본 · 설명 · 고정폭 셋(story 5048 ②d: 고정폭 둘 14 → 16, D1 = 가)', () => {
-    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) expect(size(n), n).toBeGreaterThanOrEqual(16);
-    expect([size('mono-md'), size('mono-sm')]).toEqual([16, 16]);
+  it('⭐ds 글자 단은 전부 12 이상(한글 가독 하한) — 가장 작은 단은 고정폭 12 하나, 본문 14 · 보조 13', () => {
+    for (const n of ['title', 'card-title', 'body', 'small', 'mono-lg', 'mono-md', 'mono-sm']) expect(size(n), n).toBeGreaterThanOrEqual(12);
+    expect([size('mono-lg'), size('mono-md'), size('mono-sm')]).toEqual([14, 13, 12]);
   });
 
   it('⭐굵기는 400 · 500 · 600 셋만 쓴다', () => {
@@ -122,21 +127,23 @@ describe('키트 규칙 ① 색 역할 — 글자 셋 · 면 넷 · 선 · 진�
   });
 });
 
-describe('키트 규칙 ②d — 가장 작은 글자도 16(D1 = 가) · 정의 한 곳', () => {
+describe('키트 규칙 — 글자 내림: 가장 작은 글자 12 · 폰 입력 16 · 정의 한 곳', () => {
   const globals = readFileSync(join(__dirname, '..', 'app', 'globals.css'), 'utf8');
   const sizeOf = (name: string) => {
     const m = new RegExp(`--text-${name}:\\s*([\\d.]+)(rem|px);`).exec(globals);
     if (!m) throw new Error(`--text-${name} not defined in globals.css`);
     return Number(m[1]) * (m[2] === 'rem' ? 16 : 1);
   };
-  it('⭐xs · sm · micro는 16 — Tailwind 기본(12 · 14)과 옛 10을 한 곳에서 다시 정의(호출부 0곳 변경)', () => {
-    expect([sizeOf('xs'), sizeOf('sm'), sizeOf('micro')]).toEqual([16, 16, 16]);
-    for (const n of ['xs', 'sm', 'micro']) expect(globals).toMatch(new RegExp(`--text-${n}--line-height:\\s*1\\.5;`));
+  it('⭐xs · micro는 12 · sm은 14 — Tailwind 눈금으로 한 곳에서 다시 정의(호출부 0곳 변경), 옛 micro 10 · editorial-meta 11은 12로', () => {
+    expect([sizeOf('xs'), sizeOf('sm'), sizeOf('micro'), sizeOf('editorial-meta')]).toEqual([12, 14, 12, 12]);
   });
-  it('⭐ds 고정폭 글자도 16/24(mono-lg · md · sm)', () => {
-    for (const n of ['mono-lg', 'mono-md', 'mono-sm']) {
-      expect(new RegExp(`--text-ds-${n}:\\s*16px;`).test(theme)).toBe(true);
-      expect(new RegExp(`--text-ds-${n}--line-height:\\s*24px;`).test(theme)).toBe(true);
+  it('⭐폰 입력칸(input · textarea · select)은 16 — 기본(폰)은 `text-base`, 데스크톱(`lg:`)부터 14로 내려간다. 5개 부품 파일마다 «변형 없는 text-base» + «lg:text-sm 또는 lg:text-ds-body»가 한 className에 같이 있다(iOS가 16 미만 입력칸에 초점이 가면 화면을 확대)', () => {
+    const files = ['components/ui/input.tsx', 'components/ui/textarea.tsx', 'components/ui/select.tsx', 'components/ds/input.tsx', 'components/ds/select.tsx'];
+    for (const f of files) {
+      const src = readFileSync(join(__dirname, '..', f), 'utf8');
+      const classStrings = [...src.matchAll(/(["'`])((?:(?!\1).)*(?<![\w:-])text-base(?![\w-])(?:(?!\1).)*)\1/g)].map((m) => m[2]!);
+      expect(classStrings.length, `${f}: text-base 클래스 문자열`).toBeGreaterThan(0);
+      expect(classStrings.some((c) => /(?<![\w:-])lg:text-(?:sm|ds-body)(?![\w-])/.test(c)), `${f}: 같은 className에 lg:text-sm|lg:text-ds-body`).toBe(true);
     }
   });
 });

@@ -111,7 +111,7 @@ describe('ds DatePicker', () => {
     expect(has(trigger(), 'aria-invalid:border-ds-failed')).toBe(true);
   });
 
-  it('칸 모양: 높이 36 · 폰 44 · Input과 같은 경계 · 초점 · 글자 16px(폰) / 13(lg)', async () => {
+  it('칸 모양: 높이 36 · 폰 44 · Input과 같은 경계 · 초점 · 글자 16px(폰) / 14(lg)', async () => {
     await render(<DatePicker {...base} className="w-48" />);
     for (const c of ['h-ds-control', 'touch:h-ds-touch', 'border-ds-line-control', 'bg-ds-surface-sunk', 'focus-visible:ring-ds-action', 'text-base', 'lg:text-ds-body', 'w-48']) expect(has(trigger(), c), c).toBe(true);
   });
