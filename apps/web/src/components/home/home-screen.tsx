@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
-import { useListDetailWide } from '@/hooks/use-list-detail-wide';
+import { useDetailBesideList } from '@/hooks/use-detail-beside-list';
+import { HOME_TWO_COLUMN_MIN } from './home-layout';
 import type { HomeModel } from './derive-home';
 import type { HomeSources } from './home-model-provider';
 import { HomeDetail } from './home-detail';
@@ -18,7 +19,8 @@ import { useMinuteClock } from './use-minute-clock';
  */
 export function HomeScreen({ model, sources, partial = false }: { model: HomeModel; sources: HomeSources; partial?: boolean }) {
   const t = useTranslations('home');
-  const wide = useListDetailWide();
+  // story 5031 (5c · PO ii): two columns only when the body really received 340 + 16 + 360 (home-layout.ts) — below that the detail is the sheet and the list takes the whole body
+  const { ref: bodyRef, wide } = useDetailBesideList(HOME_TWO_COLUMN_MIN);
   const { selectedKey, select } = useHomeSelection(model);
   const [sheetOpen, setSheetOpen] = useState(false);
   const rows = useMemo(() => [...model.needsHand, ...model.working, ...model.justDone], [model]);
@@ -33,11 +35,13 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
   const sheetLabel = t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' });
 
   return (
+    <div ref={bodyRef} data-testid="home-width-probe">
     <ListDetailShell
       testId="home-screen"
       columnTestId="home-detail-column"
       sheetTestId="home-detail-sheet"
       wide={wide}
+      detailWidth="fixed" // story 5031 (C1 step 5c · PO): from lg the detail is a fixed 340 and the list takes the rest
       list={<HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />}
       detail={<HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />}
       detailLabel={t('detailRequest')}
@@ -46,5 +50,6 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
       sheetOpen={sheetOpen && selectedRow !== null}
       onSheetOpenChange={setSheetOpen}
     />
+    </div>
   );
 }

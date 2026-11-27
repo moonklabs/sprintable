@@ -14,7 +14,7 @@ let root: Root;
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string; fill?: boolean; sheetHeader?: string }) {
+async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string; fill?: boolean; sheetHeader?: string; detailWidth?: 'flex' | 'fixed' }) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -29,6 +29,7 @@ async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChan
           onSheetOpenChange={props.onSheetOpenChange ?? (() => {})}
           testId={props.testId}
           fill={props.fill}
+          detailWidth={props.detailWidth}
         />
       </NextIntlClientProvider>,
     );
@@ -138,5 +139,52 @@ describe('ListDetailShell', () => {
     await show({ wide: true, testId: 'gates-screen' });
     expect(container.querySelector('[data-testid="gates-screen"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="gates-screen-detail-column"]')).toBeTruthy();
+  });
+});
+
+// story 5031 (C1 step 5c · PO): the home's split — the DETAIL a fixed 340 and the list the rest. One optional prop; the default is the shape every other screen (the agents frame · the inbox tabs) has had, character for character.
+describe('ListDetailShell — detailWidth (story 5031 · 5c)', () => {
+  const root_ = () => container.querySelector('[data-testid="list-detail"]') as HTMLElement;
+  const FLEX = 'lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]';
+  const FIXED = 'lg:grid-cols-[minmax(0,1fr)_340px]';
+  it('⭐the default (and `flex`) is the old grid in BOTH modes — not a character changed; `fixed` is the 340 split in both modes', async () => {
+    for (const fill of [false, true]) {
+      await show({ wide: true, fill });
+      const old = fill
+        ? 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4'
+        : 'lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4';
+      expect(root_().className, `default · fill ${fill}`).toBe(old);
+      await show({ wide: true, fill, detailWidth: 'flex' });
+      expect(root_().className, `flex · fill ${fill}`).toBe(old);
+      await show({ wide: true, fill, detailWidth: 'fixed' });
+      expect(root_().className, `fixed · fill ${fill}`).toBe(old.replace(FLEX, FIXED));
+      expect(root_().className).not.toContain(FLEX);
+    }
+  });
+  it('the detail column and the sheet are the same for both splits (only the wide grid changes)', async () => {
+    await show({ wide: true, detailWidth: 'fixed' });
+    expect((container.querySelector('[data-testid="list-detail-detail-column"]') as HTMLElement).className).toBe('sticky top-4 max-h-[calc(100svh-6rem)] empty:hidden');
+    await show({ wide: false, sheetOpen: true, detailWidth: 'fixed' });
+    expect(document.querySelector('[data-testid="list-detail-detail-sheet"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="list-detail-detail-column"]')).toBeNull();
+  });
+
+  it('⭐`fixed` with `wide` false is ONE column (a caller whose own threshold is above lg): no 340 track left empty; `flex` with `wide` false is the old grid as before', async () => {
+    for (const fill of [false, true]) {
+      await show({ wide: false, fill, detailWidth: 'fixed' });
+      expect(root_().className, `fixed · not wide · fill ${fill}`).toContain('lg:grid-cols-[minmax(0,1fr)]');
+      expect(root_().className).not.toContain('340px');
+      expect(root_().className).not.toContain(FLEX);
+      await show({ wide: false, fill });
+      expect(root_().className, `default · not wide · fill ${fill}`).toContain(FLEX);
+    }
+  });
+  it('the 340 written in the class and the gap 16 (`lg:gap-4`) are the named home numbers (home-layout.ts)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { HOME_DETAIL_W, HOME_GAP } = await import('@/components/home/home-layout');
+    const src = readFileSync(path.join(__dirname, 'list-detail-shell.tsx'), 'utf8');
+    expect(src).toContain(`_${HOME_DETAIL_W}px]`);
+    expect(src).toContain(`lg:gap-${HOME_GAP / 4}`);
   });
 });

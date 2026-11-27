@@ -796,7 +796,7 @@ export default function SettingsPage() {
       <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
         {/* story 4891 (UI-8 AC4) — the section list drawn with the ds parts (settings-nav-list.tsx · which sections: settings-nav.ts). ≥lg (1024 — the breakpoint SSOT): always beside the pane. Below it (a phone · a tablet): the list FIRST — the whole screen
             while `lnbOpen` (no `?tab=` on arrival) — and the pane with a back row after a section is picked (it used to be a hamburger over a 208px column squeezed next to the pane) */}
-        <div className={`focus-inset shrink-0 overflow-y-auto border-ds-line lg:w-56 lg:border-r ${lnbOpen ? 'flex w-full flex-col' : 'hidden'} lg:flex lg:flex-col`} data-testid="settings-nav-column">
+        <div className={`focus-inset shrink-0 overflow-y-auto border-ds-line lg:w-64 lg:border-r ${lnbOpen ? 'flex w-full flex-col' : 'hidden'} lg:flex lg:flex-col`} data-testid="settings-nav-column">
           <h1 className="px-4 pb-2 pt-4 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
           <SettingsNav groups={navGroups} activeTab={activeTab} integrationsHref={flatHref('/settings/integrations')} hrefFor={settingsLinkHref} />
         </div>

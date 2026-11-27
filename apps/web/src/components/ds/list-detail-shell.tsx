@@ -11,7 +11,7 @@ import { DialogTitle } from './dialog';
  * The caller owns the width decision (`useListDetailWide()` — from 1024px the detail sits beside the list), what is picked and whether the sheet is open: this part only lays them out.
  */
 export function ListDetailShell({
-  list, detail, wide, detailLabel, sheetHeader, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false,
+  list, detail, wide, detailLabel, sheetHeader, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false, detailWidth = 'flex',
 }: {
   list: ReactNode;
   detail: ReactNode;
@@ -35,9 +35,16 @@ export function ListDetailShell({
    * Off (default): the old page-scroll layout, a sticky column — every screen that does not ask for it stands exactly as before.
    */
   fill?: boolean;
+  /**
+   * story 5031 (C1 step 5c): the wide grid's split. `flex` (default — the shape every screen has had: the list 360–420, the detail takes the rest) or `fixed` (the home: the DETAIL is a fixed 340 and the list takes the rest — a long list line wants the room, the card beside it is a fixed-size reading column).
+   * Only the wide grid changes; the narrow sheet is the same. (`fixed` with `wide` false is ONE column — a caller whose own threshold is above lg.) A screen that does not ask stands exactly as before.
+   */
+  detailWidth?: 'flex' | 'fixed';
 }) {
+  // `fixed` while the detail is NOT beside the list (a caller that decided «not wide» below its own threshold, though the window is past lg): one column — the 340 must not stay as an empty track with no detail in it
+  const cols = detailWidth === 'fixed' ? (wide ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : 'lg:grid-cols-[minmax(0,1fr)]') : 'lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]';
   return (
-    <div className={fill ? 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4' : 'lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4'} data-testid={testId}>
+    <div className={fill ? `lg:grid lg:min-h-0 lg:flex-1 ${cols} lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4` : `lg:grid ${cols} lg:items-start lg:gap-4`} data-testid={testId}>
       {list}
       {wide ? (
         <aside className={`${fill ? 'min-h-0 lg:h-full' : 'sticky top-4 max-h-[calc(100svh-6rem)]'} empty:hidden`} aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>

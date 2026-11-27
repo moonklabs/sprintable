@@ -4,5 +4,6 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6" />;
+  // story 5031 (C1 step 5c): the same container as the body root (org-briefing-shell.tsx) — it fills the inset now (no centred max-w-4xl column), so the skeleton and the screen stand in the same place
+  return <PageSkeleton className="w-full space-y-6 p-4 lg:p-6" />;
 }

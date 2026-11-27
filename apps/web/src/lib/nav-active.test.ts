@@ -62,4 +62,12 @@ describe('screenOwnsListColumn — 자기 목록 칸을 가진 화면은 셸의 
     expect(screenOwnsListColumn('/flow')).toBe(false);
     expect(screenOwnsListColumn('/org-briefing')).toBe(false);
   });
+  // story 5031 (C1 step 5c · PO): 설정도 자기 탐색 칸이 있어 셸의 목록 칸을 접는다(아이콘 막대 · ⌘4 · 경로의 «설정» crumb가 길을 맡는다)
+  it('⭐설정과 그 하위(/settings/integrations)도 — 경계를 지킨다 · 설정 자리의 다른 조직 화면은 아니다', () => {
+    expect(screenOwnsListColumn('/settings')).toBe(true);
+    expect(screenOwnsListColumn('/settings/integrations')).toBe(true);
+    expect(screenOwnsListColumn('/settingsx')).toBe(false);
+    expect(screenOwnsListColumn('/organization/members')).toBe(false);
+    expect(screenOwnsListColumn('/inbox')).toBe(false);
+  });
 });
