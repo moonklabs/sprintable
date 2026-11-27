@@ -287,7 +287,7 @@ function ScrollShell({
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
   // R2(da9d1781): presence SSE event-driven(3s 폴 제거). member_id 로 event-stream 구독.
   const { currentTeamMemberId, userName } = useDashboardContext();
-  const items = useTeamPresence(true);
+  const items = useTeamPresence(true, orgId); // story 5031 — the shell's organization: a switch asks again (the badge is outside the page body's key)
   const workingCount = items.filter((i) => i.working).length;
   // story #2852(2836 FE 조각) — presence 패널은 전역 상시 마운트라 「인증 실패」 뱃지 원자료도
   // 여기서 함께 폴한다(org-briefing 진입과 무관하게 늘 최신).

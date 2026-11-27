@@ -56,9 +56,19 @@ export interface TeamPresenceItem {
  */
 const PRESENCE_EVENT_DEBOUNCE_MS = 300;
 
-export function useTeamPresence(active: boolean): TeamPresenceItem[] {
+export function useTeamPresence(active: boolean, orgId?: string): TeamPresenceItem[] {
   const [items, setItems] = useState<TeamPresenceItem[]>([]);
   const mux = useSseMultiplexerContext();
+
+  // story 5031 — the snapshot belongs to ONE organization (the ask `/api/team-presence` carries no organization in its URL: it rides on the session / the fetch interceptor's X-Org-Id), and the shell that holds this hook is NOT remounted by an
+  // organization switch (the top bar and the working-count badge are outside the page body's key). When the shell's organization really changes the old number is dropped IN THE RENDER (no frame shows the old organization's count) and the effect
+  // below asks again; an organization first known late (it was empty at mount) is only recorded — not a switch.
+  const [snapshotOrgId, setSnapshotOrgId] = useState(orgId);
+  if (orgId && orgId !== snapshotOrgId) {
+    setSnapshotOrgId(orgId);
+    if (snapshotOrgId) setItems([]);
+  }
+  const lastOrgIdRef = useRef(orgId);
 
   const seqRef = useRef(0);
   const inFlightRef = useRef(false);
@@ -103,6 +113,13 @@ export function useTeamPresence(active: boolean): TeamPresenceItem[] {
 
   useEffect(() => {
     if (!active || typeof window === 'undefined') return;
+    // story 5031 — an organization switch: an answer still in flight is the OLD organization's. Let the new ask through: the in-flight guard would otherwise swallow it ("already asking") and that old answer would be taken for the latest.
+    // Once the new ask goes out it takes the next sequence number, so the sequence guard drops the old answer by itself — no separate «make it stale» step (a mutation showed such a line is dead). A late-known organization is not a switch.
+    if (orgId && lastOrgIdRef.current && orgId !== lastOrgIdRef.current) {
+      inFlightRef.current = false;
+      pendingRef.current = false;
+    }
+    if (orgId) lastOrgIdRef.current = orgId;
     void fetchPresence(); // 초기 스냅샷
     const onVisible = () => { if (!document.hidden) void fetchPresence(); }; // hidden 중 누락 보정
     document.addEventListener('visibilitychange', onVisible);
@@ -120,7 +137,7 @@ export function useTeamPresence(active: boolean): TeamPresenceItem[] {
       document.removeEventListener('visibilitychange', onVisible);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [active, fetchPresence, scheduleFetchPresence, mux]);
+  }, [active, fetchPresence, scheduleFetchPresence, mux, orgId]);
 
   return items;
 }
