@@ -26,7 +26,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
-const { reopenMock, clearMock, retryMock } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn(), retryMock: vi.fn() }));
+const { reopenMock, clearMock, retryMock, presenceSpy } = vi.hoisted(() => ({ reopenMock: vi.fn(() => true), clearMock: vi.fn(), retryMock: vi.fn(), presenceSpy: vi.fn() }));
 vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrlOnce: reopenMock, clearReopenMarker: clearMock, retryReopenCurrentUrl: retryMock }));
 
 const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
@@ -69,7 +69,8 @@ vi.mock('@/components/nav/top-bar', () => ({
   },
 }));
 vi.mock('@/components/presence/team-presence-panel', () => ({ TeamPresencePanel: none }));
-vi.mock('@/components/presence/use-team-presence', () => ({ useTeamPresence: () => [] }));
+// a spy (codex round 2 on PR 6056: a mock that took no arguments could not tell whether the shell hands its organization to the hook — the working-count badge asks again on a switch only because it does)
+vi.mock('@/components/presence/use-team-presence', () => ({ useTeamPresence: (...args: unknown[]) => { presenceSpy(...args); return []; } }));
 vi.mock('@/components/presence/use-agent-auth-failures', () => ({ useAgentAuthFailures: () => ({}) }));
 vi.mock('@/hooks/use-chat-unread-total', () => ({ useChatUnreadTotal: () => 0 }));
 vi.mock('@/components/release-notes/release-notes-gate', () => ({ ReleaseNotesProvider: pass }));
@@ -156,6 +157,18 @@ async function render(props: Partial<Props>, child: ReactNode = <Probe />) {
 }
 
 describe('셸 본문 key — 조직이 바뀔 때만 다시 붙는다 (story 5031)', () => {
+  it('⭐셸은 자기 조직을 상단 막대의 «일하는 중» 배지 훅에 넘긴다 — 조직이 바뀌면 새 조직을, 같은 조직의 프로젝트만 바뀌면 그대로(PR 6056 · codex 판 2)', async () => {
+    presenceSpy.mockClear();
+    await render({});
+    expect(presenceSpy, 'the hook gets (active, the shell organization) — without it the badge never asks again on a switch').toHaveBeenLastCalledWith(true, ORG_A);
+    await render({ jwtOrgId: ORG_B, orgId: ORG_B });
+    expect(presenceSpy).toHaveBeenLastCalledWith(true, ORG_B);
+    presenceSpy.mockClear();
+    await render({ jwtOrgId: ORG_B, orgId: ORG_B, projectId: P2, projectName: 'Project Two', currentProjectSlug: 'two' }); // another project of the SAME organization
+    expect(presenceSpy.mock.calls.length).toBeGreaterThan(0);
+    for (const call of presenceSpy.mock.calls) expect(call).toEqual([true, ORG_B]);
+  });
+
   it('⭐조직 A→B(토큰 조직 · 평면 화면): 본문이 새로 마운트되고(마운트 +1 · 언마운트 +1) 상태가 초기화된다', async () => {
     await render({});
     expect(probe.mounts).toBe(1);
