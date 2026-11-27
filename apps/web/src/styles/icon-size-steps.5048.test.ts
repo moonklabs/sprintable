@@ -13,7 +13,7 @@ const SRC = join(__dirname, '..');
 const AREAS_DIR = join(__dirname, 'icon-size-areas');
 const AREA_FILES = readdirSync(AREAS_DIR).filter((n) => n.endsWith('.txt')).sort();
 const DIRS = AREA_FILES.flatMap((n) => readFileSync(join(AREAS_DIR, n), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')));
-const RAW = /(?<![\w:-])(?:size|h|w)-(?:3\.5|4|4\.5|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/;
+const RAW = /(?<![\w:-])(?:size|h|w)-(?:3\.5|4|4\.5|5|6|7|8|9|10|11|12|14|16|\[\d+(?:\.\d+)?px\])(?![\w.-])/; // 12(`size-3`)는 칩 · 배지 안에서 허용이라 뺀다(단, iconStart 안은 아래 규칙이 따로 막음)
 const RAW_ICON_PROP = /\bsize=\{(?:14|16|18|20|24|32)\}/;
 // «토큰 밖이 맞는 곳» — `파일::태그 앞 부분` 정확히 일치만(같은 파일에 새 자리가 생기면 RED) · 사유 한 줄. 이 목록이 자라는 diff는 PO가 본다.
 const ALLOWED: Record<string, string> = {
@@ -69,7 +69,7 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
       // `iconStart={<아이콘 …/>}`는 ds Button(높이 40)의 자리 — 단추 안 아이콘은 md뿐이다(sm 16 · 12 · 14 · 16 숫자는 RED). 아이콘 이름에 숫자가 든 것(`Trash2` · `Share2`)도 본다.
       for (const m of text.matchAll(/iconStart=\{\s*</g)) {
         const tag = openingTag(text, m.index! + m[0].length - 1);
-        if (/size-ds-icon-sm|size="sm"|size=\{(?:14|16)\}|(?<![\w:-])(?:size|h|w)-(?:3\.5|3|4)(?![\w.-])/.test(tag)) {
+        if (/size-ds-icon-sm|size="sm"|size=\{(?:14|16)\}|(?<![\w:-])(?:size|h|w)-(?:3\.5|3|4)(?![\w.-])/.test(tag) || (/^<Icon\s/.test(tag) && !/\bsize=/.test(tag))) { // 크기 없는 ds <Icon>은 기본 16(sm)이라 단추 안에선 같은 위반
           const key = `${rel}::iconStart ${tag.replace(/\s+/g, ' ').slice(0, 60)}`;
           if (!Object.keys(ALLOWED).some((k) => key.startsWith(k))) hits.push(key);
         }
