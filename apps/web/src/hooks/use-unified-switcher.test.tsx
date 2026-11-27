@@ -17,13 +17,14 @@ import koMessages from '../../messages/ko.json';
 
 // story #2212 — routerPushMock/searchParamsValue를 테스트별로 갈아끼워 next-복귀·open-redirect
 // 가드를 검증한다(기존 테스트는 빈 URLSearchParams로 그대로 동작 — 회귀 없음).
-const { routerPushMock, searchParamsValueRef } = vi.hoisted(() => ({
+const { routerPushMock, routerRefreshMock, searchParamsValueRef } = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
+  routerRefreshMock: vi.fn(),
   searchParamsValueRef: { current: '' as string },
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: routerPushMock, refresh: vi.fn() }),
+  useRouter: () => ({ push: routerPushMock, refresh: routerRefreshMock }),
   usePathname: () => '/moonklabs/sprintable/board',
   useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
@@ -70,6 +71,7 @@ beforeEach(() => {
   root = createRoot(container);
   result = null;
   routerPushMock.mockClear();
+  routerRefreshMock.mockClear();
   searchParamsValueRef.current = '';
   desktopAppRef.current = null; // [SID:4681] ③ — a browser unless a test says otherwise
   window.sessionStorage.clear(); // story #2468 — 테스트 간 stale project_id 오염 방지
@@ -256,6 +258,51 @@ describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', 
       const dest = String(call[0]);
       expect(dest.startsWith('/moonklabs/sprintable/board')).toBe(true); // 목적지 자체는 항상 내부 경로
     }
+  });
+});
+
+// story 5031 — an ORGANIZATION switch that arrives with `?next=` (the proxy sent the person to /org-briefing?next=<where they were going> and they picked an organization + project there): push to the destination
+// AND refresh, in that order — the same order as the general path. The refresh is what brings the new organization to the shell (a push alone leaves the shell's layout props — the old organization's — in place), and the shell mounts
+// its page body anew when the organization changes (app/dashboard/dashboard-shell-org-key.5031.test.tsx pins that half: push → refresh as two renders). Calls only: this is a mocked router, not Next's.
+describe('useUnifiedSwitcher — switchOrgAndProject의 ?next= 복귀는 push 뒤에 refresh도 부른다 (story 5031)', () => {
+  const okFetch = () => vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+  it('⭐?next=이 안전한 내부경로면 router.push(next) → router.refresh() 순서로 부른다(그 사이 다른 push 없음)', async () => {
+    searchParamsValueRef.current = 'next=%2Fchats';
+    okFetch();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    expect(routerPushMock).toHaveBeenCalledTimes(1);
+    expect(routerPushMock).toHaveBeenCalledWith('/chats');
+    expect(routerRefreshMock, 'reverted (no refresh after the next-push) → 0 calls').toHaveBeenCalledTimes(1);
+    expect(routerPushMock.mock.invocationCallOrder[0]!, 'the refresh comes AFTER the push (the destination first)').toBeLessThan(routerRefreshMock.mock.invocationCallOrder[0]!);
+  });
+
+  it('⭐안전하지 않은 next(//evil.com)는 믿지 않고 일반 길 — 이 분기가 아님(기존 동작 그대로: ?p= 이동 + refresh 한 번)', async () => {
+    searchParamsValueRef.current = `next=${encodeURIComponent('//evil.com')}`;
+    okFetch();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    expect(routerPushMock).not.toHaveBeenCalledWith('//evil.com');
+    for (const call of routerPushMock.mock.calls) expect(String(call[0]).startsWith('//')).toBe(false);
+    expect(routerRefreshMock).toHaveBeenCalledTimes(1); // the general path's own refresh — not a second one
+  });
+
+  it('⭐org 전환 자체가 실패하면(switch-org 비정상) push도 refresh도 부르지 않는다', async () => {
+    searchParamsValueRef.current = 'next=%2Fchats';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+    expect(routerPushMock).not.toHaveBeenCalled();
+    expect(routerRefreshMock).not.toHaveBeenCalled();
+  });
+
+  it('switchProject의 ?next=은 조직이 안 바뀌므로 그대로다 — push만, refresh 없음(셸의 조직 key 불변)', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    okFetch();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+    expect(routerPushMock).toHaveBeenCalledWith('/board');
+    expect(routerRefreshMock).not.toHaveBeenCalled();
   });
 });
 

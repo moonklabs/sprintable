@@ -314,6 +314,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const nextTarget = isSafeInternalPath(nextRaw) ? nextRaw : null;
       if (nextTarget) {
         router.push(nextTarget);
+        // story 5031 — the same order as the general path below (`push` then `refresh`): the organization changed, and the shell (its layout) is not re-rendered by a push — only a refresh brings the new organization's
+        // props, which is what mounts the page body anew (dashboard-shell.tsx keys it by the shell's organization). Without it this one way left the destination under the OLD organization's header and data.
+        router.refresh();
         return;
       }
       const sp = withProjectAgnosticParams(searchParams);

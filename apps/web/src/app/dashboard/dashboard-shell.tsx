@@ -1,7 +1,7 @@
 'use client';
 
 import { EmbeddedServerProvider } from '@/components/embedded-server-context';
-import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
+import { createContext, Fragment, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
@@ -645,7 +645,10 @@ export function DashboardShell({
                     title={tCommon('projectOpenFailedTitle')} description={tCommon('projectOpenFailedDescription')}
                   />
                 ) : null)
-                : children}
+                // story 5031 — the page body belongs to ONE organization: when the shell's organization changes (the switcher · the org hint banner · an address of another organization) the body is mounted anew,
+                // the same as a reload would give — every screen asks again with the new organization (its requests carry no organization in the URL: it rides on the session · X-Org-Id), instead of each screen
+                // having to list the organization among its own dependencies. Same organization (another project · another page) = the same key = nothing is remounted. The frame (bars · panels · toasts · palette) is outside the key.
+                : <Fragment key={effectiveOrgId ?? ''}>{children}</Fragment>}
             </ShellBody>
             {/* story #3260 — SidebarProvider 안(ShellBody와 형제)에 마운트해야
                 useSidebar()로 실 사이드바 폭을 읽어 데스크톱 겹침을 피할 수 있다(2차 finding,
