@@ -1121,6 +1121,16 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0503 = (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME)\b|drop_column|alter_column|rename_|add_column|create_index", up0503), "0503's upgrade() only swaps one CHECK for a wider list"
     assert "'member_added', 'member_removed', 'role_changed', 'bridge.inbound_skipped'" in (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text(), "the old three words stay in the new list"
+    # story 5053: 0506 is the room-lift trigger and its backfill — FOUR `op.execute` calls of upgrade() the reading lists: the trigger FUNCTION (`CREATE OR REPLACE FUNCTION conversation_messages_bump_room` — a new function that raises
+    # a room's `updated_at` to a new message's time and ONLY when the room is older), `DROP TRIGGER IF EXISTS` (nothing is there yet), the `CREATE TRIGGER … AFTER INSERT ON conversation_messages`, and ONE data `UPDATE` (the backfill: a
+    # room whose last word is later than its `updated_at` gets that time — one statement, row locks on those rooms only; it runs AFTER the trigger exists, so no message slips between). A running old revision lives with it: it never names
+    # the trigger; the room update it does itself on some roads is the same row at the same or an earlier time (the trigger writes nothing then); nothing is dropped, renamed, retyped or deleted. The downgrade() is not read.
+    room_lift = [h for h in hits if h.startswith("0506_")]
+    assert len(room_lift) == 4, room_lift
+    assert any("op.execute(" in h for h in room_lift) and any("DROP TRIGGER IF EXISTS trg_conversation_messages_bump_room ON conversation_messages" in h for h in room_lift) and any("CREATE TRIGGER trg_conversation_messages_bump_room AFTER INSERT ON conversation_messages" in h for h in room_lift), room_lift
+    up0506 = (_ROOT / "backend/alembic/versions/0506_conversation_messages_bump_room.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert up0506.count("UPDATE conversations c SET updated_at = LEAST(m.last_at, now())") == 1 and "AND updated_at < LEAST(NEW.created_at, now())" in up0506 and up0506.index("CREATE TRIGGER") < up0506.index("UPDATE conversations c SET"), "the trigger exists before the backfill runs"
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT\s+INTO|RENAME|DROP\s+(COLUMN|TABLE))\b|drop_column|alter_column|rename_|add_column|create_index", up0506), "0506 touches no column, index or row besides the room times"  # `AFTER INSERT` is the trigger's event, not a write
     # story 5041 (C0b): 0505 is TWO `op.execute` lines of upgrade() the reading lists — a NULLABLE column with no default on `reward_ledger` (`ADD COLUMN IF NOT EXISTS agent_action_request_id uuid`: no rewrite, no lock beyond the
     # catalogue change; a running old revision never names it, so every row it writes has NULL) and the partial UNIQUE index over it (`… WHERE agent_action_request_id IS NOT NULL`: every existing row is NULL and an old
     # revision's inserts are NULL, so none ever enters the index — it is empty when built; the plain build of the repository's convention). Nothing is dropped, renamed, retyped, backfilled or deleted. The downgrade() is not read.
@@ -1129,7 +1139,7 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0505 = (_ROOT / "backend/alembic/versions/0505_reward_ledger_agent_action_request.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_reward_ledger_agent_action_request ON reward_ledger (agent_action_request_id) WHERE agent_action_request_id IS NOT NULL" in up0505
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|DROP|NOT NULL DEFAULT)\b|drop_column|alter_column|rename_|CONCURRENTLY|SET NOT NULL", up0505.replace("WHERE agent_action_request_id IS NOT NULL", "")), "0505's upgrade() adds one nullable column and one partial unique index — nothing more"
-    hits = [h for h in hits if not h.startswith(("0471_", "0505_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
+    hits = [h for h in hits if not h.startswith(("0471_", "0505_", "0506_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
