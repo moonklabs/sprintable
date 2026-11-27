@@ -439,12 +439,21 @@ function AuditRow({ proofState, claim, now, human, agent, className, compactActo
   // 예전엔 name만 읽어 활동 로그가 넘긴 label(«이름 없는 구성원»)을 버려 이름 없는 행위자가 빈칸이었다.
   const actor = agent ?? human;
   const actorLabel = actor ? (actor.label ?? actor.name) : null;
+  // story 5051 — the row is a wrapping line, not a rigid one. The «time · actor» chunk used to be `shrink-0` with no ellipsis: a long actor label (a long agent name, or the «· ID 8 chars» tail two members with the SAME name
+  // get) pushed the row past the screen (CI run 45923586779: 413 on a 402 screen) — and an ellipsis alone would still leave the claim only ~80 px. So the claim keeps a floor (`basis-52` = 13rem, still shrinks below it on a
+  // screen narrower than that) and the meta group (avatar + chunk) is one flex item that drops to a second line, right-aligned, when it does not fit beside the claim; inside it the label is ellipsized and the whole words
+  // sit in `title`. Wide rows are one line as before (the meta group fits, the claim's `flex-1` pushes it to the right). Boxes decide — no breakpoint, no text-width guess.
+  const chunk = [now, compactActor ? null : actorLabel].filter(Boolean).join(' ');
   return (
-    <div className={cn('flex items-center gap-2 rounded-xl border border-proof-line bg-proof-panel px-3 py-2 text-editorial-meta', className)}>
+    <div className={cn('flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-proof-line bg-proof-panel px-3 py-2 text-editorial-meta', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
-      {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, compactActor ? null : actorLabel].filter(Boolean).join(' ')}</span>
+      <span className="min-w-0 flex-1 basis-52 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
+      {actor || chunk ? (
+        <span data-slot="audit-row-meta" className="ml-auto flex min-w-0 max-w-full items-center gap-2">
+          {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
+          {chunk ? <span className="min-w-0 truncate font-mono text-micro text-proof-ink-3" title={chunk}>{chunk}</span> : null}
+        </span>
+      ) : null}
     </div>
   );
 }
