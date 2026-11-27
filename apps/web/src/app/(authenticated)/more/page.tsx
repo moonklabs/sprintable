@@ -21,7 +21,7 @@ import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref } from '@/lib/nav-v3-destinati
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { MoreTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { MoreTopBarTitle, TitleTopBarSlot, useMoreTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
@@ -94,7 +94,7 @@ export default function MorePage() {
           금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다.
           story #fddd0e6b(B) — 「전체」(mobileTabBar.more, 탭 이름)와 「전체 메뉴」(페이지
           제목, 새 키)는 다른 값이다 — 재사용 아님. */}
-      <TopBarSlot title={<MoreTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<MoreTopBarTitle />} useText={useMoreTopBarTitleText} showContextChip />
       {/* story 4890 (UI-7 · 전체 화면 통째): 폰 «전체»는 한 줄 검색 하나로 시작한다 — 입력칸(이 목록의 화면 이름을 거름) + 오른쪽 돋보기 단추(전체 검색 · 명령 팔레트를 연다). 전엔 «전체 검색 열기» 단추 · «24개 화면 · 7개 구역» ·
           탭 안내 두 줄 · «이 목록에서 …» 입력칸이 첫 내용 앞에 28%를 차지했다. 둘은 여전히 다른 일이라(오른쪽 단추 = 팔레트 · 입력칸 = 이 목록만 거름) 이름을 가른다 — 입력칸은 범위를 말하고(moreSearchPlaceholder) 단추는 «전체 검색 열기». */}
       <div className="mb-4 flex items-center gap-2">

@@ -212,6 +212,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
   return (
     <>
       <TopBarSlot
+        titleText={t('backToList')}
         title={
           // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
           // 쌓지 않아 브라우저 BACK 재진입 트랩을 없앤다(§3.2). back()류 직접호출 금지

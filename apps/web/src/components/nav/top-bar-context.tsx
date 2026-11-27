@@ -4,6 +4,10 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 
 interface TopBarState {
   title: ReactNode | null;
+  /** story 5031 (5a): the title's plain words — what the desktop bar's path ends with and compares with the place's name (a title that is a component has no words an element scan can read). Optional. */
+  titleText?: string;
+  /** story 5031 (5a): the pathname the slot was published for — a slot that is not for the current path is stale (see `titleIsStale`) */
+  slotPath?: string;
   actions: ReactNode | null;
   // 근본 재구현(2076 회귀 후속, 유나양 규격) — 애초 "숨길 화면을 명시(hideContextChip)"가
   // fail-open 구조였다(docs·mockups·retro가 뒤로가기 신호 부재로 grep에서 3차례 누락되며
@@ -12,10 +16,10 @@ interface TopBarState {
   showContextChip: boolean;
 }
 
-type TopBarFallback = { title: ReactNode; showContextChip: boolean } | null;
+type TopBarFallback = { title: ReactNode; titleText?: string; showContextChip: boolean } | null;
 
 interface TopBarStore extends TopBarState {
-  setSlot: (slot: Pick<TopBarState, 'title' | 'actions'> & Partial<Pick<TopBarState, 'showContextChip'>>) => void;
+  setSlot: (slot: Pick<TopBarState, 'title' | 'actions'> & Partial<Pick<TopBarState, 'showContextChip' | 'titleText' | 'slotPath'>>) => void;
   clearSlot: () => void;
   /**
    * story #4291(AC3) — 화면이 슬롯을 비운 사이(옛 화면 언마운트 → 새 화면 마운트 전 · 로딩 경계가 뜬 동안) 보일 제목. 레이아웃이 쥔다
@@ -25,6 +29,10 @@ interface TopBarStore extends TopBarState {
    * 먼저 서고 떠나는 쪽 정리(예: 일감 탭 띠의 passive effect)가 뒤에 돌면, 무조건 비우기는 도착 폴백까지 지워 상단바가 통째로 비었다(«보드» → «전체»).
    */
   holdFallback: (fallback: NonNullable<TopBarFallback>) => () => void;
+  /** story 5031 (5a): the current pathname, handed in by the shell (undefined in a test of the bar alone — then nothing is ever stale) */
+  pathname?: string;
+  /** story 5031 (5a): the slot's title was published for another path — the screen has not published for this one yet */
+  titleStale: boolean;
   hidden: boolean;
   setHidden: (h: boolean) => void;
   scrollContainer: HTMLElement | null;
@@ -33,7 +41,12 @@ interface TopBarStore extends TopBarState {
 
 const TopBarCtx = createContext<TopBarStore | null>(null);
 
-export function TopBarProvider({ children }: { children: ReactNode }) {
+/** a slot published for another path than the current one is stale; a slot or a path that is not known (a bare test) is never stale */
+export function titleIsStale(slotPath: string | undefined, pathname: string | undefined): boolean {
+  return slotPath !== undefined && pathname !== undefined && slotPath !== pathname;
+}
+
+export function TopBarProvider({ children, pathname }: { children: ReactNode; pathname?: string }) {
   const [state, setState] = useState<TopBarState>({ title: null, actions: null, showContextChip: false });
   const [fallback, setFallback] = useState<TopBarFallback>(null);
   // 정체성 고정 — 쥐는 쪽 effect의 deps에 들어간다(매 렌더 새 함수면 세울 때마다 다시 돌아 끝없이 돈다).
@@ -47,10 +60,14 @@ export function TopBarProvider({ children }: { children: ReactNode }) {
   const value: TopBarStore = {
     ...state,
     title: slotEmpty ? (fallback?.title ?? null) : state.title,
+    titleText: slotEmpty ? fallback?.titleText : state.titleText,
+    // the fallback (a loading.tsx) is by definition for the screen being arrived at; only a published slot can be stale
+    titleStale: !slotEmpty && titleIsStale(state.slotPath, pathname),
+    pathname,
     showContextChip: slotEmpty ? (fallback?.showContextChip ?? false) : state.showContextChip,
     holdFallback,
     setSlot: (slot) => setState({ showContextChip: false, ...slot }),
-    clearSlot: () => setState({ title: null, actions: null, showContextChip: false }),
+    clearSlot: () => setState({ title: null, titleText: undefined, slotPath: undefined, actions: null, showContextChip: false }),
     hidden,
     setHidden,
     scrollContainer,

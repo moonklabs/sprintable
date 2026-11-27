@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
-import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { AgentsTopBarTitle, TitleTopBarSlot, useAgentsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { TEAM_TABS } from '@/lib/nav-config';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
@@ -118,7 +118,7 @@ function SplitFrame({ agentId, children }: { agentId: string | null; children: R
   return (
     <div className="px-4 pt-3" data-testid="workforce-frame">
       {/* a phone's list draws no detail pane, so none of the children mounts the top bar's title — the frame says it (wide and the sheet both have a child that does) */}
-      {!wide && agentId === null ? <TopBarSlot title={<AgentsTopBarTitle />} showContextChip /> : null}
+      {!wide && agentId === null ? <TitleTopBarSlot title={<AgentsTopBarTitle />} useText={useAgentsTopBarTitleText} showContextChip /> : null}
       <ListDetailShell
         testId="workforce-split"
         columnTestId="workforce-detail-column"

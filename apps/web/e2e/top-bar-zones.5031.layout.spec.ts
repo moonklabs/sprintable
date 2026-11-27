@@ -56,7 +56,7 @@ async function build() {
               <ToastProvider><CommandPaletteProvider><TopBarProvider><SidebarProvider><TeamPresenceToggleProvider value={{ toggle() {}, workingCount: 3, open: false }}>
                 <div id="frame" style={{ width: cfg.frameWidth + 'px' }} className="flex flex-col">
                   <TopBar className={cfg.hiddenOnPhone ? BAR_HIDDEN_ON_PHONE_CLASS : undefined} orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
-                  <TopBarSlot title={title} actions={cfg.withActions ? <button type="button" id="action-btn" className="rounded-ds-control border px-3">액션</button> : null} />
+                  <TopBarSlot title={title} actions={cfg.withActions ? <><button type="button" id="action-btn" className="rounded-ds-control border px-3">액션</button><div id="odd-action" style={{ cursor: 'pointer' }} className="px-2" onClick={() => {}}>기타</div></> : null} />
                 </div>
               </TeamPresenceToggleProvider></SidebarProvider></TopBarProvider></CommandPaletteProvider></ToastProvider>
             </NextIntlClientProvider>);
@@ -123,6 +123,7 @@ const measure = (page: Page) => page.evaluate(() => {
     bar: box(bar), barScrollW: bar.scrollWidth, barClientW: bar.clientWidth, barOffsetH: bar.offsetHeight,
     left: box(q('[data-testid="top-bar-left"]')), center: box(q('[data-testid="top-bar-center"]')), right: box(q('[data-testid="top-bar-right"]')),
     path: box(q('[data-testid="top-bar-path"]')), pathDisplay: q('[data-testid="top-bar-path"]') ? getComputedStyle(q('[data-testid="top-bar-path"]')!).display : null,
+    crumbDisplays: [...document.querySelectorAll('[data-testid="top-bar-path"] li[data-crumb]')].map((c) => getComputedStyle(c).display),
     centerDisplay: q('[data-testid="top-bar-center"]') ? getComputedStyle(q('[data-testid="top-bar-center"]')!).display : null,
     field: box(field), fieldRadius: field ? getComputedStyle(field).borderTopLeftRadius : null, fieldBorder: field ? getComputedStyle(field).borderTopWidth : null,
     fieldPad: field ? [getComputedStyle(field).paddingLeft, getComputedStyle(field).paddingRight] : null, fieldFont: field ? [getComputedStyle(field).fontSize, getComputedStyle(field).fontWeight] : null,
@@ -184,9 +185,13 @@ for (const win of DESKTOP) {
   });
 }
 
-test('[SID:5031] a title component that draws nothing leaves no dangling separator; a title that draws something has one before it (real stylesheet)', async ({ page }) => {
+test('[SID:5031] a title component that draws nothing — or no publisher at all (a settings sub-screen) — leaves no dangling separator and no blank item; a title that draws something has a separator before it (real stylesheet)', async ({ page }) => {
   await open(page, { pathname: '/chats', titleKind: 'empty-component', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280 });
   expect((await measure(page)).titleBefore, 'nothing after the last crumb: no «›»').toMatch(/^(none|normal)$/);
+  await open(page, { pathname: '/settings/integrations', titleKind: 'none', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280 });
+  const none = await page.evaluate(() => { const li = document.querySelector('[data-testid="top-bar-title"]') as HTMLElement; return { display: getComputedStyle(li).display, before: getComputedStyle(li, '::before').content, crumbs: [...document.querySelectorAll('[data-testid="top-bar-path"] li[data-crumb]')].map((c) => c.textContent) }; });
+  expect(none.crumbs, 'a settings sub-screen with no title publisher: the path ends at the place').toEqual(['올리베이라', '설정']);
+  expect(none.display, 'the empty title item is not drawn from lg (no blank list item)').toBe('none');
   await open(page, { pathname: '/chats/room-1', titleKind: 'span', title: '민 · 디디', ...SHORT, frameWidth: barWidth(1280) }, { win: 1280 });
   expect((await measure(page)).titleBefore).toBe('"›"');
 });
@@ -196,7 +201,9 @@ test('[SID:5031] 390 (below lg): the bar is the phone\'s — 48 high, no path, n
   const m = await measure(page);
   console.log(`[5031 numbers] win 390 bar ${m.bar!.w}×${m.bar!.h} · phone icon ${m.phoneIcon ? 'drawn' : 'none'}`);
   expect(m.barOffsetH).toBe(48);
-  expect(m.pathDisplay).toBe('none');
+  expect(m.pathDisplay, 'the nav is display: contents below lg (the title item is the bar\'s own item)').toBe('contents');
+  expect(m.crumbDisplays.length).toBeGreaterThan(0);
+  expect(m.crumbDisplays.every((d) => d === 'none'), 'the leading crumbs are not drawn below lg').toBe(true);
   expect(m.centerDisplay).toBe('none');
   expect(m.phoneIcon).not.toBeNull();
   expect(m.barScrollW - m.barClientW).toBe(0);
@@ -207,8 +214,13 @@ test('[SID:5031] desktop app: the strip computes `-webkit-app-region: drag` and 
   const region = () => page.evaluate(() => {
     const bar = document.querySelector('[data-testid="top-bar"]') as HTMLElement;
     const get = (el: Element) => getComputedStyle(el).getPropertyValue('-webkit-app-region').trim();
-    const pressables = [...bar.querySelectorAll('a, button, input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [tabindex]:not([tabindex="-1"])')].filter((el) => getComputedStyle(el).display !== 'none');
-    return { bar: get(bar), marked: bar.hasAttribute('data-desktop-app'), left: get(document.querySelector('[data-testid="top-bar-left"]')!), pressables: pressables.map((el) => `${el.tagName.toLowerCase()}:${el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.textContent!.slice(0, 12)}=${get(el)}`) };
+    // the SAME set the stylesheet's rule names (globals.css `[data-desktop-app] :where(…)`)
+    const pressables = [...bar.querySelectorAll('a, button, input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="switch"], [role="tab"], [role="combobox"], [contenteditable], [tabindex]:not([tabindex="-1"])')].filter((el) => getComputedStyle(el).display !== 'none');
+    const group = document.querySelector('[data-testid="top-bar-buttons"]') as HTMLElement;
+    const odd = document.getElementById('odd-action')!.getBoundingClientRect();
+    const g = group.getBoundingClientRect();
+    const outer = document.querySelector('[data-testid="top-bar-right"]') as HTMLElement;
+    return { bar: get(bar), marked: bar.hasAttribute('data-desktop-app'), group: get(group), outerRight: get(outer), oddInsideGroup: odd.left >= g.left - 0.5 && odd.right <= g.right + 0.5 && odd.top >= g.top - 0.5 && odd.bottom <= g.bottom + 0.5, left: get(document.querySelector('[data-testid="top-bar-left"]')!), pressables: pressables.map((el) => `${el.tagName.toLowerCase()}:${el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.textContent!.slice(0, 12)}=${get(el)}`) };
   });
   const cfg: Cfg = { pathname: '/organization/workforce/runs', titleKind: 'span', title: '실행 기록', ...SHORT, frameWidth: barWidth(1280), withActions: true };
   await open(page, cfg, { win: 1280 });
@@ -222,6 +234,9 @@ test('[SID:5031] desktop app: the strip computes `-webkit-app-region: drag` and 
   expect(app.bar, 'the strip drags').toBe('drag');
   expect(app.left, 'the path text inherits… the region is a property of the strip: its non-pressable parts drag too').not.toBe('no-drag');
   // search field · the two crumb links · the action button · the people button · what's-new · the bell are all there and all no-drag
+  expect(app.group, 'the buttons\' group (page actions · popover controls · the bell) is no-drag as a whole').toBe('no-drag');
+  expect(app.oddInsideGroup, 'a control no selector knows (a clickable div in the actions) lies inside that group').toBe(true);
+  expect(app.outerRight, 'the empty room around the group still drags (the outer zone is not no-drag)').not.toBe('no-drag');
   expect(app.pressables.length, 'search + 2 crumb links + action + presence + what\'s new + bell').toBeGreaterThanOrEqual(7);
   expect(app.pressables.filter((p) => !p.endsWith('=no-drag')), 'every pressable inside the strip is no-drag').toEqual([]);
 });

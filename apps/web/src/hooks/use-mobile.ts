@@ -63,3 +63,19 @@ export function useIsBelowLg(): boolean {
     () => false,
   );
 }
+
+// story 5031 (C1 step 5a): the same question with the THIRD answer «not known yet». `useIsBelowLg` answers «no» on the server and during hydration, so a page that publishes something for lg only (the desktop bar's room name · the settings tab name) published it on a phone's cold load
+// until the client knew its width. Here the server snapshot is `unknown` (and React uses it for the hydrating render too): publish the lg-only thing only when this says `lg-up`. A client without matchMedia (jsdom) is `lg-up`, as `useIsBelowLg` says «not below».
+export type WidthClass = 'unknown' | 'below-lg' | 'lg-up';
+export function useWidthClass(): WidthClass {
+  return React.useSyncExternalStore(
+    (onChange) => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+      const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    },
+    (): WidthClass => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches ? 'below-lg' : 'lg-up'),
+    (): WidthClass => 'unknown',
+  );
+}

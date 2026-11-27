@@ -30,7 +30,7 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 import { fetchWithAuth } from '@/lib/db/client';
-import { StorageTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { StorageTopBarTitle, TitleTopBarSlot, useStorageTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 
 // story #2302 AC1 — `?asset=` 딥링크가 무엇을 해야 하는지의 판정만 순수 함수로 뽑아 둔다
 // (StorageView 전체를 렌더하지 않고도 이 결정 로직 자체를 단위테스트하기 위함 — 이 컴포넌트는
@@ -412,7 +412,7 @@ export function StorageView({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TopBarSlot title={topBarTitle} showContextChip />
+      <TitleTopBarSlot title={topBarTitle} useText={useStorageTopBarTitleText} showContextChip />
 
       <div className="px-4 pt-3 empty:hidden">
         <StorageCapacityBanner />

@@ -63,7 +63,7 @@ import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { useIsBelowLg } from '@/hooks/use-mobile';
+import { useWidthClass } from '@/hooks/use-mobile';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { withProjectParam } from '@/lib/with-project-param';
 import { returnHrefAfterProjectCreate } from '@/lib/return-after-project-create';
@@ -154,7 +154,7 @@ export default function SettingsPage() {
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
   const tOnboarding = useTranslations('onboarding');
   const router = useRouter();
-  const isBelowLg = useIsBelowLg(); // story 5031 (5a): from lg the top bar's path ends with the current tab's name
+  const width = useWidthClass(); // story 5031 (5a): from lg the top bar's path ends with the current tab's name (published once the width is KNOWN to be lg-up)
   const searchParamsHook = useSearchParams();
   // story 4906 (PO 11-12): a project made from the chat list's empty state («프로젝트 만들기» there) sends the person BACK where they came from — the list, where «에이전트 추가» already stands. A whitelist of one
   // word (not a free address: no open redirect); made from settings itself (no `return`) the person stays here as before.
@@ -777,6 +777,7 @@ export default function SettingsPage() {
   const settingsLinkHref = (navId: string): string | null => { const item = allNavItems().find((i) => i.id === navId && i.kind === 'static'); return item ? flatHref(item.path) : null; };
   const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, deviceKind, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
   const activeLabelKey = navGroups.flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === activeTab)?.labelKey;
+  const tabTitle = activeLabelKey ? t(activeLabelKey) : t('title');
 
   // suppress unused variable warning — createdProjectMembership used in future flows
   void createdProjectMembership;
@@ -786,7 +787,7 @@ export default function SettingsPage() {
     <>
       {/* story 5031 (C1 step 5a · PO 11-27): /settings has the same top bar as every screen — from lg its path reads «조직 › 설정 › 지금 칸» and the last crumb is the current tab's name (a plain span: the nav column's «설정» below stays the page's h1).
           A phone keeps the nav list / the back row's own name (the bar's title stays empty there — one name, not two). */}
-      {isBelowLg ? null : <TopBarSlot title={<span className="text-sm font-medium">{activeLabelKey ? t(activeLabelKey) : t('title')}</span>} />}
+      {width === 'lg-up' ? <TopBarSlot title={<span className="text-sm font-medium">{tabTitle}</span>} titleText={tabTitle} /> : null}
       {/* story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 픽스) LNB+
           콘텐츠 split(각자 독립 overflow-y-auto)이 자기 높이를 잃는다 — 여기서 직접 앵커
           (h-[calc(100svh-var(--shell-chrome-h))] — story #4131, --shell-chrome-h가 TopBar

@@ -19,7 +19,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { ActivityTopBarTitle, TitleTopBarSlot, useActivityTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { SectionHeader } from '@/components/ds/section-header';
 import { AuditDetail } from './audit-detail';
@@ -306,7 +306,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   return (
     <>
-      <TopBarSlot title={<ActivityTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<ActivityTopBarTitle />} useText={useActivityTopBarTitleText} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}

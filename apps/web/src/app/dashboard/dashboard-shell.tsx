@@ -616,7 +616,7 @@ export function DashboardShell({
     <DashboardCtx.Provider value={ctxValue}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
-        <TopBarProvider>
+        <TopBarProvider pathname={shellPathname}>
           {/* story #3756 — dashboard-shell-root가 --bottom-dock-inset·--mobile-tab-bar-h를
               소유(globals.css). MobileTabBar·BottomDock 둘 다 이 아래 자손이라 상속으로 그
               값을 읽는다.

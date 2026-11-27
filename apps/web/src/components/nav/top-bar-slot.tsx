@@ -24,14 +24,17 @@ interface TopBarSlotProps {
    * 항목 화면은 아무것도 안 해도(기본값) 칩이 안 뜬다 — hideContextChip 방식(숨길 것 명시)의
    * fail-open 구조적 약점(새 상세 화면마다 빠뜨리기 쉬움, 유나양 규격)을 뒤집은 것. */
   showContextChip?: boolean;
+  /** story 5031 (5a): the title's plain words — the desktop bar's path ends with them and compares them with the place's name (the place's crumb is left out when the title says it). Pass it when the title is a component (its words are not in the element); without it the words are read from the element's own text. */
+  titleText?: string;
 }
 
-export function TopBarSlot({ title, actions = null, showContextChip = false }: TopBarSlotProps) {
-  const { setSlot, clearSlot } = useTopBar();
+export function TopBarSlot({ title, actions = null, showContextChip = false, titleText }: TopBarSlotProps) {
+  const { setSlot, clearSlot, pathname } = useTopBar();
   useEffect(() => {
-    setSlot({ title, actions, showContextChip });
+    // story 5031 (5a): the slot is stamped with the path it was published for; a path change publishes again (a slot that lives across screens — a layout's — is stamped fresh)
+    setSlot({ title, actions, showContextChip, titleText, slotPath: pathname });
     return clearSlot;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, actions, showContextChip]);
+  }, [title, actions, showContextChip, titleText, pathname]);
   return null;
 }

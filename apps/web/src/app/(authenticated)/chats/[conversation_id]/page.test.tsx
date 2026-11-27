@@ -23,7 +23,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 
 // story 4887 — the page asks «is this a phone (below lg)?»; each test says so (default: a desktop)
 const belowLg = vi.hoisted(() => ({ current: false }));
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => belowLg.current, useIsBelowLg: () => belowLg.current }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => belowLg.current, useIsBelowLg: () => belowLg.current, useWidthClass: () => (belowLg.current ? 'below-lg' : 'lg-up') })); // story 5031 (5a): the page also asks the third-state width
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ conversation_id: 'conv-1' }),

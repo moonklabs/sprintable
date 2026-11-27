@@ -4,7 +4,7 @@
 // jsdom has no layout: this pins what is drawn (text · the door · the hint · which classes keep the phone as it was); the real boxes at 1440 / 1280 / 1100 / 390 are measured in e2e/top-bar-zones.5031.layout.spec.ts.
 // A click test cannot prove the OS drags the window — it proves the controls inside the drag strip are real, enabled and reachable (the `no-drag` computation is measured in the layout spec).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -13,6 +13,7 @@ import enMessages from '../../../messages/en.json';
 const { pathnameRef, navigated } = vi.hoisted(() => ({ pathnameRef: { current: '/org-briefing' }, navigated: [] as string[] }));
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameRef.current,
+  useSearchParams: () => new URLSearchParams(''),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 // next/link needs the app router; this stand-in is a plain anchor that tells where the press would go (the router's job is not under test).
@@ -47,13 +48,14 @@ afterEach(async () => {
   delete (window as { sprintableDesktop?: unknown }).sprintableDesktop;
 });
 
-async function mount(opts: { pathname: string; title?: React.ReactNode; withPalette?: boolean; messages?: typeof koMessages; locale?: string; withOrg?: boolean; projectId?: string | undefined }) {
+async function mount(opts: { pathname: string; title?: React.ReactNode; extra?: (m: { TopBarSlot: typeof import('./top-bar-slot').TopBarSlot; flat: typeof import('./flat-tab-top-bar') }) => React.ReactNode; withPalette?: boolean; messages?: typeof koMessages; locale?: string; withOrg?: boolean; projectId?: string | undefined }) {
   pathnameRef.current = opts.pathname;
   vi.resetModules();
   const { TopBar } = await import('./top-bar');
   const { TopBarProvider } = await import('./top-bar-context');
   const { TopBarSlot } = await import('./top-bar-slot');
   const { SidebarProvider } = await import('@/components/ui/sidebar');
+  const flat = await import('./flat-tab-top-bar');
   const { CommandPaletteProvider, useCommandPalette } = await import('@/components/command-palette/command-palette-context');
   function OpenState() { return <span data-testid="palette-open">{String(useCommandPalette().open)}</span>; }
   const bar = (
@@ -61,6 +63,7 @@ async function mount(opts: { pathname: string; title?: React.ReactNode; withPale
       <SidebarProvider>
         <TopBar orgId={opts.withOrg === false ? undefined : 'o1'} orgMemberships={ORGS} projectId={'projectId' in opts ? opts.projectId : 'p1'} projectMemberships={PROJECTS} />
         {opts.title !== undefined ? <TopBarSlot title={opts.title} /> : null}
+        {opts.extra ? opts.extra({ TopBarSlot, flat }) : null}
         <OpenState />
       </SidebarProvider>
     </TopBarProvider>
@@ -76,11 +79,9 @@ async function mount(opts: { pathname: string; title?: React.ReactNode; withPale
 }
 
 const bar = () => container.querySelector('[data-testid="top-bar"]') as HTMLElement;
-/** the path as a person reads it: the crumbs of the path nav, then the title zone's words */
+/** the path as a person reads it: the items of the path list (the crumbs, then the title as the last item) */
 function pathText(): string {
-  const crumbs = [...container.querySelectorAll('[data-testid="top-bar-path"] li')].map((li) => li.textContent!.trim());
-  const title = container.querySelector('[data-testid="top-bar-title"]')!.textContent!.trim();
-  return [...crumbs, title].filter(Boolean).join(' › ');
+  return [...container.querySelectorAll('[data-testid="top-bar-path"] li')].map((li) => li.textContent!.trim()).filter(Boolean).join(' › ');
 }
 
 describe('TopBar 5a — the path (the rule: org › project-or-place › title; the table of the rule is lib/top-bar-path.test.ts)', () => {
@@ -115,7 +116,7 @@ describe('TopBar 5a — the path (the rule: org › project-or-place › title; 
     expect(nav.getAttribute('aria-label')).toBe('현재 위치');
     expect([...nav.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['올리베이라 조직', '/org-briefing?p=p1'], ['에이전트', '/organization/workforce?p=p1']]);
     await mount({ pathname: '/acme/sprintable/flow', title: <span>흐름</span> });
-    const crumbs = container.querySelectorAll('[data-testid="top-bar-path"] li');
+    const crumbs = container.querySelectorAll('[data-testid="top-bar-path"] li[data-crumb]');
     expect(crumbs[1]!.querySelector('a')).toBeNull();
   });
 
@@ -177,11 +178,17 @@ describe('TopBar 5a — below lg the bar is as it was (the 5a zones are lg-only 
   it('the path and the field are `hidden lg:…`, the phone search icon is `lg:hidden`, the left zone is `contents` (the title is a direct child of the bar as before), the bar stays 48 high (64 from lg)', async () => {
     await mount({ pathname: '/inbox', title: <h1>결재함</h1> });
     expect(bar().className.split(/\s+/)).toEqual(expect.arrayContaining(['h-12', 'lg:h-ds-bar']));
-    expect(container.querySelector('[data-testid="top-bar-path"]')!.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']));
+    // the path list: from lg a row of crumbs + the title; below lg the nav and the list are `display: contents`, the leading crumbs are hidden, the title item is the bar's own flex item
+    const nav = container.querySelector('[data-testid="top-bar-path"]')!;
+    expect(nav.className.split(/\s+/)).toEqual(expect.arrayContaining(['contents', 'lg:flex']));
+    expect(nav.querySelector('ol')!.className.split(/\s+/)).toEqual(expect.arrayContaining(['contents', 'lg:flex']));
+    for (const crumb of nav.querySelectorAll('li[data-crumb]')) expect(crumb.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:flex']));
     expect(container.querySelector('[data-testid="top-bar-center"]')!.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']));
     expect(container.querySelector('[data-testid="top-bar-search"]')!.parentElement!.className).toContain('lg:hidden');
     expect(container.querySelector('[data-testid="top-bar-left"]')!.className.split(/\s+/)).toContain('contents');
-    expect(container.querySelector('[data-testid="top-bar-title"]')!.parentElement).toBe(container.querySelector('[data-testid="top-bar-left"]'));
+    expect(container.querySelector('[data-testid="top-bar-title"]')!.tagName).toBe('LI');
+    expect(container.querySelector('[data-testid="top-bar-title"]')!.parentElement!.tagName).toBe('OL');
+    expect(container.querySelector('h1')!.parentElement).toBe(container.querySelector('[data-testid="top-bar-title"]')); // the title element is still the title item's own child (the phone's truncate rule lives on it)
     expect(container.querySelector('button[aria-label^="알림"]')).not.toBeNull();
   });
 });
@@ -209,5 +216,104 @@ describe('TopBar 5a — the desktop app: the strip is the window\'s drag area', 
     expect(container.querySelector('[data-testid="palette-open"]')!.textContent).toBe('true');
     await act(async () => { container.querySelector<HTMLAnchorElement>('[data-testid="top-bar-path"] a')!.click(); });
     expect(navigated).toEqual(['/org-briefing?p=p1']);
+  });
+});
+
+// ───────────────────────── codex round 1 (5a) ─────────────────────────
+describe('TopBar 5a — the title is the path\'s LAST list item (aria-current) and keeps its own element', () => {
+  it('⭐the current title is the last <li aria-current="page"> of the path list; the crumbs before it carry no aria-current; an h1 stays an h1 inside it', async () => {
+    await mount({ pathname: '/inbox', title: <h1>결재함</h1> });
+    const items = [...container.querySelectorAll('[data-testid="top-bar-path"] ol > li')];
+    expect(items.at(-1)).toBe(container.querySelector('[data-testid="top-bar-title"]'));
+    expect(items.at(-1)!.getAttribute('aria-current')).toBe('page');
+    expect(items.slice(0, -1).every((li) => !li.hasAttribute('aria-current'))).toBe(true);
+    expect(items.at(-1)!.querySelector('h1')!.textContent).toBe('결재함');
+  });
+});
+
+describe('TopBar 5a — `titleText` (a title that is a component has no words an element scan can read)', () => {
+  it('⭐an explicit titleText wins over the element\'s own text: a component title that says the place\'s name leaves the place crumb out', async () => {
+    await mount({ pathname: '/organization/workforce', extra: ({ flat }) => <flat.TitleTopBarSlot title={<flat.AgentsTopBarTitle />} useText={flat.useAgentsTopBarTitleText} showContextChip /> });
+    expect(pathText()).toBe('올리베이라 조직 › 에이전트'); // not «… › 에이전트 › 에이전트»
+  });
+
+  it('without titleText the element\'s own text is the fallback (the older publishers keep working)', async () => {
+    await mount({ pathname: '/organization/workforce', title: <h1>에이전트</h1> });
+    expect(pathText()).toBe('올리베이라 조직 › 에이전트');
+  });
+});
+
+describe('TopBar 5a — a settings sub-screen with no title publisher ends the path at 조직 › 설정', () => {
+  it('⭐/settings/integrations: the crumbs are the whole path, the title item is empty (and hidden from lg — no blank item, no dangling separator)', async () => {
+    await mount({ pathname: '/settings/integrations' });
+    expect(pathText()).toBe('올리베이라 조직 › 설정');
+    const li = container.querySelector('[data-testid="top-bar-title"]')!;
+    expect(li.textContent).toBe('');
+    expect(li.className.split(/\s+/)).toContain('lg:empty:hidden');
+  });
+});
+
+describe('TopBar 5a — a slot published for another path is stale (never shows the old screen\'s name under the new path)', () => {
+  it('⭐titleIsStale: stamped for A and the path is B → stale; same path · an unstamped slot · no path known (a bare test) → not', async () => {
+    const { titleIsStale } = await import('./top-bar-context');
+    expect([titleIsStale('/a', '/b'), titleIsStale('/a', '/a'), titleIsStale(undefined, '/b'), titleIsStale('/a', undefined)]).toEqual([true, false, false, false]);
+  });
+
+  it('⭐path A → B: the old title is marked stale on the frame the path changes, and the new screen\'s own publish clears it; a slot that lives across both paths (a layout\'s) is stamped fresh by the path change', async () => {
+    vi.resetModules();
+    const { TopBar } = await import('./top-bar');
+    const { TopBarProvider, useTopBar } = await import('./top-bar-context');
+    const { TopBarSlot } = await import('./top-bar-slot');
+    const { SidebarProvider } = await import('@/components/ui/sidebar');
+    const { CommandPaletteProvider } = await import('@/components/command-palette/command-palette-context');
+    // a publisher that publishes ONCE (no re-stamp): the frame between «the path changed» and «the new screen published»
+    function PublishOnce({ text }: { text: string }) {
+      const { setSlot, pathname } = useTopBar();
+      const [done, setDone] = React.useState(false);
+      React.useEffect(() => { if (!done) { setSlot({ title: <span>{text}</span>, actions: null, slotPath: pathname }); setDone(true); } }, [done, pathname, setSlot, text]);
+      return null;
+    }
+    const tree = (path: string, children: React.ReactNode) => (
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <CommandPaletteProvider><TopBarProvider pathname={path}><SidebarProvider>
+          <TopBar orgId="o1" orgMemberships={ORGS} projectId="p1" projectMemberships={PROJECTS} />
+          {children}
+        </SidebarProvider></TopBarProvider></CommandPaletteProvider>
+      </NextIntlClientProvider>
+    );
+    const title = () => container.querySelector('[data-testid="top-bar-title"]') as HTMLElement;
+    pathnameRef.current = '/inbox';
+    await act(async () => { root.render(tree('/inbox', <PublishOnce key="a" text="결재함" />)); });
+    expect(title().textContent).toBe('결재함');
+    expect(title().hasAttribute('data-stale-title')).toBe(false);
+    // the path changes to B; the page of B has not published yet (its publisher is still A's)
+    pathnameRef.current = '/chats';
+    await act(async () => { root.render(tree('/chats', <PublishOnce key="a" text="결재함" />)); });
+    expect(title().hasAttribute('data-stale-title'), 'A\'s name under B\'s path is marked stale').toBe(true);
+    expect(title().className).toContain('lg:data-[stale-title]:invisible'); // from lg the stale name is not painted
+    // B's screen publishes (a new publisher instance, stamped for B)
+    await act(async () => { root.render(tree('/chats', <PublishOnce key="b" text="대화" />)); });
+    expect(title().textContent).toBe('대화');
+    expect(title().hasAttribute('data-stale-title')).toBe(false);
+    // a real TopBarSlot that lives across the change publishes again for the new path: never stale
+    // (ONE title element for both renders — a layout whose title does not change: only the path change can make the slot publish again)
+    const layoutTitle = <span>층</span>;
+    pathnameRef.current = '/inbox';
+    await act(async () => { root.render(tree('/inbox', <TopBarSlot key="layout" title={layoutTitle} />)); });
+    pathnameRef.current = '/more';
+    await act(async () => { root.render(tree('/more', <TopBarSlot key="layout" title={layoutTitle} />)); });
+    expect(title().textContent).toBe('층');
+    expect(title().hasAttribute('data-stale-title')).toBe(false);
+  });
+});
+
+describe('TopBar 5a — the buttons group is marked for the desktop app\'s no-drag', () => {
+  it('⭐the page\'s actions, the phone icon, the people / what\'s new buttons and the bell all sit inside ONE `data-no-drag` group', async () => {
+    await mount({ pathname: '/organization/workforce/runs', extra: ({ TopBarSlot }) => <TopBarSlot title={<span>실행</span>} actions={<button type="button" data-testid="action-probe">액션</button>} /> });
+    const group = container.querySelector('[data-testid="top-bar-buttons"]')!;
+    expect(group.hasAttribute('data-no-drag')).toBe(true);
+    expect(group.contains(container.querySelector('button[aria-label^="알림"]'))).toBe(true);
+    expect(group.contains(container.querySelector('[data-testid="top-bar-search"]'))).toBe(true);
+    expect(group.contains(container.querySelector('[data-testid="action-probe"]'))).toBe(true);
   });
 });

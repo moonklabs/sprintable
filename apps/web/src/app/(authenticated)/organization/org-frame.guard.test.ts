@@ -110,8 +110,9 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
       expect(code('organization/insights-board/page.tsx')).toMatch(/<PageFrame width="wide"/);
     });
     it('⭐옮긴 화면의 위 막대 제목 행이 FLAT_ROUTE_TOP_BAR 표에 있다(없으면 로딩 폴백이 빈 막대를 그린다 · codex 4913C)', () => {
+      // story 5031 (5a): a row also names the title's plain words (`useText`) — the row shape grew by one field; the claim (the row exists) is unchanged
       const table = readFileSync(join(APP, '..', '..', 'components/nav/flat-tab-top-bar.tsx'), 'utf8');
-      for (const dir of MOVED_LOADING) expect(table, dir).toMatch(new RegExp(`(?:'${dir}'|${dir}): \\{ Title: \\w+, showContextChip: (?:true|false) \\}`));
+      for (const dir of MOVED_LOADING) expect(table, dir).toMatch(new RegExp(`(?:'${dir}'|${dir}): \\{ Title: \\w+, useText: \\w+, showContextChip: (?:true|false) \\}`));
     });
     it('⭐OrgScreenLoading은 PageFrame 위에서 «불러오는 중»을 상태로 알린다', () => {
       const c = readFileSync(join(APP, '..', '..', 'components/organization/org-screen-loading.tsx'), 'utf8');

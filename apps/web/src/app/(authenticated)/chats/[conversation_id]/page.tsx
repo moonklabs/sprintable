@@ -8,7 +8,7 @@ import { Icon } from '@/components/ds/icon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { RoomHead, RoomBarTitle } from '@/components/chat/room-head';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { useIsBelowLg } from '@/hooks/use-mobile';
+import { useIsBelowLg, useWidthClass } from '@/hooks/use-mobile';
 import { StatusLabel } from '@/components/ds/status-label';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
 import { AgentRecordsSheet } from '@/components/chat/agent-records-sheet';
@@ -109,6 +109,7 @@ export default function ConversationPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
+  const width = useWidthClass(); // story 5031 (5a): the desktop bar's room name goes up only when the width is KNOWN to be lg-up (not on a phone's cold load, when it is still unknown)
   const isBelowLg = useIsBelowLg(); // the phone shell's width (below lg = 1024), read at the first client render: the room head goes into the shell's header row there
   // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
   // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
@@ -451,7 +452,7 @@ export default function ConversationPage() {
     <>
       {/* story 4887 (UI-4) — a PHONE (below lg) puts the room's name · people · «⋯» into the shell's own header row (no second head under it: 135 px of reading column); lg up keeps the in-column head below. */}
       {/* story 5031 (C1 step 5a): from lg the bar's path ends with the room's name — org › 채팅 › room — as a plain span (NOT a heading: the room head below still draws the page's h1 until step 5b). The text only; the name's in-place edit stays in the head. */}
-      {isBelowLg ? null : <TopBarSlot title={<span className="text-sm font-medium">{headerTitle}</span>} actions={null} />}
+      {width === 'lg-up' ? <TopBarSlot title={<span className="text-sm font-medium">{headerTitle}</span>} titleText={headerTitle} actions={null} /> : null}
       {isBelowLg ? (
         <TopBarSlot
           title={(

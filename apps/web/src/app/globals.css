@@ -1135,4 +1135,8 @@
   [data-desktop-app] :where(a, button, input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"], [role="switch"], [role="tab"], [role="combobox"], [contenteditable], [tabindex]:not([tabindex="-1"])) {
     -webkit-app-region: no-drag;
   }
+  /* the top bar's buttons group (page actions · popover controls · anything a screen puts there) as a whole — not only the pressables the list above knows by name */
+  [data-desktop-app] [data-no-drag] {
+    -webkit-app-region: no-drag;
+  }
 }

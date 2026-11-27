@@ -12,7 +12,7 @@ import { DialogTitle } from '@/components/ds/dialog';
 import { RowList, RowListItem } from '@/components/ds/row-list';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { AgentApiKeysTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { AgentApiKeysTopBarTitle, TitleTopBarSlot, useAgentApiKeysTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
@@ -116,7 +116,7 @@ export default function ApiKeysPage() {
 
   return (
     <PageFrame width="reading">
-      <TopBarSlot title={<AgentApiKeysTopBarTitle />} showContextChip />
+      <TitleTopBarSlot title={<AgentApiKeysTopBarTitle />} useText={useAgentApiKeysTopBarTitleText} showContextChip />
       <PageHead description={t('agentApiKeyListDescription')} />
 
       {loading ? (

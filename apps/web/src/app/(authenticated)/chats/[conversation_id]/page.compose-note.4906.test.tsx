@@ -16,7 +16,7 @@ const { useDashboardContextMock, searchParamsRef, chatViewProps } = vi.hoisted((
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsBelowLg: () => false }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsBelowLg: () => false, useWidthClass: () => 'lg-up' })); // story 5031 (5a): the page also asks the third-state width
 vi.mock('next/navigation', () => ({
   useParams: () => ({ conversation_id: 'conv-1' }),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),

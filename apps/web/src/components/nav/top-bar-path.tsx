@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -19,12 +20,14 @@ export interface TopBarPathProps {
   orgMemberships: ReadonlyArray<{ orgId: string; orgName: string }>;
   projectId?: string;
   projectMemberships: ReadonlyArray<{ projectId: string; projectName: string }>;
-  /** the screen's own title (the top bar's slot) — only its text is read, to not say the place's name twice */
+  /** the screen's own title (the top bar's slot) — its words are read to not say the place's name twice … */
   title: ReactNode;
+  /** … from here when the publisher gave them (a title that is a component has no words an element scan can read), else from the element's own text */
+  titleText?: string;
 }
 
 /** The crumbs before the title for the page the bar is on (empty when none is known). */
-export function useTopBarCrumbs({ orgId, orgMemberships, projectId, projectMemberships, title }: TopBarPathProps): PathCrumb[] {
+export function useTopBarCrumbs({ orgId, orgMemberships, projectId, projectMemberships, title, titleText }: TopBarPathProps): PathCrumb[] {
   const pathname = usePathname() ?? '';
   const t = useTranslations('nav');
   return leadingCrumbs({
@@ -33,22 +36,38 @@ export function useTopBarCrumbs({ orgId, orgMemberships, projectId, projectMembe
     projectName: projectMemberships.find((p) => p.projectId === projectId)?.projectName,
     placeName: (place) => t(DEPTH1_ITEMS.find((d) => d.id === place)!.labelKey),
     placeHref: (place) => withProjectParam(placeFirstPath(place), projectId),
-    titleText: nodeText(title),
+    titleText: titleText ?? nodeText(title),
   });
 }
 
-export function TopBarPath({ crumbs }: { crumbs: readonly PathCrumb[] }) {
+/**
+ * The path as ONE list: the crumbs before the title, then the screen's own title as the last item (`aria-current="page"`). The title keeps its own element (an h1 stays an h1, a span a span) — it is only wrapped in the list item.
+ * Below lg the nav and the list are `display: contents`, the leading crumbs are hidden and the title item is the bar's own flex item exactly as the title wrapper was (the phone bar is as before).
+ * `stale`: the slot's title was published for another path (the screen has not published for this one yet) — from lg it is kept in the layout but not painted, so the old screen's name is never seen under the new path.
+ */
+export function TopBarPath({ crumbs, title, stale }: { crumbs: readonly PathCrumb[]; title: ReactNode; stale: boolean }) {
   const t = useTranslations('nav');
-  if (crumbs.length === 0) return null;
   return (
-    <nav aria-label={t('topBarPath')} data-testid="top-bar-path" className="hidden min-w-0 lg:block">
-      <ol className="flex min-w-0 items-center gap-ds-2">
+    <nav aria-label={t('topBarPath')} data-testid="top-bar-path" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center">
+      <ol className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-ds-2">
         {crumbs.map((crumb, i) => (
-          <li key={crumb.key} data-crumb={crumb.key} className="flex min-w-0 items-center gap-ds-2">
+          <li key={crumb.key} data-crumb={crumb.key} className="hidden min-w-0 items-center gap-ds-2 lg:flex">
             {i > 0 ? <Icon name="chevron_right" size={16} className="text-ds-ink-3" /> : null}
             {crumb.href ? <Link href={crumb.href} className={CRUMB_LINK}>{crumb.label}</Link> : <span className={CRUMB}>{crumb.label}</span>}
           </li>
         ))}
+        <li
+          data-testid="top-bar-title"
+          data-stale-title={stale ? '' : undefined}
+          aria-current="page"
+          className={cn(
+            'flex min-w-0 flex-auto items-center gap-2 [&>*]:min-w-0 [&>*]:truncate lg:empty:hidden lg:data-[stale-title]:invisible',
+            // the separator before the title is drawn only when a crumb comes before it and the title drew something (a title component that renders nothing leaves the item empty)
+            crumbs.length > 0 && "lg:not-empty:before:shrink-0 lg:not-empty:before:text-ds-ink-3 lg:not-empty:before:content-['›']",
+          )}
+        >
+          {title}
+        </li>
       </ol>
     </nav>
   );

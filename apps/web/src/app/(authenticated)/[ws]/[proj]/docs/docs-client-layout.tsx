@@ -31,7 +31,7 @@ import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { newUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isImeComposing } from '@/lib/ime-composition';
-import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { DocsTopBarTitle, TitleTopBarSlot, useDocsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { applyDocMove, placedFromSiblings, planDocMove, withEffectiveParents, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
 import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
 
@@ -671,8 +671,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
           끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
           맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}
-      <TopBarSlot
+      <TitleTopBarSlot
         title={topBarTitle}
+        useText={useDocsTopBarTitleText}
         actions={topBarActions}
         showContextChip={!currentSlug}
       />
