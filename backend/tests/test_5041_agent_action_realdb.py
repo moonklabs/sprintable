@@ -946,3 +946,5 @@ def test_the_reason_the_agent_is_told_is_a_code_never_the_responses_sentence():
     assert _reason_of(resp(404, {"detail": "Story 'Salary review' not found"})) == "HTTP 404", "a sentence is not a code"
     assert _reason_of(resp(409, {"detail": "SPRINT_ALREADY_CLOSED"})) == "SPRINT_ALREADY_CLOSED"
     assert _reason_of(httpx.Response(500, text="boom")) == "HTTP 500"
+    assert _reason_of(resp(403, {"detail": {"code": "api_key:abc123"}})) == "HTTP 403", "a key:value shape is not a code word (codex on 6014)"
+    assert _reason_of(resp(403, {"detail": {"code": "/etc/passwd"}})) == "HTTP 403"

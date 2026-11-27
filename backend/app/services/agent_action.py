@@ -454,7 +454,7 @@ async def sweep(session: AsyncSession) -> dict[str, int]:
     return {"expired": len(expired), "unfinished": len(stuck)}
 
 
-_REASON_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,80}")
+_REASON_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")  # a bare code word: no `key:value` shape, no spaces, no path (codex on 6014)
 
 
 def _reason_of(resp: httpx.Response) -> str:
