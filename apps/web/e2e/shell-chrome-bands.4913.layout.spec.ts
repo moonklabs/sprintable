@@ -76,18 +76,24 @@ async function css(classes: string[]): Promise<string> {
   return (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(classes), { minify: false }).code;
 }
 
-type Opts = { width: number; height: number; bands: number; launcher: boolean; anchor: (typeof ANCHORS)[number] | 'page' };
+/** `phoneBar`: a phone's settings after the client knows its width (the shell does not mount the bar — the default) or before it (the bar is mounted, hidden by the shell's class) */
+type Opts = { width: number; height: number; bands: number; launcher: boolean; anchor: (typeof ANCHORS)[number] | 'page'; phoneBar?: 'unmounted' | 'hidden-by-class' };
+/** the class the shell puts on the bar of a phone's settings — read from lib/top-bar-phone.ts (the one place) */
+const BAR_HIDDEN_ON_PHONE = /BAR_HIDDEN_ON_PHONE_CLASS = '([^']+)'/.exec(read('lib/top-bar-phone.ts'))?.[1] ?? (() => { throw new Error('lib/top-bar-phone.ts: BAR_HIDDEN_ON_PHONE_CLASS not found'); })();
 const BAND_H = 34;
 const workTabsH = (width: number) => (width < 1024 ? 56 : 44); // the band: pt-3 + a 32 px tab row (pointer) / a 44 px tab cell (touch · phone widths)
 const AFTER_H = 40; // the closed «승인 흐름에서 멈춘 것» box
 const BAND_BOX = BAND_H + 12; // a band's wrapper has `pt-3` (12px) — the box the shell measures
 
-/** the shell as dashboard-shell renders it around one anchored page (story 5031 5a: EVERY screen has the TopBar now — /settings used to be drawn without one (`data-topbar-hidden`), the premise this fixture had for it is gone; a TopBar, the bands wrapper, the grid/cell, the anchor with an inner scroller and a press at its bottom-right corner) */
+/** the shell as dashboard-shell renders it around one anchored page (story 5031 5a: from lg EVERY screen has the TopBar — /settings too; a phone's settings still has none; a TopBar, the bands wrapper, the grid/cell, the anchor with an inner scroller and a press at its bottom-right corner) */
 async function mount(page: Page, o: Opts) {
   const c = shellClasses();
   const anchor = o.anchor === 'page' ? '' : anchorClass(o.anchor);
-  const all = [...Object.values(c), anchor].join(' ').split(/\s+/).filter(Boolean);
+  const all = [...Object.values(c), anchor, BAR_HIDDEN_ON_PHONE].join(' ').split(/\s+/).filter(Boolean);
   const phone = o.width < 1024;
+  // story 5031 (5a follow-up): /settings draws the top bar from lg up like every screen; a PHONE's settings keeps no bar — the shell marks the provider `data-topbar-hidden-phone` (all widths; globals.css narrows it to below lg) and does not mount the bar there
+  const settings = o.anchor !== 'page' && o.anchor.name === 'settings';
+  const noTopBar = settings && phone && (o.phoneBar ?? 'unmounted') === 'unmounted';
   await page.setViewportSize({ width: o.width, height: o.height });
   const bands = Array.from({ length: o.bands }, (_, i) => `<div class="${c.band}" data-band="${i}"><div style="height:${BAND_H}px">band ${i}</div></div>`).join('');
   const body = o.anchor === 'page'
@@ -102,11 +108,11 @@ async function mount(page: Page, o: Opts) {
         : padded;
     })();
   await page.setContent(`<!doctype html><html${o.launcher ? ' data-support-launcher=""' : ''}><head><style>html,body{margin:0}${await css(all)}</style></head><body>
-    <div class="${c.wrapper}">
+    <div class="${c.wrapper}"${settings ? ' data-topbar-hidden-phone=""' : ''}>
       <div class="${c.peer}" data-state="expanded" data-collapsible="" data-variant="inset" data-side="left"><div style="width:256px"></div></div>
       <main id="inset" class="${c.inset}">
         <div id="scroller" class="${c.scroller}">
-          <div id="topbar" class="${c.topBar}">TopBar</div>
+          ${noTopBar ? '' : `<div id="topbar" class="${c.topBar}${settings ? ` ${BAR_HIDDEN_ON_PHONE}` : ''}">TopBar</div>`}
           <div id="bands" data-shell-bands>${bands}</div>
           <div class="${c.grid}"><div class="${c.content}">${body}</div></div>
         </div>
@@ -131,6 +137,7 @@ const measure = (page: Page) => page.evaluate(() => {
     corner: r('corner') ? { l: r('corner')!.left, t: r('corner')!.top, r: r('corner')!.right, b: r('corner')!.bottom } : null,
     launcher: r('launcher') ? { l: r('launcher')!.left, t: r('launcher')!.top, r: r('launcher')!.right, b: r('launcher')!.bottom } : null,
     bandsVar: root.style.getPropertyValue('--shell-bands-h'),
+    topBarH: r('topbar')?.height ?? 0,
   };
 });
 
@@ -165,6 +172,25 @@ for (const anchor of ANCHORS) {
         });
       }
     }
+  }
+}
+
+// story 5031 (5a follow-up · PO): settings at 390 · 1023 · 1024 · 1100 · 1440. From lg (1024) the bar is drawn (64) and the anchor counts it; below lg there is NO bar (as before 5a) and the anchor does not count one — and fits both ways.
+const SETTINGS = ANCHORS.find((a) => a.name === 'settings')!;
+for (const [width, height] of [[1440, 900], [1100, 700], [1024, 768], [1023, 768], [390, 844]] as const) {
+  for (const phoneBar of ['unmounted', 'hidden-by-class'] as const) {
+    if (width >= 1024 && phoneBar === 'hidden-by-class') continue; // from lg the bar is always mounted
+    test(`[SID:5031] settings ${width}×${height}${width < 1024 ? ` · bar ${phoneBar}` : ''}: ${width >= 1024 ? 'the bar is drawn (64) and' : 'no bar and'} the anchored frame fits the main`, async ({ page }) => {
+      await mount(page, { width, height, bands: 1, launcher: false, anchor: SETTINGS, phoneBar });
+      const m = await measure(page);
+      if (width >= 1024) expect(m.topBarH, 'from lg the bar is drawn, 64 high').toBe(64);
+      else expect(m.topBarH, 'a phone\'s settings has no bar (as before)').toBe(0);
+      expect(m.over, 'the shell scroller does not overflow').toBeLessThanOrEqual(0);
+      expect(m.docOver).toBeLessThanOrEqual(0);
+      expect(m.anchorBottom).toBeLessThanOrEqual(m.insetBottom + 0.5);
+      const tabBar = width < 1024 ? (await page.evaluate(() => document.getElementById('tabbar')!.getBoundingClientRect().height)) : 0;
+      expect(Math.round(m.insetBottom - tabBar - m.anchorBottom), 'no room left under the frame (the variable counts exactly what is drawn)').toBeLessThanOrEqual(1);
+    });
   }
 }
 

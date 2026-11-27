@@ -1110,6 +1110,10 @@
     .dashboard-shell-root {
       --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }
+    /* story 5031 (5a follow-up): a PHONE's settings draws no top bar (lib/top-bar-phone.ts) — below lg only; from lg every screen, settings included, has the bar and the rule above counts it. */
+    .dashboard-shell-root[data-topbar-hidden-phone] {
+      --shell-chrome-h: calc(var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
+    }
     .dashboard-shell-root[data-topbar-hidden] {
       --shell-chrome-h: calc(var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }

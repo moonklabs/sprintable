@@ -44,6 +44,7 @@ async function build() {
         import { TopBarProvider } from './src/components/nav/top-bar-context';
         import { TopBarSlot } from './src/components/nav/top-bar-slot';
         import { SidebarProvider } from './src/components/ui/sidebar';
+        import { BAR_HIDDEN_ON_PHONE_CLASS } from './src/lib/top-bar-phone';
         import { ToastProvider } from './src/components/ui/toast';
         import { TeamPresenceToggleProvider } from './src/components/presence/team-presence-toggle';
         import { CommandPaletteProvider } from './src/components/command-palette/command-palette-context';
@@ -54,7 +55,7 @@ async function build() {
             <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
               <ToastProvider><CommandPaletteProvider><TopBarProvider><SidebarProvider><TeamPresenceToggleProvider value={{ toggle() {}, workingCount: 3, open: false }}>
                 <div id="frame" style={{ width: cfg.frameWidth + 'px' }} className="flex flex-col">
-                  <TopBar orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
+                  <TopBar className={cfg.hiddenOnPhone ? BAR_HIDDEN_ON_PHONE_CLASS : undefined} orgId="o1" orgMemberships={[{ orgId: 'o1', orgName: cfg.org, orgSlug: 'acme' }]} projectId="p1" projectMemberships={[{ projectId: 'p1', projectName: cfg.project }]} />
                   <TopBarSlot title={title} actions={cfg.withActions ? <button type="button" id="action-btn" className="rounded-ds-control border px-3">액션</button> : null} />
                 </div>
               </TeamPresenceToggleProvider></SidebarProvider></TopBarProvider></CommandPaletteProvider></ToastProvider>
@@ -75,7 +76,7 @@ async function build() {
   return built;
 }
 
-type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean };
+type Cfg = { pathname: string; titleKind: 'h1' | 'span' | 'none' | 'empty-component'; title?: string; org: string; project: string; frameWidth: number; withActions?: boolean; hiddenOnPhone?: boolean };
 const SHORT = { org: '올리베이라', project: '스프린터블' };
 const LONG = { org: '아주아주아주아주아주아주아주아주 긴 조직 이름 주식회사 문클랩스 코리아 서비스', project: '아주아주아주아주아주아주아주아주아주아주아주아주 긴 프로젝트 이름 — 결제 연동과 정산 자동화와 고객 문의 분류' };
 /** the width the shell leaves the bar at a window width: the window − 56 icon bar − 256 list column − 16 inset margins (≥ lg) */
@@ -102,7 +103,7 @@ async function open(page: Page, cfg: Cfg, o: { win: number; desktopApp?: boolean
   await page.addScriptTag({ content: js });
   if (!(await page.evaluate(() => typeof (window as unknown as { __mount?: unknown }).__mount === 'function'))) throw new Error(`the bundle did not start: ${errs.join(' | ')}`);
   await page.evaluate((c) => (window as unknown as { __mount: (c: unknown) => void }).__mount(c), cfg);
-  try { await page.waitForSelector('[data-testid="top-bar"] button[aria-label^="알림"]', { timeout: 8000 }); } catch (e) {
+  try { await page.waitForSelector('[data-testid="top-bar"] button[aria-label^="알림"]', { state: 'attached', timeout: 8000 }); } catch (e) {
     throw new Error(`the bar did not draw (page errors: ${errs.join(' | ') || 'none'}; body: ${(await page.evaluate(() => document.body.innerHTML)).slice(0, 600)})`, { cause: e });
   }
   await page.evaluate(() => document.fonts.ready);
@@ -224,3 +225,14 @@ test('[SID:5031] desktop app: the strip computes `-webkit-app-region: drag` and 
   expect(app.pressables.length, 'search + 2 crumb links + action + presence + what\'s new + bell').toBeGreaterThanOrEqual(7);
   expect(app.pressables.filter((p) => !p.endsWith('=no-drag')), 'every pressable inside the strip is no-drag').toEqual([]);
 });
+
+// story 5031 (5a follow-up · PO): a PHONE's settings keeps no bar. The shell mounts the bar with this class until the width is known; below lg it is display: none (0 high), from lg (1024) it is the full 64 bar with its three zones.
+for (const [win, high] of [[390, 0], [1023, 0], [1024, 64], [1100, 64], [1440, 64]] as const) {
+  test(`[SID:5031] settings' bar class at ${win}: ${high === 0 ? 'no bar (display: none)' : 'the 64 bar'}`, async ({ page }) => {
+    await open(page, { pathname: '/settings', titleKind: 'span', title: '프로필', ...SHORT, frameWidth: win < 1024 ? win : barWidth(win), hiddenOnPhone: true }, { win });
+    const m = await page.evaluate(() => { const b = document.querySelector('[data-testid="top-bar"]') as HTMLElement; return { h: b.getBoundingClientRect().height, display: getComputedStyle(b).display }; });
+    console.log(`[5031 settings bar] win ${win} → ${m.display} ${m.h}`);
+    expect(m.h).toBe(high);
+    expect(m.display === 'none').toBe(high === 0);
+  });
+}
