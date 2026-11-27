@@ -581,6 +581,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const listSeqRef = useRef(0);
   // the project the list is scoped by: only the project-only fallback is — in the organization-wide list the current project is not part of the question, so changing it asks nothing
   const scopeProjectId = projectOnly ? projectId : null;
+  // story 5031 — …and the ORGANIZATION is not part of the URL either (it rides on the session · the fetch interceptor's X-Org-Id): the effect below that asks for the list lists `orgId` itself
 
   // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
   // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
@@ -705,17 +706,32 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     router.push(flatHref(`/chats/${conv.id}?${params.toString()}`));
   }, [t, router, projectId, flatHref]);
 
+  // story 5031 — the organization the list (and the stored «프로젝트로 걸러 보기») belongs to. A switch of organization on this same, still mounted list (the chats layout mounts ONE list; the switch only pushes `?p=` and refreshes, it does not remount)
+  // must ask again and drop the old organization's project choice: a project of the OLD organization asked of the new one answers nothing and would flash.
+  // The choice is dropped IN THE RENDER the new organization arrives (React's «adjust state while rendering» — the render re-runs at once, before anything is committed), not in an effect: an effect that clears it would re-render later, and in that gap
+  // (a) an answer of the old ask could still pass the stale guard and fill the old rooms, (b) a second ask could carry the old project. Here the effect below only ever sees the cleared choice, so it asks ONCE and the gap does not exist.
+  // An organization that is first known LATE (the context was empty at mount) is just recorded — that is the first look, not a switch (the stored choice is then judged by the «not one of the person's projects» effect below, as before).
+  const [filterOrgId, setFilterOrgId] = useState(orgId);
+  if (orgId && orgId !== filterOrgId) {
+    setFilterOrgId(orgId);
+    if (filterOrgId && projectFilter) setProjectFilter(''); // the stored copy is removed after the commit (the effect below the storage read) — a render may be thrown away, so it writes nothing outside React
+  }
+
   // 카디르 QA(#4142) 뒤 페드루 그라운딩(2026-09-10 12:34Z) — 에이전트 탭의 project-switch
   // 효과(아래)와 같은 형을 my 탭에도 미러. 예전엔 `fetchConversations`만 재호출해 새 응답이
   // 오기 前까지 우측이 **이전 프로젝트**의 conversations.length를 그대로 단정했다(A 0건→B
   // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
   // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
+  // story 5031: `orgId` is a dependency too — the organization-wide ask has the same URL in every organization (the organization rides on the session / X-Org-Id), so nothing else changes when it does.
+  // story 5031 — a chosen project that is not one of the person's projects (the same condition as the «not one of the person's projects» effect below): do not ask WITH it — that effect drops it and this one runs again, so no ask carries another organization's project
+  // (an organization first known late · a context that shows the new organization before the old choice is gone).
+  const filterOutsideMine = Boolean(projectFilter) && projectFilter !== 'none' && projectMemberships.length > 0 && !projectMemberships.some((m) => m.projectId === projectFilter);
   useEffect(() => {
-    if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
+    if (!filterReady || filterOutsideMine) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
     void fetchConversations(0, false);
-  }, [fetchConversations, filterReady]);
+  }, [fetchConversations, filterReady, orgId, filterOutsideMine]);
 
   // story 4847 (AC1) — the tab's stored filter, read after mount (the storage is not readable while hydrating) and only kept when it still names one of the person's projects.
   useEffect(() => {
@@ -728,6 +744,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setFilterReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // story 5031 — the stored copy of the choice made in the OLD organization goes when the organization really changes (the state was already cleared in the render); a first look at a late-known organization only records it
+  const storedOrgRef = useRef(orgId);
+  useEffect(() => {
+    if (!orgId) return;
+    if (storedOrgRef.current && storedOrgRef.current !== orgId) {
+      try { window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY); } catch { /* storage unavailable — nothing was kept */ }
+    }
+    storedOrgRef.current = orgId;
+  }, [orgId]);
 
   // an older server, and a project is picked after all: the project-only list it can answer
   useEffect(() => {
