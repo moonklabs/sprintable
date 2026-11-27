@@ -693,7 +693,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {/* E-VERIFY P0-04 — 증거 있는 done 카드에만(무증거 = 완전 무표시). 카드에서는 작은 표시 한 알(긴 «씰» 띠는 상세에 있다 — 카드 3줄을 지킨다): 검증됨 = 체크(done 색) · 주장만 = 시계(주의 색 — 초록 아님, 에이전트 주장 단독은 초록이 될 수 없다). 전체 문구는 툴팁 + 스크린리더 글. */}
           {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
             <span data-testid="story-card-seal" data-seal="verified" title={sealTitle} className="inline-flex h-5 shrink-0 items-center text-ds-done">
-              <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+              <Check className="size-3.5" aria-hidden="true" />
               <span className="sr-only">{sealTitle}</span>
             </span>
           ) : story.status === 'done' && trustStage === 'claimed' ? (
@@ -789,7 +789,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         current ? 'border-ds-action-text bg-ds-action-soft font-semibold text-ds-ink' : 'border-ds-line hover:bg-muted',
                       )}
                     >
-                      {current ? <Check className="size-3 shrink-0" strokeWidth={3} aria-hidden="true" /> : null}
+                      {current ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
                       {status.label}
                     </Button>
                   );
@@ -839,7 +839,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         className={cn(MENU_ITEM_BUTTON, 'gap-2')}
                       >
                         <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
-                        {checked ? <Check className="size-3.5 shrink-0 text-ds-action-text" strokeWidth={3} aria-hidden="true" /> : null}
+                        {checked ? <Check className="size-3.5 shrink-0 text-ds-action-text" aria-hidden="true" /> : null}
                       </Button>
                     );
                   })}

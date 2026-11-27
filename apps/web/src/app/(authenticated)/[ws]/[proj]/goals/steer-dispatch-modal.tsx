@@ -161,7 +161,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
                       <span className={`flex size-4 shrink-0 items-center justify-center rounded border ${
                         on ? 'border-proof-blue bg-proof-blue text-background' : 'border-border'
                       }`}>
-                        {on ? <Check className="size-3" strokeWidth={3} aria-hidden="true" /> : null}
+                        {on ? <Check className="size-3" aria-hidden="true" /> : null}
                       </span>
                       <RowName label={rowLabels.get(a.id)} id={a.id} />
                     </button>

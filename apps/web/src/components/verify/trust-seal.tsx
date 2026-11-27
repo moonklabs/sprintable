@@ -78,14 +78,14 @@ export function TrustSeal(props: TrustSealProps) {
         <span className="min-w-0 flex-1 text-proof-ink-3">
           <b className="font-bold text-proof-ink">{t('trustSealVerifiedBy', { name: props.humanLabel ?? props.humanName ?? '' })}</b> · {props.when} · {t('trustSealSignedOff')}
         </span>
-        <Check className="size-3.5 shrink-0 text-proof-green" strokeWidth={3} aria-hidden="true" />
+        <Check className="size-3.5 shrink-0 text-proof-green" aria-hidden="true" />
       </div>
     );
   }
 
   return (
     <span className={cn('inline-flex shrink-0 items-center text-success', props.className)} title={t('provenCompletion')}>
-      <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
+      <Check className="h-3 w-3" aria-hidden />
     </span>
   );
 }

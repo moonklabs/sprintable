@@ -112,11 +112,12 @@ describe('NavRail — 1뎁스 넷(story 5031)', () => {
     expect(rail().querySelector('[data-testid="rail-badge"]')).toBeNull();
   });
 
-  it('⭐아이콘은 Material Symbols(ds Icon)다 — data-icon을 가지고 lucide(svg.lucide)는 0', async () => {
+  it('⭐아이콘은 ds Icon이다 — data-icon을 가지고, 날것 lucide 호출(data-icon 없는 svg.lucide)은 0', async () => {
     await mount({ listColumn: { open: true, onToggle: () => undefined } });
     const icons = [...rail().querySelectorAll('[data-icon]')];
     expect(icons.length).toBeGreaterThanOrEqual(6);
-    expect(rail().querySelectorAll('svg.lucide')).toHaveLength(0);
+    // story 5048 ④(PO 11-27 «한 집안 = lucide»): ds Icon이 이제 lucide를 그린다 — 그래서 `svg.lucide` 자체는 있고, «ds Icon을 거치지 않은 날것 lucide»(data-icon이 없는 것)가 0이어야 한다(시험의 뜻 그대로).
+    expect(rail().querySelectorAll('svg.lucide:not([data-icon])')).toHaveLength(0);
     expect(four().map((el) => el.querySelector('[data-icon]')?.getAttribute('data-icon'))).toEqual(['newsmode', 'chat_bubble', 'smart_toy', 'settings']);
   });
 
