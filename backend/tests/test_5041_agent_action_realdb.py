@@ -185,6 +185,7 @@ async def test_agent_delete_story_is_kept_not_run_and_not_refused():
         async with Session() as s:
             cards = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext == str(reqs[0].id)))).scalars().all()
         assert len(cards) == 1 and cards[0].mentioned_ids == [d["admin_om"]], "one card, to the person who made the agent"
+        assert cards[0].msg_metadata["card"] == {"kind": "agent_action", "ref": str(reqs[0].id)}, "the web draws it from the request (kind + id), never from the message"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -464,6 +465,88 @@ async def test_the_replay_carries_only_the_authorization_of_the_pressing_request
     assert seen["authorization"] == "Bearer person"
     assert "cookie" not in seen and "x-agent-api-key" not in seen
     assert seen["x-org-id"] == "o", "the org / project are the SNAPSHOT's, not whatever the pressing request said"
+
+
+async def _room_for_run(Session, d, *, who_asked: str = "admin", agent_in_room: bool = True, run_agent=None):
+    """a room with the person who asked and the agent, and a run of the agent started by that person's message"""
+    from app.models.agent_run import AgentRun
+    from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+    async with Session() as s:
+        conv = Conversation(id=uuid.uuid4(), org_id=d["org_id"], project_id=d["project_id"], type="group", title="room")
+        s.add(conv)
+        await s.commit()
+        s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d[f"{who_asked}_om"]))
+        if agent_in_room:
+            s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d["agent_id"]))
+        await s.commit()
+        msg = ConversationMessage(id=uuid.uuid4(), conversation_id=conv.id, sender_id=d[f"{who_asked}_om"], content="스프린트 닫아 줘", mentioned_ids=[d["agent_id"]])
+        s.add(msg)
+        await s.commit()
+        run = AgentRun(id=uuid.uuid4(), org_id=d["org_id"], agent_id=run_agent or d["agent_id"], project_id=d["project_id"], status="running", conversation_id=conv.id, triggering_message_id=msg.id, trigger="chat")
+        s.add(run)
+        await s.commit()
+        return conv.id, run.id
+
+
+@pytest.mark.anyio
+async def test_the_card_goes_to_the_room_the_run_came_from_and_names_the_person_who_asked():
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        conv_id, run_id = await _room_for_run(Session, d, who_asked="member")
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            resp = await c.post(f"/api/v2/sprints/{d['sprint_id']}/close", headers={"X-Sprintable-Run-Id": str(run_id)})
+        assert resp.status_code == 202 and resp.json()["card_delivered"] is True, resp.text
+        (req,) = await _requests(Session, d["org_id"])
+        async with Session() as s:
+            cards = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext == str(req.id)))).scalars().all()
+        assert [c.conversation_id for c in cards] == [conv_id], "ONE card, in the room the person asked in (not a DM)"
+        assert cards[0].mentioned_ids == [d["member_om"]], "it names the person who asked — a plain member; whoever may do it on screen may still press"
+        assert req.requested_for == d["member_om"] and req.hitl_metadata["cards"][0]["conversation_id"] == str(conv_id)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_run_that_does_not_lead_to_a_room_falls_back_to_the_dm_and_nothing_is_guessed():
+    """no header · another agent's run · the agent is not in that room: the card goes to the DM of the person who made the agent, as before"""
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from app.models.member import Member
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            other = Member(id=uuid.uuid4(), org_id=d["org_id"], type="agent", name="Other Agent", is_active=True)
+            s.add(other)
+            await s.commit()
+        _c1, someone_elses_run = await _room_for_run(Session, d, run_agent=other.id)
+        _c2, not_in_room = await _room_for_run(Session, d, agent_in_room=False)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            a = await c.delete(f"/api/v2/stories/{d['story_id']}")                                                                    # no header
+            b = await c.delete(f"/api/v2/tasks/{d['task_id']}", headers={"X-Sprintable-Run-Id": str(someone_elses_run)})               # a run of another agent
+            e = await c.delete(f"/api/v2/docs/{d['doc_id']}", headers={"X-Sprintable-Run-Id": str(not_in_room)})                      # the agent is not in that room
+            g = await c.delete(f"/api/v2/goals/{d['goal_id']}", headers={"X-Sprintable-Run-Id": "not-a-uuid"})
+        assert [x.status_code for x in (a, b, e, g)] == [202, 202, 202, 202]
+        async with Session() as s:
+            ids = [str(r.id) for r in await _requests(Session, d["org_id"])]
+            rows = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext.in_(ids)))).scalars().all()
+        assert len(rows) == 4 and {r.conversation_id for r in rows}.isdisjoint({_c1, _c2}), "every card is in the person's DM, none in those rooms"
+        assert all(r.mentioned_ids == [d["admin_om"]] for r in rows)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
 
 
 def test_every_registered_action_is_asked_for_by_exactly_one_route():

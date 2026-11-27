@@ -140,22 +140,27 @@ async def _approver_ids(session: AsyncSession, *, org_id: uuid.UUID, agent_id: u
     return list(rows)
 
 
-async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent: Any, approver_id: uuid.UUID, req: HitlRequest, locale: str, text_line: str) -> uuid.UUID | None:
+async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent: Any, approver_id: uuid.UUID | None, req: HitlRequest, locale: str, text_line: str, room: Any = None) -> uuid.UUID | None:
+    """one card message: in the ROOM the request came from (when the run says which) else in the approver's DM with the agent. The message carries `card = {kind: agent_action, ref: request id}` —
+    the web draws it from the request itself (GET /api/v2/agent-actions/{id}), so the card never goes stale."""
     from app.routers.conversations import _dispatch_conversation_event
     from app.services.approval_delivery import _get_or_create_approval_dm
 
     try:
         async with session.begin_nested():
-            conv = await _get_or_create_approval_dm(session, org_id=org_id, project_id=project_id, requester_id=agent.id, approver_id=approver_id)
+            conv = room if room is not None else await _get_or_create_approval_dm(session, org_id=org_id, project_id=project_id, requester_id=agent.id, approver_id=approver_id)
+            meta: dict[str, Any] = {
+                "agent_action": {"request_id": str(req.id), "action_key": req.hitl_metadata.get("action_key")},
+                "card": {"kind": "agent_action", "ref": str(req.id)},
+            }
+            if approver_id is not None:
+                meta["activation"] = {"audience": [str(approver_id)], "kind": "request", "expects_response": True}
             msg = ConversationMessage(
                 conversation_id=conv.id,
                 sender_id=agent.id,
                 content=text_line,
-                mentioned_ids=[approver_id],
-                msg_metadata={
-                    "activation": {"audience": [str(approver_id)], "kind": "request", "expects_response": True},
-                    "agent_action": {"request_id": str(req.id), "action_key": req.hitl_metadata.get("action_key")},
-                },
+                mentioned_ids=[approver_id] if approver_id is not None else [],
+                msg_metadata=meta,
             )
             session.add(msg)
             await session.flush()
@@ -164,6 +169,45 @@ async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uu
     except Exception:  # noqa: BLE001 — one recipient's failure never loses the request; the reply to the agent says honestly that no card went
         logger.error("agent_action card delivery failed request=%s approver=%s", req.id, approver_id, exc_info=True)
         return None
+
+
+async def _room_of_request(session: AsyncSession, request: Request, *, agent: Any, org_id: uuid.UUID, project_id: uuid.UUID) -> tuple[Any, uuid.UUID | None] | None:
+    """the room a person asked the agent in, when the agent's RUN says so: `X-Sprintable-Run-Id` (the runtime puts it on every MCP call) naming a run of THIS agent whose `conversation_id` is a live room of this
+    organization (the agent is in it; it is no other project's room). Nothing is guessed from «the agent's only running run» — no header, a run of another agent, a room that is gone or not this project's =
+    `None` and the card goes to the person's DM as before. Second value = the person whose message started the run (a person's id), to be named on the card."""
+    from app.models.agent_run import AgentRun
+    from app.models.conversation import Conversation, ConversationParticipant
+    from app.models.member import Member
+
+    raw = request.headers.get("x-sprintable-run-id")
+    try:
+        run_id = uuid.UUID(raw) if raw else None
+    except ValueError:
+        run_id = None
+    if run_id is None:
+        return None
+    run = (await session.execute(
+        select(AgentRun.conversation_id, AgentRun.triggering_message_id).where(AgentRun.id == run_id, AgentRun.agent_id == agent.id, AgentRun.org_id == org_id)
+    )).first()
+    if run is None or run.conversation_id is None:
+        return None
+    conv = (await session.execute(select(Conversation).where(Conversation.id == run.conversation_id, Conversation.org_id == org_id))).scalar_one_or_none()
+    if conv is None or getattr(conv, "deleted_at", None) is not None:
+        return None
+    if getattr(conv, "project_id", None) not in (None, project_id):
+        return None
+    inside = (await session.execute(
+        select(ConversationParticipant.id).where(ConversationParticipant.conversation_id == conv.id, ConversationParticipant.member_id == agent.id)
+    )).first()
+    if inside is None:
+        return None
+    asker: uuid.UUID | None = None
+    if run.triggering_message_id is not None:
+        sender = (await session.execute(select(ConversationMessage.sender_id).where(ConversationMessage.id == run.triggering_message_id, ConversationMessage.conversation_id == conv.id))).scalar_one_or_none()
+        if sender is not None:
+            kind = (await session.execute(select(Member.type).where(Member.id == sender, Member.org_id == org_id))).scalar_one_or_none()
+            asker = sender if kind == "human" else None
+    return conv, asker
 
 
 def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
@@ -222,13 +266,15 @@ async def request_approval(
         raise HTTPException(status_code=429, detail={"code": "AGENT_ACTION_RATE_LIMITED", "message": "AGENT_ACTION_RATE_LIMITED"})
 
     approvers = await _approver_ids(session, org_id=org_id, agent_id=agent.id)
+    room = await _room_of_request(session, request, agent=agent, org_id=org_id, project_id=project_id)
+    asker = room[1] if room else None
     what = _what(spec, target_label, locale)
     agent_name = agent.name or "—"
     req = HitlRequest(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, agent_id=agent.id, request_type=REQUEST_TYPE,
         title=what[:300],
         prompt=t("agent_action.prompt.irreversible" if spec.reversible == "no" else "agent_action.prompt.partly", locale),
-        requested_for=approvers[0] if approvers else agent.id,
+        requested_for=asker or (approvers[0] if approvers else agent.id),
         status="pending", expires_at=now + EXPIRES_AFTER,
         hitl_metadata={
             "action_key": action_key, "snapshot": snap, "target_label": (target_label or "")[:200],
@@ -240,10 +286,16 @@ async def request_approval(
 
     text_line = t("agent_action.card_text", locale, what=what, agent=agent_name)
     cards: list[dict[str, str]] = []
-    for approver_id in approvers:
-        message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=approver_id, req=req, locale=locale, text_line=text_line)
+    if room is not None:
+        # the room the person asked in: ONE card there (whoever may do it on screen may press — it names the person who asked, nobody else is excluded)
+        message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=asker, req=req, locale=locale, text_line=text_line, room=room[0])
         if message_id is not None:
-            cards.append({"approver_id": str(approver_id), "message_id": str(message_id)})
+            cards.append({"approver_id": str(asker) if asker else None, "message_id": str(message_id), "conversation_id": str(room[0].id)})
+    if not cards:
+        for approver_id in approvers:
+            message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=approver_id, req=req, locale=locale, text_line=text_line)
+            if message_id is not None:
+                cards.append({"approver_id": str(approver_id), "message_id": str(message_id)})
     req.hitl_metadata = {**req.hitl_metadata, "cards": cards}
     await session.flush()
     if not cards:

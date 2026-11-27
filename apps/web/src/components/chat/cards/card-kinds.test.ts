@@ -8,12 +8,12 @@ const ID = '0d6e953f-6d43-42c1-a87c-b023544497db';
 
 describe('card vocabulary — closed list', () => {
   it('is exactly these kinds (changing it is a decision, not an accident)', () => {
-    expect([...CARD_KINDS]).toEqual(['story', 'epic', 'task', 'sprint', 'doc', 'artifact', 'hypothesis', 'evidence', 'gate', 'kanban', 'deploy']);
+    expect([...CARD_KINDS]).toEqual(['story', 'epic', 'task', 'sprint', 'doc', 'artifact', 'hypothesis', 'evidence', 'gate', 'kanban', 'deploy', 'agent_action']);
   });
   it('entity kinds are exactly the entity registry\'s object types (one list of «objects the server knows»)', () => {
     expect([...ENTITY_CARD_KINDS].sort()).toEqual(Object.keys(ENTITY_ICONS).sort());
     for (const k of ENTITY_CARD_KINDS) expect(isCardKind(k) && isEntityCardKind(k)).toBe(true);
-    for (const k of ['gate', 'kanban', 'deploy'] as const) expect(isEntityCardKind(k)).toBe(false);
+    for (const k of ['gate', 'kanban', 'deploy', 'agent_action'] as const) expect(isEntityCardKind(k)).toBe(false);
   });
 });
 

@@ -78,6 +78,7 @@ async def _view(session: AsyncSession, req: HitlRequest) -> dict:
         "id": str(req.id),
         "state": _state(req),
         "action_key": meta.get("action_key"),
+        "reversible": (svc.SPECS[meta["action_key"]].reversible if meta.get("action_key") in svc.SPECS else "no"),
         "title": req.title,
         "prompt": req.prompt,
         "project_id": str(req.project_id),

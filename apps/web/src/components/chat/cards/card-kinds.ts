@@ -6,7 +6,7 @@
  * This file is the web's copy of the vocabulary: a kind this build does not know is NOT an error for the message (an older web meets a newer server) — `parseCardRef` says `null`
  * and the catalogue shows its «this app version cannot draw it» card.
  */
-export const CARD_KINDS = ['story', 'epic', 'task', 'sprint', 'doc', 'artifact', 'hypothesis', 'evidence', 'gate', 'kanban', 'deploy'] as const;
+export const CARD_KINDS = ['story', 'epic', 'task', 'sprint', 'doc', 'artifact', 'hypothesis', 'evidence', 'gate', 'kanban', 'deploy', 'agent_action'] as const;
 export type CardKind = (typeof CARD_KINDS)[number];
 
 /** the card kinds the shell can draw today as an entity card (the entity registry's types) — the other kinds have their own parts (a gate = the approval card · kanban · deploy = later steps) */
