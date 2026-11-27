@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,6 +43,20 @@ describe('ds IconButton', () => {
     expect(w()).toBe('20');
     await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" size="xl" />); });
     expect(w()).toBe('24');
+  });
+
+  it('⭐상자를 28(`size-ds-tag`)로 줄인 자리는 `iconSize="sm"`으로 16 — 표의 20이 28 칸에 꽉 차지 않게(story 5048 ④ PO dev 실측: 방 머리 «+» 28 안 20)', async () => {
+    await act(async () => { root.render(<IconButton label="추가" icon="add" iconSize="sm" className="size-ds-tag" />); });
+    expect(container.querySelector('button svg')!.getAttribute('width')).toBe('16');
+    await act(async () => { root.render(<IconButton label="추가" icon="add" className="size-ds-tag" />); });
+    expect(container.querySelector('button svg')!.getAttribute('width')).toBe('20'); // iconSize를 안 주면 표(md → 20)
+  });
+
+  it('⭐방 머리 «+»(`size-ds-tag` 28 칸)는 `iconSize="sm"`을 단다 — 28 칸에 표의 20이 들어가지 않게(소스 고정)', () => {
+    const src = readFileSync(join(__dirname, '../chat/room-head.tsx'), 'utf8');
+    const line = src.split('\n').find((l) => l.includes('data-testid="room-head-add"') && l.includes('size-ds-tag'));
+    expect(line, 'room-head «+» line').toBeTruthy();
+    expect(line).toContain('iconSize="sm"');
   });
 
   it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 실선 흐린 면 · 이름(label)은 그대로 필수', async () => {
