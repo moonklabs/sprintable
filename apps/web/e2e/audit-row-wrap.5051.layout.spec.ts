@@ -150,9 +150,10 @@ test('[SID:5051] the goal page\'s trust rail @288 — one line each, claim ≥ 2
   const rows = await measureRail(page);
   expect(rows).toHaveLength(2);
   for (const r of rows) {
+    expect(r.metaTop, 'the meta group (the avatar) is drawn — a missing one must not pass the geometry below').not.toBeNull();
     expect(r.rowRight, 'row inside the rail').toBeLessThanOrEqual(r.colRight + 0.5);
     expect(r.claimW, 'the claim keeps its floor in the rail').toBeGreaterThanOrEqual(200);
-    expect(r.metaTop, 'the avatar stays on the claim\'s line').toBeLessThan(r.claimBottom);
+    expect(r.metaTop!, 'the avatar stays on the claim\'s line').toBeLessThan(r.claimBottom);
   }
 });
 
@@ -160,11 +161,12 @@ test('[SID:5051] a rail narrower than the claim\'s 13rem floor: the floor yields
   await open(page, 200, '__mountRail');
   const rows = await measureRail(page);
   for (const r of rows) {
+    expect(r.metaTop, 'the meta group (the avatar) is drawn').not.toBeNull();
     expect(r.rowRight, 'row inside the narrow rail').toBeLessThanOrEqual(r.colRight + 0.5);
     expect(r.claimRight, 'the claim is inside the row').toBeLessThanOrEqual(r.rowRight + 0.5);
     expect(r.claimW, 'the claim is still there').toBeGreaterThan(80);
     expect(r.claimW, 'the floor is a floor of the rail, not past it').toBeLessThan(200);
-    expect(r.metaRight, 'the avatar is inside the row').toBeLessThanOrEqual(r.rowRight + 0.5);
-    expect(r.metaTop, 'the avatar is on a second line').toBeGreaterThanOrEqual(r.claimBottom - 1);
+    expect(r.metaRight!, 'the avatar is inside the row').toBeLessThanOrEqual(r.rowRight + 0.5);
+    expect(r.metaTop!, 'the avatar is on a second line').toBeGreaterThanOrEqual(r.claimBottom - 1);
   }
 });
