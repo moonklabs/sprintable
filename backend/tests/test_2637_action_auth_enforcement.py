@@ -166,7 +166,9 @@ def _fake_request() -> "StarletteRequest":
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_human_only_blocks_agent_publisher():
-    from app.routers.events import EventPublishRequest, publish_registry_event
+    # story 5041 B4b: the HTTP road `publish_registry_event` now answers an agent's publish of a people-only event with an approval card (202, a person presses it — see test_5041_b4b_cards_realdb);
+    # the 403 «action_auth_denied» this test pins is still what the publish CORE (everything the server publishes by itself goes through it) says to an agent, so the pin moves to the core
+    from app.routers.events import _publish_registry_event_core
 
     engine, Session = await _realdb_session()
     try:
@@ -176,9 +178,8 @@ async def test_human_only_blocks_agent_publisher():
             await _seed_definition(s, org_id, key="org.acme.thing.done", action_auth={"human_only": True})
 
             with pytest.raises(HTTPException) as ei:
-                await publish_registry_event(
-                    EventPublishRequest(definition_key="org.acme.thing.done", payload={}),
-                    BackgroundTasks(), _fake_request(), db=s, auth=_agent_auth(agent_id, org_id), org_id=org_id,
+                await _publish_registry_event_core(
+                    s, org_id, _agent_auth(agent_id, org_id), "org.acme.thing.done", {}, BackgroundTasks(), request=_fake_request(),
                 )
             assert ei.value.status_code == 403
             assert ei.value.detail["code"] == "action_auth_denied"

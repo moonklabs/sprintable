@@ -2660,6 +2660,31 @@ async def _render_event_message_content(
     return "\n".join(lines)
 
 
+async def _gate_people_only_event(request: Request, db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, agent, definition_key: str, payload: dict):
+    """the approval card (or the block) for an agent's publish of a people-only event; None only if the user's setting let it through — which has no slot (`NO_AUTO`), and the core then refuses the agent with its own 403"""
+    from app.models.pm import Story
+    from app.services import agent_action
+
+    project_id = None
+    title = None
+    work_item_id = payload.get("work_item_id") if isinstance(payload, dict) else None
+    if payload.get("work_item_type") == "story" and work_item_id:
+        try:
+            row = (await db.execute(select(Story.project_id, Story.title).where(Story.id == uuid.UUID(str(work_item_id)), Story.org_id == org_id))).first()
+        except ValueError:
+            row = None
+        if row is not None:
+            project_id, title = row
+    refuse = HTTPException(
+        status_code=403,
+        detail={"code": "action_auth_denied", "message": f"이 이벤트({definition_key})는 human 발행자만 허용합니다."},
+    )
+    label = agent_action.card_text(definition_key, "—", 80) + (f" → {agent_action.card_text(title, '—', 80)}" if title else "")
+    return await agent_action.gate_agent_for_org(
+        request, db, auth=auth, agent=agent, org_id=org_id, action_key="event.publish_human_only", target_label=label, refuse=refuse, project_id=project_id,
+    )
+
+
 @router.post("/publish", status_code=201)
 async def publish_registry_event(
     body: EventPublishRequest,
@@ -2698,6 +2723,18 @@ async def publish_registry_event(
     resolved_locale = (
         resolve_locale_from_request(locale, _accept_language) if (locale or _accept_language) else None
     )
+    # story 5041 B4b — an AGENT's publish of an event only a person may publish (`action_auth.human_only`) is a card a person presses (the stored call then publishes as them), or what the user's setting says.
+    # The card stands in front of THIS road only: the publish core — which the server's own automatic publishing, the recipes and the channel publishing call directly — is not touched, and neither is any
+    # definition that is not people-only (nor the role limit: an agent whose role is not allowed still gets the 403).
+    from app.services import agent_action
+
+    _agent = await agent_action.calling_agent(db, auth, org_id, request)
+    if _agent is not None:
+        _definition = await _enabled_event_definition(db, org_id, body.definition_key)
+        if _definition is not None and (_definition.action_auth or {}).get("human_only"):
+            _decision = await _gate_people_only_event(request, db, auth, org_id, _agent, _definition.key, body.payload)
+            if _decision is not None:
+                return _decision
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
@@ -2893,6 +2930,24 @@ async def _stage_publish_rejection_detail(db: AsyncSession, definition, rejectio
     }
 
 
+async def _enabled_event_definition(db: AsyncSession, org_id: uuid.UUID, definition_key: str):
+    """the enabled definition of a key for this organisation (its own over the preset one) — the publish core and the people-only card gate read it the same way"""
+    from app.models.event_definition import EventDefinition
+
+    return (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        # org 커스텀이 있으면 프리셋보다 우선(같은 key 오버라이드 시나리오 대비 — 지금은
+        # #2632에 프리셋뿐이라 실질 영향 없음, #2636 커스텀 등록 대비 명시).
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
+    )).scalars().first()
+
+
 async def _publish_registry_event_core(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -2935,20 +2990,7 @@ async def _publish_registry_event_core(
 
     sender = await resolve_member(auth, org_id, db)
 
-    from app.models.event_definition import EventDefinition
-
-    definition = (await db.execute(
-        select(EventDefinition)
-        .where(
-            EventDefinition.key == definition_key,
-            EventDefinition.enabled.is_(True),
-            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
-        )
-        # org 커스텀이 있으면 프리셋보다 우선(같은 key 오버라이드 시나리오 대비 — 지금은
-        # #2632에 프리셋뿐이라 실질 영향 없음, #2636 커스텀 등록 대비 명시).
-        .order_by(EventDefinition.org_id.is_(None))
-        .limit(1)
-    )).scalars().first()
+    definition = await _enabled_event_definition(db, org_id, definition_key)
     if definition is None:
         raise HTTPException(
             status_code=404, detail=f"event definition not found or disabled: {definition_key!r}",

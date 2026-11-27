@@ -950,6 +950,31 @@ async def get_computers(
         raise _error(e) from None
 
 
+async def _calling_agent_card_gate(request: Request, db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """story 5041 B4b — the calling AGENT (its member), or None for a person / a caller the road already refuses its own way"""
+    from app.services.agent_action import calling_agent
+
+    return await calling_agent(db, auth, org_id, request)
+
+
+async def _setup_card_name(db: AsyncSession, org_id: uuid.UUID, setup_id: uuid.UUID) -> str:
+    """the device name a card shows for a setup of THIS organisation (another organisation's id, or none: the road's own «not found»)"""
+    from sqlalchemy import select
+
+    from app.models.desktop_setup import DesktopSetup
+    from app.services.agent_action import card_text
+
+    name = (await db.execute(select(DesktopSetup.device_name).where(DesktopSetup.id == setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
+    if name is None:
+        raise _error(DesktopSetupError("setup_not_found"))
+    return card_text(name, "—", 80)
+
+
+def _person_session_refusal() -> HTTPException:
+    """the road's own refusal of an agent (a person's session is required) — what an agent that holds no project keeps, and what it gets were the user's setting ever to let it through (no auto slot)"""
+    return HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+
+
 class ComputerRevokeResponse(BaseModel):
     setups_disconnected: int  # setups this call disconnected (0 when the computer had none connected)
     revoked_keys: int
@@ -960,6 +985,7 @@ class ComputerRevokeResponse(BaseModel):
 
 @router.delete("/computers/{computer_id}", response_model=ComputerRevokeResponse)
 async def delete_computer(
+    request: Request,
     computer_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -969,6 +995,28 @@ async def delete_computer(
     from app.services.desktop_computers import revoke_computer
     from app.services.project_auth import is_org_owner_or_admin
 
+    # story 5041 B4b — an AGENT's «disconnect this computer» is a card a person presses (their session, their rights), or what the user's setting says; no `auto` slot (an agent is never an organisation admin)
+    _agent = await _calling_agent_card_gate(request, db, auth, org_id)
+    if _agent is not None:
+        from app.services import agent_action
+        from app.services.desktop_computers import ComputerGroupingIncomplete, setup_ids_of_computer
+
+        try:
+            _ids = await setup_ids_of_computer(db, org_id, computer_id, live_only=False)
+        except ComputerGroupingIncomplete:
+            _ids = []
+        if not _ids:
+            raise _error(DesktopSetupError("setup_not_found"))
+        _live = await setup_ids_of_computer(db, org_id, computer_id, live_only=True)
+        _label = await _setup_card_name(db, org_id, _ids[0])
+        _refuse = _person_session_refusal()
+        _decision = await agent_action.gate_agent_for_org(
+            request, db, auth=auth, agent=_agent, org_id=org_id, action_key="desktop_computer.disconnect", refuse=_refuse,
+            target_label=_label + (f" (+{len(_live) - 1})" if len(_live) > 1 else ""),
+        )
+        if _decision is None:  # never (no auto slot) — and were it ever, the agent does not walk into the person's code path
+            raise _refuse
+        return _decision
     user_id = _human_only(auth)
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise _error(DesktopSetupError("not_org_admin"))
@@ -987,6 +1035,7 @@ async def delete_computer(
 
 @router.delete("/setups/{setup_id}", response_model=RevokeResponse)
 async def delete_setup(
+    request: Request,
     setup_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -994,6 +1043,18 @@ async def delete_setup(
 ):
     from app.services.project_auth import is_org_owner_or_admin
 
+    # story 5041 B4b — an AGENT's «disconnect this desktop line» is a card too (see `delete_computer`)
+    _agent = await _calling_agent_card_gate(request, db, auth, org_id)
+    if _agent is not None:
+        from app.services import agent_action
+
+        _refuse = _person_session_refusal()
+        _decision = await agent_action.gate_agent_for_org(
+            request, db, auth=auth, agent=_agent, org_id=org_id, action_key="desktop_setup.disconnect", refuse=_refuse, target_label=await _setup_card_name(db, org_id, setup_id),
+        )
+        if _decision is None:  # never (no auto slot)
+            raise _refuse
+        return _decision
     user_id = _human_only(auth)
     # a setup is an org-level record (who connected which device): the org owner/admin gate is its guard, checked here at the
     # route and again in the service; the lookup below is scoped to this org, so another org's id is «not found»
