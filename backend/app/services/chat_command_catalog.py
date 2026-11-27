@@ -332,7 +332,7 @@ async def try_execute_server_command(
         ))
 
     try:
-        from app.routers.conversations import _dispatch_conversation_event
+        from app.routers.conversations import dispatch_conversation_event_live
         from app.services.member_resolver import lookup_members_by_ids
 
         sender_resolved = (await lookup_members_by_ids({sender.id}, db)).get(sender.id)
@@ -369,7 +369,7 @@ async def try_execute_server_command(
         if cards is not None:
             cards.append(reply)  # the caller delivers it (same recipients as the line that asked for it, live after the commit)
         elif sender_resolved is not None:
-            await _dispatch_conversation_event(db, conv, reply, org_id, sender_resolved)
+            await dispatch_conversation_event_live(db, conv, reply, org_id, sender_resolved)
     except Exception:  # noqa: BLE001 — 회신 배달 실패가 집행 자체(이미 위에서 끝남)를 되돌리지 않는다.
         logger.warning("서버 집행 커맨드 결과 카드 배달 실패(비차단) command=%s message=%s", candidate.name, msg.id, exc_info=True)
 

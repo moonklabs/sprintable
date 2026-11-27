@@ -1140,6 +1140,36 @@ from app.services.event_room_gate import MENTION_WITHOUT_TEXT_KEYS as _MENTION_W
 from app.services.event_room_gate import payload_without_room_words as _payload_without_room_words  # noqa: E402
 
 
+async def dispatch_conversation_event_live(
+    db: AsyncSession,
+    conversation: Conversation,
+    msg: ConversationMessage,
+    org_id: uuid.UUID,
+    sender: "ResolvedMember | TeamMember",
+    **kwargs,
+) -> None:
+    """a word put into a room by any road OTHER than `send_message` (the approval card · its result line · a command's reply card · the gate lines): the Event rows AND — after the
+    commit that keeps the message — the live frames, as `send_message` pushes them (story 5053 · PO 11-27: on dev a card used to arrive in the database and on the next refresh, but
+    an OPEN list never heard of it, because `_dispatch_conversation_event` RETURNS the frames and these roads dropped them). The push is scheduled with the commit
+    (`schedule_after_commit`): a rolled-back savepoint (a best-effort delivery that failed) pushes nothing."""
+    import functools
+
+    from app.routers.events import _push_to_agent
+    from app.services.after_commit import schedule_after_commit
+
+    pushes = await _dispatch_conversation_event(db, conversation, msg, org_id, sender, **kwargs)
+    if not pushes:
+        return
+    # PEOPLE only (PO 11-27 · C0 5030 «an agent is delivered only a word that calls it»): these roads kept the agent's Event row as before (it is read on the agent's own schedule); the
+    # live frame is for the open web lists of the people in the room — an agent's wake is not widened by this function
+    people = {r[0] for r in (await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_([uuid.UUID(pid) for pid, _ in pushes]), TeamMember.type == "human")
+    )).all()}
+    live = [(pid, payload) for pid, payload in pushes if uuid.UUID(pid) in people]
+    if live:
+        schedule_after_commit(db, [functools.partial(_push_to_agent, pid, payload) for pid, payload in live])
+
+
 def _mention_payload_without_text(payload: dict, target_id: uuid.UUID) -> dict:
     return _payload_without_room_words(payload, recipient_id=target_id, mention=True)
 
