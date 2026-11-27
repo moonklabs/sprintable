@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { HOME_DETAIL_W, HOME_GAP, HOME_LIST_MIN, HOME_TWO_COLUMN_MIN } from '../src/components/home/home-layout';
 import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
@@ -65,9 +66,22 @@ async function build() {
         import { Tabs as TabsPrimitive } from '@base-ui/react/tabs';
         import ko from './messages/ko.json';
         import { ListDetailShell } from './src/components/ds/list-detail-shell';
+        import { useDetailBesideList } from './src/hooks/use-detail-beside-list';
+        import { HOME_TWO_COLUMN_MIN } from './src/components/home/home-layout';
         import { SettingsNav } from './src/app/(authenticated)/settings/settings-nav-list';
         import { settingsNavGroups } from './src/app/(authenticated)/settings/settings-nav';
         const groups = settingsNavGroups({ adminChecked: true, isAdmin: true, inPhoneApp: false, supportWidget: true, billing: true });
+        // the home's width rule, as the home screen has it: a wrapper that measures the body (ref) + the real hook + the real constants — the wrapper / hook / constant use in home-screen.tsx is pinned from its source below
+        function HomeScene({ cfg }) {
+          const { ref, wide } = useDetailBesideList(HOME_TWO_COLUMN_MIN);
+          return (
+            <div ref={ref} id="probe">
+              <ListDetailShell testId="home-screen" columnTestId="home-detail-column" sheetTestId="home-detail-sheet" wide={wide} detailWidth={cfg.home.detailWidth === 'fixed' ? 'fixed' : undefined}
+                list={<div id="list" className="min-w-0 rounded-ds-control border border-ds-line p-4" style={{ height: '320px' }}>list</div>}
+                detail={<div id="detail" className="rounded-ds-control border border-ds-line p-4" style={{ height: '320px' }}>detail</div>}
+                detailLabel="요청" sheetLabel="자세히" sheetOpen={false} onSheetOpenChange={() => {}} />
+            </div>);
+        }
         const Shell = ({ cfg, children }) => (
           <div className={cfg.shell.wrapper} style={{ '--sidebar-width': '16rem' }}>
             {/* the icon bar (nav-rail: w-14 = 56) stands left of the list column in the real shell */}
@@ -77,12 +91,7 @@ async function build() {
           </div>);
         window.__mount = (cfg) => {
           const body = cfg.screen === 'home'
-            ? (<div id="home-root" className={cfg.home.root}>
-                <ListDetailShell testId="home-screen" columnTestId="home-detail-column" sheetTestId="home-detail-sheet" wide={cfg.wide} detailWidth={cfg.home.detailWidth === 'fixed' ? 'fixed' : undefined}
-                  list={<div id="list" className="min-w-0 rounded-ds-control border border-ds-line p-4" style={{ height: '320px' }}>list</div>}
-                  detail={<div id="detail" className="rounded-ds-control border border-ds-line p-4" style={{ height: '320px' }}>detail</div>}
-                  detailLabel="요청" sheetLabel="자세히" sheetOpen={false} onSheetOpenChange={() => {}} />
-              </div>)
+            ? (<div id="home-root" className={cfg.home.root}><HomeScene cfg={cfg} /></div>)
             : cfg.screen === 'default-shell'
             ? (<div id="home-root" className="w-full p-6">
                 <ListDetailShell testId="plain" wide={cfg.wide} list={<div id="list" className="min-w-0 border p-4" style={{ height: '200px' }}>list</div>} detail={<div id="detail" className="border p-4" style={{ height: '200px' }}>detail</div>}
@@ -132,28 +141,58 @@ async function open(page: Page, cfg: Cfg) {
 const box = (page: Page, sel: string) => page.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, w: r.width, h: r.height }; }, sel);
 const overflow = (page: Page) => page.evaluate(() => { const s = document.getElementById('scroller')!; return s.scrollWidth - s.clientWidth; });
 
-for (const win of [1440, 1280, 1100, 1024] as const) {
-  test(`[SID:5031] home ${win}: the body fills the inset, the detail is exactly 340, the list takes the rest, no overflow`, async ({ page }) => {
+// the window width the shell takes away from the body's cell: the icon bar 56 + the list column 256 + the inset's margin 8 (the inset has no LEFT margin beside the list column — only right/top/bottom: `lg:peer-data-[variant=inset]:m-(--shell-inset) ml-0`); the body's own padding is 24 + 24
+const CHROME_W = 56 + 256 + 8;
+const BODY_PAD = 48;
+/** the first window at which the body (inside its padding) receives HOME_TWO_COLUMN_MIN — derived from the named numbers, not typed */
+const THRESHOLD_WIN = HOME_TWO_COLUMN_MIN + BODY_PAD + CHROME_W;
+
+const homeNumbers = async (page: Page, win: number) => {
+  const cell = (await box(page, '#cell'))!, root = (await box(page, '#home-root'))!, shellRoot = (await box(page, '[data-testid="home-screen"]'))!, list = (await box(page, '#list'))!, col = await box(page, '[data-testid="home-detail-column"]');
+  return { cell, root, shellRoot, list, col, win, overflow: await overflow(page) };
+};
+
+test('[SID:5031] the home\'s threshold is derived from named numbers: 340 + 16 + 360 = 716, and the window it needs follows from the chrome', () => {
+  expect([HOME_DETAIL_W, HOME_GAP, HOME_LIST_MIN, HOME_TWO_COLUMN_MIN]).toEqual([340, 16, 360, 716]);
+  expect(THRESHOLD_WIN).toBe(1084);
+  expect(/useDetailBesideList\(HOME_TWO_COLUMN_MIN\)/.test(read('components/home/home-screen.tsx')), 'the home reads the rule from the hook with the named threshold').toBe(true);
+  expect(/ref=\{bodyRef\}/.test(read('components/home/home-screen.tsx')), 'around the shell, a wrapper the hook measures').toBe(true);
+});
+
+for (const win of [1440, 1280, 1100, THRESHOLD_WIN] as const) {
+  test(`[SID:5031] home ${win}: two columns — the detail is exactly 340, the list takes the rest and is never under 360, the body fills the inset, no overflow`, async ({ page }) => {
     await open(page, { screen: 'home', win, wide: true, listColumnOpen: true });
-    const cell = (await box(page, '#cell'))!, root = (await box(page, '#home-root'))!, list = (await box(page, '#list'))!, col = (await box(page, '[data-testid="home-detail-column"]'))!;
-    console.log(`[5c home] win ${win} cell ${cell.w} · root ${root.w} (x+${root.l - cell.l}) · list ${Math.round(list.w)} · detail ${col.w} · overflow ${await overflow(page)}`);
-    expect(root.w, 'the body root fills the content cell (no centred max-width column)').toBe(cell.w);
-    expect(root.l, 'and starts at its left edge').toBe(cell.l);
-    expect(col.w, 'the detail column is exactly 340').toBe(340);
-    // list = root − the body padding (24 + 24) − the gap (16) − 340
-    expect(Math.round(list.w)).toBe(Math.round(root.w - 48 - 16 - 340));
-    expect(list.r, 'the list is left of the detail').toBeLessThanOrEqual(col.l + 0.5);
-    expect(await overflow(page)).toBe(0);
+    const n = await homeNumbers(page, win);
+    console.log(`[5c home] win ${win} body ${n.shellRoot.w} · list ${Math.round(n.list.w)} · detail ${n.col?.w ?? 'none (sheet)'} · overflow ${n.overflow}`);
+    expect(n.root.w, 'the body root fills the content cell (no centred max-width column)').toBe(n.cell.w);
+    expect(n.root.l).toBe(n.cell.l);
+    expect(n.col, 'the detail column is drawn').not.toBeNull();
+    expect(n.col!.w, 'exactly 340').toBe(HOME_DETAIL_W);
+    expect(n.list.w, 'the list is never under 360').toBeGreaterThanOrEqual(HOME_LIST_MIN);
+    expect(Math.round(n.list.w + HOME_GAP + n.col!.w), 'list + gap + detail = the body').toBe(Math.round(n.shellRoot.w));
+    expect(n.list.r).toBeLessThanOrEqual(n.col!.l + 0.5);
+    expect(n.overflow).toBe(0);
   });
 }
 
-test('[SID:5031] home 1023: below lg there is no detail column (it is a sheet) and the list takes the whole body — the phone shape is as before', async ({ page }) => {
-  await open(page, { screen: 'home', win: 1023, wide: false, listColumnOpen: true });
-  expect(await box(page, '[data-testid="home-detail-column"]')).toBeNull();
-  const root = (await box(page, '#home-root'))!, list = (await box(page, '#list'))!;
-  expect(Math.round(list.w)).toBe(Math.round(root.w - 32)); // the phone body padding is 16 + 16 (p-4)
-  expect(await overflow(page)).toBe(0);
+test(`[SID:5031] home at the threshold exactly (${THRESHOLD_WIN}): the list is exactly its least, 360`, async ({ page }) => {
+  await open(page, { screen: 'home', win: THRESHOLD_WIN, wide: true, listColumnOpen: true });
+  const n = await homeNumbers(page, THRESHOLD_WIN);
+  expect(Math.round(n.shellRoot.w)).toBe(HOME_TWO_COLUMN_MIN);
+  expect(Math.round(n.list.w)).toBe(HOME_LIST_MIN);
 });
+
+// the sheet: the window is past lg (the grid's own `lg:` rules are ON) but the body is under 716 — no detail column, and NO empty 340 track: the list is the whole body (the trap this rule must not fall into)
+for (const win of [THRESHOLD_WIN - 1, 1050, 1024, 1023] as const) {
+  test(`[SID:5031] home ${win}: the sheet — no detail column, the list is the whole body (no empty 340 track), no overflow`, async ({ page }) => {
+    await open(page, { screen: 'home', win, wide: false, listColumnOpen: true });
+    const n = await homeNumbers(page, win);
+    console.log(`[5c home] win ${win} body ${n.shellRoot.w} · list ${Math.round(n.list.w)} · detail none (sheet) · overflow ${n.overflow}`);
+    expect(n.col, 'no detail column').toBeNull();
+    expect(Math.round(n.list.w), 'the list takes the whole body').toBe(Math.round(n.shellRoot.w));
+    expect(n.overflow).toBe(0);
+  });
+}
 
 for (const [win, fill] of [[1440, false], [1100, false], [1440, true], [1100, true]] as const) {
   test(`[SID:5031] ListDetailShell DEFAULT (${win}${fill ? ' · fill' : ''}): the list is 360–420 and the detail takes the rest — unchanged (the agents frame · the inbox tabs)`, async ({ page }) => {

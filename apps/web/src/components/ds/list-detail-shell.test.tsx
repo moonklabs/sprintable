@@ -168,4 +168,23 @@ describe('ListDetailShell — detailWidth (story 5031 · 5c)', () => {
     expect(document.querySelector('[data-testid="list-detail-detail-sheet"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="list-detail-detail-column"]')).toBeNull();
   });
+
+  it('⭐`fixed` with `wide` false is ONE column (a caller whose own threshold is above lg): no 340 track left empty; `flex` with `wide` false is the old grid as before', async () => {
+    for (const fill of [false, true]) {
+      await show({ wide: false, fill, detailWidth: 'fixed' });
+      expect(root_().className, `fixed · not wide · fill ${fill}`).toContain('lg:grid-cols-[minmax(0,1fr)]');
+      expect(root_().className).not.toContain('340px');
+      expect(root_().className).not.toContain(FLEX);
+      await show({ wide: false, fill });
+      expect(root_().className, `default · not wide · fill ${fill}`).toContain(FLEX);
+    }
+  });
+  it('the 340 written in the class and the gap 16 (`lg:gap-4`) are the named home numbers (home-layout.ts)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { HOME_DETAIL_W, HOME_GAP } = await import('@/components/home/home-layout');
+    const src = readFileSync(path.join(__dirname, 'list-detail-shell.tsx'), 'utf8');
+    expect(src).toContain(`_${HOME_DETAIL_W}px]`);
+    expect(src).toContain(`lg:gap-${HOME_GAP / 4}`);
+  });
 });
