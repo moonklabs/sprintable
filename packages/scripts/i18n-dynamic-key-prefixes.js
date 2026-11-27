@@ -46,6 +46,7 @@ const DYNAMIC_KEY_PREFIXES = [
   { prefix: 'status.', file: 'components/settings/mcp-connection-settings.tsx', reason: 't(`status.${connection.status}`)' },
   { prefix: 'auth.', file: 'components/settings/mcp-connection-settings.tsx', reason: 't(`auth.${connection.authStrategy}`)' },
   { prefix: 'toolPermissions.groups.', file: 'components/agents/tool-permission-picker.tsx', reason: 't(`toolPermissions.groups.${key}`)' },
+  { prefix: 'actionPolicyAction_', file: 'components/agents/agent-action-policy-section.tsx', reason: 't(`actionPolicyAction_${key.replace(/\\./g, "_")}`) — one label per action key the server lists (30, floor rows included), checked with t.has() so a key the web does not know yet shows its own name' },
 ];
 
 function isDynamicallyComposed(flatKeyPath) {
