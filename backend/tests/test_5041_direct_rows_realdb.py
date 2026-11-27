@@ -1,7 +1,7 @@
 """story 5041 (C0b) ② — the «바로» rows (PO 11-27 seq 20558): an agent may do what a person does on screen for these, and nothing else changes.
 
 For each lifted road: the agent key is NOT answered with the old «human only» 403 (put the guard back and this goes RED), and the person is answered as before.
-For the siblings in the same files that stay a person's (publish · start · resume · cancel of an ad boost): the agent is STILL refused (the lift did not leak sideways).
+For the siblings in the same files that stay a person's (publishing a channel post — the ad boost's start · resume · cancel are a card since B1): the agent is STILL refused (the lift did not leak sideways).
 The owner/admin · role-cap · rate-limit · organisation-boundary checks are not touched — only the «who is it» 403 went.
 """
 from __future__ import annotations
@@ -60,9 +60,7 @@ def _stays_with_a_person(org_id):
     o = f"/api/v2/organizations/{org_id}"
     nobody = uuid.uuid4()
     return [
-        ("ads boost start", "POST", f"{o}/ads-boosts/{nobody}/start", {}),
-        ("ads boost resume", "POST", f"{o}/ads-boosts/{nobody}/resume", None),
-        ("ads boost cancel", "POST", f"{o}/ads-boosts/{nobody}/cancel", None),
+        # (the ads boost's start · resume · cancel are no longer here: since B1 an agent's call is a card a person presses — tests/test_5041_ads_cards_realdb.py)
         ("channel post publish", "POST", f"{o}/channel-posts/drafts/{nobody}/publish", {}),
     ]
 

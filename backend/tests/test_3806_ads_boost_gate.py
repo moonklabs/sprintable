@@ -155,8 +155,10 @@ async def test_agent_key_gets_403():
             r = await client.post(
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts", json=_boost_body(ad_connection_id=ad_conn_id),
             )
-        assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "ADS_BOOST_CREATE_HUMAN_ONLY"
+        # story 5041 B1 — an agent's boost request is a card a person presses (tests/test_5041_ads_cards_realdb.py); here the post's work item is a bare id (no project to file a card under), so it is the plain «not found»
+        # and nothing is created — the old «human only» 403 is gone for an agent that is in the project
+        assert r.status_code == 404, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_PUBLICATION_NOT_FOUND"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

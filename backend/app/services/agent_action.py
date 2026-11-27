@@ -88,6 +88,12 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("meeting.delete", "meeting_delete", "DELETE", rf"^/api/v2/meetings/{_UUID}$", "no"),
     _spec("reward.give", "reward_give", "POST", r"^/api/v2/rewards$", "no", takes_body=True),
     _spec("spec_pin.delete", "spec_pin_delete", "DELETE", rf"^/api/v2/visual-artifacts/{_UUID}/pins/{_UUID}$", "no"),
+    # story 5041 B1 — the ads boost (PO 11-27 seq 20558, rows 4 · 5 · 7 · 8 · 10 · 11): money goes out, so a person presses and it runs as them. The request carries a budget — the body is kept and the card names the amount.
+    _spec("ads_boost.request", "ads_boost_request", "POST", rf"^/api/v2/organizations/{_UUID}/publications/{_UUID}/boosts$", "partly", takes_body=True),
+    _spec("ads_boost.start", "ads_boost_start", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/start$", "partly"),
+    _spec("ads_boost.adopt", "ads_boost_adopt", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/adopt-existing$", "partly"),
+    _spec("ads_boost.resume", "ads_boost_resume", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/resume$", "partly"),
+    _spec("ads_boost.cancel", "ads_boost_cancel", "POST", rf"^/api/v2/organizations/{_UUID}/ads-boosts/{_UUID}/cancel$", "no"),
 )}
 
 

@@ -13,7 +13,8 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.ads_boost import describe_boost_for_card
 from app.services.ads_boost_states import BOOST_RUN_STATUSES, COMMAND_FAILURE_KINDS, COMMAND_STATUSES
 from app.services.ads_boost_execution import (
     AdsBoostAlreadyInStateError,
@@ -47,9 +49,10 @@ from app.services.member_resolver import resolve_member
 router = APIRouter(prefix="/api/v2/organizations", tags=["ads-boost-execution"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str):
+async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str, *, agent_ok: bool = False):
     resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
+    # story 5041 B1 — `agent_ok` is passed ONLY by a route whose agent call the user's setting let through (`auto`): the road then runs as the agent, under the agent's own rights (the checks below it stay)
+    if resolved.type != "human" and not (agent_ok and resolved.type == "agent"):
         raise HTTPException(
             status_code=403,
             detail={
@@ -58,6 +61,32 @@ async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID,
             },
         )
     return resolved
+
+
+async def _gate_an_agents_call(
+    request: Request | None, db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, gate_id: uuid.UUID, action_key: str, resolved_locale: str,
+) -> tuple[bool, JSONResponse | None]:
+    """story 5041 B1 — an AGENT's call to start · resume · cancel · adopt a boost is kept as a card a person presses (the sealed amount named on it), or answered by the user's setting (`block` → 403 · `auto` → it goes on as the
+    agent). Returns (is_agent, card-or-None): not an agent → (False, None), the road is as before; an agent with `auto` → (True, None); an agent that was asked → (True, the 202). A boost the agent cannot see is the same 404 as one that is not there."""
+    resolved = await resolve_member(auth, org_id, db)
+    if resolved.type != "agent" or request is None:
+        return False, None
+    from app.models.gate import Gate
+    from app.services import agent_action
+    from app.services.gate_service import resolve_gate_project_ids_batch
+
+    gate = (await db.execute(select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id))).scalar_one_or_none()
+    project_id = (await resolve_gate_project_ids_batch(db, org_id, [gate])).get(gate.id) if gate is not None else None
+    if gate is None or project_id is None:
+        _raise_common_error(AdsBoostGateNotFoundError(gate_id), resolved_locale)
+    decision = await agent_action.gate_agent_call(
+        request, db, auth=auth, agent=resolved, org_id=org_id, project_id=project_id, action_key=action_key,
+        target_label=await describe_boost_for_card(
+            db, org_id=org_id, amount_minor=gate.sealed_ads_budget_minor, currency=gate.sealed_ads_currency, connection_id=gate.sealed_ads_connection_id,
+            starts_at=gate.sealed_ads_starts_at, ends_at=gate.sealed_ads_ends_at,
+        ),
+    )
+    return True, decision
 
 
 class CommandResponse(BaseModel):
@@ -99,7 +128,7 @@ def _raise_common_error(exc: Exception, resolved_locale: str) -> None:
 
 @router.post("/{org_id}/ads-boosts/{gate_id}/start", response_model=CommandResponse, status_code=201)
 async def start_ads_boost_endpoint(
-    org_id: uuid.UUID, gate_id: uuid.UUID,
+    request: Request, org_id: uuid.UUID, gate_id: uuid.UUID,
     db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     locale: str | None = None,
@@ -107,19 +136,22 @@ async def start_ads_boost_endpoint(
 ) -> CommandResponse:
     """story #3806 — 라우트 진입점, `Header()` DI 마커는 여기서만 받는다. 직접-호출
     (realdb·유닛) 테스트는 `_start_ads_boost_endpoint`를 불러야 한다."""
-    return await _start_ads_boost_endpoint(
-        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
-        resolved_locale=resolve_locale_from_request(locale, accept_language),
-    )
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    is_agent, card = await _gate_an_agents_call(request, db, auth, org_id, gate_id, "ads_boost.start", resolved_locale)
+    if card is not None:
+        return card  # the ask is kept / refused by the user's setting
+    return await _start_ads_boost_endpoint(org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth, resolved_locale=resolved_locale, agent_ok=is_agent)
 
 
 async def _start_ads_boost_endpoint(
     org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
-    auth: AuthContext, resolved_locale: str,
+    auth: AuthContext, resolved_locale: str, agent_ok: bool = False,
 ) -> CommandResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    resolved = await _require_human(db, auth, org_id, resolved_locale, agent_ok=agent_ok)
     try:
         command = await request_ads_boost_start(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id, initiated_by="human",
@@ -157,7 +189,7 @@ class AdoptExistingResponse(BaseModel):
 
 @router.post("/{org_id}/ads-boosts/{gate_id}/adopt-existing", response_model=AdoptExistingResponse)
 async def adopt_existing_ads_boost_endpoint(
-    org_id: uuid.UUID, gate_id: uuid.UUID,
+    request: Request, org_id: uuid.UUID, gate_id: uuid.UUID,
     db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     locale: str | None = None,
@@ -174,7 +206,10 @@ async def adopt_existing_ads_boost_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved_locale = resolve_locale_from_request(locale, accept_language)
-    await _require_human(db, auth, org_id, resolved_locale)
+    is_agent, card = await _gate_an_agents_call(request, db, auth, org_id, gate_id, "ads_boost.adopt", resolved_locale)
+    if card is not None:
+        return card
+    await _require_human(db, auth, org_id, resolved_locale, agent_ok=is_agent)
     try:
         outcome = await adopt_existing_boost_objects(db, org_id=org_id, gate_id=gate_id)
     except AdsBoostAdoptNotApplicableError as exc:
@@ -246,25 +281,28 @@ async def _pause_ads_boost_endpoint(
 
 @router.post("/{org_id}/ads-boosts/{gate_id}/resume", response_model=CommandResponse, status_code=201)
 async def resume_ads_boost_endpoint(
-    org_id: uuid.UUID, gate_id: uuid.UUID,
+    request: Request, org_id: uuid.UUID, gate_id: uuid.UUID,
     db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     locale: str | None = None,
     accept_language: str | None = Header(None, alias="Accept-Language"),
 ) -> CommandResponse:
-    return await _resume_ads_boost_endpoint(
-        org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth,
-        resolved_locale=resolve_locale_from_request(locale, accept_language),
-    )
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
+    if org_id != verified_org_id:
+        raise HTTPException(status_code=403, detail="org_id mismatch")
+    is_agent, card = await _gate_an_agents_call(request, db, auth, org_id, gate_id, "ads_boost.resume", resolved_locale)
+    if card is not None:
+        return card
+    return await _resume_ads_boost_endpoint(org_id, gate_id, db=db, verified_org_id=verified_org_id, auth=auth, resolved_locale=resolved_locale, agent_ok=is_agent)
 
 
 async def _resume_ads_boost_endpoint(
     org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
-    auth: AuthContext, resolved_locale: str,
+    auth: AuthContext, resolved_locale: str, agent_ok: bool = False,
 ) -> CommandResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    resolved = await _require_human(db, auth, org_id, resolved_locale, agent_ok=agent_ok)
     try:
         command = await request_ads_boost_resume(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
@@ -401,7 +439,7 @@ class CancelBoostResponse(BaseModel):
 
 @router.post("/{org_id}/ads-boosts/{gate_id}/cancel", response_model=CancelBoostResponse)
 async def cancel_ads_boost_endpoint(
-    org_id: uuid.UUID, gate_id: uuid.UUID, body: CancelBoostRequest | None = None,
+    request: Request, org_id: uuid.UUID, gate_id: uuid.UUID, body: CancelBoostRequest | None = None,
     db: AsyncSession = Depends(get_db), verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     locale: str | None = None,
@@ -419,7 +457,10 @@ async def cancel_ads_boost_endpoint(
     resolved_locale = resolve_locale_from_request(locale, accept_language)
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    is_agent, card = await _gate_an_agents_call(request, db, auth, org_id, gate_id, "ads_boost.cancel", resolved_locale)
+    if card is not None:
+        return card
+    resolved = await _require_human(db, auth, org_id, resolved_locale, agent_ok=is_agent)
     try:
         result = await cancel_ads_boost(
             db, org_id=org_id, gate_id=gate_id, actor_member_id=resolved.id,

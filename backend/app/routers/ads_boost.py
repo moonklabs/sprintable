@@ -6,7 +6,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +72,7 @@ class BoostResponse(BaseModel):
     "/{org_id}/publications/{publication_id}/boosts", response_model=BoostResponse, status_code=201,
 )
 async def create_ads_boost_endpoint(
+    request: Request,
     org_id: uuid.UUID,
     publication_id: uuid.UUID,
     body: CreateBoostRequest,
@@ -85,7 +87,7 @@ async def create_ads_boost_endpoint(
     `_create_ads_boost_endpoint`를 불러야 한다."""
     return await _create_ads_boost_endpoint(
         org_id, publication_id, body, db=db, verified_org_id=verified_org_id, auth=auth,
-        resolved_locale=resolve_locale_from_request(locale, accept_language),
+        resolved_locale=resolve_locale_from_request(locale, accept_language), request=request,
     )
 
 
@@ -98,10 +100,15 @@ async def _create_ads_boost_endpoint(
     verified_org_id: uuid.UUID,
     auth: AuthContext,
     resolved_locale: str,
-) -> BoostResponse:
+    request: Request | None = None,
+) -> BoostResponse | JSONResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    # story 5041 B1 — an AGENT's request for a boost (it names a budget) is kept as a card a person presses, or answered by the user's setting; a request that is not well-formed is refused first, before any card
+    resolved = await resolve_member(auth, org_id, db)
+    is_agent = resolved.type == "agent" and request is not None
+    if not is_agent:
+        resolved = await _require_human(db, auth, org_id, resolved_locale)
 
     if body.starts_at >= body.ends_at:
         raise HTTPException(
@@ -123,6 +130,31 @@ async def _create_ads_boost_endpoint(
                 "message": t("ads_boost.unknown_currency", resolved_locale, supported=", ".join(sorted(CURRENCY_EXPONENTS))),
             },
         )
+
+    if is_agent:
+        from sqlalchemy import select
+
+        from app.models.pm import Story
+        from app.services import agent_action
+        from app.services.ads_boost import _resolve_publication_and_work_item
+        from app.services.ads_boost import describe_boost_for_card
+
+        try:
+            _publication, work_item_id = await _resolve_publication_and_work_item(db, org_id=org_id, publication_id=publication_id)
+        except AdsBoostPublicationNotFoundError as exc:
+            raise HTTPException(status_code=404, detail={"code": "ADS_BOOST_PUBLICATION_NOT_FOUND", "message": t("ads_boost.publication_not_found", resolved_locale)}) from exc
+        project_id = (await db.execute(select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id))).scalar_one_or_none()
+        if project_id is None:
+            raise HTTPException(status_code=404, detail={"code": "ADS_BOOST_PUBLICATION_NOT_FOUND", "message": t("ads_boost.publication_not_found", resolved_locale)})
+        decision = await agent_action.gate_agent_call(
+            request, db, auth=auth, agent=resolved, org_id=org_id, project_id=project_id, action_key="ads_boost.request",
+            target_label=await describe_boost_for_card(
+                db, org_id=org_id, amount_minor=body.budget_minor, currency=body.currency, connection_id=body.ad_connection_id,
+                starts_at=body.starts_at, ends_at=body.ends_at,
+            ),
+        )
+        if decision is not None:
+            return decision
 
     try:
         gate = await request_ads_boost(
