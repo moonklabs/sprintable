@@ -52,6 +52,7 @@ import { ReportMessageSummary } from './report-message-summary';
 import { ServerCommandResultCard } from './server-command-result-card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { LAYER } from '@/components/ds/layers';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -801,7 +802,8 @@ export function ChatBubble({
               >
                 {displayName}
               </span>
-              {isAgent && (
+              {isAgent && !isSystemPublisher(message.sender_runtime_type) && (
+                // story 5041 (PO 11-27) — «시스템 발행» is the server's own voice, not an agent a person talks to: no «Agent» label on it
                 // story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
                 // dot) 채택, soft-fill 폐지.
                 <AgentIdentity />

@@ -33,6 +33,13 @@ class DecisionBody(BaseModel):
     decision: Literal["approve", "reject"]
 
 
+def _locale_of(request: Request) -> str:
+    """the reader's language: the web proxy sends the screen's locale as Accept-Language (an agent's own call falls back to the default)"""
+    from app.services.agent_onboarding_config import resolve_locale_from_request
+
+    return resolve_locale_from_request(None, request.headers.get("accept-language"))
+
+
 def _stale_running(req: HitlRequest) -> bool:
     """pressed, never finished: `responded_at` is the press — past `RUNNING_STALE_AFTER` the process that was running it is taken as gone"""
     started = svc._aware(req.responded_at)
@@ -117,19 +124,20 @@ def _target_of(snapshot: dict | None, action_key: str | None = None) -> dict | N
     return None
 
 
-async def _view(session: AsyncSession, req: HitlRequest) -> dict:
+async def _view(session: AsyncSession, req: HitlRequest, locale: str = "ko") -> dict:
     meta = req.hitl_metadata or {}
     execution = meta.get("execution") or {}
     ids = {i for i in (req.agent_id, req.responded_by) if i is not None}
     names = await lookup_members_by_ids(ids, session) if ids else {}
+    title, prompt = svc.card_texts(req, locale)
     return {
         "id": str(req.id),
         "state": _state(req),
         "action_key": meta.get("action_key"),
         "target": _target_of(meta.get("snapshot"), meta.get("action_key")),
         "reversible": (svc.SPECS[meta["action_key"]].reversible if meta.get("action_key") in svc.SPECS else "no"),
-        "title": req.title,
-        "prompt": req.prompt,
+        "title": title,  # in the READER's language (the web proxy sends the screen's locale as Accept-Language), not the language of the agent's request
+        "prompt": prompt,
         "project_id": str(req.project_id),
         "requested_by": {"id": str(req.agent_id), "name": (names.get(req.agent_id).name if names.get(req.agent_id) else None)},
         "decided_by": ({"id": str(req.responded_by), "name": (names.get(req.responded_by).name if names.get(req.responded_by) else None)} if req.responded_by else None),
@@ -142,6 +150,7 @@ async def _view(session: AsyncSession, req: HitlRequest) -> dict:
 
 @router.get("/{request_id}")
 async def get_agent_action(
+    request: Request,
     request_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -156,9 +165,9 @@ async def get_agent_action(
             agent = None  # a key that is no agent's (a person's key): not an agent reading its own ask, and no session either
         if agent is None or agent.type != "agent":
             raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_PERSON_SESSION_REQUIRED", "message": "AGENT_ACTION_PERSON_SESSION_REQUIRED"})
-        return await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id))
+        return await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id), _locale_of(request))
     await _person(auth, org_id, session)
-    return await _view(session, await _load(session, auth, org_id, request_id))
+    return await _view(session, await _load(session, auth, org_id, request_id), _locale_of(request))
 
 
 @router.post("/{request_id}/decision")
@@ -184,7 +193,7 @@ async def decide_agent_action(
         )
         if (closed.rowcount or 0) == 1:
             await session.refresh(req)
-            await svc.notify_agent(session, req=req, presser=presser, kind="expired")
+            await svc.notify_agent(session, req=req, presser=presser, kind="expired", locale=_locale_of(request))
         await session.commit()
         raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_EXPIRED", "message": "AGENT_ACTION_EXPIRED"})
 
@@ -196,9 +205,9 @@ async def decide_agent_action(
         if (res.rowcount or 0) != 1:
             raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_ALREADY_DECIDED", "message": "AGENT_ACTION_ALREADY_DECIDED"})
         await session.refresh(req)
-        await svc.notify_agent(session, req=req, presser=presser, kind="rejected")
+        await svc.notify_agent(session, req=req, presser=presser, kind="rejected", locale=_locale_of(request))
         await session.commit()
-        return await _view(session, await _load(session, auth, org_id, rid))
+        return await _view(session, await _load(session, auth, org_id, rid), _locale_of(request))
 
     # approve ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     was_retry = _state(req) == "retry"  # pressed before and it never finished
@@ -216,9 +225,9 @@ async def decide_agent_action(
         await svc._finish(session, request_id=rid, execution={"state": "failed", "reason": type(exc).__name__, "at": datetime.now(timezone.utc).isoformat()})
         await session.commit()
         req = await _load(session, auth, org_id, rid)
-        await svc.notify_agent(session, req=req, presser=presser, kind="failed", reason=type(exc).__name__)
+        await svc.notify_agent(session, req=req, presser=presser, kind="failed", reason=type(exc).__name__, locale=_locale_of(request))
         await session.commit()
-        return await _view(session, req)
+        return await _view(session, req, _locale_of(request))
 
     if resp.status_code == 403:
         # this person may not do it: it goes back, untouched, for the next one — and says why in one line
@@ -238,6 +247,6 @@ async def decide_agent_action(
         kind = "changed" if resp.status_code in (404, 409, 410, 422) else "failed"
     await session.commit()
     req = await _load(session, auth, org_id, rid)
-    await svc.notify_agent(session, req=req, presser=presser, kind=kind, reason=reason)
+    await svc.notify_agent(session, req=req, presser=presser, kind=kind, reason=reason, locale=_locale_of(request))
     await session.commit()
-    return await _view(session, req)
+    return await _view(session, req, _locale_of(request))
