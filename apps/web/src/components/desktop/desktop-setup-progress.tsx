@@ -17,7 +17,7 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { storyBoardUrl } from '@/lib/entity-project-url';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { clearLineProject, readLineProject, type LineProject } from '@/lib/onboarding/line-project';
-import { findProjectChannelId } from '@/lib/onboarding/first-chat';
+import { findProjectChannelId, setupEndRoomId } from '@/lib/onboarding/first-chat';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { endsWithAgentWord, forgetActiveSetup, moveProgress, rememberActiveSetup, setupPollDelayMs, setupProgress, stepsShown, SETUP_STATUS_POLL_MS, type DesktopRuntime, type MoveProgress, type SetupStatus, type StepShown } from '@/lib/desktop-setup';
@@ -118,13 +118,25 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   // sent at once as before.
   const [phoneRetrying, setPhoneRetrying] = useState(false);
   const holdRoom = phoneControlFailed && !!onPhoneRetry; // [다시 켜기] succeeding clears `phoneControlFailed` in the card's state — the hold ends and the conversation opens
+  // story 5036 (codex): the room is looked for AFTER the agent was handed over, and that takes a moment — an answer that comes back when the page has gone away, or when the setup is no longer «handed over» (the
+  // next reading says the agent disconnected), must not take the person off the screen that is now telling them so. It leaves the once-only mark open, so a start that is handed over again still opens its room.
+  const alive = useRef(true);
+  const handedNow = useRef(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { handedNow.current = soloRoom !== null; }, [soloRoom]);
+  const openRoom = (room: string): void => {
+    if (!alive.current || !handedNow.current) { opened.current = false; return; }
+    window.location.assign(flatHref(`/chats/${room}`));
+  };
   useEffect(() => {
     if (!soloRoom || opened.current || holdRoom) return;
     opened.current = true;
     // story 5036: a person on the first-run line goes to the project's channel (step ③); everyone else to the conversation with that agent, as before
     // (no mark → at once, as it always was: nothing is awaited for someone who did not come through the line)
-    if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } // a full load: the page's address holds nothing to keep, and a new token may be needed
-    void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`)));
+    // story 5036: no mark → the channel of the project the agent really sits in (the start's room names it), else the start's own conversation — a full load either way: the page's address holds nothing to keep, and a new token may be needed
+    if (!lineMarkFor(orgId, currentProjectId)) { void setupEndRoomId(soloRoom).then(openRoom); return; }
+    void lineChannelId(orgId, currentProjectId).then((channel) => openRoom(channel ?? soloRoom));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `openRoom` only reads refs and `flatHref` (a dep)
   }, [soloRoom, flatHref, holdRoom, orgId, currentProjectId]);
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
@@ -150,7 +162,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
         <p className="text-sm" role="status">{t('phoneControl.failedStopped')}</p>
         <div className="flex flex-wrap gap-2">
           <Button disabled={phoneRetrying} onClick={() => { setPhoneRetrying(true); void onPhoneRetry!().finally(() => setPhoneRetrying(false)); }}>{t('phoneControl.again')}</Button>
-          <Button variant="outline" onClick={() => { opened.current = true; if (!lineMarkFor(orgId, currentProjectId)) { window.location.assign(flatHref(`/chats/${soloRoom}`)); return; } void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`))); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
+          <Button variant="outline" onClick={() => { opened.current = true; if (!lineMarkFor(orgId, currentProjectId)) { void setupEndRoomId(soloRoom).then((room) => window.location.assign(flatHref(`/chats/${room}`))); return; } void lineChannelId(orgId, currentProjectId).then((channel) => window.location.assign(flatHref(`/chats/${channel ?? soloRoom}`))); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
         </div>
       </Card>
     );

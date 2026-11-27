@@ -1,5 +1,7 @@
 'use client';
 
+import { desktopApp } from '@/lib/desktop-app';
+import { APP_FIRST_RUN_PATH, setupHandsAppNewAccountToOnboarding } from '@/lib/auth/onboarding-next';
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -49,7 +51,7 @@ function progressIdOf(fromAnswer: unknown, fromAddress: string | null): string |
   return fromAddress && SETUP_UUID.test(fromAddress) ? fromAddress : null;
 }
 
-export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4832: the app can take a move → a link under the card to the recipe page with «이미 있는 에이전트 옮기기» chosen (a person with agents already is not left to guess that the team link holds it) */ onMove?: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
+export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable, serverHost = false }: { query: SetupQuery; /** story 5036: this web is a workspace server host's (an organization-less person stays on this card there: its onboarding has no first-run line) */ serverHost?: boolean; onTeam: () => void; /** story 4832: the app can take a move → a link under the card to the recipe page with «이미 있는 에이전트 옮기기» chosen (a person with agents already is not left to guess that the team link holds it) */ onMove?: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
   const t = useTranslations('desktop.setup');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tOnboarding = useTranslations('onboarding');
@@ -124,12 +126,23 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   }, [orgMode.kind, isAdmin, orgId, agent]);
   const [copied, setCopied] = useState<DesktopRuntime | null>(null);
 
+  // story 5036 (codex): the hand-over to the onboarding is decided when the invitation read ANSWERS — by then the page may be gone, or the account may have an organization after all (the context refreshed)
+  const mountedRef = useRef(true);
+  const orgIdRef = useRef(orgId);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  useEffect(() => { orgIdRef.current = orgId; }, [orgId]);
   const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
   async function readInvites() {
     const mine = ++inviteReads.current;
     try {
       const list = await fetchMyInvites();
       if (mine !== inviteReads.current) return;
+      // story 5036 (C6): a new account in the Mac app (no organization · no invitation) is handed to the first-run line — the onboarding makes the organization behind the scene, then ① the first project → ② the three ways → ③ the
+      // project's channel. The card stays «checking» (the spinner) while the page changes: one move, no way back (setupHandsAppNewAccountToOnboarding). Invited people, the web, a server host: the card, as before.
+      if (setupHandsAppNewAccountToOnboarding({ inMacApp: desktopApp() !== undefined, invites: list.length, serverHost })) {
+        if (mountedRef.current && !orgIdRef.current) window.location.replace(APP_FIRST_RUN_PATH);
+        return;
+      }
       setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
       if (mine !== inviteReads.current) return;
