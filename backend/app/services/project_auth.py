@@ -9,9 +9,11 @@ import uuid
 from collections.abc import Sequence
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select, text, true
+from sqlalchemy import column, or_, select, text, true, values
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.expression import FromClause
 
 from app.models.member import Member
 from app.models.project import OrgMember, Project
@@ -216,6 +218,7 @@ def _project_access_predicate(
     *,
     user_id: "ColumnElement | uuid.UUID",
     org_id: uuid.UUID | None,
+    correlate: "FromClause | None" = None,
 ) -> ColumnElement:
     """story #1994(E-KNOWLEDGE-LINK S2) 5회차 pass: `has_project_access`의 4-branch WHERE-로직을
     atom-level SSOT로 뽑아낸 SQLAlchemy Core 불리언 표현식. 이 **한 함수**가 두 가지로 렌더된다:
@@ -240,12 +243,18 @@ def _project_access_predicate(
       · project_access(agent, member 경유, 18073a52) — org_id 지정 시 m.org_id 필터
       · org owner/admin(org-wide, p.org_id = om.org_id 상시 correlate) — org_id 지정 시 om.org_id 추가 필터
     """
+    def _outer(branch):
+        """story 5049 — the SET-based form (`project_access_holders_statement`): `user_id` is a column of a table that sits in an enclosing SELECT, TWO levels above the branches. SQLAlchemy auto-correlates only to the
+        immediately enclosing SELECT, so without this the branches would pull that table into their own FROM and cross-join it (every candidate passes). Naming the outer tables explicitly (`Project` of the middle
+        SELECT and the candidate set) correlates every level. Without `correlate` nothing changes (the literal form `has_project_access` renders)."""
+        return branch if correlate is None else branch.correlate(Project, correlate)  # `branch` is the EXISTS; correlate() reaches its SELECT
+
     org_scope_project = true() if org_id is None else (Project.org_id == org_id)
     org_scope_human_grant = true() if org_id is None else (OrgMember.org_id == org_id)
     org_scope_agent_grant = true() if org_id is None else (Member.org_id == org_id)
     org_scope_admin = true() if org_id is None else (OrgMember.org_id == org_id)
 
-    team_member_branch = (
+    team_member_branch = _outer(
         select(1)
         .where(
             TeamMember.project_id == Project.id,
@@ -255,7 +264,7 @@ def _project_access_predicate(
         )
         .exists()
     )
-    human_grant_branch = (
+    human_grant_branch = _outer(
         select(1)
         .select_from(ProjectAccess)
         .join(OrgMember, ProjectAccess.org_member_id == OrgMember.id)
@@ -268,7 +277,7 @@ def _project_access_predicate(
         )
         .exists()
     )
-    agent_grant_branch = (
+    agent_grant_branch = _outer(
         select(1)
         .select_from(ProjectAccess)
         .join(Member, ProjectAccess.member_id == Member.id)
@@ -289,7 +298,7 @@ def _project_access_predicate(
         )
         .exists()
     )
-    admin_branch = (
+    admin_branch = _outer(
         select(1)
         .select_from(OrgMember)
         .where(
@@ -302,7 +311,7 @@ def _project_access_predicate(
         .exists()
     )
 
-    return (
+    holds = (
         select(1)
         .where(
             Project.id == project_id_col,
@@ -312,6 +321,7 @@ def _project_access_predicate(
         )
         .exists()
     )
+    return holds if correlate is None else holds.correlate(correlate)
 
 
 def project_access_valid_correlated(
@@ -429,6 +439,37 @@ async def has_project_access(
     # 콜사이트의 `result.scalar_one_or_none.return_value = None|1` 관례)가 재구현 없이 그대로
     # 호환된다 — 외부 계약(bool 반환) byte-identical 유지의 일부.
     return bool(result.scalar_one_or_none())
+
+
+def project_access_holders_statement(project_id: uuid.UUID, org_id: uuid.UUID, user_ids: "Sequence[uuid.UUID] | set[uuid.UUID]"):
+    """story 5049 — `has_project_access` for a SET of ids in ONE statement: `SELECT uid FROM (VALUES …) AS cand WHERE <the project-access predicate>`. The predicate is `_project_access_predicate` itself — the one definition of the
+    four ways to hold a project — rendered with `user_id` = the candidate column and `correlate=cand` (see `_outer` there: without the explicit correlation the inner branches cross-join the candidates and everybody
+    passes). Returns the ids that hold the project; each id is asked exactly as `has_project_access` asks one."""
+    cand = values(column("uid", PG_UUID(as_uuid=True)), name="cand").data([(u,) for u in user_ids])
+    return select(cand.c.uid).where(_project_access_predicate(project_id, user_id=cand.c.uid, org_id=org_id, correlate=cand))
+
+
+# story 5049: PostgreSQL takes at most 32,767 bind parameters in one statement and a VALUES row is one — a channel of 32,757 members would make ONE statement of 32,768 and fail whole, where the per-member loop it replaced
+# went on to 32,766. So the candidates go in CHUNKS of this size (a real channel has tens to hundreds: ONE statement per step); every chunk is the same set-based statement and the answers are united.
+ACCESS_CHUNK_SIZE = 5000
+
+
+def chunks_of_access_ids(ids, size: "int | None" = None) -> "list[list]":
+    """`ids` in chunks of at most `size` (default: `ACCESS_CHUNK_SIZE`, read at call time so a test can shrink it) — the unit of one set-based statement."""
+    n = ACCESS_CHUNK_SIZE if size is None else size
+    ordered = list(ids)
+    return [ordered[i:i + n] for i in range(0, len(ordered), n)]
+
+
+async def project_access_holders(
+    session: AsyncSession, project_id: uuid.UUID, org_id: uuid.UUID, user_ids: "set[uuid.UUID]",
+) -> set[uuid.UUID]:
+    """the ids of `user_ids` that hold the project now — one statement per chunk of `ACCESS_CHUNK_SIZE` ids (`project_access_holders_statement`), the answers united; the same answer as
+    `{u for u in user_ids if await has_project_access(session, u, project_id, org_id)}`."""
+    holders: set[uuid.UUID] = set()
+    for chunk in chunks_of_access_ids(user_ids):
+        holders |= set((await session.execute(project_access_holders_statement(project_id, org_id, chunk))).scalars().all())
+    return holders
 
 
 async def project_org_and_access(
