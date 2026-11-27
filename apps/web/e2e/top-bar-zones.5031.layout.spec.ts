@@ -251,3 +251,19 @@ for (const [win, high] of [[390, 0], [1023, 0], [1024, 64], [1100, 64], [1440, 6
     expect(m.display === 'none').toBe(high === 0);
   });
 }
+
+// story 5031 (5a · codex round 2): the path is ONE navigation with ONE list at both widths — below lg the nav and the list are `display: contents`. Chromium keeps their roles either way; this pins that the roles exist in the accessibility tree at 390 AND 1280
+// (WebKit / VoiceOver is where `display: contents` used to drop the implicit roles — the explicit `role` attributes are the guard there; that real-device behaviour is NOT verified here).
+for (const [win, frame] of [[390, 390], [1280, barWidth(1280)]] as const) {
+  test(`[SID:5031] ${win}: the path is one «현재 위치» navigation holding one list, the title its current item (accessibility tree)`, async ({ page }) => {
+    await open(page, { pathname: '/organization/workforce/runs', titleKind: 'h1', title: '실행 기록', ...SHORT, frameWidth: frame }, { win });
+    const nav = page.getByRole('navigation', { name: '현재 위치' });
+    await expect(nav).toHaveCount(1);
+    await expect(nav.getByRole('list')).toHaveCount(1);
+    // the current item: the title (an h1 stays a heading inside it); below lg the leading crumbs are not drawn, from lg all three items are
+    await expect(nav.getByRole('listitem').filter({ hasText: '실행 기록' })).toHaveCount(1);
+    await expect(nav.getByRole('heading', { name: '실행 기록' })).toHaveCount(1);
+    await expect(nav.getByRole('listitem')).toHaveCount(win < 1024 ? 1 : 3);
+    expect(await nav.getByRole('listitem').last().getAttribute('aria-current')).toBe('page');
+  });
+}

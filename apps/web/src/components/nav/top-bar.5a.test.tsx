@@ -231,6 +231,23 @@ describe('TopBar 5a — the title is the path\'s LAST list item (aria-current) a
   });
 });
 
+describe('TopBar 5a — the path keeps its navigation / list meaning where `display: contents` would drop it (WebKit)', () => {
+  it('⭐the nav, the list and every item carry their roles explicitly (the phone lays them out with `display: contents`; WebKit drops the implicit roles of such elements)', async () => {
+    await mount({ pathname: '/organization/workforce/runs', title: <span>실행 기록</span> });
+    const navs = container.querySelectorAll('[role="navigation"][aria-label="현재 위치"]');
+    expect(navs).toHaveLength(1);
+    expect(navs[0]!.tagName).toBe('NAV');
+    const lists = navs[0]!.querySelectorAll('[role="list"]');
+    expect(lists).toHaveLength(1);
+    expect(lists[0]!.tagName).toBe('OL');
+    const items = [...lists[0]!.children];
+    expect(items.length).toBeGreaterThanOrEqual(3); // org · place · the title
+    expect(items.every((li) => li.tagName === 'LI' && li.getAttribute('role') === 'listitem')).toBe(true);
+    // the name of the navigation is still the label (not replaced by the role)
+    expect(navs[0]!.getAttribute('aria-label')).toBe('현재 위치');
+  });
+});
+
 describe('TopBar 5a — `titleText` (a title that is a component has no words an element scan can read)', () => {
   it('⭐an explicit titleText wins over the element\'s own text: a component title that says the place\'s name leaves the place crumb out', async () => {
     await mount({ pathname: '/organization/workforce', extra: ({ flat }) => <flat.TitleTopBarSlot title={<flat.AgentsTopBarTitle />} useText={flat.useAgentsTopBarTitleText} showContextChip /> });

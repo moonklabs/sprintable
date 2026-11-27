@@ -47,16 +47,19 @@ export function useTopBarCrumbs({ orgId, orgMemberships, projectId, projectMembe
  */
 export function TopBarPath({ crumbs, title, stale }: { crumbs: readonly PathCrumb[]; title: ReactNode; stale: boolean }) {
   const t = useTranslations('nav');
+  // The roles are written out on purpose: below lg the nav and the list are `display: contents`, and WebKit (VoiceOver) drops the implicit role of an element laid out with `display: contents` — the explicit role keeps the navigation / list / item meaning there.
+  // They repeat the implicit roles (the project's lint does not enable jsx-a11y/no-redundant-roles — if it ever does, these lines carry the reason); from lg the elements are ordinary boxes and nothing is announced twice.
   return (
-    <nav aria-label={t('topBarPath')} data-testid="top-bar-path" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center">
-      <ol className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-ds-2">
+    <nav role="navigation" aria-label={t('topBarPath')} data-testid="top-bar-path" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center">
+      <ol role="list" className="contents lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-ds-2">
         {crumbs.map((crumb, i) => (
-          <li key={crumb.key} data-crumb={crumb.key} className="hidden min-w-0 items-center gap-ds-2 lg:flex">
+          <li key={crumb.key} role="listitem" data-crumb={crumb.key} className="hidden min-w-0 items-center gap-ds-2 lg:flex">
             {i > 0 ? <Icon name="chevron_right" size={16} className="text-ds-ink-3" /> : null}
             {crumb.href ? <Link href={crumb.href} className={CRUMB_LINK}>{crumb.label}</Link> : <span className={CRUMB}>{crumb.label}</span>}
           </li>
         ))}
         <li
+          role="listitem"
           data-testid="top-bar-title"
           data-stale-title={stale ? '' : undefined}
           aria-current="page"
