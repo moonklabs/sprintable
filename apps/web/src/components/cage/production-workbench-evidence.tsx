@@ -188,7 +188,7 @@ function AnimaticCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurre
       <div className="flex items-stretch gap-3 p-3">
         <div className="flex aspect-[9/16] w-[110px] shrink-0 items-center justify-center rounded-lg border border-border bg-gradient-to-b from-info-tint to-muted">
           <span className="flex size-8 items-center justify-center rounded-full bg-card/90 text-brand shadow">
-            <Play className="size-4" fill="currentColor" />
+            <Play className="size-ds-icon-md" fill="currentColor" />
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1.5 text-xs">
