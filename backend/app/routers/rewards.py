@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +69,7 @@ async def get_balance(
 @router.post("", response_model=RewardLedgerResponse, status_code=201)
 async def grant_reward(
     body: GrantReward,
+    request: Request,
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     repo: RewardRepository = Depends(_get_repo),
@@ -79,13 +80,22 @@ async def grant_reward(
     수 있었고, `granted_by`도 body에서 그대로 신뢰돼(client-supplied) 지급자를 스푸핑할 수
     있었다. org-admin 전용으로 닫고, granted_by는 caller 본인에서 서버-파생(body 값 무시).
     """
+    # story 5041 — an agent is not told «no»: it asks, a person presses, the grant is made under THEIR rights (app/services/agent_action.py)
+    _caller = await resolve_member(auth, org_id, repo.session)
+    if _caller.type != "human":
+        from app.services import agent_action
+
+        return await agent_action.request_approval(
+            request, repo.session, auth=auth, agent=_caller, org_id=org_id, project_id=body.project_id, action_key="reward.give",
+            target_label=f"{body.amount} · {body.reason}",
+        )
     if not await _is_org_admin(repo.session, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
     # AC3-2d(2): member_id(수령자)·granted_by(지급자) canonical 정규화. (A) write.
     from app.services.member_resolver import canonicalize_member_id
     member_id = await canonicalize_member_id(body.member_id, repo.session)
-    caller_member = await resolve_member(auth, org_id, repo.session)
+    caller_member = _caller
     granted_by = await canonicalize_member_id(caller_member.id, repo.session)  # S20: caller에서 서버-파생(body 무시)
     entry = await repo.grant(
         project_id=body.project_id,

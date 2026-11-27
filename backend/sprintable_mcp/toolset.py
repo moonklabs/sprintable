@@ -138,8 +138,21 @@ def tool_group(tool_name: str) -> str:
     return _CORE
 
 
+# story 5041 (C0b) — tools the SERVER answers at call time instead of the key's scope: an agent never finds them hidden. For the first nine the server keeps the ask and a person presses
+# a card (app/services/agent_action.py: the call then runs under THEIR name and rights — an agent alone still has no road to a hard delete). `sprintable_delete_artifact` is a soft delete
+# of the caller's OWN artifact and `sprintable_delete_webhook_config` removes the caller's OWN webhook config — neither is a person's to decide. Vendored copy: app/services/mcp_toolset.py
+# and sprintable_mcp/toolset.py must stay the same (tests/test_s2311_vendor_const_sync.py).
+_SERVER_DECIDES_TOOLS: frozenset[str] = frozenset({
+    "sprintable_close_sprint", "sprintable_give_reward", "sprintable_delete_meeting", "sprintable_delete_spec_pin",
+    "sprintable_delete_story", "sprintable_delete_task", "sprintable_delete_goal", "sprintable_delete_doc", "sprintable_delete_sprint",
+    "sprintable_delete_artifact", "sprintable_delete_webhook_config",
+})
+
+
 def is_destructive(tool_name: str) -> bool:
     """S17: lock_files/unlock_files 제외 — 백엔드 SSOT와 동기화(app/services/mcp_toolset.py)."""
+    if tool_name.lower() in _SERVER_DECIDES_TOOLS:
+        return False
     n = tool_name.lower()
     return (
         "delete" in n

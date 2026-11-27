@@ -183,12 +183,25 @@ def tool_group(tool_name: str) -> str:
     return _CORE
 
 
+# story 5041 (C0b) — tools the SERVER answers at call time instead of the key's scope: an agent never finds them hidden. For the first nine the server keeps the ask and a person presses
+# a card (app/services/agent_action.py: the call then runs under THEIR name and rights — an agent alone still has no road to a hard delete). `sprintable_delete_artifact` is a soft delete
+# of the caller's OWN artifact and `sprintable_delete_webhook_config` removes the caller's OWN webhook config — neither is a person's to decide. Vendored copy: app/services/mcp_toolset.py
+# and sprintable_mcp/toolset.py must stay the same (tests/test_s2311_vendor_const_sync.py).
+_SERVER_DECIDES_TOOLS: frozenset[str] = frozenset({
+    "sprintable_close_sprint", "sprintable_give_reward", "sprintable_delete_meeting", "sprintable_delete_spec_pin",
+    "sprintable_delete_story", "sprintable_delete_task", "sprintable_delete_goal", "sprintable_delete_doc", "sprintable_delete_sprint",
+    "sprintable_delete_artifact", "sprintable_delete_webhook_config",
+})
+
+
 def is_destructive(tool_name: str) -> bool:
     """파괴적/민감 도구 — 그룹과 별개로 추가 게이팅.
 
     S17: lock_files/unlock_files 는 여기서 제외 — file_locks.py 확인 결과 advisory
     mutex(org/project-scoped 협업 조율)일 뿐 데이터 삭제/변경이 아니다(_ALWAYS_ALLOWED 참고).
     """
+    if tool_name.lower() in _SERVER_DECIDES_TOOLS:
+        return False
     n = tool_name.lower()
     return (
         "delete" in n
@@ -489,9 +502,9 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_meeting",
-    # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트
-    # hard-delete 차단 — 까심 적대적 QA가 delete_story만으로는 반쪽임을 발견, story와 동형 확대).
-    # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
+    # E-SECURITY SEC-S1(확장) · SEC-S8: delete_story/task/epic/doc/sprint 는 에이전트가 «혼자 지우는» 길이 막혀 도구를 뺐다(까심 적대적 QA — hard-delete 우회 차단).
+    # story 5041: 같은 다섯이 «승인 요청» 도구로 돌아온다 — 서버가 카드를 올리고 사람이 누르면 그 사람 이름·권한으로 실행(에이전트 혼자 hard-delete 하는 길은 여전히 0).
+    "sprintable_delete_story", "sprintable_delete_task", "sprintable_delete_goal", "sprintable_delete_doc", "sprintable_delete_sprint",
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
     "sprintable_get_epic_progress", "sprintable_get_goal_progress",

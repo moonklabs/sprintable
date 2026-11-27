@@ -123,11 +123,11 @@ def test_cancel_planning_sprint_non_destructive_close_sprint_still_blocked(modul
 
     assert m.tool_group(cancel) == "sprints"
     assert m.is_destructive(cancel) is False
-    assert m.is_destructive(close) is True
+    assert m.is_destructive(close) is False      # story 5041 — the server answers a close with a card, the tool is not hidden
 
     for scope in (None, [], ["read", "write"], ["write"]):
         assert m.is_tool_allowed(cancel, scope) is True, scope
-        assert m.is_tool_allowed(close, scope) is False, scope
+        assert m.is_tool_allowed(close, scope) is True, scope
 
     # (["admin"] 단독은 그룹 명시 키로 취급돼 sprints 그룹이 없어 close 도 막힘 — 기존 동작이라 여기선 안 건드림)
     for scope in (["destructive"], ["sprints", "destructive"], ["sprints", "admin"], ["read", "write", "destructive"]):
@@ -136,7 +136,8 @@ def test_cancel_planning_sprint_non_destructive_close_sprint_still_blocked(modul
 
     # 그룹 명시 키 — 도구 이름이 아니라 그룹 스코프가 여전히 적용된다.
     assert m.is_tool_allowed(cancel, ["sprints"]) is True
-    assert m.is_tool_allowed(close, ["sprints"]) is False
+    assert m.is_tool_allowed(close, ["sprints"]) is True      # story 5041 — a group key that holds `sprints` sees close_sprint: the server answers with a card
+    assert m.is_tool_allowed(close, ["docs"]) is False      # …but the GROUP still applies
     assert m.is_tool_allowed(cancel, ["docs"]) is False
 
 
@@ -145,7 +146,7 @@ def test_cancel_planning_sprint_in_manifest_for_default_key():
 
     m = resolve_manifest(["read", "write"], list(ALL_TOOL_NAMES))
     assert "sprintable_cancel_planning_sprint" in m["allowed_tools"]
-    assert "sprintable_close_sprint" in m["denied_tools"]
+    assert "sprintable_close_sprint" in m["allowed_tools"]      # story 5041 — no longer hidden from a default key
 
 
 # ── 엔드포인트 admin 게이트 ────────────────────────────────────────────────────

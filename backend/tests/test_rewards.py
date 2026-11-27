@@ -132,6 +132,7 @@ async def test_grant_reward_201():
     try:
         resolved = MagicMock()
         resolved.id = GRANTER_ID
+        resolved.type = "human"
         with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant, \
              patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=True), \
              patch("app.routers.rewards.resolve_member", new_callable=AsyncMock, return_value=resolved), \
@@ -159,7 +160,10 @@ async def test_grant_reward_403_when_not_org_admin():
     """prod 핫픽스(S20 MUST): org-admin 아니면 임의 리워드 발행 차단."""
     client, session, app = await _client()
     try:
-        with patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=False):
+        person = MagicMock()
+        person.type = "human"
+        with patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.rewards.resolve_member", new_callable=AsyncMock, return_value=person):
             async with client as c:
                 resp = await c.post("/api/v2/rewards", json={
                     "project_id": str(PROJECT_ID),
@@ -180,6 +184,7 @@ async def test_grant_reward_404_member_not_in_project():
     try:
         resolved = MagicMock()
         resolved.id = GRANTER_ID
+        resolved.type = "human"
         with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant, \
              patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=True), \
              patch("app.routers.rewards.resolve_member", new_callable=AsyncMock, return_value=resolved), \

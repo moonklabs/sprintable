@@ -68,6 +68,14 @@ async def activate_sprint(args: SprintIdInput) -> list[TextContent]:
         return err(exc)
 
 
+async def delete_sprint(args: SprintIdInput) -> list[TextContent]:
+    """story 5041 — asks for a sprint to be deleted for good: the server keeps the ask, a person presses a card, the delete runs under THEIR name (answer: `pending_approval`, 202)."""
+    try:
+        return ok(await client.delete(f"/api/v2/sprints/{args.sprint_id}"))
+    except Exception as exc:
+        return err(exc)
+
+
 async def close_sprint(args: SprintIdInput) -> list[TextContent]:
     """진행 중 · 검토 중(active · review) 스프린트 마감 — 파괴적(admin/destructive 권한 필요).
     시작 안 한(planning) 스프린트 접기는 cancel_planning_sprint."""

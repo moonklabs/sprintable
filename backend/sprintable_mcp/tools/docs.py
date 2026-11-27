@@ -19,6 +19,10 @@ class ListDocsInput(SprintableInput):
     cursor: str | None = None  # #2191: 이전 호출의 meta.next_cursor 값을 그대로 넘기면 다음 페이지
 
 
+class DeleteDocInput(SprintableInput):
+    doc_id: str
+
+
 class GetDocInput(SprintableInput):
     """story #3324 — 이벤트 payload·참조 토큰(`entity:doc:id`)·게이트 neutral_facts는 전부
     doc id를 주는데, 이 도구는 slug만 받아 «Doc not found»로 막혔다(담롱·PO 둘 다 오늘 같은
@@ -111,6 +115,14 @@ async def list_docs(args: ListDocsInput) -> list[TextContent]:
                 ),
             ))
         return blocks
+    except Exception as exc:
+        return err(exc)
+
+
+async def delete_doc(args: DeleteDocInput) -> list[TextContent]:
+    """story 5041 — asks for a doc to be deleted for good: the server keeps the ask, a person presses a card, the delete runs under THEIR name (answer: `pending_approval`, 202)."""
+    try:
+        return ok(await client.delete(f"/api/v2/docs/{args.doc_id}"))
     except Exception as exc:
         return err(exc)
 

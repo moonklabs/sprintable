@@ -1277,6 +1277,26 @@ _CATALOG: dict[str, dict[str, str]] = {
     "chat_card.kind.evidence": {"ko": "증거", "en": "evidence"},
     "chat_card.kind.kanban": {"ko": "스프린트 칸반", "en": "sprint board"},
     "chat_card.kind.deploy": {"ko": "프로젝트 소속", "en": "project membership"},
+    # story 5041 (C0b) — an agent asked for something a person must press: the card's words (the SERVER writes them — never the agent) and the reply the agent reads.
+    "agent_action.what.story_delete": {"ko": "스토리 «{target}» 삭제", "en": "Delete story «{target}»"},
+    "agent_action.what.task_delete": {"ko": "태스크 «{target}» 삭제", "en": "Delete task «{target}»"},
+    "agent_action.what.goal_delete": {"ko": "목표 «{target}» 삭제", "en": "Delete goal «{target}»"},
+    "agent_action.what.doc_delete": {"ko": "문서 «{target}» 삭제", "en": "Delete doc «{target}»"},
+    "agent_action.what.sprint_delete": {"ko": "스프린트 «{target}» 삭제", "en": "Delete sprint «{target}»"},
+    "agent_action.what.sprint_close": {"ko": "스프린트 «{target}» 닫기", "en": "Close sprint «{target}»"},
+    "agent_action.what.meeting_delete": {"ko": "회의 «{target}» 삭제", "en": "Delete meeting «{target}»"},
+    "agent_action.what.reward_give": {"ko": "보상 지급 — {target}", "en": "Give a reward — {target}"},
+    "agent_action.what.spec_pin_delete": {"ko": "스펙 핀 삭제 — {target}", "en": "Delete spec pin — {target}"},
+    "agent_action.card_text": {"ko": "{what} — 승인 요청 · 요청한 에이전트: {agent}", "en": "{what} — approval requested · asked by the agent: {agent}"},
+    "agent_action.prompt.irreversible": {"ko": "되돌릴 수 없어요. 누르면 누른 분의 이름과 권한으로 바로 실행돼요.", "en": "This cannot be undone. Pressing runs it right away, in your name and with your rights."},
+    "agent_action.prompt.partly": {"ko": "일부는 되돌릴 수 없어요. 누르면 누른 분의 이름과 권한으로 바로 실행돼요.", "en": "Part of this cannot be undone. Pressing runs it right away, in your name and with your rights."},
+    "agent_action.reply_pending": {"ko": "승인 카드를 올렸어요 · 누가 누르면 실행돼요 (요청 {request_id}, {hours}시간 안에 안 눌리면 거절로 닫혀요)", "en": "An approval card is up — it runs when someone presses it (request {request_id}; it closes as a refusal if nobody presses within {hours} hours)"},
+    "agent_action.reply_no_card": {"ko": "승인 요청은 남겼지만 카드를 받을 사람을 찾지 못했어요 (요청 {request_id}) — 사람에게 직접 알려 주세요", "en": "The approval request is saved, but nobody could be found to receive the card (request {request_id}) — tell a person yourself"},
+    "agent_action.result.approved": {"ko": "승인되어 실행했어요 — {what}", "en": "Approved and done — {what}"},
+    "agent_action.result.rejected": {"ko": "거절됐어요 — {what}", "en": "Refused — {what}"},
+    "agent_action.result.expired": {"ko": "아무도 누르지 않아 거절로 닫혔어요 — {what}", "en": "Nobody pressed it in time, so it closed as a refusal — {what}"},
+    "agent_action.result.failed": {"ko": "승인됐지만 실행하지 못했어요 — {what} ({reason})", "en": "Approved, but it could not be done — {what} ({reason})"},
+    "agent_action.result.changed": {"ko": "그새 바뀌어서 실행하지 않았어요 — {what} ({reason})", "en": "It changed in the meantime, so nothing was done — {what} ({reason})"},
 }
 
 

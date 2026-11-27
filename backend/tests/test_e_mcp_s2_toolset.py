@@ -30,11 +30,18 @@ def test_tool_group_strips_prefix_no_sprint_false_match():
 
 
 def test_destructive_detection():
-    assert is_destructive("sprintable_delete_story")
-    assert is_destructive("sprintable_give_reward")
-    assert is_destructive("sprintable_close_sprint")
+    # story 5041: the names the SERVER answers at call time (a person presses a card) are never «destructive-hidden»; any OTHER name that says delete / give_reward / close_sprint still is
+    assert is_destructive("sprintable_delete_widget")
+    assert is_destructive("sprintable_delete_project")
     assert not is_destructive("sprintable_add_story")
     assert not is_destructive("sprintable_list_stories")
+
+
+def test_tools_the_server_decides_are_never_hidden_by_the_destructive_rule():
+    for name in ("sprintable_delete_story", "sprintable_delete_task", "sprintable_delete_goal", "sprintable_delete_doc", "sprintable_delete_sprint",
+                 "sprintable_close_sprint", "sprintable_give_reward", "sprintable_delete_meeting", "sprintable_delete_spec_pin",
+                 "sprintable_delete_artifact", "sprintable_delete_webhook_config"):
+        assert not is_destructive(name), name
 
 
 def test_standup_missing_grouped_with_standup_not_analytics():
@@ -61,14 +68,16 @@ def test_legacy_scope_allows_nondestructive_blocks_destructive():
     # read/write(레거시) → 비파괴 전체 허용, destructive 차단
     assert is_tool_allowed("sprintable_add_story", ["read", "write"])
     assert is_tool_allowed("sprintable_send_chat_message", ["read", "write"])
-    assert not is_tool_allowed("sprintable_delete_story", ["read", "write"])
-    assert not is_tool_allowed("sprintable_give_reward", ["read", "write"])
+    assert not is_tool_allowed("sprintable_delete_widget", ["read", "write"])
+    assert is_tool_allowed("sprintable_delete_story", ["read", "write"])      # story 5041 — the server answers with a card, the tool is not hidden
+    assert is_tool_allowed("sprintable_give_reward", ["read", "write"])
 
 
 def test_empty_scope_defaults_to_legacy():
     assert is_tool_allowed("sprintable_add_story", [])
     assert is_tool_allowed("sprintable_add_story", None)
-    assert not is_tool_allowed("sprintable_delete_story", None)
+    assert not is_tool_allowed("sprintable_delete_widget", None)
+    assert is_tool_allowed("sprintable_delete_story", None)
 
 
 def test_explicit_group_scopes_only_that_group():
@@ -78,19 +87,22 @@ def test_explicit_group_scopes_only_that_group():
 
 
 def test_destructive_requires_explicit_grant():
-    assert not is_tool_allowed("sprintable_delete_story", ["stories"])  # 그룹은 OK지만 destructive 차단
-    assert is_tool_allowed("sprintable_delete_story", ["stories", "destructive"])
-    assert is_tool_allowed("sprintable_delete_story", ["stories", "admin"])
+    assert not is_tool_allowed("sprintable_delete_story_comment", ["stories"])  # 그룹은 OK지만 destructive 차단
+    assert is_tool_allowed("sprintable_delete_story_comment", ["stories", "destructive"])
+    assert is_tool_allowed("sprintable_delete_story_comment", ["stories", "admin"])
+    assert is_tool_allowed("sprintable_delete_story", ["stories"])      # story 5041 — no grant needed: the server asks a person
 
 
 def test_real_destructive_tools_still_blocked_without_admin_grant_after_s17():
     """S17 회귀 확인: lock/unlock 재분류가 진짜 파괴 도구(delete/give_reward/close_sprint) 게이팅을
     깨지 않는지 — 도메인 그룹만 있고 admin/destructive 미부여 시 여전히 차단되어야 한다."""
     scope = ["stories", "tasks", "sprints", "chat", "docs", "rewards"]
-    assert not is_tool_allowed("sprintable_delete_story", scope)
-    assert not is_tool_allowed("sprintable_give_reward", scope)
-    assert not is_tool_allowed("sprintable_close_sprint", scope)
-    assert not is_tool_allowed("sprintable_delete_sprint", scope)
+    assert not is_tool_allowed("sprintable_delete_story_comment", scope)
+    # story 5041 — these are answered by the server (a card), never hidden by the destructive rule (the group still applies)
+    assert is_tool_allowed("sprintable_delete_story", scope)
+    assert is_tool_allowed("sprintable_give_reward", scope)
+    assert is_tool_allowed("sprintable_close_sprint", scope)     # `sprints` is in this scope and the server answers with a card
+    assert is_tool_allowed("sprintable_delete_sprint", scope)
 
 
 def test_always_allowed_tools():

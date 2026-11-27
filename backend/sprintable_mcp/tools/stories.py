@@ -40,6 +40,11 @@ class ListStoriesInput(SprintableInput):
     cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
+class DeleteStoryInput(SprintableInput):
+    # story 5041 — the same UUID rule as get_story (a UUID, never a free string in the path)
+    story_id: uuid.UUID
+
+
 class GetStoryInput(SprintableInput):
     # story 4615: the id a hand-over gives (`source="story:<uuid>"`) — a UUID, never a free string in the path (Qadir 4853 ②)
     story_id: uuid.UUID
@@ -174,6 +179,15 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
         items, headers = await client.get_with_headers("/api/v2/stories", params=params)
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_stories")
+    except Exception as exc:
+        return err(exc)
+
+
+async def delete_story(args: DeleteStoryInput) -> list[TextContent]:
+    """story 5041 — asks for a story to be deleted for good. The agent does not delete it: the server keeps the ask, a person presses a card in chat, and the delete then runs under THEIR
+    name and rights. The answer is `status: pending_approval` (a 202), not a deletion."""
+    try:
+        return ok(await client.delete(f"/api/v2/stories/{args.story_id}"))
     except Exception as exc:
         return err(exc)
 

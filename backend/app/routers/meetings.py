@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -159,6 +159,7 @@ async def put_meeting(
 @router.delete("/{id}", status_code=200)
 async def delete_meeting(
     id: uuid.UUID,
+    request: Request,
     repo: MeetingRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -180,7 +181,15 @@ async def delete_meeting(
 
     resolved = await resolve_member(auth, org_id, session)
     if resolved.type != "human":
-        raise HTTPException(status_code=403, detail="Meeting 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — kept as an ask a person presses (see delete_story)
+        from app.services import agent_action
+
+        _asked = await repo.get(id)
+        if _asked is None:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=repo.project_id, action_key="meeting.delete", target_label=_asked.title,
+        )
 
     meeting = await repo.get(id)
     if meeting is None:

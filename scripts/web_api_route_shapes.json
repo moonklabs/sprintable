@@ -111,6 +111,16 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/agent-actions/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/agent-actions/{}/decision",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/agent-deployments",
 "kind": "unknown"
 },

@@ -2,7 +2,7 @@ import uuid
 from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -378,6 +378,7 @@ async def update_sprint(
 @router.delete("/{id}", status_code=200)
 async def delete_sprint(
     id: uuid.UUID,
+    request: Request,
     repo: SprintRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -401,7 +402,12 @@ async def delete_sprint(
 
     resolved = await resolve_member(auth, org_id, session, project_id=sprint.project_id)
     if resolved.type != "human":
-        raise HTTPException(status_code=403, detail="Sprint 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        # story 5041 — kept as an ask a person presses (see delete_story)
+        from app.services import agent_action
+
+        return await agent_action.request_approval(
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=sprint.project_id, action_key="sprint.delete", target_label=sprint.title,
+        )
 
     session.add(DeletionAuditLog(
         id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
@@ -455,6 +461,7 @@ async def activate_sprint(
 @router.post("/{id}/close", response_model=SprintResponse)
 async def close_sprint(
     id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -468,6 +475,13 @@ async def close_sprint(
     if _sprint_for_scope is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
     caller = await resolve_member(auth, org_id, db, project_id=_sprint_for_scope.project_id)
+    if caller.type != "human":
+        # story 5041 — an agent asks, a person presses: closing a running sprint cannot be undone (see delete_story)
+        from app.services import agent_action
+
+        return await agent_action.request_approval(
+            request, db, auth=auth, agent=caller, org_id=org_id, project_id=_sprint_for_scope.project_id, action_key="sprint.close", target_label=_sprint_for_scope.title,
+        )
     try:
         sprint = await transition_sprint(db, org_id, caller, id, "closed")
     except (SprintTransitionError, ValueError) as exc:
