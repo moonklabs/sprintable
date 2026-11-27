@@ -172,7 +172,7 @@ describe('줄의 href · 표식 · 지금 여기', () => {
     expect(row.className).toMatch(/\bgap-x-4\b/);
     expect(row.className).toMatch(/\bpx-4\b/);
     expect(row.className).toMatch(/\bborder-b-0\b/);
-    expect(row.querySelector('svg')?.getAttribute('class')).toMatch(/\bsize-6\b/);
+    expect(row.querySelector('svg')?.getAttribute('class')).toMatch(/\bsize-ds-icon-lg\b/);
     expect(row.className).not.toMatch(/\[\d+px\]/);
   });
 

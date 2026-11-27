@@ -39,7 +39,7 @@ export function NewProjectEntry({ className }: { className?: string }) {
       onClick={() => window.dispatchEvent(new Event(OPEN_NEW_PROJECT_EVENT))}
       data-testid="sidebar-new-project"
     >
-      <Plus className="size-3.5" aria-hidden />
+      <Plus className="size-ds-icon-md" aria-hidden />
       <span className="truncate">{t('switcherNewProject')}</span>
     </Button>
   );
@@ -60,7 +60,7 @@ export function MoveAgentsEntry({ className }: { className?: string }) {
       onClick={() => window.location.assign(MOVE_AGENTS_LINK)}
       data-testid="sidebar-move-agents"
     >
-      <Monitor className="size-3.5" aria-hidden />
+      <Monitor className="size-ds-icon-md" aria-hidden />
       <span className="truncate">{t('moveAgentsEntry')}</span>
     </Button>
   );

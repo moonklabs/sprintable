@@ -69,7 +69,7 @@ export function NavRow({
           aria-current={isActive ? 'page' : undefined}
           {...(navId ? { 'data-nav-id': navId } : {})}
         >
-          <Icon className="size-6 shrink-0 text-ds-ink-3" />
+          <Icon className="size-ds-icon-lg shrink-0 text-ds-ink-3" />
           <span data-nav-label className="min-w-0 flex-1 truncate text-ds-body font-semibold text-ds-ink">{label}</span>
           {scopeMark || kbd ? (
             <span className="flex shrink-0 items-center gap-1.5">

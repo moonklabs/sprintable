@@ -84,7 +84,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
         <Avatar url={triggerAvatar} label={triggerName} className="size-7" />
         <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', triggerClassName ? 'text-foreground' : 'text-sidebar-foreground')}>{triggerName}</span>
         {/* 3826-pre — 알파 합성(text-sidebar-foreground/60) → solid text-muted-foreground. */}
-        <ChevronsUpDown className={cn('size-3.5 shrink-0', 'text-muted-foreground')} />
+        <ChevronsUpDown className={cn('size-ds-icon-sm shrink-0', 'text-muted-foreground')} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         <DropdownMenuGroup>
@@ -112,8 +112,8 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
                     )
                   )}
                 </span>
-                {isActive && <Check className="size-4 shrink-0 text-info" />}
-                {busy === acc.account_id && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />}
+                {isActive && <Check className="size-ds-icon-sm shrink-0 text-info" />}
+                {busy === acc.account_id && <Loader2 className="size-ds-icon-sm shrink-0 animate-spin text-muted-foreground" />}
               </DropdownMenuItem>
             );
           })}
@@ -127,7 +127,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
           onClick={() => void handleAdd()}
           className="flex items-center gap-2"
         >
-          {busy === 'add' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+          {busy === 'add' ? <Loader2 className="size-ds-icon-sm animate-spin" /> : <Plus className="size-ds-icon-sm" />}
           <span className="flex-1">{t('addAccount')}</span>
           {atCap && <span className="text-xs text-muted-foreground">{t('capReached')}</span>}
         </DropdownMenuItem>
@@ -137,12 +137,12 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
             항목과 같은 형·같은 경로(/settings), 새 길 0. */}
         {!hasName && (
           <DropdownMenuItem render={<Link href={flatHref('/settings')} />}>
-            <UserPen className="size-4" />
+            <UserPen className="size-ds-icon-sm" />
             {t('setName')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem render={<Link href={flatHref('/settings')} />}>
-          <Settings className="size-4" />
+          <Settings className="size-ds-icon-sm" />
           {tn('settings')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -151,7 +151,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
           onClick={() => void handleSignOut('this')}
           className="flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive"
         >
-          <LogOut className="size-4" />
+          <LogOut className="size-ds-icon-sm" />
           {others.length > 0 ? t('signOutThis') : tc('logout')}
         </DropdownMenuItem>
         {others.length > 0 && (
@@ -160,7 +160,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
             onClick={() => void handleSignOut('all')}
             className="flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive"
           >
-            <LogOut className="size-4" />
+            <LogOut className="size-ds-icon-sm" />
             {t('signOutAll')}
           </DropdownMenuItem>
         )}
