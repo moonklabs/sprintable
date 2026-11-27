@@ -262,7 +262,8 @@ export function MobileTabBar({
             )}
           >
             <span className="relative">
-              <Icon className="size-[22px]" strokeWidth={1.8} />
+              {/* story 5048 ④-③ (PO 11-27) — 아래 탭 막대 아이콘 = 단계 md(20) · 선 굵기는 집안 기본(2). 전에는 22px · 선 1.8. */}
+              <Icon className="size-ds-icon-md" />
               {badge !== null ? (
                 // story #3431 — 공용 배지로 통합(bell·presence와 동일 정의, 4890부터 ds CountBadge,
                 // 색/크기 무변경). 위치만 이 소비처 고유(아이콘 오른쪽 옆, 코너 아님).
