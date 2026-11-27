@@ -248,7 +248,7 @@ async def test_create_follow_up_creates_story_with_number_and_evidence():
 
 
 @pytest.mark.anyio
-async def test_create_follow_up_agent_forbidden():
+async def test_create_follow_up_agent_is_no_longer_refused_as_human_only():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -268,8 +268,8 @@ async def test_create_follow_up_agent_forbidden():
                 f"/api/v2/organizations/{org_id}/publications/{sp.id}/follow-ups",
                 json={"kind": "edit"},
             )
-        assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "FOLLOW_UP_CREATE_HUMAN_ONLY"
+        # story 5041 · PO 11-27 — an agent may make the follow-up story (internal); this seed is not a publication, so the road answers its own 404 — what it must NOT answer is the old «human only» 403
+        assert r.status_code != 403 and "FOLLOW_UP_CREATE_HUMAN_ONLY" not in r.text, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

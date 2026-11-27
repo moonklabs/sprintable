@@ -61,19 +61,9 @@ from app.services.project_auth import assert_target_in_caller_org
 router = APIRouter(prefix="/api/v2/organizations", tags=["engagement-items"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str):
-    """PATCH(배정·상태 변경)는 휴먼 전용 — channel_post_comments.py::_require_human과
-    동형(그라운딩 PO 確定: 에이전트 키는 목록·collection-status 읽기만). `resolved_locale`
-    은 호출부(라우트 진입점)가 이미 resolve_locale_from_request()로 푼 plain str(Header()
-    마커가 라우트 경계를 못 넘는다, i18n_catalog.py 모듈 docstring 원칙)."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        message = t("engagement_items.patch_human_only", resolved_locale)
-        raise HTTPException(
-            status_code=403,
-            detail=human_error("ENGAGEMENT_ITEM_PATCH_HUMAN_ONLY", message, user_message=message),
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """The member making the call — a person or an agent (story 5041 · PO 11-27: sorting and assigning a collected comment is internal and can be set back)."""
+    return await resolve_member(auth, org_id, db)
 
 
 class EngagementItemResponse(BaseModel):
@@ -187,7 +177,7 @@ async def patch_engagement_item_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved_locale = resolve_locale_from_request(locale, accept_language)
-    await _require_human(db, auth, org_id, resolved_locale)
+    await _caller(db, auth, org_id)
 
     target_org_id = (await db.execute(
         select(ChannelPostComment.org_id).where(ChannelPostComment.id == comment_id)

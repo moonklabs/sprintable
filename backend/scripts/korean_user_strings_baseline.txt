@@ -78,7 +78,6 @@ app/routers/bridge.py::Slack에서 승인한
 app/routers/bridge.py::가 Slack에서 거부한
 app/routers/bridge.py::이미 처리된 HITL 요청인.
 app/routers/bridge.py::지원하지 않는 HITL action인.
-app/routers/campaigns.py::campaign 생성은 휴먼 멤버만 가능합니다(에이전트는 조회만).
 app/routers/campaigns.py::campaign을 찾을 수 없습니다:
 app/routers/channel_connections.py::' 채널은 샌드박스 연결을 지원하지 않습니다.
 app/routers/channel_connections.py::15분이 지나 선택 대기 상태가 만료됐습니다. 다시 연결해주세요.
@@ -117,13 +116,11 @@ app/routers/channel_post_comment_replies.py::댓글을 story로 전환
 app/routers/channel_post_comment_replies.py::댓글을 찾을 수 없습니다:
 app/routers/channel_post_comment_replies.py::안 보낸 초안이 이미 있어요.
 app/routers/channel_post_comment_replies.py::유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.
-app/routers/channel_post_comment_replies.py::이 액션은 휴먼 멤버만 가능해요.
 app/routers/channel_post_comment_replies.py::이 채널은 답변 발송을 지원하지 않아요.
 app/routers/channel_post_comment_replies.py::조각②-b(additive) — 봉인 시점(submit) 대상 댓글 원문. null=아직 게이트가 없다(draft)이거나 이 필드 추가 前에 submit된 구버전 게이트. 표시 전용 — target_comment_state 판정은 여전히 target_text_sha256(비노출)만 쓴다.
 app/routers/channel_post_comments.py::PublicationCommand.status 그대로 — 다음 할 일이 갈리는 네 값(유나 §22-15): "pending"(백오프 대기 중, 기다리면 자동 재시도) · "blocked"(연결 복구 필요, 사람이 재인증해야 함) · "dead_letter"(자동 재시도 포기, 사람 판단 필요) · "voided"(전제가 바뀌어 종결, 재시도 개념 자체가 안 맞음). 그 외 "completed" 등은 성공/진행 중.
 app/routers/channel_post_comments.py::transient 백오프 다음 시도 시각(ISO) — 없으면 null.
 app/routers/channel_post_comments.py::voided 사유(PublicationCommand.reason_code 그대로, 새 이름 짓지 않음 — 이 컬럼은 channel_post 발행류(publication_command.py)와 공유라 열거를 닫지 않는다). 페드루 PO 대조(2026-09-06) — **현재 관측 값**: "GATE_NOT_APPROVED_OR_RESEALED"(게이트 재검증 실패) · "TARGET_COMMENT_DELETED"(승인 뒤 워커 도달 前 대상 댓글 삭제 레이스) · "CONTENT_CHANGED"(channel_posts.py 재승인 필요 전이 축, 댓글 답변 경로가 아니어도 같은 컬럼에 실린다). 이 외에도 미래 값이 더 생길 수 있다 — 화면은 아는 값만 문구로 대응하고 모르는 값은 원문 그대로/일반 문구로 안전히 처리해야 한다. voided 아니면 null.
-app/routers/channel_post_comments.py::댓글 재수집은 휴먼 멤버만 가능해요.
 app/routers/channel_post_comments.py::발행 기록을 찾을 수 없습니다:
 app/routers/channel_post_comments.py::연결이 활성 상태가 아니라 댓글을 대조/수집할 수 없습니다 — 연결 화면에서 확인해 주세요.
 app/routers/channel_post_comments.py::유나 design §11-5 세 값(connection|needs_check|transient) — 실패 없었으면 null.
@@ -232,7 +229,6 @@ app/routers/hypotheses.py::전이는 owner 또는 org owner/admin만 가능합�
 app/routers/insights_board.py::days는 7 또는 30만 허용합니다.
 app/routers/insights_board.py::publication을 찾을 수 없습니다:
 app/routers/insights_board.py::story #3734 AC3 후속(PO 라이브 판정 2026-09-09) — true면 원 초안이 보관된(deleted_at not null) 발행분도 포함한다. 목록 두 곳(site-posts·channel-posts drafts)과 같은 파라미터명·같은 뜻 — 기본은 제외.
-app/routers/insights_board.py::후속 작업 생성은 휴먼 멤버만 가능합니다(에이전트는 조회만).
 app/routers/labels.py::이미 부착된 라벨
 app/routers/loops.py::루프 결정은 휴먼 멤버만 가능합니다 (에이전트 불가).
 app/routers/loops.py::루프를 찾을 수 없습니다.

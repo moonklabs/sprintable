@@ -2698,7 +2698,7 @@ async def cancel_unstarted_publish_endpoint(
     owner/admin 축과 다른 이유). 이미 시작된 명령은 409 `PUBLICATION_ALREADY_STARTED`."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id)
+    resolved = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: stopping a send that has not left yet is safe for an agent too (publish itself stays with a person)
     try:
         command = await cancel_unstarted_publication(db, org_id=org_id, draft_id=draft_id, cancelled_by_member_id=resolved.id)
     except (ChannelPostDraftNotFoundError, ChannelPostGateNotFoundError) as exc:

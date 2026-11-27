@@ -20,19 +20,10 @@ from app.services.member_resolver import resolve_member
 router = APIRouter(prefix="/api/v2/organizations", tags=["campaigns"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
-    """PO 確定 ⓑ③ — campaign 생성은 휴먼 전용(에이전트 403 pin). channel_posts.py::
-    _require_human과 동형(추가 role 제한 없음, org 멤버인 휴먼이면 누구나)."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "CAMPAIGN_CREATE_HUMAN_ONLY",
-                "message": "campaign 생성은 휴먼 멤버만 가능합니다(에이전트는 조회만).",
-            },
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """The member making the call — a person or an agent (story 5041 · PO 11-27: an agent that is told to group content makes the campaign;
+    a campaign is a name and two dates, nothing that leaves the product)."""
+    return await resolve_member(auth, org_id, db)
 
 
 class CreateCampaignRequest(BaseModel):
@@ -81,7 +72,7 @@ async def post_campaign(
 ) -> CampaignResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id)
+    resolved = await _caller(db, auth, org_id)
 
     campaign = await create_campaign(
         db, org_id=org_id, name=body.name, starts_at=body.starts_at, ends_at=body.ends_at,

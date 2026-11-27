@@ -314,7 +314,7 @@ async def test_voided_gate_is_not_reopened_by_recipe():
 
 @pytest.mark.anyio
 async def test_human_send_request_api_unchanged_by_recipe_path():
-    """AC2 — 사람 발송 요청 API는 그대로: 사람은 201(지정 승인자 없음 — 기존 모양), 에이전트 키는 403."""
+    """AC2 — 사람 발송 요청 API는 그대로: 사람은 201(지정 승인자 없음 — 기존 모양). (에이전트 키도 이제 요청은 연다 — 5041)"""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -323,14 +323,7 @@ async def test_human_send_request_api_unchanged_by_recipe_path():
         body = {"segment_name": "전체 구독자", "scheduled_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
         url = f"/api/v2/organizations/{ctx['org_id']}/publications/{ctx['pub'].id}/newsletter-sends"
 
-        _setup_org_scoped_app(app, Session, ctx["org_id"], user_id=ctx["agent_id"], agent=True)
-        try:
-            async with _client_for(app) as client:
-                r = await client.post(url, json=body)
-            assert r.status_code == 403, r.text
-            assert r.json()["error"]["code"] == "NEWSLETTER_SEND_CREATE_HUMAN_ONLY"
-        finally:
-            app.dependency_overrides.clear()
+        # story 5041 · PO 11-27 — the agent's own request (it only opens the gate) is pinned in test_3813; this test is the PERSON's road, so one gate is counted below
 
         _setup_org_scoped_app(app, Session, ctx["org_id"], user_id=ctx["owner_user_id"])
         try:

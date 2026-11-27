@@ -661,7 +661,7 @@ async def test_api_list_comments_allows_agent_caller(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_api_refresh_rejects_agent_caller():
+async def test_api_refresh_is_open_to_an_agent_caller():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -676,8 +676,8 @@ async def test_api_refresh_rejects_agent_caller():
         try:
             async with _client_for(app) as client:
                 resp = await client.post(f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments/refresh")
-                assert resp.status_code == 403
-                assert resp.json()["error"]["code"] == "COMMENT_REFRESH_HUMAN_ONLY"
+                # story 5041 · PO 11-27 — a manual refresh only reads the channel (5 minutes per publication): an agent may ask
+                assert resp.status_code != 403 and "COMMENT_REFRESH_HUMAN_ONLY" not in resp.text, resp.text
         finally:
             app.dependency_overrides.clear()
     finally:

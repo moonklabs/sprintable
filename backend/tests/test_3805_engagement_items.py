@@ -310,7 +310,7 @@ async def test_patch_assignee_set_then_explicit_null_clears_it():
 
 
 @pytest.mark.anyio
-async def test_patch_agent_forbidden():
+async def test_patch_agent_allowed():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -328,7 +328,8 @@ async def test_patch_agent_forbidden():
                 f"/api/v2/organizations/{org_id}/engagement/items/{comment.id}",
                 json={"triage_status": "done"},
             )
-        assert r.status_code == 403, r.text
+        # story 5041 · PO 11-27 — sorting and assigning a collected comment is internal and can be set back: an agent may
+        assert r.status_code != 403, r.text
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -27,18 +27,10 @@ from app.services.newsletter_send import (
 router = APIRouter(prefix="/api/v2/organizations", tags=["newsletter-send"])
 
 
-async def _require_human(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, resolved_locale: str):
-    """ads_boost.py::_require_human과 동형(호출부마다 로컬 복제 관례)."""
-    resolved = await resolve_member(auth, org_id, db)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "NEWSLETTER_SEND_CREATE_HUMAN_ONLY",
-                "message": t("newsletter_send.create_human_only", resolved_locale),
-            },
-        )
-    return resolved
+async def _caller(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """The member making the call — a person or an agent (story 5041 · PO 11-27). The request only opens the approval gate; the send
+    itself waits for a person to approve it."""
+    return await resolve_member(auth, org_id, db)
 
 
 class CreateNewsletterSendRequest(BaseModel):
@@ -89,7 +81,7 @@ async def _create_newsletter_send_endpoint(
 ) -> NewsletterSendResponse:
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    resolved = await _require_human(db, auth, org_id, resolved_locale)
+    resolved = await _caller(db, auth, org_id)
 
     try:
         gate = await request_newsletter_send(
