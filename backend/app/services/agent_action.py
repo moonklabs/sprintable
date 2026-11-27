@@ -158,7 +158,7 @@ async def _approver_ids(session: AsyncSession, *, org_id: uuid.UUID, agent_id: u
 async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent: Any, approver_id: uuid.UUID | None, req: HitlRequest, locale: str, text_line: str, room: Any = None) -> uuid.UUID | None:
     """one card message: in the ROOM the request came from (when the run says which) else in the approver's DM with the agent. The message carries `card = {kind: agent_action, ref: request id}` —
     the web draws it from the request itself (GET /api/v2/agent-actions/{id}), so the card never goes stale."""
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.services.approval_delivery import _get_or_create_approval_dm
 
     try:
@@ -178,7 +178,7 @@ async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uu
             )
             session.add(msg)
             await session.flush()
-            await _dispatch_conversation_event(session, conv, msg, org_id, agent)
+            await dispatch_conversation_event_live(session, conv, msg, org_id, agent)
             return msg.id
     except Exception:  # noqa: BLE001 — one recipient's failure never loses the request; the reply to the agent says honestly that no card went
         logger.error("agent_action card delivery failed request=%s approver=%s", req.id, approver_id, exc_info=True)
@@ -467,7 +467,7 @@ def _reason_of(resp: httpx.Response) -> str:
 
 async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any, kind: str, reason: str = "", locale: str = "ko") -> None:
     """tell the asking agent how it ended — a message in their DM (the way gate decisions reach an agent), best-effort"""
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.routers.events import _get_or_create_system_publisher
     from app.services.approval_delivery import _get_or_create_approval_dm
 
@@ -490,6 +490,6 @@ async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any,
             )
             session.add(msg)
             await session.flush()
-            await _dispatch_conversation_event(session, conv, msg, req.org_id, system)
+            await dispatch_conversation_event_live(session, conv, msg, req.org_id, system)
     except Exception:  # noqa: BLE001 — a failed reply never undoes the decision
         logger.warning("agent_action result reply failed request=%s", req.id, exc_info=True)

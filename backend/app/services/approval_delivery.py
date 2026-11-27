@@ -191,7 +191,7 @@ async def dispatch_approval_request_cards(
         )
         designated_approver_id = None
 
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.services.member_resolver import lookup_members_by_ids
 
     requester = (await lookup_members_by_ids({requester_id}, db)).get(requester_id)
@@ -316,7 +316,7 @@ async def dispatch_approval_request_cards(
                         )
                     )
                     await db.flush()
-                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                    await dispatch_conversation_event_live(db, conv, msg, org_id, requester)
                 else:
                     msg = ConversationMessage(
                         conversation_id=conv.id,
@@ -342,7 +342,7 @@ async def dispatch_approval_request_cards(
                     )
                     db.add(msg)
                     await db.flush()
-                    await _dispatch_conversation_event(db, conv, msg, org_id, requester)
+                    await dispatch_conversation_event_live(db, conv, msg, org_id, requester)
             delivered_count += 1
         except Exception as exc:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
             # story #4156(2026-09-22, 페드루 PO 確定) — #4153이 닫은 것은 FK 위반 1종(승인자
@@ -650,7 +650,7 @@ async def dispatch_approval_result_reply(
     if not project_id or resolver_id == requester_id:
         return
 
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.services.member_resolver import lookup_members_by_ids
 
     resolver = (await lookup_members_by_ids({resolver_id}, db)).get(resolver_id)
@@ -695,7 +695,7 @@ async def dispatch_approval_result_reply(
             )
             db.add(msg)
             await db.flush()
-            await _dispatch_conversation_event(db, conv, msg, org_id, resolver)
+            await dispatch_conversation_event_live(db, conv, msg, org_id, resolver)
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 해소를 막지 않음.
         logger.warning(
             "approval-result 회신 배달 실패 work_item=%s requester=%s",
@@ -751,7 +751,7 @@ async def dispatch_approval_discussion_reply(
     if not doc.project_id or resolver_id == requester_id:
         return
 
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.services.member_resolver import lookup_members_by_ids
 
     resolver = (await lookup_members_by_ids({resolver_id}, db)).get(resolver_id)
@@ -789,7 +789,7 @@ async def dispatch_approval_discussion_reply(
             )
             db.add(msg)
             await db.flush()
-            await _dispatch_conversation_event(db, conv, msg, org_id, resolver)
+            await dispatch_conversation_event_live(db, conv, msg, org_id, resolver)
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 논의 요청 자체를 막지 않음.
         logger.warning(
             "approval-discussion 회신 배달 실패 doc=%s requester=%s",
@@ -1035,7 +1035,7 @@ async def dispatch_approval_card_toss(
     if existing is not None:
         return False
 
-    from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.conversations import dispatch_conversation_event_live
     from app.services.member_resolver import lookup_members_by_ids
 
     members = await lookup_members_by_ids({designated_approver_id, tossed_by_id}, db)
@@ -1078,7 +1078,7 @@ async def dispatch_approval_card_toss(
         )
         db.add(msg)
         await db.flush()
-        await _dispatch_conversation_event(db, conv, msg, org_id, tossed_by)
+        await dispatch_conversation_event_live(db, conv, msg, org_id, tossed_by)
     return True
 
 
@@ -1354,8 +1354,8 @@ async def maybe_nudge_draft_doc_shared_in_chat(
             # 작성자)가 실려 DB의 sender_id(트리거한 사람)와 릴레이 표시가 서로 다른 두
             # 사람을 가리키는 이중 오귀속이었다(실사고: Sprintable 원본=댄·릴레이 표시=담롱,
             # 둘 다 문장을 안 씀) — 같은 system_member를 넘겨 두 층이 항상 일치하게 한다.
-            from app.routers.conversations import _dispatch_conversation_event
-            await _dispatch_conversation_event(db, conv, msg, org_id, system_member)
+            from app.routers.conversations import dispatch_conversation_event_live
+            await dispatch_conversation_event_live(db, conv, msg, org_id, system_member)
 
             # story #3380 AC — 감사축(activity_logs)도 채팅 sender와 같은 판정을 든다.
             # channel_posts.py::_publish_channel_post 등 기존 platform-action 관례
