@@ -1636,7 +1636,7 @@ function InAppSetupWait() {
   return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
 }
 
-export function DesktopSetupEntry() {
+export function DesktopSetupEntry({ serverHost = false }: { /** story 5036: this web is a workspace server host's (its onboarding keeps the old way) */ serverHost?: boolean } = {}) {
   const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null; progressWorkdir?: boolean; inApp?: boolean } | null>(null);
   const searchParams = useSearchParams();
   const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
@@ -1672,7 +1672,7 @@ export function DesktopSetupEntry() {
   }, [searchParams]);
   if (!entry) return null;
   if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />;
-  if (entry.query) return <SetupOrProgress key={entry.query.code} query={entry.query} />;
+  if (entry.query) return <SetupOrProgress key={entry.query.code} query={entry.query} serverHost={serverHost} />;
   return entry.inApp ? <InAppSetupWait /> : <OpenInDesktopApp />;
 }
 
@@ -1690,7 +1690,7 @@ const SETUP_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
  * before (a «시작» there is the server's same-person replay or its refusal — nothing new is made). The loading card stays until
  * the answer: no form drawn first, so no «시작» to press in between.
  */
-function SetupOrProgress({ query }: { query: SetupQuery }) {
+function SetupOrProgress({ query, serverHost = false }: { query: SetupQuery; serverHost?: boolean }) {
   const t = useTranslations('desktop.setup');
   const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
   const [started, setStarted] = useState<boolean | null>(id ? null : false);
@@ -1717,7 +1717,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
   // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
   if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
-  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
+  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} serverHost={serverHost} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
   return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} appRuntimeWords={query.appRuntimeWords ?? []} canWorkdir={query.canWorkdir === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
 }
 

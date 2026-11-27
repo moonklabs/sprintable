@@ -15,7 +15,7 @@ vi.mock('@/lib/db/client', () => ({
   }),
 }));
 
-import { findProjectChannelId, openFirstChatRoom } from './first-chat';
+import { findProjectChannelId, openFirstChatRoom, setupEndRoomId } from './first-chat';
 
 beforeEach(() => { routes.clear(); calls.length = 0; });
 
@@ -41,12 +41,12 @@ describe('the project\'s channel', () => {
 });
 
 describe('the channel is read ONCE, from the project\'s own rooms (PO 11-26 — no page walk)', () => {
-  it('one request: the project\'s id and nothing else in the query', async () => {
+  it('one request: the project\'s id and the page size (100) — nothing else in the query (story 5036 codex: the server\'s default page of 30 could hold the channel back)', async () => {
     routes.set('GET /api/conversations', rooms([{ id: 'chan-1', is_project_channel: true }]));
     expect(await findProjectChannelId('proj-1')).toBe('chan-1');
     const reads = calls.filter((c) => c.url.startsWith('/api/conversations'));
     expect(reads.length).toBe(1);
-    expect(reads[0]!.url).toBe('/api/conversations?project_id=proj-1'); // reverted (a page walk / extra filters) → another URL or more reads
+    expect(reads[0]!.url).toBe('/api/conversations?project_id=proj-1&limit=100'); // reverted (a page walk / extra filters) → another URL or more reads
   });
 
   it('no channel in the answer → none, and no second read is made to look further', async () => {
@@ -74,5 +74,49 @@ describe('the room the first conversation opens', () => {
     routes.set('GET /api/conversations', () => ({ ok: false }));
     routes.set('POST /api/conversations', () => ({ ok: false }));
     expect(await openFirstChatRoom('proj-1', 'agent-9')).toBeNull();
+  });
+});
+
+
+describe('[SID:5036] where the setup\'s end opens — the project the agent really sits in', () => {
+  it('the start\'s direct room names its project; that project\'s channel is the room (not the tab\'s project, not a mark)', async () => {
+    routes.set('GET /api/conversations/dm-9', () => ({ ok: true, body: { id: 'dm-9', project_id: 'proj-7' } }));
+    routes.set('GET /api/conversations', rooms([{ id: 'chan-7', is_project_channel: true }]));
+    expect(await setupEndRoomId('dm-9')).toBe('chan-7');
+    expect(calls.find((c) => c.url.startsWith('/api/conversations?'))!.url).toContain('project_id=proj-7');
+  });
+
+  it.each([
+    ['the room cannot be read', () => ({ ok: false })],
+    ['the room names no project', () => ({ ok: true, body: { id: 'dm-9' } })],
+    ['the project field is empty', () => ({ ok: true, body: { id: 'dm-9', project_id: '' } })],
+    ['the answer is not an object', () => ({ ok: true, body: null })],
+  ])('%s → the start\'s own conversation (never a dead end)', async (_n, reply) => {
+    routes.set('GET /api/conversations/dm-9', reply);
+    routes.set('GET /api/conversations', rooms([{ id: 'chan-7', is_project_channel: true }]));
+    expect(await setupEndRoomId('dm-9')).toBe('dm-9');
+  });
+
+  it('no channel in the project (an older server) → the direct room', async () => {
+    routes.set('GET /api/conversations/dm-9', () => ({ ok: true, body: { project_id: 'proj-7' } }));
+    routes.set('GET /api/conversations', rooms([{ id: 'dm-1' }]));
+    expect(await setupEndRoomId('dm-9')).toBe('dm-9');
+  });
+
+  it('an answer that does not come in time → the direct room (the person is not kept on the progress screen) — and the timer is cleared', async () => {
+    routes.set('GET /api/conversations/dm-9', () => new Promise<{ ok: boolean }>(() => undefined)); // never answers
+    const t0 = Date.now();
+    expect(await setupEndRoomId('dm-9', 20)).toBe('dm-9');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+});
+
+
+describe('[SID:5036] a project with many direct rooms (codex)', () => {
+  it('the SAME single read asks for a bigger page (100, the server\'s default is 30) — one request, no walk (reverted → the default 30 and a channel past them is missed)', async () => {
+    routes.set('GET /api/conversations', rooms([{ id: 'chan-1', is_project_channel: true }]));
+    expect(await findProjectChannelId('proj-1')).toBe('chan-1');
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.url).toBe('/api/conversations?project_id=proj-1&limit=100');
   });
 });

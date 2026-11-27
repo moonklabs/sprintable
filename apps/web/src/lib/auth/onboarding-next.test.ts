@@ -1,6 +1,8 @@
 // story 4427 — `next` for a desktop sign-up: exactly `/desktop/setup`, nothing else (no open redirect).
 import { describe, expect, it } from 'vitest';
-import { desktopOnboardingNext, onboardingRedirect, staysForNewOrgSetup } from './onboarding-next';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { desktopOnboardingNext, onboardingRedirect, staysForNewOrgSetup, APP_FIRST_RUN_PATH, setupHandsAppNewAccountToOnboarding } from './onboarding-next';
 
 describe('desktopOnboardingNext — only /desktop/setup itself', () => {
   it('accepts the setup path', () => {
@@ -38,5 +40,38 @@ describe('staysForNewOrgSetup — only the setup page itself (its query or fragm
     '\\\\evil.com', 'javascript:alert(1)', ' /desktop/setup', '/DESKTOP/SETUP', '%2Fdesktop%2Fsetup', '/x/desktop/setup',
   ])('not for %j', (value) => {
     expect(staysForNewOrgSetup(value as string | null | undefined)).toBe(false);
+  });
+});
+
+
+// story 5036 (C6 · PO 11-27, the walk's finding): an account with no organization in the Mac app is handed from the setup card to the first-run line — in ONE place, and in one move (no loop).
+describe('[SID:5036] setupHandsAppNewAccountToOnboarding — the Mac app, no organization, no invitation, not a server host', () => {
+  it('the one yes', () => {
+    expect(setupHandsAppNewAccountToOnboarding({ inMacApp: true, invites: 0, serverHost: false })).toBe(true);
+  });
+  it.each([
+    ['the web (not the Mac app)', { inMacApp: false, invites: 0, serverHost: false }],
+    ['an invitation waiting (the person joins that organization on the card)', { inMacApp: true, invites: 1, serverHost: false }],
+    ['several invitations', { inMacApp: true, invites: 3, serverHost: false }],
+    ['a server host (its onboarding has no first-run line)', { inMacApp: true, invites: 0, serverHost: true }],
+  ])('not for %s', (_n, i) => {
+    expect(setupHandsAppNewAccountToOnboarding(i)).toBe(false);
+  });
+});
+
+describe('[SID:5036] the hand-over is one move — the two pages cannot push the person back and forth', () => {
+  it('the address carries no `next` and is the plain onboarding path — the onboarding page does not send the person back to the setup page', () => {
+    expect(APP_FIRST_RUN_PATH).toBe('/onboarding');
+    expect(APP_FIRST_RUN_PATH).not.toContain('?');
+    expect(desktopOnboardingNext(null)).toBeNull(); // onboarding/page.tsx redirects only when `next` is the setup path
+    expect(desktopOnboardingNext(undefined)).toBeNull();
+  });
+
+  it('/onboarding is NOT under the (authenticated) layout that keeps an organization-less person on the setup page (reverted — the page moved under it → the person is held there and the two push each other)', () => {
+    const app = resolve(__dirname, '../../app');
+    expect(existsSync(resolve(app, 'onboarding/page.tsx'))).toBe(true);
+    expect(existsSync(resolve(app, '(authenticated)/onboarding'))).toBe(false);
+    // …and the layout holds only the setup page itself: /onboarding is not «the setup page»
+    expect(staysForNewOrgSetup(APP_FIRST_RUN_PATH)).toBe(false);
   });
 });
