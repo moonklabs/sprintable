@@ -338,7 +338,7 @@ async def test_an_agent_without_the_project_is_refused_and_nothing_is_kept():
         async with _client_for(app) as c:
             resp = await c.delete(f"/api/v2/stories/{d['story_id']}")
         # an agent that is in no project of the org is not even resolvable (400 «team member not found», as before this story); one that is in ANOTHER project gets 403 from the access check
-        assert resp.status_code in (400, 403), resp.text
+        assert resp.status_code in (400, 403, 404), resp.text
         assert await _requests(Session, d["org_id"]) == []
     finally:
         app.dependency_overrides.clear()

@@ -182,17 +182,16 @@ async def request_approval(
     target_label: str,
     locale: str | None = None,
 ) -> JSONResponse:
-    """called by a route handler in place of `403` when the caller is an agent. The agent must be able to see the project (the same check a person's call makes), else 403 like
+    """called by a route handler in place of `403` when the caller is an agent. The agent must be able to see the project (the same check a person's call makes), else the app's one 404 like
     before. Returns the `202` the agent is given."""
     from app.services.agent_onboarding_config import resolve_locale_from_request
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
 
     locale = locale or resolve_locale_from_request(None, request.headers.get("accept-language"))
     spec = SPECS.get(action_key)
     if spec is None:
         raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_NOT_APPROVABLE", "message": "AGENT_ACTION_NOT_APPROVABLE"})
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
+    await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id)  # the app's one judgement (404 — a project the agent cannot see is not told apart from one that is not there)
 
     snap = await build_snapshot(request, org_id=org_id, project_id=project_id)
     if not snapshot_is_sound(action_key, snap):
