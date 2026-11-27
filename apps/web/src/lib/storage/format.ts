@@ -80,8 +80,12 @@ export function avatarColor(isAgent: boolean): string {
 
 export function initials(name: string | null | undefined): string {
   // story #4284 — 구성원 이름은 nullable(표시 이름 없는 휴먼) — 빈 이름과 같게 «?»(문자열만 받는 자리용 · 화면 아바타는 사람 아이콘을 쓴다).
-  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
+  const words = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  // story 5032 (C2 · PO 11-27, the second look at 390): a name that starts with a mark — «[4846 실측] …», «(내) …», «·x» — drew «[» as its letter. The letter comes from the first LETTER or digit: leading punctuation is skipped
+  // (an emoji is not punctuation — story 4794 keeps it), a word that is only punctuation is left out, and a name made only of punctuation keeps its first character as before.
+  const words2 = words.map((w) => w.replace(/^[\p{P}]+/u, '')).filter(Boolean);
+  const parts = words2.length > 0 ? words2 : [words[0] ?? ''];
   const first = parts[0] ?? '';
   const isLatin = /[a-zA-Z]/.test(first);
   if (parts.length === 1) {
