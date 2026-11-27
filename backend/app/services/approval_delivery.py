@@ -113,7 +113,8 @@ async def prepare_card_rooms(
     """get-or-create the DM of the requester with each approver (the loop that writes the cards finds them again), then lock them all in room-id order — see `lock_rooms_in_id_order`.
     A DM that cannot be made here is left to the loop, which reports it the way it always did."""
     room_ids: list[uuid.UUID] = []
-    for approver_id in approver_ids:
+    # in approver-id order, so two fan-outs that make the SAME missing DMs make them in the same order (a unique-key wait between two transactions creating one DM each must not cross)
+    for approver_id in sorted(set(approver_ids), key=str):
         try:
             async with db.begin_nested():
                 conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=requester_id, approver_id=approver_id)

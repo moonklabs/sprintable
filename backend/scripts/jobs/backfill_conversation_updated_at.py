@@ -8,6 +8,9 @@ rooms, each its own short transaction, and can be run (or re-run) when the table
 Rules (the same as the trigger): a room's time only ever goes UP (a room already at or after its last word is left alone); a word timestamped in the future counts as «now»; a TOMBSTONED message (deleted_at set) is not
 activity — the list preview skips it too, so counting it would lift a room whose preview then reads empty.
 
+Races, on purpose left as they are: a room is never lowered, so a word deleted in the instant between a chunk reading it and the delete committing can leave that room up by that word's time (a room that is up a little is harmless;
+one that is down is not); a room created after the job passed its id is not visited — the trigger keeps every room that gets a message from then on, which is all such a room can need.
+
 Index note: `(conversation_id, created_at)` over ALL messages makes each chunk an index range read; without it the chunk reads the room's messages through `(conversation_id)`. On a big table build it by hand first
 (`CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_conversation_messages_conv_created_all ON conversation_messages (conversation_id, created_at)`) — the repository builds big-table indexes by hand, not in a migration.
 
