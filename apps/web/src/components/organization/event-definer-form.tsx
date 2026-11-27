@@ -211,7 +211,7 @@ function RadioRow({ selected, onSelect, title, desc }: { selected: boolean; onSe
       role="radio"
       aria-checked={selected}
       onClick={onSelect}
-      className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-ds-action-soft' : 'border-border'}`}
+      className={`mb-1.5 flex w-full items-start gap-2 rounded-lg border p-2.5 text-left ${selected ? 'border-primary bg-ds-surface-sunk' : 'border-border'}`}
     >
       <span className={`mt-0.5 size-4 shrink-0 rounded-full border-2 ${selected ? 'border-primary bg-primary' : 'border-border'}`} />
       <div>

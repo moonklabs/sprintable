@@ -43,7 +43,7 @@ export function FolderTraceCard({ trace, runtimeName, agents, onRecruit, onStart
 
   if (agents.length > 0) {
     return (
-      <section aria-labelledby={titleId} className="space-y-2 rounded-xl border border-ds-line-control bg-ds-action-soft p-3" data-testid="folder-agent-card">
+      <section aria-labelledby={titleId} className="space-y-2 rounded-xl border border-ds-line-control bg-ds-surface-sunk p-3" data-testid="folder-agent-card">
         <p id={titleId} className="text-sm font-medium break-keep">{t('folderAgentTitle')}</p>
         <p className="text-xs text-muted-foreground break-keep">{t('folderAgentBody')}</p>
         <ul className="space-y-2">
@@ -66,7 +66,7 @@ export function FolderTraceCard({ trace, runtimeName, agents, onRecruit, onStart
   }
 
   return (
-    <section aria-labelledby={titleId} className="space-y-2 rounded-xl border border-ds-line-control bg-ds-action-soft p-3" data-testid="folder-trace-card">
+    <section aria-labelledby={titleId} className="space-y-2 rounded-xl border border-ds-line-control bg-ds-surface-sunk p-3" data-testid="folder-trace-card">
       <p id={titleId} className="text-sm font-medium break-keep">{t('folderTraceTitle', { file: trace!.file })}</p>
       <p className="text-xs text-muted-foreground break-keep">{t('folderTraceBody', { runtime: runtimeName, file: trace!.file })}</p>
       <Button type="button" variant="hero" className="whitespace-nowrap" onClick={onRecruit} data-testid="folder-trace-recruit">

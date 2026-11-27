@@ -121,7 +121,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
   };
 
   return (
-    <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-ds-line-control bg-ds-action-soft px-2.5 py-1.5 text-xs text-foreground">
+    <div className="mt-1 flex items-center gap-2 rounded-md border border-dashed border-ds-line-control bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-foreground">
       <ArrowUpCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
       <span className="flex-1">{t(suggestion.label)}</span>
       {state.status === 'failed' && <span className="text-destructive">{t('intentSuggestionFailed')}</span>}

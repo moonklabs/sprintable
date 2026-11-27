@@ -1599,7 +1599,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedSprintId
-                      ? 'border-ds-line-control bg-ds-action-soft text-primary'
+                      ? 'border-ds-line-control bg-ds-surface-sunk text-primary'
                       : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
@@ -1658,7 +1658,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedEpicId
-                      ? 'border-ds-line-control bg-ds-action-soft text-primary'
+                      ? 'border-ds-line-control bg-ds-surface-sunk text-primary'
                       : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
@@ -1717,7 +1717,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   variant="ghost"
                   className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedAssigneeId
-                      ? 'border-ds-line-control bg-ds-action-soft text-primary'
+                      ? 'border-ds-line-control bg-ds-surface-sunk text-primary'
                       : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                   }`}
                 >
@@ -1803,7 +1803,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     variant="ghost"
                     className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                       selectedLabelIds.length > 0
-                        ? 'border-ds-line-control bg-ds-action-soft text-primary'
+                        ? 'border-ds-line-control bg-ds-surface-sunk text-primary'
                         : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
                     }`}
                   >

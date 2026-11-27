@@ -245,7 +245,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') onNavigate?.(doc.slug);
           }}
-          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 transition-colors hover:border-ds-line-control hover:bg-ds-action-soft"
+          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 transition-colors hover:border-ds-line-control hover:bg-ds-surface-sunk"
         >
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>

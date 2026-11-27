@@ -90,7 +90,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
     <NodeViewWrapper as="div" className="my-4 not-prose" contentEditable={false}>
       {/* URL editor — visible when block is selected */}
       {selected && (
-        <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-ds-action-soft px-3 py-2">
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-ds-surface-sunk px-3 py-2">
           <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}

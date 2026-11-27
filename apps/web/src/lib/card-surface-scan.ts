@@ -74,6 +74,8 @@ export function countSurfacelessBoxes(): number {
   }
 
   let count = 0;
+  // 진단용: 잡힌 상자의 «태그.클래스 w×h»를 window에 남긴다(e2e가 실패 메시지에 붙임 — CI에서 어느 자리인지 바로 보이게. 판정에는 안 쓰임).
+  const found: string[] = [];
   for (const el of Array.from(document.querySelectorAll('*'))) {
     if (!hasNoOwnSurface(el)) continue;
     if (!hasFullBorder(el)) continue;
@@ -81,6 +83,9 @@ export function countSurfacelessBoxes(): number {
     if (!isContainer(el)) continue;
     if (!nearestOpaqueAncestorIsBody(el)) continue;
     count += 1;
+    const r = el.getBoundingClientRect();
+    found.push(`${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').slice(0, 160)} ${Math.round(r.width)}x${Math.round(r.height)}`);
   }
+  (window as unknown as { __surfacelessBoxes?: string[] }).__surfacelessBoxes = found;
   return count;
 }

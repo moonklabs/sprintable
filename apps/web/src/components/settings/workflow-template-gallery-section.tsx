@@ -273,7 +273,7 @@ export function WorkflowTemplateGallerySection({
               disabled={loadingBindings}
               // story #3010(로드맵 P3, L1) — 선택 가능한 인라인 카드는 --elev-card.
               className={`rounded-lg border p-4 text-left transition hover:border-ds-action hover:shadow-[var(--elev-card)] disabled:opacity-60 ${
-                selected?.id === def.id ? 'border-primary bg-ds-action-soft' : 'border-border bg-background'
+                selected?.id === def.id ? 'border-primary bg-ds-surface-sunk' : 'border-border bg-background'
               }`}
             >
               <div className="flex items-start justify-between gap-2">

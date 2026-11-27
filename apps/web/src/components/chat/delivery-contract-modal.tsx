@@ -191,7 +191,7 @@ export function DeliveryContractModal({
                       aria-pressed={level === l}
                       className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition ${
                         level === l
-                          ? 'border-primary bg-ds-action-soft text-primary'
+                          ? 'border-primary bg-ds-surface-sunk text-primary'
                           : 'border-border text-muted-foreground hover:bg-muted'
                       }`}
                     >

@@ -69,7 +69,7 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
 
       {/* AC7: 스트리밍 텍스트 프리뷰 */}
       {isLoading && streamText && (
-        <div className="rounded-lg border bg-ds-action-soft p-3">
+        <div className="rounded-lg border bg-ds-surface-sunk p-3">
           <div className="mb-1 flex items-center gap-2">
             <span className="h-2 w-2 animate-pulse rounded-full bg-ds-action" />
             <span className="text-xs font-medium text-primary">{t('aiSummarizing')}</span>

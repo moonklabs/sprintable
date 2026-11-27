@@ -808,7 +808,7 @@ export function ToolbarButton({
         disabled
           ? 'cursor-not-allowed border-border bg-card text-muted-foreground opacity-50'
           : active
-            ? 'border-ds-action bg-ds-action-soft text-primary'
+            ? 'border-ds-action bg-ds-surface-sunk text-primary'
             : 'border-border bg-card text-foreground hover:border-ds-action hover:text-primary'
       }`}
     >

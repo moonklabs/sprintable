@@ -64,7 +64,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
           onClick={() => switchTo(2)}
           className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-editorial-meta transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 2
-              ? 'border-ds-line-control bg-ds-action-soft text-brand-text'
+              ? 'border-ds-line-control bg-ds-surface-sunk text-brand-text'
               : 'border-border text-muted-foreground hover:border-ds-line-control hover:text-foreground'
           }`}
         >
@@ -76,7 +76,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
           onClick={() => switchTo(3)}
           className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-editorial-meta transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 3
-              ? 'border-ds-line-control bg-ds-action-soft text-brand-text'
+              ? 'border-ds-line-control bg-ds-surface-sunk text-brand-text'
               : 'border-border text-muted-foreground hover:border-ds-line-control hover:text-foreground'
           }`}
         >

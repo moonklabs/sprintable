@@ -487,7 +487,7 @@ const SlashMenu = forwardRef<
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => command(item)}
       >
-        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border ${isActive ? 'border-ds-line-control bg-ds-action-soft' : 'bg-ds-surface-sunk'}`}>
+        <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border ${isActive ? 'border-ds-line-control bg-ds-surface-sunk' : 'bg-ds-surface-sunk'}`}>
           <Icon className={`size-3.5 ${isActive ? 'text-brand-text' : 'text-muted-foreground'}`} />
         </span>
         <span className="flex min-w-0 flex-col">

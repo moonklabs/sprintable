@@ -331,7 +331,7 @@ export function HypothesisDeclarationCard({
                   })}
                   className={cn(
                     'w-full rounded-lg border px-2.5 py-1.5 text-left text-xs transition',
-                    value.linkedHypothesisId === h.id ? 'border-primary bg-ds-action-soft text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
+                    value.linkedHypothesisId === h.id ? 'border-primary bg-ds-surface-sunk text-foreground' : 'border-border text-muted-foreground hover:border-ds-line-control',
                   )}
                 >
                   {h.statement}
@@ -340,7 +340,7 @@ export function HypothesisDeclarationCard({
             </div>
           )}
           {value.linkedPreview ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-ds-line-control bg-ds-action-soft p-2 text-editorial-meta">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-ds-line-control bg-ds-surface-sunk p-2 text-editorial-meta">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
               <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>

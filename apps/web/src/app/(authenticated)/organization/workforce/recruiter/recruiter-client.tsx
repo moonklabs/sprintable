@@ -1144,7 +1144,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 aria-pressed={selected}
                 className={cn(
                   'rounded-md border px-4 py-4 text-left transition',
-                  selected ? 'border-ds-line-control bg-ds-action-soft' : 'border-border bg-ds-background hover:bg-muted',
+                  selected ? 'border-ds-line-control bg-ds-surface-sunk' : 'border-border bg-ds-background hover:bg-muted',
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1179,7 +1179,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   aria-pressed={selected}
                   className={cn(
                     'rounded-md border px-4 py-4 text-left transition',
-                    selected ? 'border-ds-line-control bg-ds-action-soft' : 'border-border bg-ds-background hover:bg-muted',
+                    selected ? 'border-ds-line-control bg-ds-surface-sunk' : 'border-border bg-ds-background hover:bg-muted',
                   )}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -1337,7 +1337,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
                 className={cn(
                   'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-2.5 text-left text-sm transition-colors',
-                  equipSkip ? 'border-ds-action bg-ds-action-soft ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
+                  equipSkip ? 'border-ds-action bg-ds-surface-sunk ring-1 ring-ds-line-control' : 'border-border hover:border-ds-line-control',
                 )}
               >
                 <div className="min-w-0">
