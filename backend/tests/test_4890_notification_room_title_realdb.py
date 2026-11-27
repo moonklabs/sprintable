@@ -128,7 +128,8 @@ async def test_a_dm_has_no_room_name_and_a_room_without_a_title_stays_empty():
 
 
 async def test_a_person_who_can_no_longer_read_the_room_gets_no_room_name_and_the_name_is_nowhere_in_the_answer():
-    """⭐the leak test: the row stays (the bell says that something came), the words are withheld by the room gate, and the room's NAME is withheld with them."""
+    """⭐the leak test: the words and the room's NAME reach nobody who can no longer read the room. (Before story 5049 the row stayed in the bell with its words and name taken out — «the bell says that something came»;
+    since 5049 the bell no longer lists a room's words-line for someone who cannot read the room at all, so the line is simply not there. The leak assertion — no name, no words anywhere in the answer — is the same.)"""
     from sqlalchemy import delete
 
     from app.models.conversation import ConversationParticipant
@@ -143,7 +144,7 @@ async def test_a_person_who_can_no_longer_read_the_room_gets_no_room_name_and_th
             await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == conv_id, ConversationParticipant.member_id == reader))
             await s.commit()
         rows, text = await _bell(Session, org_id, reader_user)
-        assert _chat(rows), rows  # the line is still there
+        assert not _chat(rows), rows  # story 5049: the line is not listed for someone who cannot read the room (it used to stay, with the words and the name taken out)
         assert all(x["target_conversation_title"] is None for x in rows), rows
         assert TITLE not in text and "ac-secret-words-4890" not in text, text
     finally:
