@@ -12,7 +12,7 @@
 #
 # 사용법:
 #   mirror_sibling_run_conclusion.sh --job-name "<잡 표시 이름>" --head-sha <sha> \
-#     --this-run-id <이 run의 id> [--poll-interval-seconds N(기본 15)] \
+#     --this-run-id <이 run의 id> [--poll-interval-seconds N(기본 30)] \
 #     [--max-wait-seconds N(기본 1200)]
 #
 # 종료 코드: 0 = 미러 대상 잡의 결론이 success. 1 = 그 외 전부(실패·취소·진짜 run을
@@ -25,7 +25,7 @@ set -euo pipefail
 JOB_NAME=""
 HEAD_SHA=""
 THIS_RUN_ID=""
-POLL_INTERVAL_SECONDS=15
+POLL_INTERVAL_SECONDS=30
 MAX_WAIT_SECONDS=1200
 
 while [ $# -gt 0 ]; do
@@ -58,45 +58,73 @@ fi
 # 재실행으로 바뀐 결론을 이미 완주해 리포트를 마친 옛 edited-only run(run B)은 자동으로
 # 다시 안 돈다 — run A를 재실행했으면 required 체크 최신화를 위해 run B도 수동으로 같이
 # 재실행할 것(운영 규칙, PR #4482 본문 참고).
-find_sibling_run_id() {
+# story 5048 후속(CI 미러 «형제 대기» 고침 · PO 11-27 — 5991·5990에서 edited-only 실행의 미러가 failure로 닫혀 병합 관문을 막음):
+#  ① «가장 오래된 형제 하나»를 시작 때 못 박지 않는다 — 그 run이 대상 잡을 아예 안 돌리는 run(5991의 실측: 형제 45931220688에는 그 이름의 잡이 없고 진짜 잡은 다른 형제에 있었다)이면 285초를 «안 보임»으로 기다리다 끝났다.
+#     이제 매 폴링마다 같은 head_sha의 형제 run들을 다시 읽어, 대상 잡이 «보이는» 가장 오래된 형제를 골라 그 잡의 결론을 미러한다(run_id 최소 우선 전제는 그대로).
+#  ② API 일시 오류(비-JSON · 빈 응답 · 한도 403 · 네트워크)는 `set -e`로 스크립트를 죽이지 않고 «아직 안 보임(레이스)»처럼 다음 폴링에서 다시 본다.
+#     fail-closed는 그대로 — 확정 결론이 success가 아니거나 max-wait를 넘기면 exit 1. 「형제가 아직 도는 중」은 실패가 아니라 대기다.
+#  ④ 폴링 기본 간격 15 → 30초(PO 11-27): GH_TOKEN=GITHUB_TOKEN은 저장소마다 시간당 1000(엔터프라이즈 15000)을 그 저장소의 모든 실행이 나눠 쓴다 — 미러 하나가 폴링당 1+형제 수 호출이라 15초면 최악 ~900~1200으로 혼자 통을 비울 수 있었다. 부르는 곳(ci.yml 3곳)은 간격을 안 넘겨 기본값을 따라온다.
+#  ③ (codex 1회) «읽기 오류»와 «그 이름의 잡이 없음»을 구별한다 — 더 오래된 형제를 읽지 못한 폴링에서는 더 새 형제의 결론을 믿지 않고 다음 폴링을 기다린다(오래된 형제가 진짜 잡이면 그 결론이 우선).
+find_sibling_run_ids() {
+  # 이 run 자신을 뺀 같은 head_sha의 CI run id들(오름차순). API 오류면 빈 문자열(호출부가 레이스로 다룸).
   gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=50" \
-    --jq "[.workflow_runs[] | select(.name == \"CI\") | select(.id != ${THIS_RUN_ID})] | sort_by(.id) | .[0].id // empty"
+    --jq "[.workflow_runs[] | select(.name == \"CI\") | select(.id != ${THIS_RUN_ID}) | .id] | sort | .[]" 2>/dev/null || true
 }
 
-# 대상 run의 jobs 목록에서 이름이 정확히 일치하는 잡의 {status, conclusion}을 한 줄
-# JSON으로 낸다 — 아직 그 이름의 잡이 안 보이면(run은 있으나 job 목록이 아직 안 채워진
-# 레이스) 빈 문자열.
+# 대상 run의 jobs 목록에서 이름이 정확히 일치하는 잡의 {status, conclusion}을 한 줄 JSON으로 낸다.
+#  · 잡이 «안 보임»(응답은 정상인데 그 이름이 없음 — 이 run은 그 잡을 안 돌림 · 레이스) → 빈 문자열
+#  · API 오류(비-JSON · 한도 403 · 네트워크) → 정확히 `ERR`  ← 「안 보임」과 구별한다(codex 지적: 가장 오래된 형제의 오류를 «없음»으로 읽어
+#    더 새 형제의 success를 미러하면, 진짜 잡이 빨간데도 초록으로 닫히는 fail-open이 됨).
 find_job_state() {
-  local run_id="$1"
-  gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" \
-    --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | {status, conclusion}"
+  local run_id="$1" out
+  if ! out="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+    --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | {status, conclusion}" 2>/dev/null)"; then
+    echo "ERR"
+    return 0
+  fi
+  echo "$out"
 }
 
 echo "story #4099 — edited-only run(${THIS_RUN_ID}) — sha=${HEAD_SHA}의 진짜 run을 찾는 중..."
-SIBLING_RUN_ID="$(find_sibling_run_id)"
-if [ -z "$SIBLING_RUN_ID" ]; then
+SIBLINGS="$(find_sibling_run_ids)"
+if [ -z "$SIBLINGS" ]; then
   echo "::error::같은 head_sha(${HEAD_SHA})의 진짜(non-edited-only) run을 못 찾았습니다 — fail-closed."
   exit 1
 fi
-echo "진짜 run = ${SIBLING_RUN_ID} — 그 run의 '${JOB_NAME}' 잡 결론을 기다리는 중(최대 ${MAX_WAIT_SECONDS}초)..."
+echo "형제 run 후보: $(echo "$SIBLINGS" | tr '\n' ' ')— '${JOB_NAME}' 잡이 보이는 가장 오래된 run의 결론을 기다립니다(최대 ${MAX_WAIT_SECONDS}초)."
 
 ELAPSED=0
 while true; do
-  STATE_JSON="$(find_job_state "$SIBLING_RUN_ID")"
+  STATE_JSON=""
+  PICKED=""
+  # 매 폴링마다 형제 목록을 다시 읽는다(새 run이 생겼거나 앞선 읽기가 API 오류였을 수 있음).
+  CURRENT="$(find_sibling_run_ids)"
+  [ -n "$CURRENT" ] && SIBLINGS="$CURRENT"
+  UNSURE=""
+  for RID in $SIBLINGS; do
+    S="$(find_job_state "$RID")"
+    if [ "$S" = "ERR" ]; then
+      # 이 형제를 읽지 못했다 — 더 오래된 형제의 «모름»을 건너뛰고 더 새 형제의 결론을 믿으면 안 된다. 다음 폴링에서 다시 본다.
+      UNSURE="$RID"; break
+    fi
+    if [ -n "$S" ]; then STATE_JSON="$S"; PICKED="$RID"; break; fi
+  done
   if [ -n "$STATE_JSON" ]; then
-    STATUS="$(echo "$STATE_JSON" | jq -r '.status')"
-    CONCLUSION="$(echo "$STATE_JSON" | jq -r '.conclusion // empty')"
+    STATUS="$(echo "$STATE_JSON" | jq -r '.status' 2>/dev/null || true)"
+    CONCLUSION="$(echo "$STATE_JSON" | jq -r '.conclusion // empty' 2>/dev/null || true)"
     if [ "$STATUS" = "completed" ]; then
-      echo "run ${SIBLING_RUN_ID}의 '${JOB_NAME}' 완주 — conclusion=${CONCLUSION}"
+      echo "run ${PICKED}의 '${JOB_NAME}' 완주 — conclusion=${CONCLUSION}"
       if [ "$CONCLUSION" = "success" ]; then
         exit 0
       fi
       echo "::error::원본 잡 결론이 success가 아닙니다(${CONCLUSION}) — 미러도 실패로 닫습니다."
       exit 1
     fi
-    echo "아직 진행 중(status=${STATUS}) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
+    echo "run ${PICKED}: 아직 진행 중(status=${STATUS:-?}) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
+  elif [ -n "$UNSURE" ]; then
+    echo "run ${UNSURE}의 잡 목록을 못 읽음(API 일시 오류) — 더 새 형제로 넘어가지 않고 ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
   else
-    echo "run ${SIBLING_RUN_ID}에 '${JOB_NAME}' 잡이 아직 안 보임(레이스 가능) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
+    echo "형제 run 어디에도 '${JOB_NAME}' 잡이 아직 안 보임(레이스 · API 일시 오류 포함) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
   fi
 
   if [ "$ELAPSED" -ge "$MAX_WAIT_SECONDS" ]; then
