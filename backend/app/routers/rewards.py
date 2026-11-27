@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -84,10 +85,15 @@ async def grant_reward(
     _caller = await resolve_member(auth, org_id, repo.session)
     if _caller.type != "human":
         from app.services import agent_action
+        from app.services.member_resolver import canonicalize_member_id, lookup_members_by_ids
 
+        # the card must name WHO gets it (the stored call pays the stored recipient) and keep the agent's free text visibly apart from the server's words (quoted, cut)
+        _to = await canonicalize_member_id(body.member_id, repo.session)
+        _names = await lookup_members_by_ids({_to}, repo.session)
+        _who = (_names[_to].name if _to in _names and _names[_to].name else str(_to)[:8])
         return await agent_action.request_approval(
             request, repo.session, auth=auth, agent=_caller, org_id=org_id, project_id=body.project_id, action_key="reward.give",
-            target_label=f"{body.amount} · {body.reason}",
+            target_label=f"{_who} · {body.amount:g} · “{(body.reason or '').strip()[:80]}”",
         )
     if not await _is_org_admin(repo.session, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
@@ -97,7 +103,16 @@ async def grant_reward(
     member_id = await canonicalize_member_id(body.member_id, repo.session)
     caller_member = _caller
     granted_by = await canonicalize_member_id(caller_member.id, repo.session)  # S20: caller에서 서버-파생(body 무시)
-    entry = await repo.grant(
+    # story 5041 — a grant that answers an agent's card is made ONCE: the replay carries the request id (set in this process only), the ledger keeps it, and a unique index refuses a second row —
+    # so «pressed, never finished, pressed again» cannot pay twice (the same row comes back)
+    from app.services import agent_action as _aa
+
+    _rid = _aa.replaying_request_id()
+    if _rid is not None:
+        _done = await repo.find_by_agent_action_request(_rid)
+        if _done is not None:
+            return RewardLedgerResponse.model_validate(_done)
+    _grant_kwargs = dict(
         project_id=body.project_id,
         member_id=member_id,
         amount=body.amount,
@@ -106,6 +121,15 @@ async def grant_reward(
         reference_type=body.reference_type,
         reference_id=body.reference_id,
     )
+    if _rid is None:
+        entry = await repo.grant(**_grant_kwargs)  # an ordinary grant: exactly as before
+    else:
+        try:
+            async with repo.session.begin_nested():
+                entry = await repo.grant(**_grant_kwargs, agent_action_request_id=_rid)
+        except IntegrityError:
+            # two presses raced past the look-up: the database kept one row — answer with it
+            entry = await repo.find_by_agent_action_request(_rid)
     if entry is None:
         raise HTTPException(status_code=404, detail="Member not found in project")
     return RewardLedgerResponse.model_validate(entry)

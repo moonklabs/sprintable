@@ -116,6 +116,17 @@ describe('an open ask', () => {
   });
 });
 
+describe('a press that did not finish', () => {
+  it('shows «끝나지 않았어요», says pressing again continues it, and keeps the buttons', async () => {
+    stub({ read: () => json(200, view({ state: 'retry', execution: { state: 'failed', reason: 'unfinished' } })) }); await show();
+    expect(container.textContent).toContain('끝나지 않았어요');
+    expect(container.textContent).toContain('같은 요청은 두 번 처리되지 않아요');
+    expect(btn('승인하기')).toBeTruthy(); expect(btn('거절하기')).toBeTruthy();
+    expect(container.textContent).not.toContain('24시간 뒤에 거절돼요');
+    expect(writes()).toEqual([]);
+  });
+});
+
 describe('a settled ask (a second person opens it later)', () => {
   it.each([
     ['rejected', { state: 'rejected', decided_by: { id: 'p1', name: '윤재' } }, '윤재님이 거절했어요'],

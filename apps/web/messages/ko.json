@@ -6250,6 +6250,8 @@
     "agentActionStateExecuted": "처리했어요",
     "agentActionStateFailed": "처리하지 못했어요",
     "agentActionStateChanged": "그새 바뀌었어요",
+    "agentActionStateRetry": "끝나지 않았어요",
+    "agentActionRetryLine": "앞서 누른 처리가 끝나지 않았어요. 다시 누르면 이어서 처리해요. 같은 요청은 두 번 처리되지 않아요",
     "agentActionStateRejected": "거절했어요",
     "agentActionStateExpired": "기한이 지났어요",
     "agentActionByApproved": "{name}님이 승인해서 처리했어요",

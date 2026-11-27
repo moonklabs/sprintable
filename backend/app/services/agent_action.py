@@ -19,6 +19,7 @@ What this module keeps true:
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import json
 import logging
@@ -45,6 +46,15 @@ EXPIRES_AFTER = timedelta(hours=24)
 MAX_OPEN_PER_AGENT_PER_HOUR = 20
 MAX_CARD_RECIPIENTS = 3
 SNAPSHOT_BODY_LIMIT = 64 * 1024
+RUNNING_STALE_AFTER = timedelta(minutes=5)  # a press whose execution has not finished by then is taken as not finished (the process may have died) — it can be pressed again; the replay is idempotent
+
+# The id of the request whose stored call is being replayed RIGHT NOW, set only by `execute_as_presser` in this process (a context variable — no client can set it: it is not read from any header). The one
+# handler that must not run twice for one request (a reward) reads it and leaves the request id in its own table, where the database refuses a second row.
+_REPLAYING: contextvars.ContextVar[uuid.UUID | None] = contextvars.ContextVar("agent_action_replaying", default=None)
+
+
+def replaying_request_id() -> uuid.UUID | None:
+    return _REPLAYING.get()
 
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
@@ -56,10 +66,11 @@ class ActionSpec:
     method: str
     path_re: re.Pattern[str]
     reversible: str        # 'no' | 'partly'
+    takes_body: bool = False  # only an action whose endpoint reads a body (a reward) may carry one; for the rest the stored call has NO query and NO body — nothing rides along that the card does not show
 
 
-def _spec(key: str, what: str, method: str, pattern: str, reversible: str) -> ActionSpec:
-    return ActionSpec(key=key, what_key=f"agent_action.what.{what}", method=method, path_re=re.compile(pattern), reversible=reversible)
+def _spec(key: str, what: str, method: str, pattern: str, reversible: str, takes_body: bool = False) -> ActionSpec:
+    return ActionSpec(key=key, what_key=f"agent_action.what.{what}", method=method, path_re=re.compile(pattern), reversible=reversible, takes_body=takes_body)
 
 
 # The registry — one place that says which calls an agent may ASK for (every one of them is a call a person may make on screen). The route handlers name their key; nothing else
@@ -72,7 +83,7 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("sprint.delete", "sprint_delete", "DELETE", rf"^/api/v2/sprints/{_UUID}$", "no"),
     _spec("sprint.close", "sprint_close", "POST", rf"^/api/v2/sprints/{_UUID}/close$", "partly"),
     _spec("meeting.delete", "meeting_delete", "DELETE", rf"^/api/v2/meetings/{_UUID}$", "no"),
-    _spec("reward.give", "reward_give", "POST", r"^/api/v2/rewards$", "no"),
+    _spec("reward.give", "reward_give", "POST", r"^/api/v2/rewards$", "no", takes_body=True),
     _spec("spec_pin.delete", "spec_pin_delete", "DELETE", rf"^/api/v2/visual-artifacts/{_UUID}/pins/{_UUID}$", "no"),
 )}
 
@@ -107,6 +118,7 @@ def snapshot_is_sound(action_key: str, snap: dict[str, Any]) -> bool:
     return (
         snap.get("method") == spec.method
         and isinstance(snap.get("path"), str) and spec.path_re.fullmatch(snap["path"]) is not None
+        and (spec.takes_body or (not snap.get("query") and not snap.get("body_b64")))
         and snap.get("sha256") == snapshot_hash(snap)
     )
 
@@ -149,18 +161,17 @@ async def _post_card(session: AsyncSession, *, org_id: uuid.UUID, project_id: uu
     try:
         async with session.begin_nested():
             conv = room if room is not None else await _get_or_create_approval_dm(session, org_id=org_id, project_id=project_id, requester_id=agent.id, approver_id=approver_id)
-            meta: dict[str, Any] = {
-                "agent_action": {"request_id": str(req.id), "action_key": req.hitl_metadata.get("action_key")},
-                "card": {"kind": "agent_action", "ref": str(req.id)},
-            }
-            if approver_id is not None:
-                meta["activation"] = {"audience": [str(approver_id)], "kind": "request", "expects_response": True}
             msg = ConversationMessage(
                 conversation_id=conv.id,
                 sender_id=agent.id,
                 content=text_line,
                 mentioned_ids=[approver_id] if approver_id is not None else [],
-                msg_metadata=meta,
+                # a literal the code builds here (the metadata ratchet: a new line never takes its metadata from another row or a variable)
+                msg_metadata={
+                    "agent_action": {"request_id": str(req.id), "action_key": req.hitl_metadata.get("action_key")},
+                    "card": {"kind": "agent_action", "ref": str(req.id)},
+                    **({"activation": {"audience": [str(approver_id)], "kind": "request", "expects_response": True}} if approver_id is not None else {}),
+                },
             )
             session.add(msg)
             await session.flush()
@@ -236,7 +247,7 @@ async def request_approval(
     org_id: uuid.UUID,
     project_id: uuid.UUID,
     action_key: str,
-    target_label: str,
+    target_label: Any,
     locale: str | None = None,
 ) -> JSONResponse:
     """called by a route handler in place of `403` when the caller is an agent. The agent must be able to see the project (the same check a person's call makes), else the app's one 404 like
@@ -251,9 +262,15 @@ async def request_approval(
     await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id)  # the app's one judgement (404 — a project the agent cannot see is not told apart from one that is not there)
 
     snap = await build_snapshot(request, org_id=org_id, project_id=project_id)
+    if not spec.takes_body:
+        # the endpoint ignores a query / body on these — and the card shows none: drop them, so what is stored is exactly what the card names
+        snap = {**snap, "query": "", "body_b64": "", "content_type": ""}
+        snap["sha256"] = snapshot_hash(snap)
     if not snapshot_is_sound(action_key, snap):
         raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_NOT_APPROVABLE", "message": "AGENT_ACTION_NOT_APPROVABLE"})
 
+    if callable(target_label):
+        target_label = target_label(locale)  # a label that needs the catalogue (a count · a name) is built here, in the request's language
     now = datetime.now(timezone.utc)
     # one asker at a time: «look for the same open ask, count the hour, insert» is check-then-insert — two retries at once would both see nothing and make two cards (a person pressing both = the
     # reward given twice) and the hourly ceiling would be walked past. The lock is per agent and lives to the end of this request's transaction.
@@ -338,9 +355,12 @@ async def _claim(session: AsyncSession, *, request_id: uuid.UUID, org_id: uuid.U
         text(
             "UPDATE agent_hitl_requests SET status = 'approved', responded_by = :who, responded_at = now(), "
             "metadata = jsonb_set(metadata, '{execution}', CAST(:ex AS jsonb), true) "
-            "WHERE id = :id AND org_id = :org AND request_type = :rt AND status = 'pending' AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())"
+            "WHERE id = :id AND org_id = :org AND request_type = :rt AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now()) AND ("
+            " status = 'pending' OR "
+            # a claim that never finished (the process died mid-call): taken over ONCE, atomically — and the replay carries the request id as its idempotency key, so nothing is done twice
+            " (status = 'approved' AND metadata->'execution'->>'state' = 'running' AND responded_at < now() - make_interval(secs => :stale)))"
         ),
-        {"who": presser_id, "id": request_id, "org": org_id, "rt": REQUEST_TYPE, "ex": json.dumps({"state": "running"})},
+        {"who": presser_id, "id": request_id, "org": org_id, "rt": REQUEST_TYPE, "ex": json.dumps({"state": "running"}), "stale": RUNNING_STALE_AFTER.total_seconds()},
     )
     return (res.rowcount or 0) == 1
 
@@ -375,8 +395,45 @@ async def execute_as_presser(request: Request, snap: dict[str, Any], *, request_
         headers["content-type"] = snap["content_type"]
     url = snap["path"] + (("?" + snap["query"]) if snap.get("query") else "")
     body = base64.b64decode(snap["body_b64"]) if snap.get("body_b64") else None
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url="http://agent-action.internal", timeout=60.0) as client:
-        return await client.request(snap["method"], url, content=body, headers=headers)
+    token = _REPLAYING.set(request_id)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=request.app), base_url="http://agent-action.internal", timeout=60.0) as client:
+            return await client.request(snap["method"], url, content=body, headers=headers)
+    finally:
+        _REPLAYING.reset(token)
+
+
+async def sweep(session: AsyncSession) -> dict[str, int]:
+    """the cron's one pass over this type: (a) a request nobody pressed for 24 h is declined (like a press that finds it expired) and the agent is told; (b) a press that never finished — the process
+    died between the claim and the result — is given back as «did not finish» (the request id is the replay's idempotency key, so pressing again cannot do it twice) and the agent is told.
+    Neither re-runs anything: the stored call needs a person's own credential, and nothing is stored."""
+    expired = (await session.execute(
+        text(
+            "UPDATE agent_hitl_requests SET status = 'rejected', response_text = 'expired', responded_at = now() "
+            "WHERE request_type = :rt AND status = 'pending' AND deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at <= now() RETURNING id"
+        ),
+        {"rt": REQUEST_TYPE},
+    )).scalars().all()
+    stuck = (await session.execute(
+        text(
+            "UPDATE agent_hitl_requests SET status = 'pending', responded_by = NULL, responded_at = NULL, "
+            "metadata = jsonb_set(metadata, '{execution}', CAST(:ex AS jsonb), true) "
+            "WHERE request_type = :rt AND status = 'approved' AND deleted_at IS NULL AND metadata->'execution'->>'state' = 'running' "
+            "AND responded_at < now() - make_interval(secs => :stale) RETURNING id"
+        ),
+        {"rt": REQUEST_TYPE, "stale": RUNNING_STALE_AFTER.total_seconds(), "ex": json.dumps({"state": "failed", "reason": "unfinished", "retry": True})},
+    )).scalars().all()
+    for rid in (*expired, *stuck):
+        req = (await session.execute(select(HitlRequest).where(HitlRequest.id == rid).execution_options(populate_existing=True))).scalar_one_or_none()
+        if req is None:
+            continue
+        from app.models.member import Member
+
+        # the line to the agent is said by the person the card was for (the same DM a press would answer in); an ask that had nobody to go to has nobody to say it — the agent sees it on its next read
+        speaker = (await session.execute(select(Member).where(Member.id == req.requested_for, Member.type == "human"))).scalar_one_or_none() if req.requested_for != req.agent_id else None
+        if speaker is not None:
+            await notify_agent(session, req=req, presser=speaker, kind="expired" if rid in expired else "unfinished")
+    return {"expired": len(expired), "unfinished": len(stuck)}
 
 
 def _reason_of(resp: httpx.Response) -> str:

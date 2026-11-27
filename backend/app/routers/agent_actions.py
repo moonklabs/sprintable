@@ -32,11 +32,22 @@ class DecisionBody(BaseModel):
     decision: Literal["approve", "reject"]
 
 
+def _stale_running(req: HitlRequest) -> bool:
+    """pressed, never finished: `responded_at` is the press — past `RUNNING_STALE_AFTER` the process that was running it is taken as gone"""
+    started = svc._aware(req.responded_at)
+    return req.status == "approved" and ((req.hitl_metadata or {}).get("execution") or {}).get("state") == "running" and started is not None \
+        and started <= datetime.now(timezone.utc) - svc.RUNNING_STALE_AFTER
+
+
 def _state(req: HitlRequest) -> str:
-    """pending | approved(running) | executed | failed | rejected | expired"""
+    """pending | retry (pressed once and it did not finish — pressing again continues it, never doubles it) | approved(running) | executed | failed | rejected | expired"""
     execution = (req.hitl_metadata or {}).get("execution") or {}
+    if _stale_running(req):
+        return "retry"
     if req.status == "pending":
-        return "expired" if svc.is_expired(req) else "pending"
+        if svc.is_expired(req):
+            return "expired"
+        return "retry" if execution.get("reason") == "unfinished" else "pending"
     if req.status == "rejected":
         return "expired" if (req.response_text or "") == "expired" else "rejected"
     if req.status == "approved":
@@ -57,13 +68,17 @@ async def _person(auth: AuthContext, org_id: uuid.UUID, session: AsyncSession):
     return who
 
 
-async def _load(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, request_id: uuid.UUID) -> HitlRequest:
+async def _load(session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, request_id: uuid.UUID, *, agent_member_id: uuid.UUID | None = None) -> HitlRequest:
     req = (await session.execute(
         select(HitlRequest).where(HitlRequest.id == request_id, HitlRequest.org_id == org_id, HitlRequest.request_type == svc.REQUEST_TYPE, HitlRequest.deleted_at.is_(None))
         # the state moves through raw UPDATEs (claim · finish): a copy this session already holds must be re-read, never trusted
         .execution_options(populate_existing=True)
     )).scalar_one_or_none()
-    # not there and not yours look the same — nobody learns which asks exist in a project they cannot see
+    # not there and not yours look the same — nobody learns which asks exist in a project they cannot see. An AGENT may read ITS OWN ask (and no other's)
+    if agent_member_id is not None:
+        if req is None or req.agent_id != agent_member_id:
+            raise HTTPException(status_code=404, detail={"code": "AGENT_ACTION_NOT_FOUND", "message": "AGENT_ACTION_NOT_FOUND"})
+        return req
     if req is None or not await has_project_access(session, uuid.UUID(auth.user_id), req.project_id, org_id):
         raise HTTPException(status_code=404, detail={"code": "AGENT_ACTION_NOT_FOUND", "message": "AGENT_ACTION_NOT_FOUND"})
     return req
@@ -98,6 +113,16 @@ async def get_agent_action(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    meta = auth.claims.get("app_metadata") or {}
+    if meta.get("api_key_id") and not meta.get("human_api_key_id"):
+        # an agent's key: only the answer to its OWN ask, so it can see how it ended (the card is the person's; the decision is never an agent's)
+        try:
+            agent = await resolve_member(auth, org_id, session)
+        except HTTPException:
+            agent = None  # a key that is no agent's (a person's key): not an agent reading its own ask, and no session either
+        if agent is None or agent.type != "agent":
+            raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_PERSON_SESSION_REQUIRED", "message": "AGENT_ACTION_PERSON_SESSION_REQUIRED"})
+        return await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id))
     await _person(auth, org_id, session)
     return await _view(session, await _load(session, auth, org_id, request_id))
 
@@ -142,6 +167,7 @@ async def decide_agent_action(
         return await _view(session, await _load(session, auth, org_id, rid))
 
     # approve ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    was_retry = _state(req) == "retry"  # pressed before and it never finished
     if not svc.snapshot_is_sound(action_key, snap):
         logger.error("agent_action snapshot unsound request=%s action=%s", rid, action_key)
         raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_SNAPSHOT_INVALID", "message": "AGENT_ACTION_SNAPSHOT_INVALID"})
@@ -167,7 +193,9 @@ async def decide_agent_action(
         raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_FORBIDDEN_FOR_APPROVER", "message": "this person may not do it", "reason": svc._reason_of(resp)})
 
     now = datetime.now(timezone.utc).isoformat()
-    if 200 <= resp.status_code < 300:
+    # a delete that finds the thing already gone, on a request that was pressed before and did not finish: the first press did it — that is the result asked for
+    already_done = was_retry and action_key.endswith(".delete") and resp.status_code == 404
+    if 200 <= resp.status_code < 300 or already_done:
         await svc._finish(session, request_id=rid, execution={"state": "executed", "http_status": resp.status_code, "at": now})
         kind, reason = "approved", ""
     else:

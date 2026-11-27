@@ -6,7 +6,8 @@ import { fetchWithAuth } from '@/lib/db/client';
  * its state, who pressed): this file only carries them. Every call goes through the viewer's own session — the server runs the stored call UNDER THAT PERSON, so their own rights decide, and
  * a press that is not theirs to make comes back 403 with the request left as it was.
  */
-export type AgentActionState = 'pending' | 'running' | 'executed' | 'failed' | 'rejected' | 'expired';
+/** `retry` = pressed once and it did not finish: pressing again continues it — the server does the same request only once, so it is safe */
+export type AgentActionState = 'pending' | 'retry' | 'running' | 'executed' | 'failed' | 'rejected' | 'expired';
 
 export interface AgentActionView {
   id: string;
@@ -23,7 +24,7 @@ export interface AgentActionView {
   changed: boolean;
 }
 
-const STATES: readonly string[] = ['pending', 'running', 'executed', 'failed', 'rejected', 'expired'];
+const STATES: readonly string[] = ['pending', 'retry', 'running', 'executed', 'failed', 'rejected', 'expired'];
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const nameOf = (v: unknown): string | null => (obj(v) && typeof v.name === 'string' && v.name.trim() !== '' ? v.name.trim() : null);
 

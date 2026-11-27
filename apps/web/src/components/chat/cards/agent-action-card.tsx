@@ -37,7 +37,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
     if (r.result === 'settled') { setPhase({ kind: 'idle' }); onSettled(); return; }
     setPhase({ kind: 'error', why: r.result });
   };
-  const open = view.state === 'pending';
+  const open = view.state === 'pending' || view.state === 'retry';
   const outcome = outcomeLine(t, view);
   return (
     <CardFrame state="ready" data-testid="chat-card-agent-action">
@@ -63,7 +63,7 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
             </div>
           </div>
         ) : null}
-        {open ? <p className="m-0 text-ds-small text-ds-ink-3">{t('agentActionPendingHint')}</p> : null}
+        {view.state === 'pending' ? <p className="m-0 text-ds-small text-ds-ink-3">{t('agentActionPendingHint')}</p> : null}
         {outcome ? <p className="m-0 min-w-0 break-words text-ds-small text-ds-ink-2">{outcome}</p> : null}
         {phase.kind === 'error' ? <p role="alert" className="m-0 text-ds-small text-ds-failed">{phase.why === 'forbidden' ? t('agentActionErrForbidden') : t('agentActionErrFault')}</p> : null}
       </div>
@@ -75,6 +75,7 @@ type T = ReturnType<typeof useTranslations>;
 
 function StateChip({ t, view }: { t: T; view: AgentActionView }) {
   if (view.state === 'pending') return <Chip>{t('agentActionStatePending')}</Chip>;
+  if (view.state === 'retry') return <Chip>{t('agentActionStateRetry')}</Chip>;
   if (view.state === 'running') return <Chip>{t('agentActionStateRunning')}</Chip>;
   if (view.state === 'executed') return <Chip tone="done">{t('agentActionStateExecuted')}</Chip>;
   if (view.state === 'failed') return <Chip>{view.changed ? t('agentActionStateChanged') : t('agentActionStateFailed')}</Chip>;
@@ -82,6 +83,7 @@ function StateChip({ t, view }: { t: T; view: AgentActionView }) {
 }
 
 function outcomeLine(t: T, view: AgentActionView): string | null {
+  if (view.state === 'retry') return t('agentActionRetryLine');
   if (view.state === 'executed') return view.decidedBy ? t('agentActionByApproved', { name: view.decidedBy }) : null;
   if (view.state === 'rejected') return view.decidedBy ? t('agentActionByRejected', { name: view.decidedBy }) : null;
   if (view.state === 'expired') return t('agentActionExpiredLine');

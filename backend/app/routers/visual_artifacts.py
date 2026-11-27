@@ -918,7 +918,8 @@ async def delete_spec_pin(
     if _caller.type != "human":
         return await agent_action.request_approval(
             request, session, auth=auth, agent=_caller, org_id=org_id, project_id=project_id, action_key="spec_pin.delete",
-            target_label=str(getattr(artifact, "title", "") or pin_id),
+            # WHICH pin: the artifact's pins look alike by its title — name the pin's own words and its short id (the agent's own text is not here: the pin's description was written by a person)
+            target_label=f"{(getattr(artifact, 'title', '') or '').strip()[:80]} · “{(getattr(pin, 'description', '') or '').strip()[:60]}” ({str(pin_id)[:8]})",
         )
     await session.delete(pin)
     await session.flush()

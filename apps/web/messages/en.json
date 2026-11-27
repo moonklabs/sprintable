@@ -6250,6 +6250,8 @@
     "agentActionStateExecuted": "Done",
     "agentActionStateFailed": "Could not be done",
     "agentActionStateChanged": "Changed meanwhile",
+    "agentActionStateRetry": "Not finished",
+    "agentActionRetryLine": "The earlier press did not finish. Press again to continue it — the same request is never done twice",
     "agentActionStateRejected": "Declined",
     "agentActionStateExpired": "Expired",
     "agentActionByApproved": "{name} approved it and it was done",
