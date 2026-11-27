@@ -64,7 +64,7 @@ def adjustable_actions() -> tuple[str, ...]:
     """the actions a person can set — those the approval card knows (`agent_action.SPECS`) plus the ones with no auto slot"""
     from app.services.agent_action import SPECS
 
-    return tuple(sorted(set(SPECS) | NO_AUTO))
+    return tuple(sorted((set(SPECS) | NO_AUTO) - set(FLOOR_ACTIONS)))  # a floor row is never «adjustable» (it is listed separately, locked)
 
 
 def default_level(action_key: str) -> str:

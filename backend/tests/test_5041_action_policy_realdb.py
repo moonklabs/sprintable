@@ -232,3 +232,21 @@ async def test_every_change_is_one_audit_row_and_the_old_gate_levels_are_untouch
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+def test_the_old_gate_levels_road_cannot_write_an_action_row_and_no_floor_action_is_adjustable():
+    """codex on this PR: (1) `set_gate_level` — the old (done · merge × actor) road — must not be a way around the action policy's rules: it refuses every work_type that is not `done` / `merge`, so an
+    `action:<key>` row (a floor action, an `auto` without a scope) can only be written by `set_action_level`; (2) no action is both adjustable and a floor row (the listing has no duplicates)"""
+    import asyncio
+
+    from app.services.agent_action_policy import FLOOR_ACTIONS, adjustable_actions
+    from app.services.gate_config import set_gate_level
+
+    async def _try(work_type):
+        return await set_gate_level(None, org_id=uuid.uuid4(), project_id=None, work_type=work_type, actor_type="agent", level="auto", created_by=None)  # refused before any database use
+
+    for work_type in ("action:gate.approve", "action:story.delete", "anything"):
+        with pytest.raises(ValueError):
+            asyncio.run(_try(work_type))
+    assert not set(adjustable_actions()) & set(FLOOR_ACTIONS)
+    assert len(adjustable_actions()) == len(set(adjustable_actions()))
