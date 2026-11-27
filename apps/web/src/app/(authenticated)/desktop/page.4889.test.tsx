@@ -59,6 +59,7 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
     const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
     const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
+    const { DesktopSettingsCard } = await import('@/components/desktop/desktop-settings-card');
     const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
     const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
     const { PhoneSessionManagement } = await import('@/components/desktop/phone-session-management');
@@ -70,7 +71,7 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
     // a column whose cards all draw nothing (a person with no org: no phone cards) must not leave an empty half
     expect(byId(page, 'desktop-col-app')!.props?.className).toContain('empty:hidden');
     expect(byId(page, 'desktop-col-phone')!.props?.className).toContain('empty:hidden');
-    expect(comps(byId(page, 'desktop-col-app')!.props?.children)).toEqual([DesktopOpenAppCard, DesktopDownloadCard]);
+    expect(comps(byId(page, 'desktop-col-app')!.props?.children)).toEqual([DesktopOpenAppCard, DesktopDownloadCard, DesktopSettingsCard]);
     expect(comps(byId(page, 'desktop-col-phone')!.props?.children)).toEqual([DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement]);
     expect(comps(columns.props?.children)).not.toContain(DesktopDevices);
     expect(comps(page.props?.children).at(-1)).toBe(DesktopDevices);

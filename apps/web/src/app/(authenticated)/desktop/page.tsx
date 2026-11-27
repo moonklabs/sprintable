@@ -4,6 +4,7 @@ import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card'
 import { PageFrame } from '@/components/ds/page-frame';
 import { DesktopPageHead } from '@/components/desktop/desktop-page-head';
 import { DesktopScreenTitle } from '@/components/desktop/desktop-screen-title';
+import { DesktopSettingsCard } from '@/components/desktop/desktop-settings-card';
 import { DesktopOpenAppCard } from '@/components/desktop/desktop-open-app-card';
 import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-devices';
@@ -72,6 +73,8 @@ export default async function DesktopPage() {
                 {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
                 <DesktopOpenAppCard />
                 <DesktopDownloadCard />
+                {/* story 5038 (C8 · B 설정 칸): inside the desktop app only, and only when the app gives its settings — the app's own switches (notices · Dock badge · menu-bar icon · keep the app on); a browser and an older app draw nothing */}
+                <DesktopSettingsCard />
               </>
             )}
           </div>
