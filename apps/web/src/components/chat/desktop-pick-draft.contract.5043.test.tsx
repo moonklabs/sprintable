@@ -27,7 +27,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 
 const ROOT = path.resolve(__dirname, '../../../../..');
 const RAW = readFileSync(path.join(ROOT, 'contracts', 'desktop-pick-draft.json'));
-const SHA = '23cc1704e98729319f42132e1d7a7cebb429cdcbb717ce29e32e1d39ea92105b'; // the mobile repository's contracts/desktop-pick-draft.json — a copy that drifts is a failure, not a quiet divergence
+const SHA = '01309fd4e870e2d7806477c61f15bc628d21dad05805951e014e6b88d068dda8'; // the mobile repository's contracts/desktop-pick-draft.json — a copy that drifts is a failure, not a quiet divergence
 const C = JSON.parse(RAW.toString('utf8')) as { cases: Array<{ name: string; draft: { ko: string; en: string } }> };
 
 let container: HTMLDivElement; let root: Root;
@@ -45,7 +45,7 @@ const message = (content: string): ChatMessage => ({
 describe('[SID:5043 ⑥] contracts/desktop-pick-draft.json — the web side', () => {
   it('the file is the mobile repository\'s byte for byte', () => {
     expect(createHash('sha256').update(RAW).digest('hex')).toBe(SHA);
-    expect(C.cases.length).toBeGreaterThanOrEqual(6);
+    expect(C.cases.length).toBeGreaterThanOrEqual(10);
   });
 
   it('⭐every draft is within the composer\'s limit and goes through the address and back unchanged (`?compose=` · both shells) — nothing is cut, nothing is decoded into something else', () => {
