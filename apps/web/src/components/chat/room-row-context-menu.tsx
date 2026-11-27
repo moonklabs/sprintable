@@ -25,11 +25,11 @@ export function RoomRowContextMenu({ x, y, muted, onToggleMute, onOpenSettings, 
     <DropdownMenu open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DropdownMenuContent anchor={anchor} side="bottom" align="start" sideOffset={0} className="w-48" data-testid="room-row-menu">
         <DropdownMenuItem onClick={onToggleMute} data-testid="room-row-mute">
-          {muted ? <Bell className="size-3.5 text-muted-foreground" /> : <BellOff className="size-3.5 text-muted-foreground" />}
+          {muted ? <Bell className="size-ds-icon-sm text-muted-foreground" /> : <BellOff className="size-ds-icon-sm text-muted-foreground" />}
           {muted ? t('unmuteNotifications') : t('muteNotifications')}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onOpenSettings} data-testid="room-row-settings">
-          <Settings className="size-3.5 text-muted-foreground" />
+          <Settings className="size-ds-icon-sm text-muted-foreground" />
           {t('deliveryContractTitle')}
         </DropdownMenuItem>
       </DropdownMenuContent>

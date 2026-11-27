@@ -410,7 +410,7 @@ export default function ConversationPage() {
       {/* per-대화 알림 mute (270c87e6): the muted STATE stays visible — a person must see a room is muted without opening anything (story 4887 · P3-a) */}
       {meta.muted ? (
         <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" role="status" data-testid="room-muted-indicator">
-          <Icon name="notifications_off" size={14} />
+          <Icon name="notifications_off" size="sm" />
           {/* the words stay for assistive tech below sm (sr-only) and show from sm up — a phone screen reader must still hear that the room is muted */}
           <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
         </span>
@@ -424,22 +424,22 @@ export default function ConversationPage() {
           data-testid="room-head-menu"
           className="flex items-center rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground touch:min-h-11 touch:min-w-11 touch:justify-center"
         >
-          <Icon name="more_horiz" size={16} />
+          <Icon name="more_horiz" size="sm" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={6} className="w-52">
           <DropdownMenuItem onClick={() => void handleToggleMute()} data-testid="room-head-mute">
-            <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size={16} className="text-muted-foreground" />
+            <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size="sm" className="text-muted-foreground" />
             {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
           </DropdownMenuItem>
           {recordsEntry ? (
             <DropdownMenuItem onClick={() => setRecordsOpenFor(conversation_id)} data-testid="room-head-records">
-              <Icon name="history" size={16} className="text-muted-foreground" />
+              <Icon name="history" size="sm" className="text-muted-foreground" />
               {t('agentSession.records.button')}
             </DropdownMenuItem>
           ) : null}
           {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
           <DropdownMenuItem onClick={() => { setDeliveryFromCog(false); setShowDeliveryContract(true); }} data-testid="room-head-settings">
-            <Icon name="settings" size={16} className="text-muted-foreground" />
+            <Icon name="settings" size="sm" className="text-muted-foreground" />
             {t('deliveryContractTitle')}
           </DropdownMenuItem>
         </DropdownMenuContent>

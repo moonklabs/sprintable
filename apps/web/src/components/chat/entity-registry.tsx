@@ -48,7 +48,7 @@ export function resolveEntityIcon(entityType: string): LucideIcon | null {
  * storage-file-glyph.tsx 동일 주석: 컴포넌트 스코프 안에서 lookup한 컴포넌트를 바로 JSX로 쓰면
  * `react-hooks/static-components`에 걸린다). */
 export function EntityGlyph({ Icon, label, className }: { Icon: LucideIcon | null; label: string; className?: string }) {
-  if (Icon) return <Icon className={className ?? 'size-4 shrink-0'} />;
+  if (Icon) return <Icon className={className ?? 'size-ds-icon-sm shrink-0'} />;
   return <span className={`flex items-center justify-center text-micro font-bold ${className ?? 'size-4 shrink-0'}`}>{initials(label)}</span>;
 }
 

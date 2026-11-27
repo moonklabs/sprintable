@@ -78,7 +78,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
 
       {isSettled ? (
         <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-foreground">
-          {answer.decision === 'allow' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+          {answer.decision === 'allow' ? <Check className="size-ds-icon-sm text-primary" /> : <X className="size-ds-icon-sm text-destructive" />}
           {answer.decision === 'allow' ? t('hitlApproved') : t('hitlDenied')}
           {answer.reason && <span className="font-normal text-muted-foreground">— {answer.reason}</span>}
         </div>
@@ -86,7 +86,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
         // 유나 design:changes — 만료는 사람의 결정(허용/거부)과 다른 성질(시스템 종료)이라
         // 같은 무게를 주지 않는다: muted + Clock으로 위계를 낮춘다.
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="h-3.5 w-3.5" aria-hidden />
+          <Clock className="size-ds-icon-sm" aria-hidden />
           {t('hitlExpired')}
         </div>
       ) : showDenyInput ? (
@@ -124,7 +124,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
             disabled={locked}
             className="flex-1"
           >
-            <Check className="h-3.5 w-3.5" aria-hidden />
+            <Check className="size-ds-icon-sm" aria-hidden />
             {t('hitlAllow')}
           </Button>
           <Button
@@ -135,7 +135,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
             disabled={locked}
             className="flex-1"
           >
-            <X className="h-3.5 w-3.5" aria-hidden />
+            <X className="size-ds-icon-sm" aria-hidden />
             {t('hitlDeny')}
           </Button>
         </div>

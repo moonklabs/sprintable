@@ -90,7 +90,7 @@ export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, 
               onClick={() => { onBlock(); onClose(); }}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
             >
-              <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
+              <ShieldOff className="size-ds-icon-sm text-muted-foreground" />
               {tChats('blockUserConfirmConfirm')}
             </button>
           </>

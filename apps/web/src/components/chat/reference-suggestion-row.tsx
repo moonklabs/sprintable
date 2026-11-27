@@ -138,7 +138,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
             key={c.raw}
             className="flex items-center gap-2 rounded-md border border-dashed border-border bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-muted-foreground"
           >
-            <Link2 className="size-3.5 shrink-0" aria-hidden />
+            <Link2 className="size-ds-icon-sm shrink-0" aria-hidden />
             {state.status === 'linked' ? (
               <>
                 <span className="flex-1" />
@@ -184,7 +184,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
                   aria-label={t('referenceCandidateReject')}
                   className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <X className="size-3.5" />
+                  <X className="size-ds-icon-sm" />
                 </button>
               </>
             )}

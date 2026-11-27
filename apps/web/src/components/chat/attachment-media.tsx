@@ -79,7 +79,7 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
   if (state === 'denied') {
     return (
       <div className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-muted-foreground`}>
-        <Lock className="h-4 w-4 shrink-0" aria-hidden />
+        <Lock className="size-ds-icon-sm shrink-0" aria-hidden />
         <span className="text-xs">{t('attachmentDenied')}</span>
       </div>
     );
@@ -93,7 +93,7 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
           onClick={() => void play()}
           className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+          <RefreshCw className="size-ds-icon-sm" aria-hidden />
           {t('attachmentReload')}
         </button>
       </div>
@@ -110,7 +110,7 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
             download={label}
             className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Download className="h-3.5 w-3.5" aria-hidden />
+            <Download className="size-ds-icon-sm" aria-hidden />
             {t('mediaDownload')}
           </a>
         ) : null}
@@ -160,13 +160,13 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
       className={`${frameClass} ${kind === 'video' ? 'flex-col gap-1.5' : ''} text-foreground transition hover:bg-ds-surface-high disabled:opacity-70`}
     >
       {state === 'fetching' ? (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+        <Loader2 className="size-ds-icon-sm shrink-0 animate-spin text-muted-foreground" />
       ) : (
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-background/80">
-          <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
+          <Play className="size-ds-icon-sm fill-current" aria-hidden />
         </span>
       )}
-      {kind === 'video' ? <KindIcon className="h-4 w-4 text-muted-foreground" aria-hidden /> : null}
+      {kind === 'video' ? <KindIcon className="size-ds-icon-sm text-muted-foreground" aria-hidden /> : null}
       <span className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground">{label}</span>
     </button>
   );

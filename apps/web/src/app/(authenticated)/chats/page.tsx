@@ -59,13 +59,13 @@ export default function ChatsPage() {
             </div>
           ) : conversationCount === 0 && noProjectAtAll ? null : conversationCount === 0 ? (
             <EmptyState
-              icon={<MessageSquare className="size-8 text-muted-foreground" />}
+              icon={<MessageSquare className="size-ds-icon-lg text-muted-foreground" />}
               title={t('noConversations')}
               className="w-full max-w-xs"
             />
           ) : (
             <EmptyState
-              icon={<MessageSquare className="size-8 text-muted-foreground" />}
+              icon={<MessageSquare className="size-ds-icon-lg text-muted-foreground" />}
               title={t('selectConversationPrompt')}
               className="w-full max-w-xs"
             />

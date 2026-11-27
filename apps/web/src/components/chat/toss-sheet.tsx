@@ -315,7 +315,7 @@ export function TossSheet({
                   )}
                 >
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                    {c.type === 'dm' ? <MessageSquare className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
+                    {c.type === 'dm' ? <MessageSquare className="size-ds-icon-sm" /> : <Users className="size-ds-icon-sm" />}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
                   {alreadyThere ? (

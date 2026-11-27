@@ -714,9 +714,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 className={`flex items-center gap-2 rounded-lg border bg-ds-surface-sunk px-3 py-1.5 ${uploadFailed ? 'border-destructive' : 'border-border'}`}
               >
                 {sending ? (
-                  <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-muted-foreground" />
+                  <Loader2 className="size-ds-icon-sm flex-shrink-0 animate-spin text-muted-foreground" />
                 ) : (
-                  <Icon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                  <Icon className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
                 )}
                 <span className="max-w-40 truncate text-xs text-foreground">{file.name}</span>
                 <button
@@ -726,7 +726,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   className="text-muted-foreground hover:text-foreground disabled:opacity-40"
                   aria-label={t('removeAttachment')}
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="size-ds-icon-sm" />
                 </button>
               </div>
             );
@@ -782,7 +782,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   key={tg.agentId}
                   className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground"
                 >
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <AlertTriangle className="size-ds-icon-sm shrink-0" aria-hidden />
                   <span className="min-w-0 flex-1 text-foreground">
                     {t('commandUnsupportedWarn', {
                       agentName: tg.agentName,
@@ -804,7 +804,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         return (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info bg-info-tint text-foreground' : 'border-border bg-ds-background text-muted-foreground'}`}>
-            {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+            {cmd ? <Terminal className="size-ds-icon-sm shrink-0" aria-hidden /> : <Type className="size-ds-icon-sm shrink-0" aria-hidden />}
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>
           </div>
@@ -893,7 +893,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   onMouseDown={(e) => { e.preventDefault(); selectCommand(cmd); }}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${idx === commandIndex ? 'bg-ds-action-soft' : 'hover:bg-muted'}`}
                 >
-                  <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <Terminal className="size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
                       mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
                   <span className="shrink-0 font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
@@ -971,7 +971,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${shouldHighlightEntityCandidate(idx, entityPicker.entityIndex, entityPicker.hasNavigated) ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   {/* ㉠: 종류는 위 머리글의 «글자»가 1차 신호 — 이 아이콘은 어디까지나 보조. */}
-                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
+                  <EntityIcon className="mr-1.5 size-ds-icon-sm shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
                   {statusLabel ? (
                     <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{statusLabel}</span>
@@ -1008,7 +1008,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               aria-label={t('attachMenuLabel')}
               className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-ds-surface-high hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
             >
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              <ChevronDown className="size-ds-icon-sm" aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
               <DropdownMenuItem
@@ -1018,7 +1018,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   setPickerOpen(true);
                 }}
               >
-                <FolderOpen className="size-4 text-info" aria-hidden />
+                <FolderOpen className="size-ds-icon-sm text-info" aria-hidden />
                 {t('attachMenuStorage')}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1042,7 +1042,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               steerMode ? 'bg-info-tint text-foreground' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-foreground'
             }`}
           >
-            <Compass className="h-4 w-4" />
+            <Compass className="size-ds-icon-sm" />
           </button>
         )}
         {/* story #2805 — accept로 확장자를 좁혀도 실제 게이트가 아니다(드래그앤드롭·붙여넣기는

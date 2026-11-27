@@ -65,6 +65,8 @@ describe('cn() — ds 글자 눈금이 text-color와 공존한다', () => {
 describe('cn() — ds 밀도 · 그림자 · 움직임 토큰(UI-3)', () => {
   it('⭐밀도: 같은 축끼리는 뒤가 이기고(높이 · 최소 높이 · 정사각), 다른 축과는 공존한다', () => {
     expect(cn('h-ds-control', 'h-8')).toBe('h-8');
+    expect(cn('size-4', 'size-ds-icon-md')).toBe('size-ds-icon-md'); // story 5048 ④-②: 아이콘 크기 단계가 호출부의 옛 size-*를 덮는다(안 알리면 둘 다 남음)
+    expect(cn('size-ds-icon-sm', 'size-5')).toBe('size-5');
     expect(cn('h-8', 'h-ds-control')).toBe('h-ds-control');
     expect(cn('h-ds-control touch:h-ds-touch', 'h-8')).toBe('touch:h-ds-touch h-8');
     expect(cn('min-h-ds-compact', 'min-h-0')).toBe('min-h-0');

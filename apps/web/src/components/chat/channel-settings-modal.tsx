@@ -106,7 +106,7 @@ export function ChannelSettingsModal({ conversationId, agents, canEditAgents, ro
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <DialogTitle className="text-sm font-semibold text-foreground">{t('channelSettingsTitle')}</DialogTitle>
           <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label={tc('close')}>
-            <X className="h-4 w-4" />
+            <X className="size-ds-icon-sm" />
           </Button>
         </div>
 

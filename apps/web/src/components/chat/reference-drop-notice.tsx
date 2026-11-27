@@ -64,7 +64,7 @@ export function ReferenceDropNotice({ dropped, onDismiss }: { dropped: DroppedRe
         className="shrink-0 text-muted-foreground hover:text-foreground"
         aria-label={tc('close')}
       >
-        <X className="h-4 w-4" />
+        <X className="size-ds-icon-sm" />
       </button>
     </div>
   );

@@ -70,7 +70,7 @@ export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon
       disabled={loading}
       className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs hover:bg-ds-surface-high disabled:opacity-60"
     >
-      {loading ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-muted-foreground" /> : <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />}
+      {loading ? <Loader2 className="size-ds-icon-sm flex-shrink-0 animate-spin text-muted-foreground" /> : <Icon className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />}
       <span className="truncate text-foreground">{label}</span>
     </button>
   );
