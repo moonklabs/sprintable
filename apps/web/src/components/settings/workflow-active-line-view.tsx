@@ -49,7 +49,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
   return (
     <div className="space-y-3 rounded-ds-control border border-ds-line p-3">
       <div className="flex items-center gap-2">
-        <GitBranch className="size-4 shrink-0 text-ds-ink-3" aria-hidden />
+        <GitBranch className="size-ds-icon-sm shrink-0 text-ds-ink-3" aria-hidden />
         <p className="text-ds-small font-semibold text-ds-ink-2">{t('simActiveLine')}</p>
         {/* the box that picks the line this card shows — named by the card's own title (no new word) */}
         <NativeSelect aria-label={t('simActiveLine')} value={entityType} onChange={(e) => setEntityType(e.target.value)} className="ml-auto w-32">
@@ -61,7 +61,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
         <p className="text-ds-small text-ds-ink-3">…</p>
       ) : !data || !data.has_active ? (
         <div className="flex items-center gap-1.5 text-ds-small text-ds-ink-3">
-          <ShieldOff className="size-3.5 shrink-0" aria-hidden />
+          <ShieldOff className="size-ds-icon-sm shrink-0" aria-hidden />
           {t('activeLineNone')}
         </div>
       ) : steps.length ? (
@@ -69,7 +69,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
           {steps.map((s, i) => (
             <li key={i} className="flex flex-wrap items-center gap-1.5 text-ds-small text-ds-ink">
               <span className="font-mono">{s.from_status ?? '—'}</span>
-              <ArrowRight className="size-3 shrink-0 text-ds-ink-3" aria-hidden />
+              <ArrowRight className="size-ds-icon-sm shrink-0 text-ds-ink-3" aria-hidden />
               <span className="font-mono">{s.to_status ?? '—'}</span>
             </li>
           ))}

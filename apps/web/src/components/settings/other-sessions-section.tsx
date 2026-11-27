@@ -60,7 +60,7 @@ export function OtherSessionsSection() {
     // 5018 nit: `#other-sessions` lands on this card; scroll-mt clears the page's top edge so the button shows
     <>
       <div id="other-sessions" className="scroll-mt-24" data-testid="other-sessions">
-        <SettingsSection title={<span className="inline-flex items-center gap-1.5"><LogOut className="size-4" />{t('otherSessionsTitle')}</span>} description={t('otherSessionsDescription')}>
+        <SettingsSection title={<span className="inline-flex items-center gap-1.5"><LogOut className="size-ds-icon-sm" />{t('otherSessionsTitle')}</span>} description={t('otherSessionsDescription')}>
           <p aria-live="polite" className="break-keep text-ds-body text-ds-ink" data-testid="other-sessions-done">
             {line}
           </p>

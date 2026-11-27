@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(__dirname, '..');
-const DIRS = ['components/chat', 'app/(authenticated)/chats', 'components/kanban', 'components/epics', 'components/sprints', 'components/docs', 'app/(authenticated)/[ws]/[proj]/docs', 'components/retro']; // ④-② 채팅 · ④-④ 칸반(+epics · sprints) · ④-⑥ 문서(+retro) — 다음 영역은 여기에 한 줄씩
+const DIRS = ['components/chat', 'app/(authenticated)/chats', 'components/kanban', 'components/epics', 'components/sprints', 'components/docs', 'app/(authenticated)/[ws]/[proj]/docs', 'components/retro', 'components/settings', 'app/(authenticated)/settings']; // ④-② 채팅 · ④-④ 칸반(+epics · sprints) · ④-⑥ 문서(+retro) · ④-⑧ 설정 — 다음 영역은 여기에 한 줄씩
 const RAW = /(?<![\w:-])(?:size|h|w)-(?:3\.5|4|4\.5|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/;
 const RAW_ICON_PROP = /\bsize=\{(?:14|16|18|20|24|32)\}/;
 // «토큰 밖이 맞는 곳» — `파일::태그 앞 부분` 정확히 일치만(같은 파일에 새 자리가 생기면 RED) · 사유 한 줄. 이 목록이 자라는 diff는 PO가 본다.

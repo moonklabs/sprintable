@@ -222,7 +222,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
               <ul className="divide-y divide-ds-line text-ds-small">
                 <PasswordRuleItem met={rules.length} label={t('setPasswordRuleLength')} />
                 <li className={`flex items-center gap-1.5 py-1.5 ${categoriesMet >= 3 ? 'text-ds-done' : 'text-ds-ink-3'}`}>
-                  {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
+                  {categoriesMet >= 3 ? <Check className="size-ds-icon-sm shrink-0" /> : <Circle className="size-ds-icon-sm shrink-0" />}
                   <span>{t('setPasswordRuleCategories', { count: categoriesMet })}</span>
                 </li>
               </ul>
@@ -245,7 +245,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
 function PasswordRuleItem({ met, label }: { met: boolean; label: string }) {
   return (
     <li className={`flex items-center gap-1.5 py-1.5 ${met ? 'text-ds-done' : 'text-ds-ink-3'}`}>
-      {met ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
+      {met ? <Check className="size-ds-icon-sm shrink-0" /> : <Circle className="size-ds-icon-sm shrink-0" />}
       <span>{label}</span>
     </li>
   );

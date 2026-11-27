@@ -196,11 +196,11 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       )}
                     >
                       {toggling ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Loader2 className="size-ds-icon-md animate-spin" />
                       ) : granted ? (
-                        <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
+                        <><Shield className="size-ds-icon-md" />{t('projectAccessAllowed')}</>
                       ) : (
-                        <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
+                        <><ShieldOff className="size-ds-icon-md" />{t('projectAccessBlocked')}</>
                       )}
                     </Button>
                   ) : (
@@ -208,7 +208,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       'inline-flex shrink-0 items-center gap-1 text-ds-small',
                       granted ? 'text-ds-done' : 'text-ds-ink-3',
                     )}>
-                      {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+                      {granted ? <Shield className="size-ds-icon-sm" /> : <ShieldOff className="size-ds-icon-sm" />}
                       {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
                     </span>
                   )}

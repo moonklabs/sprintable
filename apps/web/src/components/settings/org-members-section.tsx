@@ -387,7 +387,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       ? t('inviteProjectsTrigger')
                       : t('inviteProjectsCount', { count: inviteProjectIds.length })}
                   </span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 text-ds-ink-3 transition-transform ${showProjectPicker ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`size-ds-icon-md shrink-0 text-ds-ink-3 transition-transform ${showProjectPicker ? 'rotate-180' : ''}`} />
                 </Button>
                 {showProjectPicker && (
                   <ul className="max-h-56 space-y-1 overflow-y-auto rounded-ds-control border border-ds-line p-1 md:max-w-sm">
@@ -403,7 +403,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                             className={cn('w-full justify-start', selected && 'bg-ds-action-soft text-ds-action-text')}
                           >
                             <span className="flex-1 truncate text-left">{p.name}</span>
-                            {selected && <Check className="h-3.5 w-3.5 shrink-0" />}
+                            {selected && <Check className="size-ds-icon-md shrink-0" />}
                           </Button>
                         </li>
                       );
@@ -576,9 +576,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                       })}
                     >
                       {copiedInviteId === invite.id ? (
-                        <><Check className="mr-1 h-3 w-3" />{t('orgInviteCopiedLabel')}</>
+                        <><Check className="mr-1 size-ds-icon-md" />{t('orgInviteCopiedLabel')}</>
                       ) : (
-                        <><Copy className="mr-1 h-3 w-3" />{tShare('copyLink')}</>
+                        <><Copy className="mr-1 size-ds-icon-md" />{tShare('copyLink')}</>
                       )}
                     </Button>
                     <Button

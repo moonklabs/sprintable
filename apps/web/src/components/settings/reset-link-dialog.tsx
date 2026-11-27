@@ -51,7 +51,7 @@ export function ResetLinkDialog({ open, member, url, minutes, onClose }: ResetLi
           <div className="flex items-center gap-2">
             <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 font-mono" data-testid="reset-link-url" aria-label={ts('orgMemberResetLinkTitle')} />
             <Button variant="secondary" onClick={() => void copy()} data-testid="reset-link-copy">
-              {copied ? <Check className="size-4" aria-hidden="true" /> : <Copy className="size-4" aria-hidden="true" />}
+              {copied ? <Check className="size-ds-icon-md" aria-hidden="true" /> : <Copy className="size-ds-icon-md" aria-hidden="true" />}
               <span className="ml-1">{copied ? ts('orgMemberResetLinkCopied') : ts('orgMemberResetLinkCopy')}</span>
             </Button>
           </div>

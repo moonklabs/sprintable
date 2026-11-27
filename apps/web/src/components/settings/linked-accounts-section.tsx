@@ -125,7 +125,7 @@ export function LinkedAccountsSection({ onLoadError }: LinkedAccountsSectionProp
           aria-atomic="true"
           className={`flex items-center gap-1.5 text-ds-body ${message.type === 'success' ? 'text-ds-ink' : 'text-ds-failed'}`}
         >
-          {message.type === 'success' && <Check className="size-3.5 shrink-0 text-ds-done" aria-hidden="true" />}
+          {message.type === 'success' && <Check className="size-ds-icon-sm shrink-0 text-ds-done" aria-hidden="true" />}
           {message.text}
         </p>
       )}

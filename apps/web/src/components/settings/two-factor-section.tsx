@@ -154,7 +154,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
 
   return (
     <SettingsSection
-      title={<span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4" />{t('twoFactorTitle')}</span>}
+      title={<span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-ds-icon-sm" />{t('twoFactorTitle')}</span>}
       description={state === 'enabled' ? t('twoFactorActive') : t('twoFactorDescription')}
     >
       {message && (
