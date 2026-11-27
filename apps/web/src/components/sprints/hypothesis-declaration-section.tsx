@@ -77,7 +77,7 @@ export function HypothesisDeclarationSection({
       {declarations.length === 0 ? (
         <div className="flex flex-col gap-2 rounded-xl border border-dashed border-info-border bg-info-tint p-3">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-            <Sparkles className="size-3.5 text-info" aria-hidden />
+            <Sparkles className="size-ds-icon-sm text-info" aria-hidden />
             {t('declareGateQuestion')}
           </p>
           <p className="text-editorial-meta leading-snug text-muted-foreground">{t('declareGateHint')}</p>

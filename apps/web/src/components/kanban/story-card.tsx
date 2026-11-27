@@ -617,7 +617,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           // 터치 폰은 누르는 자리 44×44(음수 margin으로 줄 높이는 그대로) — 호버 없는 기기는 늘 보이고, 마우스는 카드 호버 · 초점 때 보인다.
           className={cn('-my-0.5 -mr-1', metaInk, 'hover:bg-ds-surface-sunk hover:text-ds-ink touch:-my-3 touch:size-11', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
-          <MoreHorizontal className="size-4" aria-hidden="true" />
+          <MoreHorizontal className="size-ds-icon-sm" aria-hidden="true" />
         </Button>
         ) : null}
       </div>
@@ -679,9 +679,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {lastExecution ? (
             <span title={execTitle} className="flex h-5 w-5 shrink-0 items-center justify-center">
               {lastExecution.status === 'matched' ? (
-                <Zap className="h-3 w-3 text-ds-needs-hand" />
+                <Zap className="size-ds-icon-sm text-ds-needs-hand" />
               ) : (
-                <ZapOff className={cn('h-3 w-3', metaInk)} />
+                <ZapOff className={cn('size-ds-icon-sm', metaInk)} />
               )}
             </span>
           ) : null}
@@ -693,12 +693,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {/* E-VERIFY P0-04 — 증거 있는 done 카드에만(무증거 = 완전 무표시). 카드에서는 작은 표시 한 알(긴 «씰» 띠는 상세에 있다 — 카드 3줄을 지킨다): 검증됨 = 체크(done 색) · 주장만 = 시계(주의 색 — 초록 아님, 에이전트 주장 단독은 초록이 될 수 없다). 전체 문구는 툴팁 + 스크린리더 글. */}
           {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
             <span data-testid="story-card-seal" data-seal="verified" title={sealTitle} className="inline-flex h-5 shrink-0 items-center text-ds-done">
-              <Check className="size-3.5" aria-hidden="true" />
+              <Check className="size-ds-icon-sm" aria-hidden="true" />
               <span className="sr-only">{sealTitle}</span>
             </span>
           ) : story.status === 'done' && trustStage === 'claimed' ? (
             <span data-testid="story-card-seal" data-seal="claimed" title={sealTitle} className="inline-flex h-5 shrink-0 items-center text-ds-needs-hand">
-              <Clock className="size-3.5" aria-hidden="true" />
+              <Clock className="size-ds-icon-sm" aria-hidden="true" />
               <span className="sr-only">{sealTitle}</span>
             </span>
           ) : null}
@@ -814,7 +814,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 className={cn(MENU_ITEM_BUTTON, 'justify-between')}
               >
                 {t('assignMember')}
-                <ChevronRight className="size-3.5" />
+                <ChevronRight className="size-ds-icon-sm" />
               </Button>
               {assignMenuOpen && assignMenuPos && createPortal(
                 <div
@@ -839,7 +839,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         className={cn(MENU_ITEM_BUTTON, 'gap-2')}
                       >
                         <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
-                        {checked ? <Check className="size-3.5 shrink-0 text-ds-action-text" aria-hidden="true" /> : null}
+                        {checked ? <Check className="size-ds-icon-sm shrink-0 text-ds-action-text" aria-hidden="true" /> : null}
                       </Button>
                     );
                   })}

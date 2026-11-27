@@ -645,7 +645,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
                       onClick={() => setOverflowOpen((v) => !v)} aria-expanded={overflowOpen}
                       className="flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                     >
-                      {overflowOpen ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}
+                      {overflowOpen ? <ChevronDown className="size-ds-icon-sm" aria-hidden /> : <ChevronRight className="size-ds-icon-sm" aria-hidden />}
                       {t('epicSwimlaneOverflowToggle', { count: overflowEpics.length })}
                     </button>
                     {overflowOpen && overflowEpics.map((epic) => (

@@ -1624,7 +1624,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
-                    {!selectedSprintId && <Check className="size-3.5 text-primary" />}
+                    {!selectedSprintId && <Check className="size-ds-icon-sm text-primary" />}
                   </DropdownMenuItem>
                   {(() => {
                     const filtered = sprints.filter((s) => s.title.toLowerCase().includes(sprintSearch.toLowerCase()));
@@ -1634,7 +1634,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     return filtered.map((s) => (
                       <DropdownMenuItem key={s.id} onClick={() => updateFilter('sprint_id', s.id)}>
                         <span className="flex-1 truncate">{s.title}</span>
-                        {s.id === selectedSprintId && <Check className="size-3.5 text-primary" />}
+                        {s.id === selectedSprintId && <Check className="size-ds-icon-sm text-primary" />}
                       </DropdownMenuItem>
                     ));
                   })()}
@@ -1683,7 +1683,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
-                    {!selectedEpicId && <Check className="size-3.5 text-primary" />}
+                    {!selectedEpicId && <Check className="size-ds-icon-sm text-primary" />}
                   </DropdownMenuItem>
                   {(() => {
                     const filtered = epics.filter((e) => e.title.toLowerCase().includes(epicSearch.toLowerCase()));
@@ -1693,7 +1693,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     return filtered.map((e) => (
                       <DropdownMenuItem key={e.id} onClick={() => updateFilter('epic_id', e.id)}>
                         <span className="flex-1 truncate">{e.title}</span>
-                        {e.id === selectedEpicId && <Check className="size-3.5 text-primary" />}
+                        {e.id === selectedEpicId && <Check className="size-ds-icon-sm text-primary" />}
                       </DropdownMenuItem>
                     ));
                   })()}
@@ -1746,7 +1746,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
-                    {!selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                    {!selectedAssigneeId && <Check className="size-ds-icon-sm text-primary" />}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 {(() => {
@@ -1769,7 +1769,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                           {humans.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
                               <span className="flex-1 truncate">{m.label}</span>
-                              {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                              {m.id === selectedAssigneeId && <Check className="size-ds-icon-sm text-primary" />}
                             </DropdownMenuItem>
                           ))}
                         </DropdownMenuGroup>
@@ -1781,7 +1781,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                           {agents.map((m) => (
                             <DropdownMenuItem key={m.id} onClick={() => updateFilter('assignee_id', m.id)}>
                               <span className="flex-1 truncate">{m.label}</span>
-                              {m.id === selectedAssigneeId && <Check className="size-3.5 text-primary" />}
+                              {m.id === selectedAssigneeId && <Check className="size-ds-icon-sm text-primary" />}
                             </DropdownMenuItem>
                           ))}
                         </DropdownMenuGroup>
@@ -1828,7 +1828,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
-                      {selectedLabelIds.length === 0 && <Check className="size-3.5 text-primary" />}
+                      {selectedLabelIds.length === 0 && <Check className="size-ds-icon-sm text-primary" />}
                     </DropdownMenuItem>
                     {orgLabels
                       .filter((l) => l.name.toLowerCase().includes(labelSearch.toLowerCase()))
@@ -1843,7 +1843,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
                             {label.name}
                           </span>
-                          {selectedLabelIds.includes(label.id) && <Check className="size-3.5 text-primary" />}
+                          {selectedLabelIds.includes(label.id) && <Check className="size-ds-icon-sm text-primary" />}
                         </DropdownMenuItem>
                       ))}
                   </DropdownMenuGroup>
@@ -1878,7 +1878,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 searchQuery ? 'bg-ds-action-soft text-primary' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-foreground'
               }`}
             >
-              <Search className="size-3.5" />
+              <Search className="size-ds-icon-sm" />
             </Button>
           )}
 
@@ -1895,7 +1895,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-muted-foreground'
               }`}
             >
-              <LayoutGrid className="size-3.5" />
+              <LayoutGrid className="size-ds-icon-sm" />
             </Button>
             <Button
               type="button"
@@ -1908,7 +1908,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                 viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-ds-surface-high hover:text-muted-foreground'
               }`}
             >
-              <LayoutList className="size-3.5" />
+              <LayoutList className="size-ds-icon-sm" />
             </Button>
           </div>
 
@@ -1983,12 +1983,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           // "전환 시각 큐 부재"도 함께 소멸(전환이 안 일어나므로 큐가 지킬 대상이 없음).
           <div className="shrink-0 border-b border-border px-6 py-4">
             <EmptyState
-              icon={<Workflow className="size-8" />}
+              icon={<Workflow className="size-ds-icon-lg" />}
               title={t('boardEmptyTitle')}
               description={t('boardEmptyDescription')}
               action={
                 <Button size="sm" onClick={() => setAutoComposeNonce((n) => n + 1)}>
-                  <Plus className="size-3.5" />
+                  <Plus className="size-ds-icon-sm" />
                   {t('boardEmptyCta')}
                 </Button>
               }

@@ -200,7 +200,7 @@ export function KanbanTrustColumn({
               onClick={startCompose}
               className="flex h-5 w-5 items-center justify-center rounded text-ds-ink-3 transition hover:bg-ds-surface-high hover:text-ds-ink"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="size-ds-icon-sm" />
             </button>
           ) : null}
         </div>

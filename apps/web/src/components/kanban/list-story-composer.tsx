@@ -47,7 +47,7 @@ export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => P
           type="button"
           variant="quiet"
           size="lg"
-          iconStart={<Icon name="add" size={16} />}
+          iconStart={<Icon name="add" size="md" />}
           onClick={() => setComposing(true)}
           className="w-full justify-start"
         >
