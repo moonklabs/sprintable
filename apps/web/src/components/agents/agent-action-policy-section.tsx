@@ -46,15 +46,21 @@ export function AgentActionPolicySection({ agentId, projects }: { agentId: strin
 
   // the newest read wins: an answer for a project that is no longer the one shown (a slow one that arrives after another was chosen) is dropped, never drawn under the wrong project (codex on this PR)
   const readSeq = useRef(0);
+  // the answer is drawn only if it is still the newest ask; the effect asks through `.then` (a callback — not a synchronous setState in the effect body, which the lint rule refuses), «loading» is set by the handlers that ask again (project chosen · retry) and is the initial state
+  const apply = useCallback((mine: number, r: Awaited<ReturnType<typeof fetchPolicy>>) => {
+    if (mine !== readSeq.current) return;
+    if (r.result === 'ok') { setEntries(r.entries); setState('ready'); } else setState(r.result);
+  }, []);
   const load = useCallback(async () => {
     if (!projectId) return;
     const mine = ++readSeq.current;
-    setState('loading');
-    const r = await fetchPolicy(agentId, projectId);
-    if (mine !== readSeq.current) return;
-    if (r.result === 'ok') { setEntries(r.entries); setState('ready'); } else setState(r.result);
-  }, [agentId, projectId]);
-  useEffect(() => { void load(); }, [load]);
+    apply(mine, await fetchPolicy(agentId, projectId));
+  }, [agentId, projectId, apply]);
+  useEffect(() => {
+    if (!projectId) return;
+    const mine = ++readSeq.current;
+    void fetchPolicy(agentId, projectId).then((r) => apply(mine, r));
+  }, [agentId, projectId, apply]);
 
   const label = (key: string) => {
     const k = `actionPolicyAction_${key.replace(/\./g, '_')}`;
@@ -86,14 +92,14 @@ export function AgentActionPolicySection({ agentId, projects }: { agentId: strin
       <p className="m-0 text-ds-small text-ds-ink-3">{t('actionPolicyHint')}</p>
       <label className="flex items-center gap-2 text-ds-small text-ds-ink-2">
         <span>{t('actionPolicyProject')}</span>
-        <NativeSelect value={projectId} disabled={saving !== null} onChange={(e) => setProjectId(e.target.value)} data-testid="action-policy-project">
+        <NativeSelect value={projectId} disabled={saving !== null} onChange={(e) => { setState('loading'); setProjectId(e.target.value); }} data-testid="action-policy-project">
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </NativeSelect>
       </label>
       {state === 'fault' ? (
         <div className="flex flex-col items-start gap-2">
           <p className="m-0 text-ds-body text-ds-ink-3">{t('actionPolicyLoadFailed')}</p>
-          <Button variant="secondary" onClick={() => void load()}>{t('actionPolicyRetry')}</Button>
+          <Button variant="secondary" onClick={() => { setState('loading'); void load(); }}>{t('actionPolicyRetry')}</Button>
         </div>
       ) : null}
       {state === 'ready' ? (
