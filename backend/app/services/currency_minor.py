@@ -34,6 +34,14 @@ def currency_exponent(currency: str) -> int:
         raise UnknownCurrencyError(currency) from None
 
 
+def format_minor_amount(amount_minor: int | None, currency: str | None) -> str:
+    """an amount for a line a person reads, e.g. «50,000 KRW» · «12.50 USD»; empty when there is no amount, the unit table's own exponent (an unlisted currency reads as whole units)"""
+    if amount_minor is None or not currency:
+        return ""
+    exp = CURRENCY_EXPONENTS.get(currency, 0)
+    return f"{amount_minor / (10 ** exp):,.{exp}f} {currency}"
+
+
 def meta_budget_units(amount_minor: int, currency: str) -> int:
     """An amount in our minor units → Meta's budget units (the currency offset). Equal for every currency in the table
     (offset = 10 ** exponent); the call still goes through here so an unknown currency never reaches Meta."""

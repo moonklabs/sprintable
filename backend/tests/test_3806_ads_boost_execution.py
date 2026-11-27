@@ -206,8 +206,10 @@ async def test_agent_key_gets_403_on_start():
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/start")
-        assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "ADS_BOOST_EXECUTE_HUMAN_ONLY"
+        # story 5041 B1 — an agent's start is a card a person presses (tests/test_5041_ads_cards_realdb.py). This gate's post is a bare work item id (no project to file a card under), so the agent gets the plain
+        # «not found» and NOTHING is queued: the old «human only» 403 is gone for an agent that is in the project
+        assert r.status_code == 404, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_GATE_NOT_FOUND"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

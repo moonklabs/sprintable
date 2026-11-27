@@ -129,6 +129,22 @@ async def _resolve_publication_and_work_item(
     return publication, work_item_id
 
 
+async def describe_boost_for_card(
+    db: AsyncSession, *, org_id: uuid.UUID, amount_minor: int | None, currency: str | None, connection_id: uuid.UUID | None,
+    starts_at: datetime | None, ends_at: datetime | None,
+) -> str:
+    """story 5041 B1 — what a person reads on the approval card of an agent's boost call: the amount · the ad account · the schedule (everything the sealed request carries that moves money), e.g. «100,000 KRW · 우리 광고 계정 · 2026-12-01~2026-12-08»"""
+    from app.services.currency_minor import format_minor_amount
+
+    account = "—"
+    if connection_id is not None:
+        row = (await db.execute(select(ChannelConnection.account_label, ChannelConnection.account_id).where(ChannelConnection.id == connection_id, ChannelConnection.org_id == org_id))).first()
+        if row is not None:
+            account = (row[0] or row[1] or "—")
+    when = f"{starts_at:%Y-%m-%d}~{ends_at:%Y-%m-%d}" if starts_at and ends_at else "—"
+    return " · ".join((format_minor_amount(amount_minor, currency) or "—", account, when))
+
+
 async def _validate_ad_connection(db: AsyncSession, *, org_id: uuid.UUID, ad_connection_id: uuid.UUID) -> None:
     # story #4009(critical, AC4 방어 2층) — `_AD_CONNECTION_CHANNELS`는 이 모듈이
     # import될 때 한 번만 계산돼(CHANNEL_ADAPTERS 상태 스냅샷) 요청마다 플래그

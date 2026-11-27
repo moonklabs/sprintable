@@ -915,6 +915,9 @@ def test_every_registered_action_is_asked_for_by_exactly_one_route():
                 for kw in node.keywords:
                     if kw.arg == "action_key" and isinstance(kw.value, ast.Constant):
                         named[kw.value.value] = named.get(kw.value.value, 0) + 1
+            # story 5041 B1 — the ads-boost roads reach it through one helper that forwards the key (its 6th positional argument): the helper is the only caller of `gate_agent_call` with a variable key
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_gate_an_agents_call" and len(node.args) > 5 and isinstance(node.args[5], ast.Constant):
+                named[node.args[5].value] = named.get(node.args[5].value, 0) + 1
     assert named == {key: 1 for key in SPECS}, named
     bare = [str(path) for path in pathlib.Path("app/routers").glob("*.py") if "agent_action.request_approval(" in path.read_text()]
     assert bare == [], f"a road must go through gate_agent_call, not ask for approval around the user's setting: {bare}"
