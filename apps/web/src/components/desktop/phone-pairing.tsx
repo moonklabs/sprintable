@@ -369,7 +369,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         </Shell>
       );
     case 'busy':
-      return <Shell><Loader2 className="size-4 animate-spin" aria-label={t('checking')} /></Shell>;
+      return <Shell><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('checking')} /></Shell>;
     case 'confirm':
       return (
         <Shell>
@@ -455,7 +455,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           <Line>{t('limit.why')}</Line>
           <Line>{t('limit.todo')}</Line>
           <p className="text-ds-small text-ds-ink-3">{t('limit.listHead')}</p>
-          {phones === null ? <Loader2 className="size-4 animate-spin" aria-label={t('checking')} /> : (
+          {phones === null ? <Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('checking')} /> : (
             <ul className="flex flex-col gap-3">
               {phones.map((p) => (
                 <LimitPhoneRow

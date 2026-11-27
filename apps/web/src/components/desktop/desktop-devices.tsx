@@ -187,7 +187,7 @@ export function DesktopDevices() {
             </p>
           ) : computers === null ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-ds-icon-sm animate-spin" />
               {tDesktop('loading')}
             </p>
           ) : computers.length === 0 ? (
@@ -288,7 +288,7 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
             <p className={`flex flex-wrap items-center gap-2 text-sm ${off ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'}`}>
               {/* the chevron and the name are one item: a long name wraps inside its own box and the state drops to the next line, never the chevron alone above the name */}
               <span className="flex min-w-0 max-w-full items-center gap-2">
-                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+                <ChevronDown className="size-ds-icon-sm shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
                 <span className="min-w-0 break-words" data-testid="desktop-computer-name">{computer.device_name}</span>
               </span>
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" data-testid="desktop-computer-state">
@@ -360,7 +360,7 @@ function DeviceRow({ device, deviceName, linked = false, onDisconnect }: { devic
     <>
       <div className="min-w-0">
         <p className={`flex flex-wrap items-center gap-2 text-sm ${off ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'}`}>
-          {agents.length > 0 ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /> : null}
+          {agents.length > 0 ? <ChevronDown className="size-ds-icon-sm shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /> : null}
           {/* story 4734: the computer's line carries the Mac's name — a setup row inside it does not repeat it */}
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" data-testid="desktop-device-state">
             <StateDot state={device.state} />

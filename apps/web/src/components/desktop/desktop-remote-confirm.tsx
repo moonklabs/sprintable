@@ -124,7 +124,7 @@ function Confirm({ code }: { code: string }) {
   // story 4889 (AC3 §5-7): a result with no button was a dead end — every one of them gets the way back to «연결된 기기» (`/desktop`, the same link the «disconnected» result already had)
   const devicesLink = <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>;
   if (view.kind === 'loading') {
-    return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+    return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   }
   if (view.kind === 'ready') {
     return (
@@ -135,7 +135,7 @@ function Confirm({ code }: { code: string }) {
         <p className="text-sm text-muted-foreground">{t('agentsStay')}</p>
         <div className="flex gap-2">
           <Button onClick={turnOn} disabled={view.busy}>
-            {view.busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            {view.busy ? <Loader2 className="size-ds-icon-md animate-spin" aria-hidden /> : null}
             {t('turnOn')}
           </Button>
           <Button variant="outline" asChild><a href={flat('/desktop')}>{t('cancel')}</a></Button>

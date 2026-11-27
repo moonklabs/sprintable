@@ -212,7 +212,7 @@ function WindowLine({ t, msLeft, onClose }: { t: T; msLeft: number; onClose: () 
 function Choose({ t, read, only, onReload, onPick }: { t: T; read: Read; only: ReturnType<typeof entryOf>; onReload: () => void; onPick: (setupId: string, project: { project_id: string; name: string }) => void }) {
   const [picked, setPicked] = useState<string | null>(null);
   const computers = useMemo(() => (read.kind === 'ready' ? read.computers.filter((c) => projectsOf(c).length > 0) : []), [read]);
-  if (read.kind === 'reading') return <div aria-busy="true" data-testid="phone-files-reading"><Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden /></div>;
+  if (read.kind === 'reading') return <div aria-busy="true" data-testid="phone-files-reading"><Loader2 className="size-ds-icon-sm animate-spin text-muted-foreground" aria-hidden /></div>;
   if (read.kind === 'old_app') return <Card className="break-keep p-4" data-testid="phone-files-old-app"><p className="text-sm text-foreground">{t('oldApp')}</p></Card>;
   if (read.kind === 'failed') return <Line t={t} text={t('readFailed')} testId="phone-files-read-failed" onRetry={onReload} />;
   if (read.kind === 'no_phone') return <Card className="break-keep p-4" data-testid="phone-files-no-mac"><p className="text-sm text-foreground">{t('noMac')}</p></Card>;
@@ -297,7 +297,7 @@ function DownloadLine({ t, dl, onStop, onRetry }: { t: T; dl: Download; onStop: 
   if (dl.kind === 'running') {
     return (
       <div role="status" className="flex items-center justify-between gap-2 rounded-md border border-border bg-ds-surface-sunk px-3 py-2 text-sm text-foreground" data-testid="phone-files-download-running">
-        <span className="flex items-center gap-2"><Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />{dl.of > 0 ? t('download.running', { got: dl.got, of: dl.of }) : t('download.starting')}</span>
+        <span className="flex items-center gap-2"><Loader2 className="size-ds-icon-sm animate-spin text-muted-foreground" aria-hidden />{dl.of > 0 ? t('download.running', { got: dl.got, of: dl.of }) : t('download.starting')}</span>
         <Button variant="outline" size="sm" onClick={onStop} data-testid="phone-files-download-stop">{t('download.stop')}</Button>
       </div>
     );
@@ -322,7 +322,7 @@ function FileScreen({ t, v, canDownload, onDownload, onStopDownload, onRetry, on
       {v.dl && <DownloadLine t={t} dl={v.dl} onStop={onStopDownload} onRetry={onDownload} />}
       {v.state.kind === 'loading' && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-file-loading">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> {t(computer ? 'file.loadingComputer' : 'file.loading')}
+          <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden /> {t(computer ? 'file.loadingComputer' : 'file.loading')}
         </div>
       )}
       {v.state.kind === 'end' && v.dl === null && <Line t={t} text={v.state.outcome.kind === 'cancelled' ? t('outcome.cancelled') : fileEndLine(t, v.state.outcome, computer)} testId="phone-files-file-end" onRetry={v.state.outcome.kind === 'cancelled' || retryable(v.state.outcome) ? onRetry : undefined} />}
@@ -356,7 +356,7 @@ function Folder({ t, v, canOpen, onOpen, onFile, onBack }: { t: T; v: FolderView
       </div>
       {v.state.kind === 'loading' && (
         <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="phone-files-loading">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> {t(computer ? 'loadingComputer' : 'loading')}
+          <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden /> {t(computer ? 'loadingComputer' : 'loading')}
         </div>
       )}
       {v.state.kind === 'end' && (v.state.outcome.kind === 'cancelled'

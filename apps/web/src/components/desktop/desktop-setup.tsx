@@ -706,7 +706,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
-  if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)
   // the setup values are only in memory (the page took them off the address): a reload that should land on THIS page puts them back first
   // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
@@ -717,7 +717,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
   if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
-  if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     // «목록 다시 불러오기» (move-changed): the agents are read again — the ticks that are no longer movable fall off by themselves
     const onRetry = view.failure === 'move-changed' ? () => { setAttachableTick((n) => n + 1); reload(); }
@@ -1111,13 +1111,13 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
             <Checkbox id="setup-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={view.kind === 'starting'} className="mt-0.5 size-5 self-start" />
             <label htmlFor="setup-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
-              <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
+              <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-ds-icon-sm shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
             </label>
           </div>
         ) : null}
         <Button ref={startRef} onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
-          {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
+          {view.kind === 'starting' ? <Loader2 className="size-ds-icon-md animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
         {/* story 4701 (Yuna 4701-copy-1015): the recruiter's agent is not on a row until the list is read — «시작» is off and says why, in the
             count line's place and before every other reason (the waiting IS the reason at that moment) */}
@@ -1608,7 +1608,7 @@ function ResumeProgress({ setupId, canWorkdir = false }: { setupId: string; canW
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => { let off = false; void renewToken().then((r) => { if (!off) setOk(r); }); return () => { off = true; }; }, []);
   // named like the page's other loading card, so a screen reader is not silent (Yuna 10:02Z)
-  if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (ok === null) return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   return ok ? <SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} /> : <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
 }
 
@@ -1633,7 +1633,7 @@ function InAppSetupWait() {
     }, IN_APP_SETUP_WAIT_MS);
     return () => clearTimeout(id);
   }, [router, todayHref]);
-  return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
 }
 
 export function DesktopSetupEntry({ serverHost = false }: { /** story 5036: this web is a workspace server host's (its onboarding keeps the old way) */ serverHost?: boolean } = {}) {
@@ -1711,7 +1711,7 @@ function SetupOrProgress({ query, serverHost = false }: { query: SetupQuery; ser
       });
     return () => { off = true; };
   }, [id, query.canWorkdir]);
-  if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  if (started === null) return <Card className="p-6"><Loader2 className="size-ds-icon-sm animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" canWorkdir={query.canWorkdir === true} />;
   // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.

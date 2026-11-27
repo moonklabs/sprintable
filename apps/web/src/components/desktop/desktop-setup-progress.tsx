@@ -243,12 +243,12 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
           {/* story 4492: the gate is part of getting the agents ready (①) — the note asking the person to answer sits here */}
           {progress.trustHint && claude ? (
             <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-trust-hint">
-              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('trustHint')}
+              <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />{t('trustHint')}
             </span>
           ) : null}
           {progress.workdirFallback ? (
             <span className="mt-1 flex gap-2 text-xs text-muted-foreground" data-testid="setup-workdir-fallback">
-              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
+              <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />{t('workdirFallback', { recipe: task })}
             </span>
           ) : null}
         </Step>
@@ -433,7 +433,7 @@ function MoveProgressBody({ move, kind, onRetry, todayHref, phoneControlFailed, 
           {move.folderWait.length ? (
             <span className="mt-1 flex flex-col gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-move-folder-wait">
               <span className="flex gap-2">
-                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                <Info className="mt-0.5 size-ds-icon-sm shrink-0" aria-hidden />
                 {/* story 4832: an app that answers the per-agent link is asked here (the buttons below); an older one keeps the pointer to the window's notice */}
                 {/* every waiting agent has its button → «아래 버튼»; some have none (an id the link cannot carry) → the pointer line, which covers them all */}
                 {(() => { const g = group(move.folderWait); return t(folderLinks.length === move.folderWait.length ? 'move.folderWaitHere' : 'move.folderWait', { names: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()}
@@ -515,10 +515,10 @@ function Step({ state, label, detail, paused = false, detailTestId, children }: 
   return (
     <li className="flex gap-3" data-state={state} data-paused={paused && state !== 'done' ? 'true' : undefined}>
       {state === 'done'
-        ? <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+        ? <Check className="mt-0.5 size-ds-icon-sm shrink-0 text-primary" aria-hidden />
         : paused || state === 'waiting'
-          ? <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
-          : <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />}
+          ? <Circle className="mt-0.5 size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
+          : <Loader2 className="mt-0.5 size-ds-icon-sm shrink-0 animate-spin text-muted-foreground" aria-hidden />}
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
         {detail ? <span className="block text-xs text-muted-foreground" data-testid={detailTestId}>{detail}</span> : null}
