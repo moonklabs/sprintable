@@ -63,10 +63,11 @@ describe('로그인 입력칸 글자 크기(story #4406)', () => {
   });
 
   // story 4891 — the two boxes are the ds Input now, like every other ds screen: ds-body from the side-by-side layout up (13 px then; 16 px since story 5048 T0 ① — the kit's base UI text). The rule that matters (16 px on a phone) is the test above.
-  it('데스크톱 폭(1280px) — ds 본문 크기(16px · story 5048 T0 ①: 키트 기본 UI 글자)', async () => {
+  // 재기준화(story 5048 글자 내림 · 선생님 11-27 «독거노인용 같다» · PO: 넓은 화면 입력 14 · 폰 입력 16): 데스크톱 ds 본문이 16 → 14. 폰 16은 위 시험이 그대로 지킨다(iOS 확대 방지).
+  it('데스크톱 폭(1280px) — ds 본문 크기(14px · story 5048 글자 내림)', async () => {
     const inputs = await loginInputs();
     const cascade = await loadTailwindCascade(container, { viewportWidth: 1280 });
-    for (const el of inputs) expect(toPx(cascade.computed(el, 'font-size', 'light')), el.type).toBe(16);
+    for (const el of inputs) expect(toPx(cascade.computed(el, 'font-size', 'light')), el.type).toBe(14);
   });
 });
 
