@@ -24,16 +24,16 @@ export function AgentActionCard({ requestId }: { requestId: string }) {
   return <AgentActionCardFace key={view.state} view={view} requestId={requestId} onPressed={(next) => setPressed({ base: read.value, view: next })} onSettled={() => { setPressed(null); retry(); }} />;
 }
 
-type Phase = { kind: 'idle' } | { kind: 'confirm' } | { kind: 'busy' } | { kind: 'error'; why: 'forbidden' | 'fault' };
+type Phase = { kind: 'idle' } | { kind: 'confirm' } | { kind: 'always' } | { kind: 'busy' } | { kind: 'error'; why: 'forbidden' | 'fault' };
 
 export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: { view: AgentActionView; requestId: string; onPressed: (next: AgentActionView) => void; onSettled: () => void }) {
   const t = useTranslations('chats');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const busy = phase.kind === 'busy';
-  const press = async (decision: 'approve' | 'reject') => {
+  const press = async (decision: 'approve' | 'reject', alwaysAllow = false) => {
     if (busy) return; // one press at a time
     setPhase({ kind: 'busy' });
-    const r = await pressAgentAction(requestId, decision);
+    const r = await pressAgentAction(requestId, decision, alwaysAllow ? { alwaysAllow: true } : undefined);
     if (r.result === 'ok') { setPhase({ kind: 'idle' }); onPressed(r.view); return; }
     if (r.result === 'settled') { setPhase({ kind: 'idle' }); onSettled(); return; }
     setPhase({ kind: 'error', why: r.result });
@@ -52,10 +52,21 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
         {/* what it is about — the object's own card (title · status; a click opens it in the side panel, read for THIS viewer); once a delete is done there is nothing left to open */}
         {view.target && !view.gone ? <EntityCard kind={view.target.kind} refId={view.target.id} /> : null}
         {view.gone ? <p className="m-0 text-ds-small text-ds-ink-2" data-testid="agent-action-gone">{t('agentActionGone')}</p> : null}
-        {open && phase.kind !== 'confirm' ? (
+        {open && phase.kind !== 'confirm' && phase.kind !== 'always' ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" loading={busy} disabled={busy} onClick={() => (view.irreversible ? setPhase({ kind: 'confirm' }) : void press('approve'))}>{t('agentActionApprove')}</Button>
             <Button variant="secondary" disabled={busy} onClick={() => void press('reject')}>{t('agentActionReject')}</Button>
+            {/* story 5041 ② — «이번만» is the approve button above; this is the other half: allow this agent, in this project, for this action, for good (the server offers it only to an organisation owner / admin) */}
+            {view.alwaysAllowAvailable ? <Button variant="quiet" disabled={busy} onClick={() => setPhase({ kind: 'always' })}>{t('agentActionAlwaysAllow')}</Button> : null}
+          </div>
+        ) : null}
+        {open && phase.kind === 'always' ? (
+          <div className="flex flex-col gap-2" role="group" aria-label={t('agentActionAlwaysAllow')}>
+            <p className="m-0 text-ds-small text-ds-ink-2">{t('agentActionAlwaysAllowAsk')}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="primary" onClick={() => void press('approve', true)}>{t('agentActionAlwaysAllowYes')}</Button>
+              <Button variant="quiet" onClick={() => setPhase({ kind: 'idle' })}>{t('agentActionConfirmNo')}</Button>
+            </div>
           </div>
         ) : null}
         {open && phase.kind === 'confirm' ? (

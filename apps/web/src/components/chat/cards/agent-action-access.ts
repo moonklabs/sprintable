@@ -27,6 +27,8 @@ export interface AgentActionView {
   gone: boolean;
   /** the stored call found the state changed (404 · 409 · 410 · 422) — told apart from a plain failure */
   changed: boolean;
+  /** the card offers «always allow» (story 5041 ②): the server says so — only to an organisation owner / admin, for an action that has an auto slot, while the ask is open */
+  alwaysAllowAvailable: boolean;
 }
 
 const STATES: readonly string[] = ['pending', 'retry', 'running', 'executed', 'failed', 'rejected', 'expired'];
@@ -54,6 +56,7 @@ export function parseAgentAction(raw: unknown): AgentActionView | null {
     target,
     gone: raw.state === 'executed' && typeof raw.action_key === 'string' && raw.action_key.endsWith('.delete') && target !== null,
     changed: raw.state === 'failed' && status !== null && [404, 409, 410, 422].includes(status),
+    alwaysAllowAvailable: raw.always_allow_available === true,
   };
 }
 
@@ -68,12 +71,13 @@ export async function fetchAgentAction(requestId: string): Promise<AgentActionVi
 /** `forbidden` = this person may not do it (the request stays open for the next one) · `settled` = someone else already decided / it ran out (re-read) · `fault` = anything else */
 export type AgentActionPress = { result: 'ok'; view: AgentActionView } | { result: 'forbidden' | 'settled' | 'fault' };
 
-export async function pressAgentAction(requestId: string, decision: 'approve' | 'reject'): Promise<AgentActionPress> {
+/** `alwaysAllow` = «approve AND allow this agent in this project for good» (an organisation owner / admin only — the server refuses anything else before it claims the ask) */
+export async function pressAgentAction(requestId: string, decision: 'approve' | 'reject', opts?: { alwaysAllow?: boolean }): Promise<AgentActionPress> {
   try {
     const res = await fetchWithAuth(`/api/agent-actions/${encodeURIComponent(requestId)}/decision`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify(opts?.alwaysAllow ? { decision, always_allow: true } : { decision }),
     });
     if (res.status === 403) return { result: 'forbidden' };
     // 409 (someone else decided / it ran out) · 410 · 422 (it changed) · 404 (it is gone or no longer yours to see): the ask is not what this card shows — re-read it
