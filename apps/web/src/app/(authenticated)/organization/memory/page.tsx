@@ -9,7 +9,7 @@ export default function OrganizationMemoryPage() {
   return (
     <div className="mx-auto w-full max-w-3xl p-6">
       <EmptyState
-        icon={<Brain className="size-8" />}
+        icon={<Brain className="size-ds-icon-lg" />}
         title={t('memorySlotTitle')}
         description={t('memorySlotBody')}
       />

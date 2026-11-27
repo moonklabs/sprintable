@@ -50,7 +50,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
     : flatHref(`/chats/${conversationId}`));
   return (
     <div className="flex items-start gap-3 border-t border-border px-3 py-3 first:border-t-0">
-      <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+      <Icon className="mt-0.5 size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 truncate text-editorial-ui font-medium text-foreground">{item.workItemTitle}</span>
