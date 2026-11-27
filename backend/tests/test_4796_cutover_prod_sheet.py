@@ -1121,7 +1121,15 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     up0503 = (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
     assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME)\b|drop_column|alter_column|rename_|add_column|create_index", up0503), "0503's upgrade() only swaps one CHECK for a wider list"
     assert "'member_added', 'member_removed', 'role_changed', 'bridge.inbound_skipped'" in (_ROOT / "backend/alembic/versions/0503_audit_action_bridge_skipped.py").read_text(), "the old three words stay in the new list"
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
+    # story 5041 (C0b): 0505 is TWO `op.execute` lines of upgrade() the reading lists — a NULLABLE column with no default on `reward_ledger` (`ADD COLUMN IF NOT EXISTS agent_action_request_id uuid`: no rewrite, no lock beyond the
+    # catalogue change; a running old revision never names it, so every row it writes has NULL) and the partial UNIQUE index over it (`… WHERE agent_action_request_id IS NOT NULL`: every existing row is NULL and an old
+    # revision's inserts are NULL, so none ever enters the index — it is empty when built; the plain build of the repository's convention). Nothing is dropped, renamed, retyped, backfilled or deleted. The downgrade() is not read.
+    reward = [h for h in hits if h.startswith("0505_")]
+    assert len(reward) == 2 and "ALTER TABLE reward_ledger ADD COLUMN IF NOT EXISTS agent_action_request_id uuid" in reward[0] and "op.execute(" in reward[1], reward  # the second statement spans lines (the reading prints its first line, as for 0502's index)
+    up0505 = (_ROOT / "backend/alembic/versions/0505_reward_ledger_agent_action_request.py").read_text().split("def upgrade()")[1].split("def downgrade()")[0]
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_reward_ledger_agent_action_request ON reward_ledger (agent_action_request_id) WHERE agent_action_request_id IS NOT NULL" in up0505
+    assert not re.search(r"\b(DELETE|TRUNCATE|INSERT|UPDATE|RENAME|DROP|NOT NULL DEFAULT)\b|drop_column|alter_column|rename_|CONCURRENTLY|SET NOT NULL", up0505.replace("WHERE agent_action_request_id IS NOT NULL", "")), "0505's upgrade() adds one nullable column and one partial unique index — nothing more"
+    hits = [h for h in hits if not h.startswith(("0471_", "0505_", "0472_", "0473_", "0474_", "0475_", "0477_", "0479_", "0480_", "0482_", "0483_", "0484_", "0485_", "0486_", "0488_", "0489_", "0490_", "0491_", "0492_", "0494_", "0495_", "0497_", "0499_", "0500_", "0501_", "0502_", "0503_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
