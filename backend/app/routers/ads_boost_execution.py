@@ -15,6 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -199,6 +200,23 @@ async def pause_ads_boost_endpoint(
     )
 
 
+async def _agent_needs_the_gates_project(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, gate_id: uuid.UUID, resolved, resolved_locale: str) -> None:
+    """story 5041 (Kadir's audit of 6018, L1): an AGENT that stops or re-reads a boost must hold the gate's own project — the check these two roads never had (a person is an organisation member and
+    reaches them as before, unchanged). A project the agent does not hold answers exactly as a gate that is not there (404 — a project's existence is never disclosed: story 2322 · 2342)."""
+    if resolved.type != "agent":
+        return
+    from app.models.gate import Gate
+    from app.services.gate_service import resolve_gate_project_ids_batch
+    from app.services.project_auth import has_project_access
+
+    gate = (await db.execute(select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id))).scalar_one_or_none()
+    if gate is None:
+        return
+    project_id = (await resolve_gate_project_ids_batch(db, org_id, [gate])).get(gate.id)
+    if project_id is not None and not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
+        _raise_common_error(AdsBoostGateNotFoundError(gate_id), resolved_locale)
+
+
 async def _pause_ads_boost_endpoint(
     org_id: uuid.UUID, gate_id: uuid.UUID, *, db: AsyncSession, verified_org_id: uuid.UUID,
     auth: AuthContext, resolved_locale: str,
@@ -206,6 +224,7 @@ async def _pause_ads_boost_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: stopping the spend is safe for an agent too (start · resume · cancel stay with a person)
+    await _agent_needs_the_gates_project(db, auth, org_id, gate_id, resolved, resolved_locale)
     try:
         command = await request_ads_boost_pause(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,
@@ -561,6 +580,7 @@ async def _refresh_ads_boost_spend_endpoint(
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
     resolved = await resolve_member(auth, org_id, db)  # story 5041 · PO 11-27: a read-and-store refresh with its own 429 — an agent may ask
+    await _agent_needs_the_gates_project(db, auth, org_id, gate_id, resolved, resolved_locale)
     try:
         result = await refresh_ads_boost_spend_now(
             db, org_id=org_id, gate_id=gate_id, requester_member_id=resolved.id,

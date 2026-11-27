@@ -183,13 +183,44 @@ async def test_refresh_agent_key_may_refresh():
         await _start_boost(Session, org_id, gate_id, owner_id)
 
         async with Session() as s:
-            agent_id = await _seed_agent(s, org_id, project_id)
+            agent_id = await _seed_agent(s, org_id, project_id, grant=True)  # an agent that HOLDS the gate's project
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend/refresh")
         # story 5041 · PO 11-27 — a read-and-store refresh (own 429): an agent may ask; start · resume · cancel stay with a person
         assert r.status_code == 201, r.text
         assert r.json()["spend_minor"] is not None
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_agent_without_the_gates_project_is_refused_on_refresh_and_pause():
+    """Kadir's audit of 6018 (L1): the roads opened to an agent never checked the gate's PROJECT — an agent of project A could stop or re-read project B's ad. Now it needs that project — else the answer is a gate that is not there (404; a person is unchanged)."""
+    from app.main import app
+    from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _session_factory
+
+    engine, Session, org_id, project_id, owner_id, gate_id = await _setup_approved_gate(await _session_factory(), on_a_story=True)
+    try:
+        await _start_boost(Session, org_id, gate_id, owner_id)
+        async with Session() as s:
+            from app.models.project import Project
+
+            other = Project(id=uuid.uuid4(), org_id=org_id, name="Another project")
+            s.add(other)
+            await s.commit()
+            outsider = await _seed_agent(s, org_id, other.id)  # a member of ANOTHER project of the same organisation — not of the gate's
+        _setup_org_scoped_app(app, Session, org_id, user_id=outsider, agent=True)
+        async with _client_for(app) as client:
+            for path in ("spend/refresh", "pause"):
+                r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/{path}")
+                assert r.status_code == 404 and r.json()["error"]["code"] == "ADS_BOOST_GATE_NOT_FOUND", (path, r.text)  # a project the agent does not hold is a gate that is not there (404 — existence is not disclosed)
+        # the person reaches both as before
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            assert (await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend/refresh")).status_code == 201
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
