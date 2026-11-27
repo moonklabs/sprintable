@@ -15,6 +15,8 @@ sees who named them and where; the words are withheld by the gate, the line stay
   08 `read-all` marks what is shown and leaves the unreadable room's lines alone
   09 the helper marks only a room's words-lines of the given people (never a mention, never another kind of notification, never an already-read time)
   10 a notification that is not about a room is counted as before
+  11 a `dispatched` row with no entity type (NULL) or another kind is never taken for a room's words — counted, listed and read by `read-all` (SQL three-valued logic); the room's own copy follows the room
+  12 the helper is narrowed to the rooms' organization and touches only UNREAD words-lines (another organization's row naming the same room id is left alone)
 """
 from __future__ import annotations
 
@@ -282,5 +284,99 @@ async def test_10_a_notification_that_is_not_about_a_room_is_counted_as_before()
         await w.sql("DELETE FROM project_access WHERE project_id = :p AND org_member_id = :s", p=s.pid, s=s.a)
         n = await _nums(w, s.ta)
         assert "story.assigned" in n["kinds"] and n["bell"] == 2, n  # the assignment + the mention; the channel's words are not
+    finally:
+        await _close(engine, w)
+
+
+async def _dispatched(w, org, a, *, entity_type, entity_id, event="task.update") -> None:
+    await w.sql(
+        "INSERT INTO events (id, org_id, event_type, source_entity_type, source_entity_id, recipient_id, recipient_type, payload, status) "
+        "VALUES (gen_random_uuid(), :o, 'dispatched', :t, :i, :a, 'human', CAST(:p AS jsonb), 'delivered')",
+        o=org, t=entity_type, i=entity_id, a=a, p='{"event_type": "%s", "title": "t"}' % event,
+    )
+
+
+async def test_11_a_dispatched_row_with_no_entity_type_or_another_kind_is_never_taken_for_a_rooms_words():
+    """`source_entity_type = 'conversation'` is NULL for a row whose type is NULL, which made `NOT (is-a-words-line)` NULL and dropped the row from the list and the count (and `read-all` skipped it): such a notification
+    is not a room's words and must be treated as plain «not». A `conversation` copy (the bell's copy of a room) keeps following the room."""
+    engine, w = await _world()
+    try:
+        s = await _scene(w, "channel", "P11")
+        await _dispatched(w, s.org, s.a, entity_type=None, entity_id=None)                                  # ① no entity at all
+        await _dispatched(w, s.org, s.a, entity_type="doc", entity_id=uuid.uuid4())                         # ② another kind
+        await _dispatched(w, s.org, s.a, entity_type="conversation", entity_id=s.chan, event="room.copy")  # ③ the room's own copy (any kind but a chat message's, so the 4890 hide does not apply)
+        n = await _nums(w, s.ta)
+        assert (n["bell"], n["listed"]) == (7, 7), n  # 3 lines + the mention + the three dispatched rows
+        # the access goes (the seat stays): ① and ② stay, the room's copy goes with the room
+        await w.sql("DELETE FROM project_access WHERE project_id = :p AND org_member_id = :s", p=s.pid, s=s.a)
+        n = await _nums(w, s.ta)
+        assert (n["bell"], n["listed"]) == (3, 3), n  # the mention + ① + ②
+        ra = await w.client.patch("/api/v2/event-notifications/read-all", headers=_H(s.ta))
+        assert ra.status_code == 200
+        left = await _q(w, "SELECT payload->>'event_type', count(*) FROM events WHERE recipient_id = :a AND read_at IS NULL AND event_type = 'dispatched' AND payload->>'event_type' IN ('task.update', 'room.copy') GROUP BY 1", a=s.a)
+        assert dict(left) == {"room.copy": 1}, left  # ① and ② ('task.update') were read by read-all; the unreadable room's copy ('room.copy') was not
+        n = await _nums(w, s.ta)
+        assert (n["bell"], n["listed"]) == (0, 0), n
+    finally:
+        await _close(engine, w)
+
+
+async def test_12_the_helper_is_narrowed_to_the_rooms_organization_and_touches_only_unread_words_lines():
+    engine, w = await _world()
+    try:
+        from app.services.event_room_gate import mark_room_words_lines_read
+
+        s = await _scene(w, "channel", "P12a")
+        other_org, _ot, _pid, _chan = await _owner_and_channel(w, "P12b")  # another organization
+        # a line of ANOTHER organization that names this room id (a crafted / colliding row): it must not be touched
+        foreign = uuid.uuid4()
+        await w.sql(
+            "INSERT INTO events (id, org_id, event_type, source_entity_type, source_entity_id, recipient_id, recipient_type, payload, status) "
+            "VALUES (:i, :o, 'conversation.message_created', 'conversation_message', gen_random_uuid(), :a, 'human', CAST(:p AS jsonb), 'delivered')",
+            i=foreign, o=other_org, a=s.a, p='{"conversation_id": "%s"}' % s.chan)
+        unread_words = (await _q(w, "SELECT count(*) FROM events WHERE recipient_id = :a AND org_id = :o AND read_at IS NULL AND event_type = 'conversation.message_created' AND payload->>'conversation_id' = :c", a=s.a, o=s.org, c=str(s.chan)))[0][0]
+        assert unread_words >= 3
+        async with w.Session() as session:
+            n = await mark_room_words_lines_read(session, room_ids=[s.chan], member_ids=[s.a], org_id=s.org)
+            await session.commit()
+        assert n >= unread_words  # every unread words-line of the room (the bell's copies of it count too)
+        assert (await _q(w, "SELECT read_at IS NULL FROM events WHERE id = :i", i=foreign))[0][0] is True, "another organization's row was marked read"
+        async with w.Session() as session:  # control: without the organization the same row IS marked (the narrowing is what protects it)
+            await mark_room_words_lines_read(session, room_ids=[s.chan], member_ids=[s.a])
+            await session.commit()
+        assert (await _q(w, "SELECT read_at IS NULL FROM events WHERE id = :i", i=foreign))[0][0] is False
+        async with w.Session() as session:  # and a second run finds nothing unread: only UNREAD lines are ever counted
+            assert await mark_room_words_lines_read(session, room_ids=[s.chan], member_ids=[s.a], org_id=s.org) == 0
+    finally:
+        await _close(engine, w)
+
+
+async def test_13_every_road_that_unseats_narrows_the_read_marking_to_the_channels_organization():
+    engine, w = await _world()
+    try:
+        from app.services.project_channel import empty_project_channel, unseat_from_project_channel, unseat_from_project_channels_of_org
+
+        s = await _scene(w, "channel", "P13a")
+        other_org, _ot, _pid, _chan = await _owner_and_channel(w, "P13b")
+
+        async def foreign_row() -> uuid.UUID:
+            i = uuid.uuid4()
+            await w.sql(
+                "INSERT INTO events (id, org_id, event_type, source_entity_type, source_entity_id, recipient_id, recipient_type, payload, status) "
+                "VALUES (:i, :o, 'conversation.message_created', 'conversation_message', gen_random_uuid(), :a, 'human', CAST(:p AS jsonb), 'delivered')",
+                i=i, o=other_org, a=s.a, p='{"conversation_id": "%s"}' % s.chan)
+            return i
+
+        roads = {
+            "one revoke": lambda session: unseat_from_project_channel(session, project_id=s.pid, member_id=s.a),
+            "org removal": lambda session: unseat_from_project_channels_of_org(session, org_id=s.org, member_ids={s.a}),
+            "project deleted": lambda session: empty_project_channel(session, project_id=s.pid),
+        }
+        for name, road in roads.items():
+            row = await foreign_row()
+            async with w.Session() as session:
+                await road(session)
+                await session.commit()
+            assert (await _q(w, "SELECT read_at IS NULL FROM events WHERE id = :i", i=row))[0][0] is True, f"{name}: another organization's row naming the room was marked read"
     finally:
         await _close(engine, w)

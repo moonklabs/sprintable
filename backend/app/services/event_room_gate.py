@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from sqlalchemy import and_, case, cast, exists, func, or_, select, update
+from sqlalchemy import and_, case, cast, exists, false, func, or_, select, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 # the stored event kinds that carry a room's WORDS, and where the room is named
@@ -205,9 +205,14 @@ def is_room_words_line():
     """SQL: the `events` row carries a room's words (a chat line · a human-intervention request · the bell's `dispatched` copy of a room). NOT a mention, NOT any other notification."""
     from app.models.event import Event
 
-    return or_(
-        Event.event_type.in_(ROOM_WORDS_LINE_TYPES),
-        and_(Event.event_type == "dispatched", Event.source_entity_type == "conversation"),
+    # COALESCE: a `dispatched` row whose `source_entity_type` is NULL makes `type == 'conversation'` NULL, so the OR is NULL and `NOT (…)` is NULL — such a row (any notification that names no entity) would drop out of the
+    # bell's list and count and stay unread after «read all» (SQL three-valued logic; the same trap `_is_hidden_notification` guards with a coalesce). «Not a words-line» must be a plain false.
+    return func.coalesce(
+        or_(
+            Event.event_type.in_(ROOM_WORDS_LINE_TYPES),
+            and_(Event.event_type == "dispatched", Event.source_entity_type == "conversation"),
+        ),
+        false(),
     )
 
 
@@ -234,13 +239,16 @@ async def room_words_lines_readable_clause(db, org_id: uuid.UUID, auth):
     return or_(~is_room_words_line(), reads_its_room)
 
 
-async def mark_room_words_lines_read(db, *, room_ids, member_ids=None) -> int:
+async def mark_room_words_lines_read(db, *, room_ids, member_ids=None, org_id: "uuid.UUID | None" = None) -> int:
     """story 5049 — a person lost a room (the project's access taken away · the seat taken out): their UNREAD words-lines of that room are marked read, in the CALLER's transaction (a revoke that rolls back
     takes this with it). `room_ids`: a collection or a subquery of room ids; `member_ids`: the people (a collection or a subquery) or None for everyone who has a line of those rooms. Mentions stay as they
-    are (see above); a line already read keeps its time. Returns the number of lines marked."""
+    are (see above); a line already read keeps its time. `org_id` (the rooms' organization — every caller that knows it passes it) narrows the statement to that organization's rows by `ix_events_org_id`; the one road that
+    crosses organizations (account deletion) passes none. Returns the number of lines marked."""
     from app.models.event import Event
 
     conditions = [Event.read_at.is_(None), is_room_words_line(), room_words_line_room().in_(room_ids)]
+    if org_id is not None:
+        conditions.append(Event.org_id == org_id)
     if member_ids is not None:
         conditions.append(Event.recipient_id.in_(member_ids))
     result = await db.execute(update(Event).where(*conditions).values(read_at=func.now()).execution_options(synchronize_session=False))

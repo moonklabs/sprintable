@@ -94,7 +94,8 @@ async def remove_project_channel_participant(
             ConversationParticipant.conversation_id == channel_id, ConversationParticipant.member_id == member_id,
         )
     )
-    await mark_room_words_lines_read(db, room_ids=[channel_id], member_ids=[member_id])
+    org_id = (await db.execute(select(Conversation.org_id).where(Conversation.id == channel_id))).scalar_one_or_none()
+    await mark_room_words_lines_read(db, room_ids=[channel_id], member_ids=[member_id], org_id=org_id)
 
 
 async def ensure_project_channel_quietly(
@@ -148,7 +149,7 @@ async def unseat_from_project_channels_of_org(db: AsyncSession, *, org_id: uuid.
             ConversationParticipant.conversation_id.in_(channel_ids), ConversationParticipant.member_id.in_(member_ids),
         )
     )
-    await mark_room_words_lines_read(db, room_ids=channel_ids, member_ids=list(member_ids))  # story 5049: their unread channel lines are read with the seat
+    await mark_room_words_lines_read(db, room_ids=channel_ids, member_ids=list(member_ids), org_id=org_id)  # story 5049: their unread channel lines are read with the seat
 
 
 async def unseat_from_all_project_channels(db: AsyncSession, *, member_ids_sql, params: dict) -> None:
@@ -167,6 +168,7 @@ async def unseat_from_all_project_channels(db: AsyncSession, *, member_ids_sql, 
     # story 5049: and their unread channel lines are read (the ids the caller's SQL names, resolved once)
     ids = [r[0] for r in (await db.execute(text(member_ids_sql), params)).all()]
     if ids:
+        # no organization here on purpose: account deletion crosses every organization the person sat in (the recipients are named, and only their UNREAD words-lines are touched)
         await mark_room_words_lines_read(db, room_ids=select(Conversation.id).where(Conversation.is_project_channel.is_(True)), member_ids=ids)
 
 
@@ -176,8 +178,9 @@ async def empty_project_channel(db: AsyncSession, *, project_id: uuid.UUID) -> N
     from app.services.event_room_gate import mark_room_words_lines_read
 
     channel_ids = select(Conversation.id).where(Conversation.project_id == project_id, Conversation.is_project_channel.is_(True))
+    channel_org = (await db.execute(select(Conversation.org_id).where(Conversation.project_id == project_id, Conversation.is_project_channel.is_(True)))).scalar_one_or_none()
     await db.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id.in_(channel_ids)))
-    await mark_room_words_lines_read(db, room_ids=channel_ids)  # story 5049: nobody is in the room any more — nobody keeps an unread line of it
+    await mark_room_words_lines_read(db, room_ids=channel_ids, org_id=channel_org)  # story 5049: nobody is in the room any more — nobody keeps an unread line of it
 
 
 async def retitle_project_channel_quietly(db: AsyncSession, *, project_id: uuid.UUID, title: str) -> bool:

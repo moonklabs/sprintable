@@ -48,7 +48,8 @@ def auth_ctx(org_id, member_id):
 @pytest.fixture(autouse=True)
 def _room_gate_is_not_under_test_here(monkeypatch):
     """story 5049 — the bell's «a room's words only for who reads the room now» clause asks the database who the caller is and which rooms they read (real-Postgres tests:
-    `test_5049_unread_room_readable_realdb.py`); these route-plumbing tests feed the session a fixed list of results, so the clause is stood in by «true» (no extra statements)."""
+    `test_5049_unread_room_readable_realdb.py`); these route-plumbing tests feed the session a fixed list of results, so the clause is stood in by «true» (no extra statements).
+    The clause's WIRING (count · list · read-all) and its NULL logic are NOT checked here — `test_5049_unread_room_readable_realdb.py` (real Postgres) is responsible for them."""
     from sqlalchemy import true
 
     async def _always(db, org_id, auth):
