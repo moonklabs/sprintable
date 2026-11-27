@@ -151,9 +151,9 @@ export default function RetroPage() {
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowCreateForm((v) => !v)}>
             {showCreateForm ? (
-              <><X className="mr-1.5 h-3.5 w-3.5" />{tc('cancel')}</>
+              <><X className="mr-1.5 size-ds-icon-md" />{tc('cancel')}</>
             ) : (
-              <><Plus className="mr-1.5 h-3.5 w-3.5" />{t('newSession')}</>
+              <><Plus className="mr-1.5 size-ds-icon-md" />{t('newSession')}</>
             )}
           </Button>
         }
@@ -218,12 +218,12 @@ export default function RetroPage() {
             // 다음 행동을 빈상태 중심에 둔다. 컨테이너 bg는 공유 EmptyState 기본(형제와 동일)이라
             // 손대지 않는다(다크 blend는 EmptyState 공통 축·retro 특정 아님).
             <EmptyState
-              icon={<History className="size-8" />}
+              icon={<History className="size-ds-icon-lg" />}
               title={t('noSessions')}
               description={t('noSessionsDescription')}
               action={
                 <Button size="sm" onClick={() => setShowCreateForm(true)}>
-                  <Plus className="size-4" />
+                  <Plus className="size-ds-icon-md" />
                   {t('noSessionsCta')}
                 </Button>
               }

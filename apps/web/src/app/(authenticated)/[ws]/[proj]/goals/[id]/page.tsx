@@ -386,7 +386,7 @@ export default function EpicDetailPage() {
           <div className="flex items-center gap-2">
             {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(gates/chats와 동일 원칙, §3.2). */}
             <Link href={`/${wsSlug}/${projSlug}/goals`} replace className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-3.5 w-3.5" />
+              <ArrowLeft className="size-ds-icon-md" />
               {t('backToList')}
             </Link>
             <span className="text-muted-foreground">/</span>
@@ -410,7 +410,7 @@ export default function EpicDetailPage() {
                 onClick={() => setIsEditing((v) => !v)}
                 className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
               >
-                {isEditing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                {isEditing ? <X className="size-ds-icon-sm" /> : <Pencil className="size-ds-icon-sm" />}
                 {isEditing ? t('cancel') : t('edit')}
               </button>
               <button
@@ -419,7 +419,7 @@ export default function EpicDetailPage() {
                 className="flex items-center gap-1.5 rounded-lg border border-destructive px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive-tint transition-colors"
                 aria-label={t('deleteGoal')}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="size-ds-icon-sm" />
                 {t('deleteGoal')}
               </button>
             </div>

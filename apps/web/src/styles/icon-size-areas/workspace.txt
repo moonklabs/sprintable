@@ -1,0 +1,4 @@
+# 워크스페이스 화면 + 이웃 dispatch · integrations(④-⑫) — 문서 폴더(…/[proj]/docs)는 docs.txt와 겹쳐 두 번 걸리지만 같은 검사라 무해
+app/(authenticated)/[ws]
+components/dispatch
+components/integrations
