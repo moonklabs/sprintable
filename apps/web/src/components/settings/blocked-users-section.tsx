@@ -121,7 +121,7 @@ export function BlockedUsersSection() {
             <ListRow
               key={row.blocked_member_id}
               className="last:border-b-0"
-              leading={<ShieldOff className="h-4 w-4 text-ds-ink-3" aria-hidden />}
+              leading={<ShieldOff className="size-ds-icon-sm text-ds-ink-3" aria-hidden />}
               title={rowLabels.get(row.blocked_member_id)}
               trailing={
                 <Button

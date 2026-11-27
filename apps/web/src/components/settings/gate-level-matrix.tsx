@@ -179,7 +179,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
       <div className="flex flex-wrap items-center gap-3 text-ds-small text-ds-ink-3">
         {LEVELS.map((lv) => (
           <span key={lv} className="inline-flex items-center gap-1">
-            <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
+            <LevelMark level={lv} className="mr-0.5 inline size-ds-icon-sm" />{t(LEVEL_META[lv].labelKey)}
           </span>
         ))}
       </div>
@@ -200,7 +200,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
               <p className="text-ds-body font-semibold text-ds-ink">{t(`work_${wt}`)}</p>
               {wt === 'merge' ? (
                 <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
-                  <Lock className="h-3 w-3" />
+                  <Lock className="size-ds-icon-sm" />
                   {t('mergeFloorNote')}
                 </span>
               ) : null}
@@ -232,7 +232,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   // a 14 px icon press — on a touch screen the press area is 44 × 44 (the picture stays small)
                                   className="inline-flex items-center justify-center text-ds-ink-3 hover:text-ds-ink disabled:opacity-50 touch:min-h-11 touch:min-w-11"
                                 >
-                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  <RotateCcw className="size-ds-icon-sm" />
                                 </button>
                               ) : null}
                             </span>
@@ -256,7 +256,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   aria-pressed={selected}
                                   className={cn('min-w-15 gap-1', selected && LEVEL_META[lv].selected, floorDisabled && 'opacity-40')}
                                 >
-                                  <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
+                                  <LevelMark level={lv} className="mr-0.5 inline size-ds-icon-md" />{t(LEVEL_META[lv].labelKey)}
                                 </Button>
                               );
                             })}

@@ -195,7 +195,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                   ) : null}
                   {isOwner ? (
                     <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
-                      <Shield className="h-3 w-3" />
+                      <Shield className="size-ds-icon-sm" />
                       {t('projectAccessAlwaysAllowed')}
                     </span>
                   ) : canManage ? (
@@ -206,16 +206,16 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
                       className="min-w-18 gap-1"
                     >
                       {toggling ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <Loader2 className="size-ds-icon-md animate-spin" />
                       ) : granted ? (
-                        <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
+                        <><Shield className="size-ds-icon-md" />{t('projectAccessAllowed')}</>
                       ) : (
-                        <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
+                        <><ShieldOff className="size-ds-icon-md" />{t('projectAccessBlocked')}</>
                       )}
                     </Button>
                   ) : (
                     <span className={cn('inline-flex items-center gap-1 text-ds-small', granted ? 'text-ds-done' : 'text-ds-ink-3')}>
-                      {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+                      {granted ? <Shield className="size-ds-icon-sm" /> : <ShieldOff className="size-ds-icon-sm" />}
                       {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
                     </span>
                   )}

@@ -52,7 +52,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
             {(control) => <Input {...control} type="time" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="touch:h-11" />}
           </Field>
           <Button variant="primary" size="lg" onClick={handleSave} disabled={saving || !projectId}>
-            {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
+            {saved ? <><Check className="size-ds-icon-md" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
           </Button>
         </div>
       </SettingsSection>

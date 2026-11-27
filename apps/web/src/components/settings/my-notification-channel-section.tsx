@@ -286,7 +286,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
           <div className="space-y-2 rounded-ds-control border border-ds-needs-hand-bar/40 bg-ds-needs-hand-soft p-2.5 text-ds-small text-ds-ink">
             <p className="flex items-start gap-1.5">
               {/* story #2590(TIER1 아이콘) — 경고 아이콘은 글자색(ink)으로(색만으로 뜻을 싣지 않는다: 글이 같이 간다). */}
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ds-ink" aria-hidden />
+              <AlertTriangle className="mt-0.5 size-ds-icon-sm shrink-0 text-ds-ink" aria-hidden />
               <span>{t('misconfigGlobalActive')}</span>
             </p>
             <Button variant="secondary" onClick={handleTurnOffGlobal} disabled={busyId === globalActive.id}>
@@ -358,8 +358,8 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                             aria-label={`${t('testSend')} — ${ariaScope}`}
                           >
                             {test.status === 'sending'
-                              ? <Loader2 className="h-4 w-4 animate-spin" />
-                              : <Send className="h-4 w-4" />}
+                              ? <Loader2 className="size-ds-icon-md animate-spin" />
+                              : <Send className="size-ds-icon-md" />}
                           </Button>
                           <SwitchButton
                             checked={c.is_active}
@@ -374,7 +374,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                             disabled={busy}
                             aria-label={`${tc('delete')} — ${ariaScope}`}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="size-ds-icon-md" />
                           </Button>
                         </div>
                       </div>
@@ -390,8 +390,8 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                           aria-live={test.status === 'fail' ? 'assertive' : 'polite'}
                           aria-atomic="true"
                         >
-                          {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts, locale, displayTimezone)}` : ''}</>}
-                          {test.status === 'fail' && <><X className="h-3 w-3" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}
+                          {test.status === 'ok' && <><Check className="size-ds-icon-sm" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts, locale, displayTimezone)}` : ''}</>}
+                          {test.status === 'fail' && <><X className="size-ds-icon-sm" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}
                           {test.status === 'sending' && <>{t('testSending')}</>}
                           {test.status === 'unavailable' && <>{t('testUnavailable')}</>}
                         </p>

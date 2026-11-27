@@ -25,7 +25,7 @@ interface SettingsNavProps {
 function SettingsNavSkeleton() {
   return (
     <div className="flex h-14 items-center gap-3 border-b border-ds-line px-4" data-testid="settings-tab-skeleton" aria-hidden="true">
-      <div className="size-[18px] animate-pulse rounded bg-ds-surface-high" />
+      <div className="size-ds-icon-sm animate-pulse rounded bg-ds-surface-high" />
       <div className="h-3 w-24 animate-pulse rounded bg-ds-surface-high" />
     </div>
   );
@@ -40,7 +40,7 @@ export function SettingsNav({ groups, activeTab, integrationsHref, hrefFor }: Se
     const active = item.kind === 'tab' && item.id === activeTab;
     const inner = (
       <>
-        <Icon name={item.icon} size={18} className={item.danger ? 'text-ds-failed' : 'text-ds-ink-2'} />
+        <Icon name={item.icon} size="sm" className={item.danger ? 'text-ds-failed' : 'text-ds-ink-2'} />
         <span className={cn('min-w-0 flex-1 truncate text-ds-body font-semibold', item.danger ? 'text-ds-failed' : 'text-ds-ink')}>{item.ns === 'nav' ? tNav(item.labelKey) : t(item.labelKey)}</span>
         <Icon name="chevron_right" className="text-ds-ink-3 lg:hidden" />
       </>

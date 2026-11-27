@@ -190,7 +190,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         <TabsList aria-label={t('tabWorkflowPolicies')}>
           {MODES.map(({ key, labelKey, Icon }) => (
             <TabsTrigger key={key} value={key}>
-              <Icon className="size-3.5" aria-hidden />
+              <Icon className="size-ds-icon-sm" aria-hidden />
               {t(labelKey)}
             </TabsTrigger>
           ))}
@@ -219,18 +219,18 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         <TabsContent value="edit">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="secondary" disabled={busy} iconStart={<Plus className="size-3.5" aria-hidden />} onClick={() => void newDraft()}>
+              <Button type="button" variant="secondary" disabled={busy} iconStart={<Plus className="size-ds-icon-md" aria-hidden />} onClick={() => void newDraft()}>
                 {t('lineEditorNewDraft')}
               </Button>
               {draftId ? (
                 <>
-                  <Button type="button" variant="secondary" disabled={busy} iconStart={<FileCheck2 className="size-3.5" aria-hidden />} onClick={() => void runLint()}>
+                  <Button type="button" variant="secondary" disabled={busy} iconStart={<FileCheck2 className="size-ds-icon-md" aria-hidden />} onClick={() => void runLint()}>
                     {t('lineEditorLint')}
                   </Button>
-                  <Button type="button" variant="primary" disabled={busy} iconStart={<Save className="size-3.5" aria-hidden />} onClick={() => void saveDraft()}>
+                  <Button type="button" variant="primary" disabled={busy} iconStart={<Save className="size-ds-icon-md" aria-hidden />} onClick={() => void saveDraft()}>
                     {t('lineEditorSave')}
                   </Button>
-                  <Button type="button" variant="secondary" disabled={busy} iconStart={<Send className="size-3.5" aria-hidden />} onClick={() => void requestPublish()}>
+                  <Button type="button" variant="secondary" disabled={busy} iconStart={<Send className="size-ds-icon-md" aria-hidden />} onClick={() => void requestPublish()}>
                     {t('lineEditorRequestPublish')}
                   </Button>
                 </>
@@ -280,7 +280,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                     <Button
                       type="button" variant="quiet" className="ml-auto" onClick={() => void openVersion(v.id)}
                       aria-label={t('lineEditorEditAriaLabel', { n: index + 1, label: t('lineEditorEditAction') })}
-                      iconStart={<Pencil className="size-3.5" aria-hidden />}
+                      iconStart={<Pencil className="size-ds-icon-md" aria-hidden />}
                     >
                       {t('lineEditorEditAction')}
                     </Button>

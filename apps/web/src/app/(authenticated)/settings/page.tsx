@@ -986,7 +986,7 @@ export default function SettingsPage() {
                 <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('membersTabPeople')}</h2>
                 {isAdmin ? (
                   <DsButton variant="primary" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
-                    <Plus className="size-3.5" /> {t('addMember')}
+                    <Plus className="size-ds-icon-md" /> {t('addMember')}
                   </DsButton>
                 ) : null}
               </div>

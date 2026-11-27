@@ -109,7 +109,7 @@ export function WorkflowPolicySimulatorSection() {
         </Field>
       </div>
 
-      <Button type="button" variant="primary" iconStart={<Play className="size-3.5" aria-hidden />} disabled={!canRun} loading={loading} onClick={() => void run()}>
+      <Button type="button" variant="primary" iconStart={<Play className="size-ds-icon-md" aria-hidden />} disabled={!canRun} loading={loading} onClick={() => void run()}>
         {loading ? t('simRunning') : t('simRun')}
       </Button>
 
@@ -133,7 +133,7 @@ export function WorkflowPolicySimulatorSection() {
                 {result.routing_path.map((s, i) => (
                   <li key={i} className="flex flex-wrap items-center gap-1.5 text-ds-small text-ds-ink">
                     <span className="font-mono">{s.from_status ?? '—'}</span>
-                    <ArrowRight className="size-3 shrink-0 text-ds-ink-3" aria-hidden />
+                    <ArrowRight className="size-ds-icon-sm shrink-0 text-ds-ink-3" aria-hidden />
                     <span className="font-mono">{s.to_status}</span>
                     {s.route ? <Tag>{s.route}</Tag> : null}
                   </li>
