@@ -28,7 +28,7 @@ export function TreeSearchInput({
     <div className="flex-shrink-0 px-3 pb-2 pt-1">
       {/* story 4892 (UI-9 목록 열) — 찾기 칸 = ds Input + ds Icon · 지우기 = ds IconButton. debounce · API · 핸들러 무변경, 부품만. */}
       <div className="relative">
-        <Icon name="search" size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ds-ink-3" />
+        <Icon name="search" size="sm" className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ds-ink-3" />
         <Input
           ref={inputRef}
           type="text"

@@ -135,7 +135,7 @@ export function StoryMentionMenu({
               : 'text-foreground'
           }`}
         >
-          <EntityGlyph Icon={STORY_ICON} label={item.title} className="size-3.5 flex-shrink-0 text-muted-foreground" />
+          <EntityGlyph Icon={STORY_ICON} label={item.title} className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
           <span className="truncate text-xs">{item.title}</span>
         </Button>
       ))}

@@ -495,28 +495,28 @@ export function DocEditor({
             onClick={() => editor.chain().focus().toggleBold().run()}
             title={`${tEditor('toolbarBold')} (Ctrl+B)`}
           >
-            <Bold className="size-3.5" />
+            <Bold className="size-ds-icon-sm" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('italic')}
             onClick={() => editor.chain().focus().toggleItalic().run()}
             title={`${tEditor('toolbarItalic')} (Ctrl+I)`}
           >
-            <Italic className="size-3.5" />
+            <Italic className="size-ds-icon-sm" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('strike')}
             onClick={() => editor.chain().focus().toggleStrike().run()}
             title={tEditor('toolbarStrikethrough')}
           >
-            <Strikethrough className="size-3.5" />
+            <Strikethrough className="size-ds-icon-sm" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('code')}
             onClick={() => editor.chain().focus().toggleCode().run()}
             title={tEditor('toolbarInlineCode')}
           >
-            <Code className="size-3.5" />
+            <Code className="size-ds-icon-sm" />
           </BubbleButton>
           <span className="mx-0.5 h-4 w-px bg-ds-line" />
           <BubbleButton
@@ -532,14 +532,14 @@ export function DocEditor({
             // story #3776(1층B) — "링크", docs ns의 기존 toolbarLink 키 재사용.
             title={tEditor('toolbarLink')}
           >
-            <Link2 className="size-3.5" />
+            <Link2 className="size-ds-icon-sm" />
           </BubbleButton>
           <BubbleButton
             active={editor.isActive('highlight')}
             onClick={() => editor.chain().focus().toggleHighlight().run()}
             title={tEditor('toolbarHighlight')}
           >
-            <Highlighter className="size-3.5" />
+            <Highlighter className="size-ds-icon-sm" />
           </BubbleButton>
         </BubbleMenu>
         <MobileSelectionMenu editor={editor} />
@@ -616,7 +616,7 @@ export function DocEditor({
                   onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
                   className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <Plus className="size-3.5" />
+                  <Plus className="size-ds-icon-sm" />
                 </button>
                 {insertMenuOpen ? (
                   <div
@@ -633,7 +633,7 @@ export function DocEditor({
                       onClick={openImagePicker}
                       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
                     >
-                      <ImageIcon className="size-4 text-muted-foreground" />
+                      <ImageIcon className="size-ds-icon-sm text-muted-foreground" />
                       {tEditor('attachImage')}
                     </button>
                     <button
@@ -642,7 +642,7 @@ export function DocEditor({
                       onClick={openFilePicker}
                       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
                     >
-                      <Paperclip className="size-4 text-muted-foreground" />
+                      <Paperclip className="size-ds-icon-sm text-muted-foreground" />
                       {tEditor('attachFile')}
                     </button>
                   </div>
@@ -660,7 +660,7 @@ export function DocEditor({
               className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center"
             >
               <span className="flex size-9 items-center justify-center rounded-full bg-info-tint text-foreground">
-                <Plus className="size-4" />
+                <Plus className="size-ds-icon-sm" />
               </span>
               <span className="break-keep text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
               <span className="break-keep text-xs text-foreground">{tEditor('attachDropHint')}</span>
@@ -688,14 +688,14 @@ export function DocEditor({
               ariaLabel={labels.undo}
               onClick={() => editor.chain().focus().undo().run()}
             >
-              <Undo2 className="size-3.5" />
+              <Undo2 className="size-ds-icon-sm" />
             </ToolbarButton>
             <ToolbarButton
               disabled={!editor.can().redo()}
               ariaLabel={labels.redo}
               onClick={() => editor.chain().focus().redo().run()}
             >
-              <Redo2 className="size-3.5" />
+              <Redo2 className="size-ds-icon-sm" />
             </ToolbarButton>
             <Sep />
             <ToolbarButton

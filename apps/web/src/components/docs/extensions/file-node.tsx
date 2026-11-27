@@ -98,7 +98,7 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
       <NodeViewWrapper as="div" className="my-3 not-prose">
         <div className={cardBase}>
           <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
+            <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">{filename}</p>
@@ -118,7 +118,7 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
       <NodeViewWrapper as="div" className="my-3 not-prose">
         <div className={cardBase}>
           <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive-tint text-destructive">
-            <AlertTriangle className="size-4" aria-hidden />
+            <AlertTriangle className="size-ds-icon-sm" aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-destructive">{t('attachFileUnavailable')}</p>
@@ -145,7 +145,7 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
     return (
       <NodeViewWrapper as="div" className="my-3 not-prose">
         <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 opacity-70')}>
-          <FileGlyph className="size-4 flex-shrink-0 text-muted-foreground" aria-hidden />
+          <FileGlyph className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{filename}</p>
             <p className="text-xs text-muted-foreground">{t('attachFileBlocked')}</p>
@@ -162,7 +162,7 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
     <NodeViewWrapper as="div" className="my-3 not-prose">
       <div className={cardBase}>
         <span className={`flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md ${tint}`}>
-          {fileGlyph(mimeType, 'size-[18px]')}
+          {fileGlyph(mimeType, 'size-ds-icon-md')}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">{filename}</p>
@@ -177,9 +177,9 @@ export function FileAttachmentView({ node }: ReactNodeViewProps) {
           aria-label={t('attachDownload')}
         >
           {downloading ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
+            <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden />
           ) : (
-            <DownloadIcon className="size-4" aria-hidden />
+            <DownloadIcon className="size-ds-icon-sm" aria-hidden />
           )}
         </button>
       </div>

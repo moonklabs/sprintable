@@ -426,10 +426,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
       // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
       <div className={cn('flex items-center gap-1.5', !sidebarCollapsed && 'lg:hidden')}>
-        <DsButton variant="quiet" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')} iconStart={<Icon name="create_new_folder" size={14} />}>
+        <DsButton variant="quiet" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')} iconStart={<Icon name="create_new_folder" size="md" />}>
           <span className="hidden sm:inline">{t('newFolder')}</span>
         </DsButton>
-        <DsButton onClick={handleNewDoc} aria-label={t('newDoc')} iconStart={<Icon name="add" size={14} />}>
+        <DsButton onClick={handleNewDoc} aria-label={t('newDoc')} iconStart={<Icon name="add" size="md" />}>
           <span className="hidden sm:inline">{t('newDoc')}</span>
         </DsButton>
       </div>
@@ -453,7 +453,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         <DsButton
           type="button"
           variant="secondary"
-          iconStart={<Icon name="add" size={14} />}
+          iconStart={<Icon name="add" size="md" />}
           onClick={handleNewDoc}
           aria-label={t('newDoc')}
           className="hidden lg:inline-flex"
@@ -713,9 +713,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))] focus-within:translate-y-0',
             )}
           >
-            <DsButton variant="secondary" size="lg" onClick={() => setTreeDrawerOpen(true)} aria-label={t('openDocTree')} iconStart={<Icon name="description" size={16} />} className="min-w-0 max-w-full justify-start">
+            <DsButton variant="secondary" size="lg" onClick={() => setTreeDrawerOpen(true)} aria-label={t('openDocTree')} iconStart={<Icon name="description" size="md" />} className="min-w-0 max-w-full justify-start">
               <span className="min-w-0 truncate">{currentDocTitle ?? t('title')}</span>
-              <Icon name="expand_more" size={14} className="shrink-0 text-ds-ink-3" />
+              <Icon name="expand_more" size="sm" className="shrink-0 text-ds-ink-3" />
             </DsButton>
           </div>
           )}

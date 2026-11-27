@@ -488,7 +488,7 @@ const SlashMenu = forwardRef<
         onClick={() => command(item)}
       >
         <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border ${isActive ? 'border-ds-line-control bg-ds-surface-sunk' : 'bg-ds-surface-sunk'}`}>
-          <Icon className={`size-3.5 ${isActive ? 'text-brand-text' : 'text-muted-foreground'}`} />
+          <Icon className={`size-ds-icon-sm ${isActive ? 'text-brand-text' : 'text-muted-foreground'}`} />
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="text-xs font-medium leading-tight">{item.title}</span>

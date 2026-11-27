@@ -298,7 +298,7 @@ export function DocGateSection({
       {isDraft && !approverPickerOpen ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center text-ds-ink-3">
-            <Icon name="shield" size={16} />
+            <Icon name="shield" size="sm" />
           </span>
           <span className="min-w-0 flex-1 break-keep text-ds-small text-ds-ink-3">{t('docGateRequestReviewHint')}</span>
           <Button
@@ -306,7 +306,7 @@ export function DocGateSection({
             className="shrink-0"
             disabled={busy}
             onClick={() => void openApproverPicker()}
-            iconStart={<Icon name="shield" size={14} />}
+            iconStart={<Icon name="shield" size="md" />}
           >
             {t('docGateRequestReview')}
           </Button>
@@ -335,7 +335,7 @@ export function DocGateSection({
             {approverOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
           </NativeSelect>
           <div className="flex gap-1.5">
-            <Button variant="primary" className="flex-1" disabled={!selectedApprover || busy} onClick={() => void submitForApproval()} iconStart={<Icon name="shield" size={14} />}>
+            <Button variant="primary" className="flex-1" disabled={!selectedApprover || busy} onClick={() => void submitForApproval()} iconStart={<Icon name="shield" size="md" />}>
               {t('docGateRequestReview')}
             </Button>
             <Button
@@ -362,7 +362,7 @@ export function DocGateSection({
                 variant="danger"
                 disabled={busy}
                 onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else setRejectOpen(true); }}
-                iconStart={<Icon name="cancel" size={14} />}
+                iconStart={<Icon name="cancel" size="md" />}
               >
                 {t('docGateReject')}
               </Button>
@@ -370,7 +370,7 @@ export function DocGateSection({
                 variant="primary"
                 disabled={busy}
                 onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else approve(); }}
-                iconStart={<Icon name="check_circle" size={14} />}
+                iconStart={<Icon name="check_circle" size="md" />}
               >
                 {t('docGateApprove')}
               </Button>
@@ -383,7 +383,7 @@ export function DocGateSection({
           ) : state === 'confirmed' && gate ? (
             /* ④ confirmed = 결재자 + 시각. */
             <span className="inline-flex flex-wrap items-center gap-x-2 text-ds-small text-ds-ink-3">
-              <span className="inline-flex items-center gap-1"><Icon name="person" size={12} />{resolveName(gate.resolver_id)}</span>
+              <span className="inline-flex items-center gap-1"><Icon name="person" size="sm" />{resolveName(gate.resolver_id)}</span>
               {gate.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
             </span>
           ) : state === 'denied' ? (
@@ -393,7 +393,7 @@ export function DocGateSection({
               className="ml-auto"
               disabled={busy}
               onClick={() => void docTransition('draft')}
-              iconStart={<Icon name="undo" size={14} />}
+              iconStart={<Icon name="undo" size="md" />}
             >
               {t('docGateEdit')}
             </Button>
@@ -407,7 +407,7 @@ export function DocGateSection({
           <p className="text-ds-small font-semibold text-ds-ink">{t('docGateDeniedReason')}</p>
           <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-ds-small text-ds-ink">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ds-small text-ds-ink-3">
-            <span className="inline-flex items-center gap-1"><Icon name="person" size={12} />{resolveName(gate?.resolver_id)}</span>
+            <span className="inline-flex items-center gap-1"><Icon name="person" size="sm" />{resolveName(gate?.resolver_id)}</span>
             {gate?.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
           </div>
         </div>
@@ -432,7 +432,7 @@ export function DocGateSection({
                   <li key={ev.key} className="relative grid grid-cols-[18px_1fr] gap-2 pb-2.5">
                     {!isLast ? <span className="absolute left-2 top-4 bottom-0 w-px bg-ds-line" aria-hidden /> : null}
                     <span className={`z-[1] grid size-[18px] place-items-center rounded-full ${am.dot}`}>
-                      <Icon name={am.icon} size={10} />
+                      <Icon name={am.icon} size={12} />
                     </span>
                     <div className="min-w-0">
                       <p className="break-keep text-ds-small text-ds-ink">
@@ -457,7 +457,7 @@ export function DocGateSection({
         <Dialog open={rejectOpen} onOpenChange={(open) => { if (!open && !busy) setRejectOpen(false); }}>
           <DialogContent aria-labelledby={rejectTitleId} className="max-w-sm" showCloseButton={false}>
             <DialogTitle id={rejectTitleId} className="flex items-center gap-2">
-              <Icon name="gpp_bad" size={16} className="shrink-0 text-ds-failed" />
+              <Icon name="gpp_bad" size="sm" className="shrink-0 text-ds-failed" />
               {t('docGateRejectModalTitle')}
             </DialogTitle>
             {/* the label is a Korean sentence line: it breaks by word (story 4363 guard) */}
@@ -477,7 +477,7 @@ export function DocGateSection({
               <Button variant="quiet" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>
               <Button
                 variant="danger"
-                iconStart={<Icon name="gpp_bad" size={14} />}
+                iconStart={<Icon name="gpp_bad" size="md" />}
                 // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝 — 예전엔
                 // busy만 봐서 빈 textarea로도 즉시 제출됐다(서버 무검증이던 시절 그대로 방치).
                 disabled={busy || !note.trim()}

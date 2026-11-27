@@ -67,8 +67,8 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
         }`}
       >
         {isNotFound
-          ? <AlertCircle className="size-3 flex-shrink-0" />
-          : <FileText className="size-3 flex-shrink-0" />}
+          ? <AlertCircle className="size-ds-icon-sm flex-shrink-0" />
+          : <FileText className="size-ds-icon-sm flex-shrink-0" />}
         {title}
       </span>
     </NodeViewWrapper>
@@ -188,7 +188,7 @@ function WikiLinkMenu({
               : 'text-foreground hover:bg-muted'
           }`}
         >
-          <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />
+          <FileText className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
           <span className="truncate text-xs">{item.title}</span>
         </button>
       ))}

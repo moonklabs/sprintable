@@ -114,7 +114,7 @@ export function MobileSelectionMenu({ editor }: { editor: Editor | null }) {
               : 'text-muted-foreground hover:bg-accent hover:text-foreground'
           }`}
         >
-          <Icon className="size-4" />
+          <Icon className="size-ds-icon-md" />
         </button>
       ))}
     </div>,

@@ -132,7 +132,7 @@ export function DocsIndex() {
           description={t('emptyDescription')}
           className="w-full max-w-lg"
           action={
-            <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size={14} />}>
+            <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size="md" />}>
               {t('newDoc')}
             </Button>
           }
@@ -159,7 +159,7 @@ export function DocsIndex() {
             <IconButton icon="view_list" label={t('indexViewList')} aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} className={viewMode === 'list' ? 'bg-ds-surface-high text-ds-ink' : undefined} />
             <IconButton icon="grid_view" label={t('indexViewGrid')} aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} className={viewMode === 'grid' ? 'bg-ds-surface-high text-ds-ink' : undefined} />
           </div>
-          <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size={14} />}>
+          <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size="md" />}>
             {t('newDoc')}
           </Button>
         </div>

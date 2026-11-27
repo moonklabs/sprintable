@@ -91,7 +91,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
       {/* URL editor — visible when block is selected */}
       {selected && (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-ds-line-control bg-ds-surface-sunk px-3 py-2">
-          <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
+          <Link2 className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}
             value={editUrl}
@@ -140,12 +140,12 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-sm transition-colors hover:bg-ds-surface-high"
               >
-                <ExternalLink className="size-4 flex-shrink-0 text-muted-foreground" />
+                <ExternalLink className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate text-ds-ink-2">{url}</span>
               </a>
             ) : (
               <div className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex items-center gap-3 px-4 py-3 text-sm opacity-70')}>
-                <Link2 className="size-4 flex-shrink-0 text-muted-foreground" />
+                <Link2 className="size-ds-icon-sm flex-shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{t('embedLinkBlocked')}</span>
               </div>
             )
@@ -153,7 +153,7 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
         </>
       ) : (
         <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
-          <Link2 className="size-4" />
+          <Link2 className="size-ds-icon-sm" />
           <span>{t('embedUrlSelectHint')}</span>
         </div>
       )}

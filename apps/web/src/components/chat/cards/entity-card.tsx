@@ -35,7 +35,7 @@ export function EntityCardFace({ kind, title, statusLabel, onOpen }: { kind: Ent
   const t = useTranslations('chats');
   const body = (
     <>
-      <EntityGlyph Icon={resolveEntityIcon(kind)} label={title} className="size-5 shrink-0 text-ds-ink-2" />
+      <EntityGlyph Icon={resolveEntityIcon(kind)} label={title} className="size-ds-icon-md shrink-0 text-ds-ink-2" />
       <span className="min-w-0 flex-1 break-words text-ds-body font-medium text-ds-ink line-clamp-2">{title}</span>
       {statusLabel ? <Chip>{statusLabel}</Chip> : null}
     </>

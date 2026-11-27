@@ -68,7 +68,7 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
                     {doc.icon ? (
                       <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
                     ) : (
-                      <Icon name="description" size={16} className="text-ds-ink-3" />
+                      <Icon name="description" size="sm" className="text-ds-ink-3" />
                     )}
                     <span className="min-w-0 flex-1 truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>
                   </button>

@@ -67,8 +67,8 @@ function ToggleSummaryView({ getPos, editor }: ReactNodeViewProps) {
         aria-label={isOpen ? t('toggleCollapse') : t('toggleExpand')}
       >
         {isOpen
-          ? <ChevronDown className="size-3.5" />
-          : <ChevronRight className="size-3.5" />}
+          ? <ChevronDown className="size-ds-icon-sm" />
+          : <ChevronRight className="size-ds-icon-sm" />}
       </button>
       <NodeViewContent as="div" className="flex-1 font-medium leading-6 outline-none" />
     </NodeViewWrapper>

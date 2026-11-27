@@ -208,7 +208,7 @@ function SynthesisBlock({
   return (
     <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-info-tint p-4">
       <div className="flex items-center gap-2">
-        <Sparkles className="size-3.5 text-info" aria-hidden />
+        <Sparkles className="size-ds-icon-sm text-info" aria-hidden />
         <h2 className="flex-1 text-sm font-semibold text-foreground">{t('synthesisTitle')}</h2>
         <Badge variant="info">{t('aiDraftBadge')}</Badge>
       </div>
@@ -426,7 +426,7 @@ export function SprintCloseCockpit({
         <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />
       ) : (
         <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-ds-surface-sunk p-5 text-center">
-          <Sparkles className="size-4 text-info" aria-hidden />
+          <Sparkles className="size-ds-icon-lg text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
           {generateError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('synthesisGenerateFailed')}</p> : null}
           <Button variant="outline" size="sm" onClick={() => void handleGenerate()}>
@@ -438,7 +438,7 @@ export function SprintCloseCockpit({
       {!generating && synthesis && nextHypotheses.length > 0 ? (
         <div className="space-y-2.5">
           <div className="flex items-center gap-2">
-            <Sparkles className="size-3.5 text-info" aria-hidden />
+            <Sparkles className="size-ds-icon-sm text-info" aria-hidden />
             <h2 className="text-sm font-semibold text-foreground">{t('recTitle')}</h2>
             <Badge variant="info">{t('aiDraftBadge')}</Badge>
           </div>

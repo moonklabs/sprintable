@@ -160,7 +160,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   if (state === 'draft') {
     return (
       <Card data-testid="doc-status-header" data-state="draft" className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <Icon name={STATE_ICON.draft} size={20} className={cn('shrink-0', STATE_ICON_TONE.draft)} />
+        <Icon name={STATE_ICON.draft} size="md" className={cn('shrink-0', STATE_ICON_TONE.draft)} />
         <p className="m-0 min-w-0 flex-1 break-keep text-ds-body text-ds-ink-2">{t('docGateRequestReviewHint')}</p>
         <Button variant="primary" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
@@ -178,7 +178,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       className={cn('flex flex-wrap items-center gap-3 px-4 py-3', state === 'confirmed' ? 'bg-ds-done-soft' : state === 'denied' ? 'bg-ds-failed-soft' : 'bg-ds-surface')}
     >
       <span className="grid size-8 shrink-0 place-items-center rounded-ds-control bg-ds-background">
-        <Icon name={STATE_ICON[state]} size={16} className={STATE_ICON_TONE[state]} />
+        <Icon name={STATE_ICON[state]} size="sm" className={STATE_ICON_TONE[state]} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-ds-card-title font-semibold text-ds-ink">{t(STATE_LABEL_KEY[state])}</div>
@@ -197,7 +197,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         // (우회 경로 자체를 안 만든다 — 반려도 동일 취급, 비대칭 예외 없음).
         <Button asChild variant="secondary" className="shrink-0">
           <Link href={editHref}>
-            <Icon name="open_in_new" size={14} />{t('docGateGoToEditorSign')}
+            <Icon name="open_in_new" size="md" />{t('docGateGoToEditorSign')}
           </Link>
         </Button>
       ) : isApprover ? (
@@ -207,10 +207,10 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
               승인은 사유가 필요 없으므로 기존처럼 원탭 그대로. */}
           <Button asChild variant="danger">
             <Link href={editHref}>
-              <Icon name="cancel" size={14} />{t('docGateReject')}
+              <Icon name="cancel" size="md" />{t('docGateReject')}
             </Link>
           </Button>
-          <Button variant="secondary" disabled={busy} iconStart={<Icon name="check_circle" size={14} />}
+          <Button variant="secondary" disabled={busy} iconStart={<Icon name="check_circle" size="md" />}
             onClick={() => currentTeamMemberId && void gateTransition({ status: 'approved', resolver_id: currentTeamMemberId }, onTransitioned)}
           >
             {t('docGateApprove')}
@@ -219,7 +219,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       ) : state === 'pending' ? (
         <span className="shrink-0 break-keep text-ds-small text-ds-ink">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
-        <Button variant="quiet" disabled={busy} iconStart={<Icon name="undo" size={14} />} onClick={() => void docTransition('draft', onTransitioned)}>
+        <Button variant="quiet" disabled={busy} iconStart={<Icon name="undo" size="md" />} onClick={() => void docTransition('draft', onTransitioned)}>
           {t('docGateEdit')}
         </Button>
       ) : null}
@@ -283,7 +283,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
       <ol className="m-0 list-none space-y-3 p-0 pt-3">
         {auditEvents.map((ev) => (
           <li key={ev.key} className="flex gap-2">
-            <Icon name={kindIcon[ev.kind]} size={16} className={cn('mt-0.5 shrink-0', kindTone[ev.kind])} />
+            <Icon name={kindIcon[ev.kind]} size="sm" className={cn('mt-0.5 shrink-0', kindTone[ev.kind])} />
             <div className="min-w-0 flex-1">
               <div className="break-keep text-ds-body text-ds-ink">{`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}</div>
               {/* [SID:4311 PR 3] 꼬리 붙은 행 라벨(«이름 · ID 앞 8자»)은 RowName으로 — 이름만 잘리고 동명이인을 가르는 꼬리는 늘 보인다(한 덩어리 truncate 금지 · row-name 가드). */}

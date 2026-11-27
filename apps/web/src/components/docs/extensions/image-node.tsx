@@ -172,7 +172,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
         <StateBox tone="muted">
           <div className="absolute inset-0 animate-pulse bg-muted" aria-hidden />
           <div className="relative z-[1] flex flex-col items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-[18px] animate-spin text-info" aria-hidden />
+            <Loader2 className="size-ds-icon-md animate-spin text-info" aria-hidden />
             <span>{t('attachUploading')}</span>
             <span className="text-micro">
               {filename}
@@ -195,7 +195,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             aria-live="assertive"
             aria-atomic="true"
           >
-            <ImageOff className="size-[22px]" aria-hidden />
+            <ImageOff className="size-ds-icon-lg" aria-hidden />
             <span>{t('attachImageUnavailable')}</span>
             {isRef || (uploadError && uploadId) ? (
               <button
@@ -220,7 +220,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
         <NodeViewWrapper as="div" className="relative my-4 inline-block max-w-full not-prose">
           <StateBox tone="muted">
             <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-              <Lock className="size-[22px]" aria-hidden />
+              <Lock className="size-ds-icon-lg" aria-hidden />
               <span>{t('attachImagePrivate')}</span>
             </div>
           </StateBox>

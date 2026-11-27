@@ -233,7 +233,7 @@ function DocAssetImage({ assetId, alt, errorLabel }: { assetId: string; alt: str
   if (state === 'error') {
     return (
       <span className="not-prose my-2 flex items-center gap-2 rounded-xl border border-border bg-ds-surface-sunk px-4 py-3 text-xs text-muted-foreground">
-        <ImageOff className="size-3.5 flex-shrink-0" aria-hidden />
+        <ImageOff className="size-ds-icon-sm flex-shrink-0" aria-hidden />
         <span className="truncate">{errorLabel}</span>
       </span>
     );

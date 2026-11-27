@@ -35,7 +35,7 @@ export function KanbanCardFace({ summary, onOpen }: { summary: KanbanSummary; on
   const title = summary.title ?? '';
   const head = (
     <>
-      <EntityGlyph Icon={resolveEntityIcon('sprint')} label={title || 'sprint'} className="size-5 shrink-0 text-ds-ink-2" />
+      <EntityGlyph Icon={resolveEntityIcon('sprint')} label={title || 'sprint'} className="size-ds-icon-md shrink-0 text-ds-ink-2" />
       <span className="min-w-0 flex-1 truncate text-ds-body font-medium text-ds-ink">{title}</span>
       <span className="shrink-0 whitespace-nowrap text-ds-small text-ds-ink-3">{t('kanbanTotal', { count: summary.total })}{summary.hasMore ? '+' : ''}</span>
     </>

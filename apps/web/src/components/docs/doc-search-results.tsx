@@ -78,7 +78,7 @@ export function DocSearchResults({
                 {doc.icon ? (
                   <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
                 ) : (
-                  <Icon name="description" size={16} className="mt-0.5 text-ds-ink-3" />
+                  <Icon name="description" size="sm" className="mt-0.5 text-ds-ink-3" />
                 )}
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>

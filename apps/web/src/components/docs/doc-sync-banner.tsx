@@ -60,7 +60,7 @@ export function DocSyncBanner({
       {/* story #2513 — Alert 글자가 text-foreground로 통일된 후 색-미지정 아이콘은
           currentColor를 상속해 variant 색을 잃는다. info 분기만 명시 필요(warning은
           이미 text-foreground라 무영향). */}
-      {isConflict ? <AlertTriangle className="size-4" /> : <RotateCw className="size-4 text-info" />}
+      {isConflict ? <AlertTriangle className="size-ds-icon-sm" /> : <RotateCw className="size-ds-icon-sm text-info" />}
       <AlertTitle className="break-keep">{labels.title}</AlertTitle>
       {showDiscardWarning && <AlertDescription className="break-keep">{labels.discardWarning}</AlertDescription>}
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">
