@@ -20,6 +20,16 @@ describe('ds PageHead', () => {
     expect(container.querySelector('[data-slot="ds-page-head-actions"] button')?.textContent).toBe('주 행동');
   });
 
+  it('⭐한글 낱말을 중간에서 끊지 않는다 — 설명 · 보조 글이 `break-keep`이고 긴 영문 · 숫자 낱말은 `overflow-wrap:anywhere`로 칸 안에서 꺾인다(story 5048 · 에이전트 화면 «관 / 리해요»)', async () => {
+    await act(async () => { root.render(<PageHead description="조직 내 전체 프로젝트의 에이전트를 조회하고 관리해요." meta="마지막 수정 · 어제" actions={<button type="button">에이전트 추가</button>} />); });
+    const ps = [...container.querySelectorAll('[data-slot="ds-page-head"] p')];
+    expect(ps).toHaveLength(2);
+    for (const p of ps) {
+      expect(p.className).toMatch(/(^|\s)break-keep(\s|$)/);
+      expect(p.className).toContain('[overflow-wrap:anywhere]');
+    }
+  });
+
   it('⭐설명 · 보조 글 · 행동이 다 없으면 아무것도 그리지 않는다(빈 줄을 남기지 않는다)', async () => {
     await act(async () => { root.render(<PageHead />); });
     expect(container.innerHTML).toBe('');
