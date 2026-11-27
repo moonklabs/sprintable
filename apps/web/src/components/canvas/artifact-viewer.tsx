@@ -452,7 +452,7 @@ export function ArtifactViewer({
           ) : null}
           {artifact.anchor_version != null ? (
             <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-editorial-meta font-semibold text-success">
-              <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
+              <Check className="h-3 w-3" aria-hidden />
               {t('anchorBadge', { version: artifact.anchor_version })}
             </span>
           ) : null}

@@ -148,8 +148,8 @@ function GateGlyph({ node, t }: { node: FlowMapNode; t: ReturnType<typeof useTra
   return (
     <span className="shrink-0" title={label} aria-label={label} role="img">
       {kind === 'verify'
-        ? <Circle className="size-2.5 text-brand" strokeWidth={2.5} aria-hidden="true" />
-        : <Check className="size-2.5 text-success" strokeWidth={2.5} aria-hidden="true" />}
+        ? <Circle className="size-2.5 text-brand" aria-hidden="true" />
+        : <Check className="size-2.5 text-success" aria-hidden="true" />}
     </span>
   );
 }

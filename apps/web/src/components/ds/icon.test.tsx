@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-// UI-3(a9d56577) — Icon 부품 + lucide → Material Symbols 대응표 회귀가드.
+// UI-3(a9d56577) — Icon 부품 + lucide ↔ 이름 대응표 회귀가드. story 5048 ④(PO 11-27: «한 집안 = lucide»): 글리프는 lucide 컴포넌트(끝 둥근 선 · 굵기 2 · 24 격자) — 예전 Material 경로 시험은 «lucide 선 아이콘이다» 시험으로 바뀜.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Icon } from './icon';
+import { Icon, ICON_SIZE } from './icon';
 import { ICON_PATHS } from './icon-paths';
 import { LUCIDE_TO_MATERIAL } from './icon-map';
 
@@ -20,14 +20,27 @@ afterEach(async () => {
 });
 
 describe('Icon', () => {
-  it('이름의 글리프 경로를 currentColor 인라인 SVG로 그린다(기본 16px)', async () => {
+  it('이름의 글리프를 lucide 선 아이콘(24 격자 · 굵기 2 · 끝 둥글게 · currentColor)으로 그린다(기본 16px)', async () => {
     await act(async () => { root.render(<Icon name="check" />); });
     const svg = container.querySelector('svg')!;
-    expect(svg.getAttribute('viewBox')).toBe('0 -960 960 960');
+    expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
     expect(svg.getAttribute('width')).toBe('16');
-    expect(svg.getAttribute('fill')).toBe('currentColor');
-    expect(svg.querySelector('path')!.getAttribute('d')).toBe(ICON_PATHS.check.d);
+    expect(svg.getAttribute('fill')).toBe('none');
+    expect(svg.getAttribute('stroke')).toBe('currentColor');
+    expect(svg.getAttribute('stroke-width')).toBe('2'); // 키트 캡처를 눈으로 읽은 값(PO) — 1.5로 깎지 않는다
+    expect(svg.getAttribute('stroke-linecap')).toBe('round');
+    expect(svg.getAttribute('stroke-linejoin')).toBe('round');
     expect(svg.getAttribute('data-icon')).toBe('check');
+  });
+
+  it('⭐크기 단계: sm 16 · md 20 · lg 24 — 단계 이름과 숫자 둘 다 받는다(ICON_SIZE가 한 곳)', async () => {
+    expect(ICON_SIZE).toEqual({ sm: 16, md: 20, lg: 24 });
+    for (const [step, px] of Object.entries(ICON_SIZE)) {
+      await act(async () => { root.render(<Icon name="check" size={step as keyof typeof ICON_SIZE} />); });
+      expect(container.querySelector('svg')!.getAttribute('width'), step).toBe(String(px));
+    }
+    await act(async () => { root.render(<Icon name="check" size={14} />); });
+    expect(container.querySelector('svg')!.getAttribute('width')).toBe('14');
   });
 
   it('label이 없으면 장식(aria-hidden) · 있으면 뜻을 싣는 img', async () => {
@@ -57,17 +70,15 @@ describe('Icon', () => {
     await act(async () => { root.render(<Icon name="progress_activity" />); });
     expect(container.querySelector('svg')!.getAttribute('class')).not.toContain('animate-spin');
   });
-
-  it('격자가 다른 글리프(auto_awesome)는 자기 viewBox를 쓴다', async () => {
-    await act(async () => { root.render(<Icon name="auto_awesome" />); });
-    expect(container.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 24 24');
-  });
 });
 
 describe('icon-paths · icon-map', () => {
-  it('글리프 경로가 모두 비어 있지 않은 SVG path이고 숫자 · 명령만 가진다', () => {
-    for (const [name, g] of Object.entries(ICON_PATHS)) {
-      expect(g.d, name).toMatch(/^[Mm][-\d.,\sMmLlHhVvCcSsQqTtAaZz]+$/);
+  it('⭐글리프 표의 모든 이름이 그려진다 — lucide 선 아이콘(path · line · circle 등 자식이 있는 svg)', async () => {
+    for (const name of Object.keys(ICON_PATHS)) {
+      await act(async () => { root.render(<Icon name={name as keyof typeof ICON_PATHS} />); });
+      const svg = container.querySelector('svg')!;
+      expect(svg.children.length, name).toBeGreaterThan(0);
+      expect(svg.getAttribute('stroke'), name).toBe('currentColor');
     }
   });
 

@@ -101,6 +101,10 @@
   --spacing-ds-control-xl: 3rem;
   --spacing-ds-row: 3.5rem;
   --spacing-ds-tag: 1.75rem;
+  /* story 5048 ④ — 아이콘 크기 단계(키트 24 하나 · 글 14에 맞춰 20 = 조작 안): `size-ds-icon-sm|md|lg`. 12 · 14는 칩 · 배지 안에서만. ds `Icon`의 `size="sm|md|lg"`와 같은 값(icon.tsx ICON_SIZE). */
+  --spacing-ds-icon-sm: 1rem;
+  --spacing-ds-icon-md: 1.25rem;
+  --spacing-ds-icon-lg: 1.5rem;
   /* 부품 규격의 큰 높이(키트 문서 §2.3): 상단 막대 64 · 대화 머리 80 · 대화 목록 줄 60(채팅 밀도 11-27: 키트 88 → 60) · 탐색 항목 폭 240 */
   --spacing-ds-bar: 4rem;
   --spacing-ds-head: 5rem;
