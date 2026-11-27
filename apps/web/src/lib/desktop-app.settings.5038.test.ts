@@ -67,3 +67,28 @@ describe('[SID:5038 C8] subscribeDesktopSettings · writeDesktopSettings', () =>
     setBridge({ ...base }); expect(await writeDesktopSettings({ dockBadge: false })).toBe('unsupported');
   });
 });
+
+describe('[SID:5038 C8] the store is kept for ONE bridge (codex): another bridge object starts clean', () => {
+  const app = (settings: unknown, extra: Record<string, unknown> = {}) => ({ ...base, settings, setSettings: async () => ({ ok: true, settings }), subscribeSettings: () => () => undefined, ...extra });
+  it('⭐a replaced bridge: the old one\'s pushed value is gone, the old subscription is let go, the new one is subscribed and read', () => {
+    let emitA: (s: unknown) => void = () => undefined; const stopA = vi.fn();
+    setBridge(app(S, { subscribeSettings: (l: (s: unknown) => void) => { emitA = l; l(S); return stopA; } }));
+    const listen = vi.fn(); subscribeDesktopSettings(listen);
+    emitA({ ...S, keepRunning: true }); expect(desktopSettings()!.keepRunning).toBe(true);
+    const subB = vi.fn((l: (s: unknown) => void) => { l(S); return () => undefined; });
+    setBridge(app({ ...S, trayIcon: false }, { subscribeSettings: subB }));
+    expect(desktopSettings()).toEqual({ ...S, trayIcon: false }); // not A's pushed keepRunning
+    expect(stopA).toHaveBeenCalledTimes(1);
+    subscribeDesktopSettings(listen); expect(subB).toHaveBeenCalledTimes(1); // B is subscribed (A's was let go)
+  });
+  it('⭐an answer that comes after the bridge was replaced does not touch the new bridge\'s values', async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const a = app(S, { setSettings: () => new Promise((r) => { release = r; }) }); setBridge(a);
+    desktopSettings();
+    const pending = writeDesktopSettings({ keepRunning: true });
+    setBridge(app({ ...S, dockBadge: false })); expect(desktopSettings()!.dockBadge).toBe(false);
+    release({ ok: true, settings: { ...S, keepRunning: true } });
+    expect(await pending).toBe('ok');
+    expect(desktopSettings()).toEqual({ ...S, dockBadge: false });
+  });
+});

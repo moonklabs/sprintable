@@ -312,11 +312,22 @@ let pushedSettings: DesktopSettings | undefined; // undefined = nothing pushed y
 let settingsNow: DesktopSettings | null = null;
 const settingsListeners = new Set<() => void>();
 let stopSettings: (() => void) | null = null;
+let settingsBridge: SprintableDesktop | undefined; // the bridge the pushed value and the subscription belong to (codex: a page whose bridge object is replaced must not keep the old one's values or its subscription)
 const sameSettings = (a: DesktopSettings | null, b: DesktopSettings | null) => (a === null || b === null ? a === b : JSON.stringify(a) === JSON.stringify(b));
+
+/** everything kept for one bridge is dropped when the page's bridge is another object than the one it was kept for (the old subscription is let go) */
+function settingsFor(raw: SprintableDesktop | undefined): void {
+  if (settingsBridge === raw) return;
+  if (stopSettings) { const stop = stopSettings; stopSettings = null; try { stop(); } catch { /* the old app is gone */ } }
+  settingsBridge = raw;
+  pushedSettings = undefined;
+  settingsNow = null;
+}
 
 /** the app's settings right now, or null (a browser · an older app · the app gave no settings, or not in the closed shape · it lacks the write hand — then there is nothing the page may offer) */
 export function desktopSettings(): DesktopSettings | null {
   const raw = rawBridge();
+  settingsFor(raw);
   if (!raw || typeof raw.setSettings !== 'function' || typeof raw.subscribeSettings !== 'function') return null;
   const next = pushedSettings !== undefined ? pushedSettings : desktopSettingsOf(raw.settings);
   if (sameSettings(settingsNow, next)) return settingsNow;
@@ -327,6 +338,7 @@ export function desktopSettings(): DesktopSettings | null {
 /** story 5038 — for useSyncExternalStore: tell me when the settings changed (the app calls back at once with the current ones). Nothing to subscribe to → a no-op. One subscription to the app is shared by all. */
 export function subscribeDesktopSettings(listen: () => void): () => void {
   const raw = rawBridge();
+  settingsFor(raw);
   if (!raw?.subscribeSettings) return () => undefined;
   settingsListeners.add(listen);
   if (!stopSettings) {
@@ -355,11 +367,14 @@ export function subscribeDesktopSettings(listen: () => void): () => void {
 export async function writeDesktopSettings(patch: DesktopSettingsPatch, bridge?: SprintableDesktop): Promise<'ok' | 'failed' | 'unsupported'> {
   const raw = bridge ?? rawBridge();
   if (typeof raw?.setSettings !== 'function') return 'unsupported';
+  const mine = rawBridge(); // the page's bridge at the time of the press — the store is kept for it (an answer that comes after another bridge took over is not applied)
+  settingsFor(mine);
   try {
     const r = await raw.setSettings(patch);
     const kept = r && typeof r === 'object' && (r as { ok?: unknown }).ok === true ? desktopSettingsOf((r as { settings?: unknown }).settings) : null;
     if (!kept) return 'failed';
-    if (!sameSettings(settingsNow, kept)) { pushedSettings = kept; for (const l of [...settingsListeners]) l(); } else { pushedSettings = kept; }
+    // the answer belongs to the bridge it came from: if the page has another bridge by now, the new one's values are not touched
+    if (settingsBridge === mine && rawBridge() === mine) { const changed = !sameSettings(settingsNow, kept); pushedSettings = kept; if (changed) for (const l of [...settingsListeners]) l(); }
     return 'ok';
   } catch { return 'failed'; }
 }
@@ -370,6 +385,7 @@ export function __resetDesktopAppForTest(): void {
   settingsNow = null;
   settingsListeners.clear();
   stopSettings = null;
+  settingsBridge = undefined;
   pushedOffer = undefined;
   offerNow = null;
   offerListeners.clear();
