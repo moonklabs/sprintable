@@ -65,7 +65,7 @@ function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person'
       aria-hidden="true"
       className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-small font-semibold text-ds-ink-2"
     >
-      {icon ? <UnnamedMemberIcon type={icon === 'agent' ? 'agent' : 'human'} className="size-3.5" data-testid={`trust-mark-icon-${icon}`} /> : label}
+      {icon ? <UnnamedMemberIcon type={icon === 'agent' ? 'agent' : 'human'} data-testid={`trust-mark-icon-${icon}`} /> : label}
     </span>
   );
 }
