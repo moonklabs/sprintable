@@ -326,6 +326,13 @@ async def request_approval(
 
     text_line = t("agent_action.card_text", locale, what=what, agent=agent_name)
     cards: list[dict[str, str]] = []
+    # story 5053 — the rooms of this card are locked in room-id order before the first message goes in (the same rule as the gate fan-out: opposite orders must queue, not deadlock)
+    from app.services.approval_delivery import lock_rooms_in_id_order, prepare_card_rooms
+
+    if room is not None:
+        await lock_rooms_in_id_order(session, [room[0].id])
+    else:
+        await prepare_card_rooms(session, org_id=org_id, project_id=project_id, requester_id=agent.id, approver_ids=list(approvers))
     if room is not None:
         # the room the person asked in: ONE card there (whoever may do it on screen may press — it names the person who asked, nobody else is excluded)
         message_id = await _post_card(session, org_id=org_id, project_id=project_id, agent=agent, approver_id=asker, req=req, locale=locale, text_line=text_line, room=room[0])
