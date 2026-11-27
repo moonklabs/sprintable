@@ -30,7 +30,6 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageSplit } from '@/components/ds/page-split';
 import { SummaryCard } from '@/components/ds/summary-card';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentsTopBarTitle, TitleTopBarSlot, useAgentsTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';

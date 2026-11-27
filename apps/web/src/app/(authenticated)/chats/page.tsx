@@ -2,7 +2,6 @@
 
 import { useTranslations } from 'next-intl';
 import { MessageSquare } from 'lucide-react';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { useChatRail } from './chat-rail-context';

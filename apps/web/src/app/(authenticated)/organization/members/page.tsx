@@ -2,7 +2,6 @@
 
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { OrgMembersTopBarTitle, TitleTopBarSlot, useOrgMembersTopBarTitleText } from '@/components/nav/flat-tab-top-bar';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 
 export default function OrganizationMembersPage() {

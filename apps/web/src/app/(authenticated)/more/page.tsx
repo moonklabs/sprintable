@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card } from '@/components/ds/card';
 import { Icon } from '@/components/ds/icon';
 import { ListRow } from '@/components/ds/list-row';
