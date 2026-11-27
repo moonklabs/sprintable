@@ -14,6 +14,7 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext } from '@playwright/test';
 import { findHorizontalOverflow } from './helpers/horizontal-overflow';
 import { storageAssetList } from './helpers/storage-list';
+import { flowBoardFrame } from './helpers/flow-board-frame';
 
 // 민 기기와 같은 조건: 402×874 · 한국어(글자 버튼 폭이 로케일마다 달라 en만 재면 «새 실행 시작하기» 같은 긴 한국어 라벨을 놓친다).
 test.use({ storageState: 'playwright/.auth/owner.json', viewport: { width: 402, height: 874 }, locale: 'ko-KR' });
@@ -81,18 +82,16 @@ test.beforeAll(async () => {
   if (me['name']) throw new Error(`e2e 소유자에 이름이 있다(${String(me['name'])}) — 이름 없는 소유자 시드가 전제(story #4284 AC3 · 새 DB로)`);
   ownerIsUnnamed = true;
 
-  const projects = await json(await api.get('/api/v2/projects', { headers: H }), 'projects');
-  let project = findDeep(projects, (o) => o['slug'] === 'overflow-guard');
-  if (!project) {
-    project = findDeep(await json(await api.post('/api/v2/projects', { headers: H, data: { org_id: orgId, name: 'Overflow Guard', slug: 'overflow-guard' } }), 'project'), (o) => typeof o['id'] === 'string');
-  }
+  // a NEW project for every run of this block. A serial group that fails is run again as a whole (CI retries 2) and this block runs again with it: seeding into the
+  // SAME project stacked the rows (CI run 45923586779: three seeds → 48 activity rows, the 2nd and 3rd attempts saw that, the 1st saw one seed). Every attempt now sees only its own data.
+  const stamp = Date.now();
+  const project = findDeep(await json(await api.post('/api/v2/projects', { headers: H, data: { org_id: orgId, name: 'Overflow Guard', slug: `overflow-guard-${stamp}` } }), 'project'), (o) => typeof o['id'] === 'string');
   const projectId = project!['id'] as string;
   seededProjectId = projectId;
   // 실사용 프로젝트 이름 길이(민 기기의 «뭉클랩 / 제로고»처럼 상단바 컨텍스트 칩이 최대 폭까지 차는 쪽) — 짧은 이름이면 칩이 좁아 상단바 경합이 안 드러난다.
   await json(await api.patch(`/api/v2/projects/${projectId}`, { headers: H, data: { name: PROJECT_NAME } }), 'project name');
 
   // [SID:4356] 맨 위 폴더(분류) 둘 · 그 안에 긴 제목 문서 하나씩 — 문서 읽기 빵부스러기 실제 폭을 잰다(아래 빵부스러기 테스트).
-  const stamp = Date.now();
   for (const [category, key] of [[CRUMB_SHORT_CATEGORY, 'short'], [CRUMB_LONG_CATEGORY, 'long']] as const) {
     const folder = findDeep(await json(await api.post('/api/v2/docs', { headers: H, data: { org_id: orgId, project_id: projectId, slug: `crumb-${key}-folder-${stamp}`, title: category, content: '', is_folder: true } }), 'crumb folder'), (o) => typeof o['id'] === 'string')!;
     const slug = `crumb-${key}-doc-${stamp}`;
@@ -272,16 +271,17 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   // - 맨 아래 상자와 탭바 사이 틈 16(뿌리 p-4).
   // - 보드 칸이 긴 내용(시드 스토리 19)으로 실제로 넘치고 **스크롤이 움직인다**(scrollTop 이동).
   await page.goto(withProject('/flow'), { waitUntil: 'domcontentloaded' });
-  await page.locator('[data-testid="flow-board-frame"]').waitFor({ state: 'attached', timeout: 90_000 });
-  await page.locator('details').last().waitFor({ state: 'attached', timeout: 90_000 });
+  await flowBoardFrame(page).waitFor({ state: 'attached', timeout: 90_000 });
+  await page.getByRole('main').locator('details').last().waitFor({ state: 'attached', timeout: 90_000 });
   // 양성 대조 — 이 실행이 시드한 스토리가 이 보드에 실제로 그려졌다(다른 프로젝트 · 빈 보드면 여기서 RED). 칸은 최신 20장만 그려
   // 먼저 만든 긴 제목 스토리는 채움 스토리에 밀려 첫 장에 없다(로컬 실측) — 마지막에 만든 채움 스토리로 확인한다. 부하 걸린 dev 서버에서
   // 보드가 채워지기까지 15~30초(실측)라 넉넉히.
-  await expect(page.locator('[data-testid="flow-board-frame"]').getByText(`넘침 가드 채움 스토리 ${FILLER_STORY_COUNT}`, { exact: true }).first()).toBeAttached({ timeout: 120_000 });
+  await expect(flowBoardFrame(page).getByText(`넘침 가드 채움 스토리 ${FILLER_STORY_COUNT}`, { exact: true }).first()).toBeAttached({ timeout: 120_000 });
   await page.waitForTimeout(2000);
   const flow = await page.evaluate(() => {
-    const frame = document.querySelector<HTMLElement>('[data-testid="flow-board-frame"]')!;
-    const det = [...document.querySelectorAll('details')].pop()!;
+    // inside `main` only — the same scope as flowBoardFrame(page): the streaming holder after </main> is not the board
+    const frame = document.querySelector<HTMLElement>('main [data-testid="flow-board-frame"]')!;
+    const det = [...document.querySelectorAll('main details')].pop()!;
     let sc: HTMLElement | null = det.parentElement;
     while (sc && !/overflow-y-auto/.test(sc.className)) sc = sc.parentElement;
     if (!sc) return null;
