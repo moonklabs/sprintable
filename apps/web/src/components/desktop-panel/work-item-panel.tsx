@@ -26,6 +26,7 @@ export function PanelStateView({ agentId, state, retry }: { agentId: string; sta
   if (!isPanelId(agentId)) return <PanelNote testId="panel-bad-address">{t('badAddress')}</PanelNote>;
   if (state.phase === 'loading') return <PanelNote testId="panel-loading">{t('loading')}</PanelNote>;
   if (state.phase === 'none') return <PanelNote testId="panel-none">{t('noActive')}</PanelNote>;
+  if (state.phase === 'notfound') return <PanelNote testId="panel-not-found">{t('notFound')}</PanelNote>;
   if (state.phase === 'error') {
     return (
       <div className="p-4" data-testid="panel-error">

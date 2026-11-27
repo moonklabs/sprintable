@@ -494,6 +494,7 @@
   },
   "desktopPanel": {
     "loading": "Loading…",
+    "notFound": "Couldn't find the target.",
     "noActive": "No work item right now",
     "badAddress": "This address can't be opened",
     "loadErrorTitle": "Couldn't load this",

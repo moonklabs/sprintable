@@ -1,6 +1,6 @@
 /**
  * story 5042 (C9) — the work-item tab's page of the desktop app, measured in Chromium with the REAL `PanelStateView` (real ds Banner · Button, the real Tailwind build). The panel's column is as narrow as 280 px
- * (the app's own floor) and as wide as the window: the states a person can see without a story — loading · none · error (with a retry) · a bad address — never scroll sideways and keep their words inside the view.
+ * (the app's own floor) and as wide as the window: the states a person can see without a story — loading · none · not found · error (with a retry) · a bad address — never scroll sideways and keep their words inside the view.
  * (The story itself is the web's own reading view, which has its own specs; the page only hands it the one id.)
  */
 import { readFileSync } from 'node:fs';
@@ -65,7 +65,7 @@ async function open(page: Page, o: { width: number; phase: string; agentId?: str
 const overflowX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 for (const width of [1440, 390, 320, 280]) {
-  for (const [phase, testId, agentId] of [['loading', 'panel-loading', undefined], ['none', 'panel-none', undefined], ['error', 'panel-error', undefined], ['loading', 'panel-bad-address', '../me']] as const) {
+  for (const [phase, testId, agentId] of [['loading', 'panel-loading', undefined], ['none', 'panel-none', undefined], ['error', 'panel-error', undefined], ['notfound', 'panel-not-found', undefined], ['loading', 'panel-bad-address', '../me']] as const) {
     test(`[SID:5042] ${width}px · ${testId}: nothing scrolls sideways and the words stay inside the view`, async ({ page }) => {
       await open(page, { width, phase, agentId });
       const box = await page.locator(`[data-testid="${testId}"]`).boundingBox();

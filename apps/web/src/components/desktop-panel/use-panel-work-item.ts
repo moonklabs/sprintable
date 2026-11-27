@@ -12,6 +12,8 @@ import { isPanelId } from './panel-path';
 export type PanelWorkItem =
   | { phase: 'loading' }
   | { phase: 'error' }
+  /** the server refuses this person the agent (403) or has no such agent (404): «찾을 수 없어요» — the same line the reading view and the C4 refusal say, never a retry button (a retry cannot change it) */
+  | { phase: 'notfound' }
   | { phase: 'none' }
   | { phase: 'story'; storyId: string };
 
@@ -26,12 +28,12 @@ export function activeStoryIdOf(json: unknown): string | null | undefined {
   return isPanelId(row.active_story_id) ? row.active_story_id : undefined;
 }
 
-async function readJson(url: string): Promise<{ ok: boolean; json: unknown }> {
+async function readJson(url: string): Promise<{ ok: boolean; status: number; json: unknown }> {
   try {
     const res = await fetchWithAuth(url);
-    return { ok: res.ok, json: res.ok ? await res.json().catch(() => null) : null };
+    return { ok: res.ok, status: res.status, json: res.ok ? await res.json().catch(() => null) : null };
   } catch {
-    return { ok: false, json: null };
+    return { ok: false, status: 0, json: null };
   }
 }
 
@@ -43,6 +45,8 @@ export function usePanelWorkItem(agentId: string): PanelWorkItem & { retry: () =
     const mine = ++seq.current;
     const res = await readJson(`/api/team-members/${agentId}`);
     if (mine !== seq.current) return; // an older read, or the page is gone
+    // read with THIS person's session: an agent they may not see (403) or that is not there (404) is «not found» — what is shown before (a story seen earlier) goes too
+    if (res.status === 403 || res.status === 404) { setState({ phase: 'notfound' }); return; }
     const id = res.ok ? activeStoryIdOf(res.json) : undefined;
     // a failed read after a good one keeps what is shown (the next poll tries again); only a page with nothing to show says «error»
     setState((prev) => (id === undefined ? (prev.phase === 'story' || prev.phase === 'none' ? prev : { phase: 'error' }) : id === null ? { phase: 'none' } : prev.phase === 'story' && prev.storyId === id ? prev : { phase: 'story', storyId: id }));

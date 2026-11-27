@@ -65,6 +65,25 @@ describe('WorkItemPanel (container)', () => {
     await flush();
     expect(q('reading-view')!.dataset.id).toBe(S1);
   });
+  it('⭐a person who may not see the agent (403) or an agent that is not there (404) gets «대상을 찾을 수 없어요.» — the same line as the reading view and the C4 refusal — no retry button, never the error banner; the story is never asked for', async () => {
+    for (const status of [403, 404]) {
+      mocks.fetchWithAuth.mockClear(); mocks.views.length = 0;
+      answer = () => refuse(status);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await mount();
+      expect(q('panel-not-found')!.textContent, String(status)).toBe('대상을 찾을 수 없어요.');
+      expect(q('panel-error'), String(status)).toBeNull(); expect(q('reading-view')).toBeNull();
+      expect(mocks.fetchWithAuth.mock.calls.map((c) => c[0])).toEqual([`/api/team-members/${AGENT}`]);
+    }
+  });
+  it('⭐access taken away while a story is shown: the next poll answers 403 → the story goes, «찾을 수 없어요» stays (a 5xx keeps the story, as before)', async () => {
+    await mount();
+    expect(q('reading-view')).not.toBeNull();
+    answer = () => refuse(403);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    await flush();
+    expect(q('panel-not-found')).not.toBeNull(); expect(q('reading-view')).toBeNull();
+  });
   it('an answer that is not a member row is an error too (not «no work item»)', async () => {
     answer = () => ok(['x']);
     await mount();

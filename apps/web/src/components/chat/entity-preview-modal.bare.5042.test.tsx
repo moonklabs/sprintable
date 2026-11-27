@@ -23,6 +23,15 @@ const closeButton = () => container.querySelector(`button[aria-label="${koMessag
 const footer = () => container.querySelector('div.border-t');
 
 describe('[SID:5042] EntityPreviewModal bare (the work panel)', () => {
+  it('⭐a story this person\'s session may not read (the server refuses) is drawn as «대상을 찾을 수 없어요.» — bare changes nothing about that', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })));
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><EntityPreviewModal entityType="story" entityId="7e0e7cc1-c2b8-4669-bfaa-3b13903fd670" title={null} status={null} href={null} onClose={() => {}} embedded bare /></NextIntlClientProvider>);
+    });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.chats.entityNotFound);
+    expect(closeButton()).toBeNull();
+  });
   it('⭐bare: the reading view without a close button and without the footer link — the body is still there', async () => {
     await show({ bare: true });
     expect(container.textContent).toContain('PR 병합 게이트');
