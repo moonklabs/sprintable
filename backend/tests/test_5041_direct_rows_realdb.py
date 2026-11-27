@@ -157,3 +157,37 @@ async def test_an_agent_reads_a_run_profile_but_cannot_change_it():
             assert put.status_code == 403, "the write stays with a person's own session"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_agent_reader_is_never_told_it_can_change_a_run_profile(monkeypatch):
+    """Kadir's audit of 6018 (L2): `may_change` could say yes for an agent that made the profile's agent — the write is a person's session only, so an agent's read says no whatever the rule answers"""
+    from app.main import app
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+    from app.services import agent_run_profile
+
+    async def _yes(*a, **k):
+        return True
+
+    monkeypatch.setattr(agent_run_profile, "may_change", _yes)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            other = Member(id=uuid.uuid4(), org_id=d["org_id"], type="agent", name="Made By Agent", is_active=True, owner_member_id=d["admin_om"])
+            s.add(other)
+            await s.commit()
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=d["project_id"], member_id=other.id, permission="granted", role="member"))
+            await s.commit()
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            agent_view = (await c.get(f"/api/v2/agents/{other.id}/run-profile")).json()
+        await _act_as(app, Session, d["admin_user"], d["org_id"])
+        async with _client_for(app) as c:
+            person_view = (await c.get(f"/api/v2/agents/{other.id}/run-profile")).json()
+        assert agent_view["can_change"] is False and agent_view["can_change_unattended"] is False
+        assert person_view["can_change"] is True, "the same rule still answers a person"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
