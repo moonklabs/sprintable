@@ -46,6 +46,36 @@ async function press(label: string) { await act(async () => { btn(label)!.click(
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); log = []; });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
 
+describe('«늘 허용» (story 5041 ②)', () => {
+  it('is not offered unless the server says so — no button, whatever the ask is', async () => {
+    stub(); await show();
+    expect(btn('이 에이전트는 이 프로젝트에서 늘 허용')).toBeUndefined();
+  });
+  it('is offered when the server says so; it asks once, says what it means, and sends ONE decision with always_allow — cancelling sends nothing', async () => {
+    stub({ read: () => json(200, view({ always_allow_available: true })) }); await show();
+    expect(btn('이 에이전트는 이 프로젝트에서 늘 허용')).toBeTruthy();
+    await press('이 에이전트는 이 프로젝트에서 늘 허용');
+    expect(container.textContent).toContain('묻지 않고 에이전트 자신의 권한으로 바로 해요');
+    expect(container.textContent).toContain('다른 프로젝트나 다른 에이전트에는 그대로 물어요');
+    expect(writes()).toEqual([]);
+    await press('취소');
+    expect(writes()).toEqual([]);
+    expect(btn('승인하기')).toBeTruthy();
+    await press('이 에이전트는 이 프로젝트에서 늘 허용'); await press('승인하고 늘 허용');
+    expect(writes()).toEqual([{ method: 'POST', url: `/api/agent-actions/${REQ}/decision`, body: { decision: 'approve', always_allow: true } }]);
+  });
+  it('a plain approval never carries always_allow', async () => {
+    stub({ read: () => json(200, view({ always_allow_available: true })) }); await show();
+    await press('승인하기'); await press('승인해서 실행');
+    expect(writes()).toEqual([{ method: 'POST', url: `/api/agent-actions/${REQ}/decision`, body: { decision: 'approve' } }]);
+  });
+  it('parseAgentAction reads only a literal true as «offered»', () => {
+    const base = { id: REQ, state: 'pending', title: 't', prompt: 'p', reversible: 'no' };
+    expect(parseAgentAction({ ...base, always_allow_available: true })?.alwaysAllowAvailable).toBe(true);
+    for (const v of [false, 'true', 1, null, undefined]) expect(parseAgentAction({ ...base, always_allow_available: v })?.alwaysAllowAvailable).toBe(false);
+  });
+});
+
 describe('an open ask', () => {
   it('shows the ask, who asked, the two buttons — and mounting alone sends NO write', async () => {
     stub(); await show();

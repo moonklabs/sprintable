@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api/v2/agent-actions", tags=["agent-actions", "Work"
 class DecisionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: Literal["approve", "reject"]
+    # story 5041 ② step 3 — «이번만 승인 / 이 에이전트는 이 프로젝트에서 늘 허용»: with an approval, ALSO save «always allow» for this agent × this project × this action (the same setting `PUT /agent-action-policy` makes)
+    always_allow: bool = False
 
 
 def _locale_of(request: Request) -> str:
@@ -124,7 +126,21 @@ def _target_of(snapshot: dict | None, action_key: str | None = None) -> dict | N
     return None
 
 
-async def _view(session: AsyncSession, req: HitlRequest, locale: str = "ko") -> dict:
+async def _always_allow_available(session: AsyncSession, req: HitlRequest, org_id: uuid.UUID, viewer_user_id: uuid.UUID | None) -> bool:
+    """whether the card offers «always allow»: the viewer is an organisation owner / admin (a PERSON's session), the action has an auto slot, and it is not already `auto` for this agent in this project"""
+    from app.services import agent_action_policy as policy
+    from app.services.project_auth import is_org_owner_or_admin
+
+    action_key = (req.hitl_metadata or {}).get("action_key", "")
+    if viewer_user_id is None or action_key not in policy.adjustable_actions() or action_key in policy.NO_AUTO or action_key in policy.FLOOR_ACTIONS:
+        return False
+    if not await is_org_owner_or_admin(session, viewer_user_id, org_id):
+        return False
+    level, _ = await policy.resolve_action_level(session, org_id=req.org_id, project_id=req.project_id, agent_id=req.agent_id, action_key=action_key)
+    return level != "auto"
+
+
+async def _view(session: AsyncSession, req: HitlRequest, locale: str = "ko", *, always_allow_available: bool = False) -> dict:
     meta = req.hitl_metadata or {}
     execution = meta.get("execution") or {}
     ids = {i for i in (req.agent_id, req.responded_by) if i is not None}
@@ -145,6 +161,8 @@ async def _view(session: AsyncSession, req: HitlRequest, locale: str = "ko") -> 
         "created_at": req.created_at.isoformat() if req.created_at else None,
         "expires_at": req.expires_at.isoformat() if req.expires_at else None,
         "execution": {k: execution.get(k) for k in ("state", "http_status", "reason")} if execution else None,
+        # the card's second button (story 5041 ② step 3): only for an organisation owner / admin looking at an ask whose action can be allowed for good
+        "always_allow_available": always_allow_available and _state(req) == "pending",
     }
 
 
@@ -167,7 +185,8 @@ async def get_agent_action(
             raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_PERSON_SESSION_REQUIRED", "message": "AGENT_ACTION_PERSON_SESSION_REQUIRED"})
         return await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id), _locale_of(request))
     await _person(auth, org_id, session)
-    return await _view(session, await _load(session, auth, org_id, request_id), _locale_of(request))
+    req = await _load(session, auth, org_id, request_id)
+    return await _view(session, req, _locale_of(request), always_allow_available=await _always_allow_available(session, req, org_id, uuid.UUID(auth.user_id)))
 
 
 @router.post("/{request_id}/decision")
@@ -182,6 +201,15 @@ async def decide_agent_action(
     presser = await _person(auth, org_id, session)
     req = await _load(session, auth, org_id, request_id)
     rid, snap, action_key = req.id, dict((req.hitl_metadata or {}).get("snapshot") or {}), (req.hitl_metadata or {}).get("action_key", "")
+    if body.always_allow:
+        # «always allow» rides on an APPROVAL by an organisation owner / admin, for an action that has an auto slot — refused BEFORE anything is claimed, so a refusal burns nothing
+        if body.decision != "approve":
+            raise HTTPException(status_code=422, detail={"code": "AGENT_ACTION_ALWAYS_ALLOW_NEEDS_APPROVE", "message": "AGENT_ACTION_ALWAYS_ALLOW_NEEDS_APPROVE"})
+        if not await _always_allow_available(session, req, org_id, uuid.UUID(auth.user_id)):
+            from app.services.project_auth import is_org_owner_or_admin
+
+            admin = await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id)
+            raise HTTPException(status_code=409 if admin else 403, detail={"code": "AGENT_ACTION_ALWAYS_ALLOW_NOT_AVAILABLE" if admin else "AGENT_ACTION_ALWAYS_ALLOW_ADMIN_REQUIRED", "message": "AGENT_ACTION_ALWAYS_ALLOW_NOT_AVAILABLE" if admin else "AGENT_ACTION_ALWAYS_ALLOW_ADMIN_REQUIRED"})
 
     if svc.is_expired(req):
         closed = await session.execute(
@@ -216,6 +244,18 @@ async def decide_agent_action(
         raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_SNAPSHOT_INVALID", "message": "AGENT_ACTION_SNAPSHOT_INVALID"})
     if not await svc._claim(session, request_id=rid, org_id=org_id, presser_id=presser.id):
         raise HTTPException(status_code=409, detail={"code": "AGENT_ACTION_ALREADY_DECIDED", "message": "AGENT_ACTION_ALREADY_DECIDED"})
+    if body.always_allow:
+        # the standing permission is saved in the SAME commit as the claim: a press that lost the claim saved nothing, and the press that won saved it whatever this one call then answers
+        from app.services import agent_action_policy as policy
+        from app.services.activity_log import ActivityLogService
+
+        before, _ = await policy.resolve_action_level(session, org_id=org_id, project_id=req.project_id, agent_id=req.agent_id, action_key=action_key)
+        await policy.set_action_level(session, org_id=org_id, action_key=action_key, level="auto", project_id=req.project_id, agent_id=req.agent_id, set_by=presser.id)
+        await ActivityLogService(session).record(
+            org_id=org_id, action="agent_action_policy.set", actor_type="human", actor_id=presser.id, project_id=req.project_id,
+            entity_type="agent_action_policy", entity_id=req.agent_id,
+            context={"action_key": action_key, "level_before": before, "level_after": "auto", "project_id": str(req.project_id), "agent_id": str(req.agent_id), "via": "card"},
+        )
     await session.commit()  # the claim is visible to everyone before the call starts — a second press loses here, not after
 
     try:
