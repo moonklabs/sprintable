@@ -136,7 +136,7 @@ export function AuUsageBanner() {
 
   return (
     <Alert variant={isPaused ? 'destructive' : 'warning'}>
-      {isPaused ? <AlertOctagon className="size-4 text-destructive" /> : <AlertTriangle className="size-4" />}
+      {isPaused ? <AlertOctagon className="size-ds-icon-sm text-destructive" /> : <AlertTriangle className="size-ds-icon-sm" />}
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription>{desc}</AlertDescription>
 
@@ -180,7 +180,7 @@ export function AuUsageBanner() {
           aria-label={t('auDismiss')}
           onClick={handleDismiss}
         >
-          <X className="size-4" />
+          <X className="size-ds-icon-sm" />
         </Button>
       )}
     </Alert>

@@ -1,2 +1,0 @@
-# 에이전트(④-⑪ 1뎁스 넷 중 하나)
-components/agents

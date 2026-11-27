@@ -146,7 +146,7 @@ export function PricingPlanCard({
         <div className="mb-4 h-8 w-full" aria-hidden="true" />
       ) : (
         <Button variant="ghost" size="sm" disabled className="mb-4 w-full bg-muted text-muted-foreground">
-          <Lock className="h-3.5 w-3.5" data-icon="inline-start" />
+          <Lock className="size-ds-icon-sm" data-icon="inline-start" />
           {t('comingSoonCta')}
         </Button>
       )}

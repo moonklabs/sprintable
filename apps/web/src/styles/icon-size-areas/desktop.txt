@@ -1,2 +1,0 @@
-# 데스크톱(④-⑬) — 이 Mac 연결 · 폰 앱 카드 · 원격 제어
-components/desktop

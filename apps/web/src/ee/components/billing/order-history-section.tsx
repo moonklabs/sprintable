@@ -121,7 +121,7 @@ export function OrderHistorySection({ canManage }: { canManage: boolean }) {
                           className="inline-flex items-center gap-1 text-primary hover:underline"
                         >
                           {t('orderHistoryReceiptLink')}
-                          <ExternalLink className="h-3 w-3" aria-hidden />
+                          <ExternalLink className="size-ds-icon-sm" aria-hidden />
                         </a>
                       ) : null}
                     </td>
