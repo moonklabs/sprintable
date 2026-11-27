@@ -147,9 +147,7 @@ async def test_account_delete_updates_org_and_team_members():
         #   is locked — and again as the first thing the revoke does: the same transaction-level lock, re-taken for free) = 13
         #   + story 4977 B2: the person's sealed records (their history) are deleted right after the closer = 14
         #   + story #5032: the person's seats in every project channel are deleted in the same transaction (ONE statement: members ∪ org seats of the user) = 15
-        #   + story 5049: the same seats' read-marking — `unseat_from_all_project_channels` resolves the ids the caller's SQL names (ONE lookup, counted here) and, only when there are some, marks their unread channel lines
-        #   read with ONE UPDATE in the same transaction; this mock hands back no ids, so the UPDATE is skipped = 16 (with ids it would be 17)
-        assert session.execute.call_count == 16
+        assert session.execute.call_count == 15
         # story 4782: the person's session lock comes BEFORE the account row is locked (a token being issued holds that lock while it writes the same row — the other order is a deadlock)
         assert "pg_advisory_xact_lock" in str(session.execute.call_args_list[0].args[0]) and "pg_advisory_xact_lock_shared" not in str(session.execute.call_args_list[0].args[0])
         assert "FROM users" in str(session.execute.call_args_list[1].args[0])

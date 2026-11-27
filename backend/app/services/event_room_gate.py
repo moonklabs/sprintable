@@ -20,8 +20,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from sqlalchemy import and_, case, cast, exists, false, func, or_, select, update
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import select
 
 # the stored event kinds that carry a room's WORDS, and where the room is named
 CHAT_MESSAGE_EVENT_TYPES = frozenset({
@@ -188,68 +187,3 @@ async def room_notifications_to_withhold(db, org_id: uuid.UUID, auth, rows: Any)
         sender = ev.get("sender_name") if isinstance(ev, dict) else None
         out[nid] = {"sender_name": sender} if isinstance(sender, str) and sender else None   # only a plain name survives: any other shape (a list, a number, a nested object) is dropped
     return out
-
-
-# ─── the bell COUNTS and LISTS a room's words only for who reads the room NOW (story 5049) ───────────────────────────────────────────────────────────────────────────────────────────────
-# The 4870 gate above hands a stored copy back without its words when the caller cannot read the room — the row itself stayed in the bell: listed, and counted as unread for a line nobody can open
-# (the room's own unread count, `conversations/unread-count`, already counts rooms the person reads only). One definition, below, for the bell's count, its list and its «read all»: a line that carries
-# a room's WORDS belongs to the bell only while its recipient reads that room now — the SAME predicate every read of a room asks (`readable_room_clause`). A MENTION (`conversation:mention`) is not one of these
-# lines on purpose: a person named from outside a room still sees who named them and where (4846 AC9 — the words are withheld by the gate above, the line stays and counts).
-
-# the stored kinds whose row IS a line of a room's words (the room is named by the payload); the bell's copy of a room (`dispatched` about a `conversation`) is the third, below
-ROOM_WORDS_LINE_TYPES = ("conversation.message_created", "conversation.human_intervention_requested")
-_UUID_TEXT = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-
-
-def is_room_words_line():
-    """SQL: the `events` row carries a room's words (a chat line · a human-intervention request · the bell's `dispatched` copy of a room). NOT a mention, NOT any other notification."""
-    from app.models.event import Event
-
-    # COALESCE: a `dispatched` row whose `source_entity_type` is NULL makes `type == 'conversation'` NULL, so the OR is NULL and `NOT (…)` is NULL — such a row (any notification that names no entity) would drop out of the
-    # bell's list and count and stay unread after «read all» (SQL three-valued logic; the same trap `_is_hidden_notification` guards with a coalesce). «Not a words-line» must be a plain false.
-    return func.coalesce(
-        or_(
-            Event.event_type.in_(ROOM_WORDS_LINE_TYPES),
-            and_(Event.event_type == "dispatched", Event.source_entity_type == "conversation"),
-        ),
-        false(),
-    )
-
-
-def room_words_line_room():
-    """SQL: the room id a words-line names, or NULL (a row that is not a words-line, or names no usable room). `payload.conversation_id` is text, so a malformed one is guarded before the cast."""
-    from app.models.event import Event
-
-    in_payload = Event.payload["conversation_id"].astext
-    return case(
-        (Event.event_type.in_(ROOM_WORDS_LINE_TYPES), case((in_payload.op("~")(_UUID_TEXT), cast(in_payload, PG_UUID)), else_=None)),
-        (and_(Event.event_type == "dispatched", Event.source_entity_type == "conversation"), Event.source_entity_id),
-        else_=None,
-    )
-
-
-async def room_words_lines_readable_clause(db, org_id: uuid.UUID, auth):
-    """SQL over `events`: true for every row that is NOT a room's words-line; for a words-line, true only when the caller reads its room NOW (`readable_room_clause` — the one predicate of every room read). A
-    words-line that names no usable room is not shown or counted either (fail closed, as the gate above)."""
-    from app.models.conversation import Conversation
-    from app.services.conversation_auth import readable_room_clause
-
-    readable = await readable_room_clause(db, org_id, auth)
-    reads_its_room = exists(select(1).select_from(Conversation).where(Conversation.id == room_words_line_room(), Conversation.org_id == org_id, readable))
-    return or_(~is_room_words_line(), reads_its_room)
-
-
-async def mark_room_words_lines_read(db, *, room_ids, member_ids=None, org_id: "uuid.UUID | None" = None) -> int:
-    """story 5049 — a person lost a room (the project's access taken away · the seat taken out): their UNREAD words-lines of that room are marked read, in the CALLER's transaction (a revoke that rolls back
-    takes this with it). `room_ids`: a collection or a subquery of room ids; `member_ids`: the people (a collection or a subquery) or None for everyone who has a line of those rooms. Mentions stay as they
-    are (see above); a line already read keeps its time. `org_id` (the rooms' organization — every caller that knows it passes it) narrows the statement to that organization's rows by `ix_events_org_id`; the one road that
-    crosses organizations (account deletion) passes none. Returns the number of lines marked."""
-    from app.models.event import Event
-
-    conditions = [Event.read_at.is_(None), is_room_words_line(), room_words_line_room().in_(room_ids)]
-    if org_id is not None:
-        conditions.append(Event.org_id == org_id)
-    if member_ids is not None:
-        conditions.append(Event.recipient_id.in_(member_ids))
-    result = await db.execute(update(Event).where(*conditions).values(read_at=func.now()).execution_options(synchronize_session=False))
-    return result.rowcount or 0
