@@ -150,26 +150,21 @@ async def test_agent_scope_matrix():
                 assert resp_draft.status_code == 201, resp_draft.text
                 agent_reply_id = resp_draft.json()["id"]
 
-                # submit — 403.
+                # story 5041 · PO 11-27 — submit · follow-up · refresh are no longer «human only»: submit only OPENS the gate, follow-up is an internal story, refresh reads the channel
                 resp_submit = await client.post(
                     f"/api/v2/organizations/{org_id}/comments/{comment.id}/replies/{agent_reply_id}/submit",
                 )
-                assert resp_submit.status_code == 403
-                assert resp_submit.json()["error"]["code"] == "COMMENT_REPLY_HUMAN_ONLY"
+                assert resp_submit.status_code != 403 and "COMMENT_REPLY_HUMAN_ONLY" not in resp_submit.text, resp_submit.text
 
-                # follow-up — 403.
                 resp_followup = await client.post(
                     f"/api/v2/organizations/{org_id}/comments/{comment.id}/follow-ups", json={"title": "t"},
                 )
-                assert resp_followup.status_code == 403
-                assert resp_followup.json()["error"]["code"] == "COMMENT_REPLY_HUMAN_ONLY"
+                assert resp_followup.status_code == 201, resp_followup.text
 
-                # refresh(조각①) — 403.
                 resp_refresh = await client.post(
                     f"/api/v2/organizations/{org_id}/publications/{pub.id}/comments/refresh",
                 )
-                assert resp_refresh.status_code == 403
-                assert resp_refresh.json()["error"]["code"] == "COMMENT_REFRESH_HUMAN_ONLY"
+                assert resp_refresh.status_code != 403 and "COMMENT_REFRESH_HUMAN_ONLY" not in resp_refresh.text, resp_refresh.text
         finally:
             app.dependency_overrides.clear()
 

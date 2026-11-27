@@ -545,7 +545,7 @@ async def test_get_comment_reply_view_reports_changed_after_edit():
 
 
 @pytest.mark.anyio
-async def test_api_create_draft_allows_agent_but_submit_rejects_agent():
+async def test_api_create_draft_and_submit_are_open_to_an_agent():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -569,8 +569,8 @@ async def test_api_create_draft_allows_agent_but_submit_rejects_agent():
                 resp2 = await client.post(
                     f"/api/v2/organizations/{org_id}/comments/{comment.id}/replies/{reply_id}/submit",
                 )
-                assert resp2.status_code == 403
-                assert resp2.json()["error"]["code"] == "COMMENT_REPLY_HUMAN_ONLY"
+                # story 5041 · PO 11-27 — submitting only OPENS the approval gate (the send waits for a person's approval): an agent may
+                assert resp2.status_code != 403 and "COMMENT_REPLY_HUMAN_ONLY" not in resp2.text, resp2.text
         finally:
             app.dependency_overrides.clear()
     finally:

@@ -332,7 +332,7 @@ async def test_channel_draft_creation_rejects_cross_org_source_content_item():
 
 
 @pytest.mark.anyio
-async def test_campaign_create_human_only_agent_gets_403():
+async def test_campaign_create_agent_may_create_and_is_recorded_as_the_agent():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -344,8 +344,9 @@ async def test_campaign_create_human_only_agent_gets_403():
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/campaigns", json={"name": "가을 캠페인"})
-            assert r.status_code == 403, r.text
-            assert r.json()["error"]["code"] == "CAMPAIGN_CREATE_HUMAN_ONLY"
+            # story 5041 · PO 11-27 — a campaign is a name and two dates (nothing leaves the product): an agent makes it, as itself
+            assert r.status_code == 201, r.text
+            assert r.json()["created_by_member_id"] == str(agent_id)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -173,7 +173,7 @@ async def test_refresh_records_activity_log_with_human_actor():
 
 
 @pytest.mark.anyio
-async def test_refresh_agent_key_gets_403():
+async def test_refresh_agent_key_may_refresh():
     from app.main import app
     from tests.test_3475_publishing_metrics import _client_for, _setup_org_scoped_app
     from tests.test_e4fc29fa_site_post_orchestration import _seed_agent, _session_factory
@@ -187,8 +187,9 @@ async def test_refresh_agent_key_gets_403():
         _setup_org_scoped_app(app, Session, org_id, user_id=agent_id, agent=True)
         async with _client_for(app) as client:
             r = await client.post(f"/api/v2/organizations/{org_id}/ads-boosts/{gate_id}/spend/refresh")
-        assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "ADS_BOOST_EXECUTE_HUMAN_ONLY"
+        # story 5041 · PO 11-27 — a read-and-store refresh (own 429): an agent may ask; start · resume · cancel stay with a person
+        assert r.status_code == 201, r.text
+        assert r.json()["spend_minor"] is not None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

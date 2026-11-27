@@ -107,7 +107,7 @@ async def test_fresh_send_request_creates_pending_gate_with_sealed_three():
 
 
 @pytest.mark.anyio
-async def test_agent_key_gets_403():
+async def test_agent_key_opens_the_gate_the_send_still_waits_for_a_person():
     from app.main import app
 
     engine, Session, org_id, project_id, owner_id, pub, _, _conn_id = await _setup(await _session_factory())
@@ -120,8 +120,9 @@ async def test_agent_key_gets_403():
                 f"/api/v2/organizations/{org_id}/publications/{pub.id}/newsletter-sends",
                 json=_send_body(),
             )
-        assert r.status_code == 403, r.text
-        assert r.json()["error"]["code"] == "NEWSLETTER_SEND_CREATE_HUMAN_ONLY"
+        # story 5041 · PO 11-27 — the request only OPENS the approval gate; the send itself waits for a person to approve it
+        assert r.status_code == 201, r.text
+        assert r.json()["status"] == "pending"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
