@@ -284,6 +284,91 @@ set -e
 echo "$OUT8" | sed 's/^/    /'
 assert_exit_code "$RC8" "0" "API 일시 오류 두 번 뒤 success → exit 0(옛 동작은 첫 오류에서 exit 1)"
 
+RUNS9="$WORK/runs9.json"
+cat > "$RUNS9" <<'JSON'
+{"workflow_runs": [
+  {"id": 555, "name": "CI"},
+  {"id": 300, "name": "CI"},
+  {"id": 400, "name": "CI"}
+]}
+JSON
+
+echo "── 시나리오 9: 가장 오래된 형제(300)의 잡이 아직 in_progress, 더 새 형제(400)는 success → 300을 기다리다 타임아웃 exit 1(400의 초록을 믿지 않음) ──"
+JOBS9="$WORK/jobs9.sh"
+cat > "$JOBS9" <<'BASH'
+case "$1" in
+  */runs/300/jobs*)
+    jq "$2" <<'JSON'
+{"jobs": [{"name": "Backend pytest", "status": "in_progress", "conclusion": null}]}
+JSON
+    ;;
+  */runs/400/jobs*)
+    jq "$2" <<'JSON'
+{"jobs": [{"name": "Backend pytest", "status": "completed", "conclusion": "success"}]}
+JSON
+    ;;
+esac
+BASH
+BIN9="$WORK/bin9"
+make_fake_gh "$BIN9" "$RUNS9" "$JOBS9"
+set +e
+OUT9="$(run_script "$BIN9" --job-name "Backend pytest" --head-sha abc123 --this-run-id 555 --poll-interval-seconds 1 --max-wait-seconds 2 2>&1)"
+RC9=$?
+set -e
+assert_exit_code "$RC9" "1" "오래된 형제 진행 중 + 새 형제 success → exit 1(조기 초록 없음)"
+
+echo "── 시나리오 10(codex 지적): 가장 오래된 형제(300)의 잡 목록 읽기가 계속 오류, 더 새 형제(400)는 success → 400으로 건너뛰지 않고 타임아웃 exit 1 ──"
+JOBS10="$WORK/jobs10.sh"
+cat > "$JOBS10" <<'BASH'
+case "$1" in
+  */runs/300/jobs*)
+    echo "HTTP 502" >&2
+    exit 1
+    ;;
+  */runs/400/jobs*)
+    jq "$2" <<'JSON'
+{"jobs": [{"name": "Backend pytest", "status": "completed", "conclusion": "success"}]}
+JSON
+    ;;
+esac
+BASH
+BIN10="$WORK/bin10"
+make_fake_gh "$BIN10" "$RUNS9" "$JOBS10"
+set +e
+OUT10="$(run_script "$BIN10" --job-name "Backend pytest" --head-sha abc123 --this-run-id 555 --poll-interval-seconds 1 --max-wait-seconds 2 2>&1)"
+RC10=$?
+set -e
+assert_exit_code "$RC10" "1" "오래된 형제 읽기 오류 + 새 형제 success → exit 1(옛 동작은 400의 success로 exit 0 — fail-open)"
+
+echo "── 시나리오 11: 300이 처음 두 번 읽기 오류 뒤 success, 400은 failure → 300의 success를 미러해 exit 0(오류 동안 400의 빨강으로 건너뛰지 않음) ──"
+CALL_COUNT11="$WORK/call-count-11"
+echo 0 > "$CALL_COUNT11"
+JOBS11="$WORK/jobs11.sh"
+cat > "$JOBS11" <<BASH
+case "\$1" in
+  */runs/300/jobs*)
+    N=\$(cat "$CALL_COUNT11"); N=\$((N + 1)); echo "\$N" > "$CALL_COUNT11"
+    if [ "\$N" -lt 3 ]; then echo "HTTP 502" >&2; exit 1; fi
+    jq "\$2" <<'JSON'
+{"jobs": [{"name": "Backend pytest", "status": "completed", "conclusion": "success"}]}
+JSON
+    ;;
+  */runs/400/jobs*)
+    jq "\$2" <<'JSON'
+{"jobs": [{"name": "Backend pytest", "status": "completed", "conclusion": "failure"}]}
+JSON
+    ;;
+esac
+BASH
+BIN11="$WORK/bin11"
+make_fake_gh "$BIN11" "$RUNS9" "$JOBS11"
+set +e
+OUT11="$(run_script "$BIN11" --job-name "Backend pytest" --head-sha abc123 --this-run-id 555 --poll-interval-seconds 1 --max-wait-seconds 10 2>&1)"
+RC11=$?
+set -e
+echo "$OUT11" | sed 's/^/    /'
+assert_exit_code "$RC11" "0" "오래된 형제 오류 뒤 회복 → 그 형제의 success로 exit 0"
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo "OK: mirror_sibling_run_conclusion.sh 전 시나리오 통과"

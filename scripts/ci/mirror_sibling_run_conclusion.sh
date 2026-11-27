@@ -63,17 +63,25 @@ fi
 #     이제 매 폴링마다 같은 head_sha의 형제 run들을 다시 읽어, 대상 잡이 «보이는» 가장 오래된 형제를 골라 그 잡의 결론을 미러한다(run_id 최소 우선 전제는 그대로).
 #  ② API 일시 오류(비-JSON · 빈 응답 · 한도 403 · 네트워크)는 `set -e`로 스크립트를 죽이지 않고 «아직 안 보임(레이스)»처럼 다음 폴링에서 다시 본다.
 #     fail-closed는 그대로 — 확정 결론이 success가 아니거나 max-wait를 넘기면 exit 1. 「형제가 아직 도는 중」은 실패가 아니라 대기다.
+#  ③ (codex 1회) «읽기 오류»와 «그 이름의 잡이 없음»을 구별한다 — 더 오래된 형제를 읽지 못한 폴링에서는 더 새 형제의 결론을 믿지 않고 다음 폴링을 기다린다(오래된 형제가 진짜 잡이면 그 결론이 우선).
 find_sibling_run_ids() {
   # 이 run 자신을 뺀 같은 head_sha의 CI run id들(오름차순). API 오류면 빈 문자열(호출부가 레이스로 다룸).
   gh api "repos/${GH_REPO}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=50" \
     --jq "[.workflow_runs[] | select(.name == \"CI\") | select(.id != ${THIS_RUN_ID}) | .id] | sort | .[]" 2>/dev/null || true
 }
 
-# 대상 run의 jobs 목록에서 이름이 정확히 일치하는 잡의 {status, conclusion}을 한 줄 JSON으로 낸다 — 안 보이거나(레이스) API 오류면 빈 문자열.
+# 대상 run의 jobs 목록에서 이름이 정확히 일치하는 잡의 {status, conclusion}을 한 줄 JSON으로 낸다.
+#  · 잡이 «안 보임»(응답은 정상인데 그 이름이 없음 — 이 run은 그 잡을 안 돌림 · 레이스) → 빈 문자열
+#  · API 오류(비-JSON · 한도 403 · 네트워크) → 정확히 `ERR`  ← 「안 보임」과 구별한다(codex 지적: 가장 오래된 형제의 오류를 «없음»으로 읽어
+#    더 새 형제의 success를 미러하면, 진짜 잡이 빨간데도 초록으로 닫히는 fail-open이 됨).
 find_job_state() {
-  local run_id="$1"
-  gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" \
-    --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | {status, conclusion}" 2>/dev/null || true
+  local run_id="$1" out
+  if ! out="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" \
+    --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | {status, conclusion}" 2>/dev/null)"; then
+    echo "ERR"
+    return 0
+  fi
+  echo "$out"
 }
 
 echo "story #4099 — edited-only run(${THIS_RUN_ID}) — sha=${HEAD_SHA}의 진짜 run을 찾는 중..."
@@ -91,8 +99,13 @@ while true; do
   # 매 폴링마다 형제 목록을 다시 읽는다(새 run이 생겼거나 앞선 읽기가 API 오류였을 수 있음).
   CURRENT="$(find_sibling_run_ids)"
   [ -n "$CURRENT" ] && SIBLINGS="$CURRENT"
+  UNSURE=""
   for RID in $SIBLINGS; do
     S="$(find_job_state "$RID")"
+    if [ "$S" = "ERR" ]; then
+      # 이 형제를 읽지 못했다 — 더 오래된 형제의 «모름»을 건너뛰고 더 새 형제의 결론을 믿으면 안 된다. 다음 폴링에서 다시 본다.
+      UNSURE="$RID"; break
+    fi
     if [ -n "$S" ]; then STATE_JSON="$S"; PICKED="$RID"; break; fi
   done
   if [ -n "$STATE_JSON" ]; then
@@ -107,6 +120,8 @@ while true; do
       exit 1
     fi
     echo "run ${PICKED}: 아직 진행 중(status=${STATUS:-?}) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
+  elif [ -n "$UNSURE" ]; then
+    echo "run ${UNSURE}의 잡 목록을 못 읽음(API 일시 오류) — 더 새 형제로 넘어가지 않고 ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
   else
     echo "형제 run 어디에도 '${JOB_NAME}' 잡이 아직 안 보임(레이스 · API 일시 오류 포함) — ${POLL_INTERVAL_SECONDS}초 뒤 재확인 (경과 ${ELAPSED}s/${MAX_WAIT_SECONDS}s)"
   fi
