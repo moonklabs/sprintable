@@ -1119,10 +1119,18 @@ async def _process_one_ads_boost_command(db: AsyncSession, command: PublicationC
             if reason:
                 activity_context["reason"] = reason
         by_scheduler = command.initiated_by == "scheduler"
+        # story 5041 (PO 11-27): who stopped the ad must show on the ad's history — «○○ (에이전트)가 멈춤». The requester can now be an AGENT (pause · spend refresh are open to it), and this row said «human» for
+        # everyone who was not the scheduler: the history named the agent but called it a person. The requester's own kind is what is recorded (no new notification kind: an agent does what a person does, as an agent).
+        requester_type = "human"
+        if not by_scheduler and command.requested_by_member_id is not None:
+            from app.models.member import Member
+
+            if (await db.execute(select(Member.type).where(Member.id == command.requested_by_member_id))).scalar_one_or_none() == "agent":
+                requester_type = "agent"
         await ActivityLogService(db).record(
             org_id=command.org_id, action=_ACTIVITY_ACTION_BY_OP[command.operation],
             actor_id=None if by_scheduler else command.requested_by_member_id,
-            actor_type="platform" if by_scheduler else "human",
+            actor_type="platform" if by_scheduler else requester_type,
             entity_type="gate", entity_id=gate.id, context=activity_context,
         )
 

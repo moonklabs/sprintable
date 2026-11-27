@@ -144,3 +144,30 @@ async def test_a_persons_pause_stays_the_persons(monkeypatch):
         assert (row.actor_type, row.actor_id) == ("human", owner_id)
     finally:
         await engine.dispose()
+
+
+async def test_an_agents_pause_is_recorded_as_the_agents_and_the_history_names_it(monkeypatch):
+    """story 5041 (PO 11-27): no new notification kind — instead the ad's history says WHO stopped it. An agent can now ask for the pause (6018); its activity row said «human» for everyone who was not the
+    scheduler. It is recorded as the agent's, and the gate history (the ad's screen) carries the agent's name and kind."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+    from app.services.ads_boost_execution import request_ads_boost_pause
+    from tests.test_e4fc29fa_site_post_orchestration import _seed_agent
+
+    engine, Session, org_id, owner_id, gate_id, _calls = await _setup(monkeypatch)
+    try:
+        await _start_command(Session, org_id, gate_id, owner_id)
+        await _tick(Session)
+        async with Session() as s:
+            project_id = (await s.execute(select(Project.id).where(Project.org_id == org_id))).scalars().first()
+            agent_id = await _seed_agent(s, org_id, project_id, name="광고를 멈춘 에이전트", grant=True)
+        async with Session() as s:
+            await request_ads_boost_pause(s, org_id=org_id, gate_id=gate_id, requester_member_id=agent_id)
+        await _tick(Session)
+        [row] = await _rows(Session, gate_id, "ads_boost_paused")
+        assert (row.actor_type, row.actor_id) == ("agent", agent_id), "recorded as the agent, not as a person"
+        line = [i for i in await _history(Session, org_id, owner_id, gate_id) if i["action"] == "ads_boost_paused"]
+        assert len(line) == 1 and line[0]["actor_type"] == "agent" and line[0]["actor_name"] == "광고를 멈춘 에이전트", line
+    finally:
+        await engine.dispose()
