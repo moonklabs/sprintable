@@ -187,9 +187,11 @@ async def delete_meeting(
         _asked = await repo.get(id)
         if _asked is None:
             raise HTTPException(status_code=404, detail="Meeting not found")
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=resolved, org_id=org_id, project_id=repo.project_id, action_key="meeting.delete", target_label=_asked.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
 
     meeting = await repo.get(id)
     if meeting is None:

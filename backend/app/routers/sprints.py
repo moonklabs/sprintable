@@ -405,9 +405,11 @@ async def delete_sprint(
         # story 5041 — kept as an ask a person presses (see delete_story)
         from app.services import agent_action
 
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=resolved, org_id=org_id, project_id=sprint.project_id, action_key="sprint.delete", target_label=sprint.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
 
     session.add(DeletionAuditLog(
         id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
@@ -479,9 +481,11 @@ async def close_sprint(
         # story 5041 — an agent asks, a person presses: closing a running sprint cannot be undone (see delete_story)
         from app.services import agent_action
 
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, db, auth=auth, agent=caller, org_id=org_id, project_id=_sprint_for_scope.project_id, action_key="sprint.close", target_label=_sprint_for_scope.title,
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
     try:
         sprint = await transition_sprint(db, org_id, caller, id, "closed")
     except (SprintTransitionError, ValueError) as exc:

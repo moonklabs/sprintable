@@ -47,8 +47,10 @@ FLOOR_ACTIONS: dict[str, int] = {
     "hypothesis.decide": 102,
 }
 
-# no `auto` slot — the organisation and the project themselves are always a card
-NO_AUTO: frozenset[str] = frozenset({"org.delete", "project.delete"})
+# no `auto` slot — the organisation and the project deletions are always a card (PO 11-27), and so are the two actions whose road demands an ORGANISATION ADMIN (goal deletion — it takes its stories with it — and a reward):
+# `auto` runs the call as the agent under the agent's own rights, and an agent is never an organisation admin (story 2058), so the road would refuse it — a switch that can never work is not offered.
+# Whether an admin's standing delegation should let it through is a separate decision (the agent would act with a person's authority): not built.
+NO_AUTO: frozenset[str] = frozenset({"org.delete", "project.delete", "goal.delete", "reward.give"})
 
 DEFAULT_LEVEL = "ask"
 

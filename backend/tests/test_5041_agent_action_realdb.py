@@ -901,7 +901,7 @@ async def test_a_replay_that_hangs_is_cancelled_so_a_stale_running_request_has_n
 
 
 def test_every_registered_action_is_asked_for_by_exactly_one_route():
-    """a registered action no route asks for (or a route naming one that is not registered) is a rule nobody enforces"""
+    """a registered action no route asks for (or a route naming one that is not registered) is a rule nobody enforces — and no route calls `request_approval` around the setting (it would skip `auto` / `block`)"""
     import ast
     import pathlib
 
@@ -910,11 +910,14 @@ def test_every_registered_action_is_asked_for_by_exactly_one_route():
     named: dict[str, int] = {}
     for path in pathlib.Path("app/routers").glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "request_approval":
+            # a route asks the USER's setting first (`gate_agent_call`: ask → the approval card · block · auto) — it is the one call a road makes; `request_approval` is what it does for `ask`
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "gate_agent_call":
                 for kw in node.keywords:
                     if kw.arg == "action_key" and isinstance(kw.value, ast.Constant):
                         named[kw.value.value] = named.get(kw.value.value, 0) + 1
     assert named == {key: 1 for key in SPECS}, named
+    bare = [str(path) for path in pathlib.Path("app/routers").glob("*.py") if "agent_action.request_approval(" in path.read_text()]
+    assert bare == [], f"a road must go through gate_agent_call, not ask for approval around the user's setting: {bare}"
 
 
 # ── Kadir's audit of 6012 (lows) ────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -1284,6 +1284,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "agent_action.prompt.partly": {"ko": "일부는 되돌릴 수 없어요. 누르면 누른 분의 이름과 권한으로 바로 실행돼요.", "en": "Part of this cannot be undone. Pressing runs it right away, in your name and with your rights."},
     "agent_action.reply_pending": {"ko": "승인 카드를 올렸어요 · 누가 누르면 실행돼요 (요청 {request_id}, {hours}시간 안에 안 눌리면 거절로 닫혀요)", "en": "An approval card is up — it runs when someone presses it (request {request_id}; it closes as a refusal if nobody presses within {hours} hours)"},
     "agent_action.reply_no_card": {"ko": "승인 요청은 남겼지만 카드를 받을 사람을 찾지 못했어요 (요청 {request_id}) — 사람에게 직접 알려 주세요", "en": "The approval request is saved, but nobody could be found to receive the card (request {request_id}) — tell a person yourself"},
+    "agent_action.blocked": {"ko": "이 동작은 사용자 설정으로 막혀 있어요 — 에이전트는 할 수 없어요.", "en": "This action is blocked by the user's setting — an agent cannot do it."},
     "agent_action.result.approved": {"ko": "승인되어 실행했어요 — {what}", "en": "Approved and done — {what}"},
     "agent_action.result.rejected": {"ko": "거절됐어요 — {what}", "en": "Refused — {what}"},
     "agent_action.result.expired": {"ko": "아무도 누르지 않아 거절로 닫혔어요 — {what}", "en": "Nobody pressed it in time, so it closed as a refusal — {what}"},

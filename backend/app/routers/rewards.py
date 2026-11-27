@@ -91,10 +91,12 @@ async def grant_reward(
         _to = await canonicalize_member_id(body.member_id, repo.session)
         _names = await lookup_members_by_ids({_to}, repo.session)
         _who = (_names[_to].name if _to in _names and _names[_to].name else str(_to)[:8])
-        return await agent_action.request_approval(
+        _decision = await agent_action.gate_agent_call(
             request, repo.session, auth=auth, agent=_caller, org_id=org_id, project_id=body.project_id, action_key="reward.give",
             target_label=f"{_who} · {body.amount:g} · “{(body.reason or '').strip()[:80]}”",
         )
+        if _decision is not None:
+            return _decision  # `auto` (the user's setting): no card — the call goes on, as the agent, under the agent's own rights
     if not await _is_org_admin(repo.session, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
