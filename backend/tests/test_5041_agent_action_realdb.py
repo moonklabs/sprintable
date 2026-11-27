@@ -948,3 +948,35 @@ def test_the_reason_the_agent_is_told_is_a_code_never_the_responses_sentence():
     assert _reason_of(httpx.Response(500, text="boom")) == "HTTP 500"
     assert _reason_of(resp(403, {"detail": {"code": "api_key:abc123"}})) == "HTTP 403", "a key:value shape is not a code word (codex on 6014)"
     assert _reason_of(resp(403, {"detail": {"code": "/etc/passwd"}})) == "HTTP 403"
+
+
+@pytest.mark.anyio
+async def test_the_card_and_the_result_line_are_in_the_readers_language_not_the_agents():
+    """dev QA lap 11-27: on an English screen the card said «되돌릴 수 없어요…» and the result line «승인되어 실행했어요» — they were written in the language of the agent's request. The card's sentence is
+    made when it is READ (the screen's locale arrives as Accept-Language), and the result line is spoken in the language of the person who pressed."""
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            request_id = (await c.delete(f"/api/v2/stories/{d['story_id']}")).json()["request_id"]  # the agent asks with no language: the default (ko) is what gets stored
+        await _act_as(app, Session, d["admin_user"], d["org_id"])
+        async with _client_for(app) as c:
+            en = (await c.get(f"/api/v2/agent-actions/{request_id}", headers={"Accept-Language": "en-US,en;q=0.9"})).json()
+            ko = (await c.get(f"/api/v2/agent-actions/{request_id}", headers={"Accept-Language": "ko"})).json()
+            pressed = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"}, headers={"Accept-Language": "en"})
+        assert pressed.status_code == 200, pressed.text
+        assert en["prompt"].startswith("This cannot be undone") and en["title"].startswith("Delete story"), (en["title"], en["prompt"])
+        assert ko["prompt"].startswith("되돌릴 수 없어요") and ko["title"].startswith("스토리"), (ko["title"], ko["prompt"])
+        assert pressed.json()["prompt"].startswith("This cannot be undone"), "the press answer is in the presser's language too"
+        async with Session() as s:
+            result = (await s.execute(select(ConversationMessage.content).where(ConversationMessage.content.like("Approved and done%")))).scalars().all()
+        assert result, "the result line was spoken in English (the presser's language)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

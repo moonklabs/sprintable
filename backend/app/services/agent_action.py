@@ -248,6 +248,19 @@ def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
     return t(spec.what_key, locale, target=plain_text(target_label, 120) or "—")
 
 
+def card_texts(req: HitlRequest, locale: str) -> tuple[str, str]:
+    """the card's sentence and its warning, made when it is READ in the reader's language (story 5041 · PO 11-27: on an English screen the card said «되돌릴 수 없어요…» because the stored text was
+    written in the language of the agent's request). The stored title / prompt are the fallback for a request whose action this server no longer knows."""
+    meta = req.hitl_metadata or {}
+    spec = SPECS.get(meta.get("action_key", ""))
+    if spec is None:
+        return req.title, req.prompt
+    return (
+        _what(spec, meta.get("target_label", ""), locale)[:300],
+        t("agent_action.prompt.irreversible" if spec.reversible == "no" else "agent_action.prompt.partly", locale),
+    )
+
+
 async def request_approval(
     request: Request,
     session: AsyncSession,
