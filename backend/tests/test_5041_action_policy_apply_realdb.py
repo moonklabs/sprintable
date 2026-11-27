@@ -198,3 +198,23 @@ async def test_the_other_roads_follow_the_same_setting(key, path_of, model_name)
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_setting_for_a_project_the_agent_cannot_see_does_not_reach_that_project():
+    """codex on this PR: the setting names a project and an agent — it must never be the way into a project the AGENT itself cannot see (the project check comes before the level is read, for the agent's own identity)"""
+    from app.main import app
+    from app.models.pm import Story
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        p2, story2 = await _second_project_with_story(Session, d, agent_ids=[])  # the agent holds NO access to the second project
+        await _set(app, Session, d, action_key="story.delete", level="auto", project_id=str(p2), agent_id=str(d["agent_id"]))
+        r = await _as_agent_delete(app, Session, d, d["agent_id"], f"/api/v2/stories/{story2}")
+        assert r.status_code == 404, r.text
+        assert await _exists(Session, Story, story2), "the setting did not open the project"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

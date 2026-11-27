@@ -385,7 +385,7 @@ async def gate_agent_call(
     from app.services.agent_onboarding_config import resolve_locale_from_request
     from app.services.project_auth import require_project_access
 
-    await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id)
+    await require_project_access(session, agent.id, project_id, org_id)  # THE AGENT's own identity — the one the setting is keyed on (for an agent key it is also `auth.user_id`)
     level, source = await resolve_action_level(session, org_id=org_id, project_id=project_id, agent_id=agent.id, action_key=action_key)
     if level == "auto":
         from app.services.activity_log import ActivityLogService
