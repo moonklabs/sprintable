@@ -123,8 +123,8 @@ async def test_the_bell_list_and_its_mark_read_do_not_give_an_agent_that_lost_th
         r = await _call(Session, w, "agent", lost, "GET", "/api/v2/event-notifications?limit=100")
         assert r.status_code == 200, r.text
         rows = [i for i in r.json() if i["id"] == str(e_lost)]
-        # story 5049: the bell no longer LISTS a room's words-line for someone who cannot read the room (it is not counted either) — before, the row stayed with its words taken out. Either way the words do not reach them.
-        assert not rows and words not in r.text, r.text
+        assert rows, "the row is kept (only the words go)"
+        assert _shown_as_withheld(rows[0]["payload"], words) and words not in r.text, rows
         r = await _call(Session, w, "agent", lost, "PATCH", f"/api/v2/event-notifications/{e_lost}/read")
         assert r.status_code == 200, r.text
         assert _shown_as_withheld(r.json()["payload"], words) and words not in r.text
@@ -300,7 +300,7 @@ async def test_a_person_who_lost_the_project_but_is_in_the_room_reads_on_and_a_p
         r = await _call(Session, w, "human", w.u_c, "GET", "/api/v2/event-notifications?limit=100")
         assert r.status_code == 200, r.text
         rows = [i for i in r.json() if i["id"] == str(e_c)]
-        assert not rows and words not in r.text, r.text  # story 5049: a words-line of a room the person cannot read is not listed (before: listed with the words taken out)
+        assert rows and _shown_as_withheld(rows[0]["payload"], words) and words not in r.text, r.text
     finally:
         await engine.dispose()
 
@@ -316,7 +316,8 @@ async def test_the_bell_preview_of_a_room_is_withheld_from_someone_who_cannot_re
         r = await _call(Session, w, "human", w.u_c, "GET", "/api/v2/event-notifications?limit=100")
         assert r.status_code == 200, r.text
         rows = [i for i in r.json() if i["id"] == str(e_out)]
-        assert not rows and words not in r.text, r.text  # story 5049: the bell's copy of a room is not listed for someone who cannot read the room (before: listed with an empty body)
+        assert rows and words not in r.text and rows[0]["payload"].get("body") == "" and rows[0]["payload"]["content_withheld"] is True, r.text
+        assert rows[0]["payload"]["title"] == "a new message"                                          # the bell still says that something came
     finally:
         await engine.dispose()
 
