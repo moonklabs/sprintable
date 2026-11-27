@@ -177,7 +177,7 @@ const EXPECTED_ON = [
 const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }> = {
   '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
   '/settings': { source: '(authenticated)/settings/page.tsx', container: 'mx-auto w-full max-w-3xl p-4 lg:p-6' },
-  '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
+  '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'w-full space-y-6 p-4 lg:p-6' }, // story 5031 (5c): the home body fills the inset — the centred max-w-4xl column is gone (the skeleton in org-briefing/loading.tsx follows)
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
   '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-98' },
   '/chat': { source: '../components/chat-v3/chat-v3-screen.tsx', container: 'flex flex-1 flex-col gap-3 p-5' },

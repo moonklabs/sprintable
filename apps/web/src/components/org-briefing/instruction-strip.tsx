@@ -30,7 +30,7 @@ function useColumnClearOfButton(stripRef: { current: HTMLElement | null }): bool
   const [clear, setClear] = useState(false);
   useLayoutEffect(() => {
     const strip = stripRef.current;
-    const column = strip?.parentElement ?? null; // the body root: `mx-auto w-full max-w-4xl …`
+    const column = strip?.parentElement ?? null; // the body root: `w-full …` (story 5031 5c: it has NO max-width any more — the cap below reads `none` → NaN → the corner stays kept, the safe side; the corner is given back only for a column that still carries a cap)
     let pane: HTMLElement | null = column?.parentElement ?? null;
     while (pane && !/(auto|scroll)/.test(getComputedStyle(pane).overflowY)) pane = pane.parentElement;
     if (!column || !pane) return;

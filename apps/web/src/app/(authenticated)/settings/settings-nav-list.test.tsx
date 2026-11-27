@@ -42,6 +42,8 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
     await draw('profile');
     expect(rows().length).toBe(settingsNavGroups(gates).flatMap((x) => x.items).length);
     for (const r of rows()) expect(r.className).toContain('min-h-ds-row');
+    // story 5031 (C1 step 5c · PO): from lg the rows are 40 (the kit's control height — `lg:min-h-ds-control`), below lg they keep the 56 above (a phone's whole-screen list is as before)
+    for (const r of rows()) expect(r.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-ds-row', 'lg:min-h-ds-control', 'lg:py-ds-1']));
     const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
     expect(tabs.map((t) => t.getAttribute('data-settings-tab'))).toEqual(settingsNavGroups(gates).flatMap((x) => x.items).filter((i) => i.kind === 'tab').map((i) => i.id));
   });

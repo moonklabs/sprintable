@@ -3,6 +3,7 @@
 //  · 자원(`/{ws}/{proj}/{자원}`) 항목: 직접 경로 또는 flat 경로가 지금 주소와 같거나 그 하위. 일감처럼 탭줄을 가진 항목은 탭 경로들(extra)까지 본다.
 import type { NavItemConfig } from './nav-config';
 import { resolveChatsHref } from './nav-v3-destinations';
+import { DEPTH1_ITEMS } from './nav-placement';
 
 // kind가 없는 항목(예: «전체» ALL_SCREENS_ITEM — 구역 항목이 아니라 입구 하나)은 정적으로 본다. 자원 항목만 건너뛴다.
 export function findActiveStaticItemId(items: ReadonlyArray<Pick<NavItemConfig, 'id' | 'path'> & { kind?: NavItemConfig['kind'] }>, pathname: string, search: URLSearchParams): string | null {
@@ -34,7 +35,10 @@ export function isResourceItemActive(pathname: string, resource: string, orgSlug
 // 맥 창 1100에서 막대 56 + 방 목록 224 + 방 본문 + 스레드 300이 한 줄에 공존하려면 길잡이 256이 비어야 한다(댄군 UI-4 AC3 · PO 확정).
 // 화면이 늘면 여기 한 줄만 더한다(셸은 이 목록만 읽는다).
 // 경로는 목적지 모듈(nav-v3-destinations)의 «대화» 정본을 그대로 쓴다 — 목적지 문자열은 한 곳에서만 조립한다(verify:nav-v3-single-source).
-export const SCREENS_OWNING_LIST_COLUMN: readonly string[] = [resolveChatsHref(undefined)];
+// story 5031 (C1 step 5c · PO): 설정도 같은 이유로 셸 목록 칸을 접는다 — 설정은 자기 탐색 칸(제목 + 섹션 줄)을 갖고, 셸의 목록 칸이 그 옆에 또 서면 «목록 둘»이 나란했다. 잃는 길은 0: 화면 이동은 아이콘 막대 · ⌘4 · 경로의 «설정» crumb가 맡는다.
+// 설정의 경로는 네 자리 표(nav-placement · DEPTH1_ITEMS)의 «설정» 첫 화면을 그대로 쓴다(문자열을 여기서 따로 쓰지 않는다).
+const SETTINGS_ROUTE = DEPTH1_ITEMS.find((item) => item.id === 'settings')!.path;
+export const SCREENS_OWNING_LIST_COLUMN: readonly string[] = [resolveChatsHref(undefined), SETTINGS_ROUTE];
 
 export function screenOwnsListColumn(pathname: string): boolean {
   return SCREENS_OWNING_LIST_COLUMN.some((route) => pathname === route || pathname.startsWith(`${route}/`));

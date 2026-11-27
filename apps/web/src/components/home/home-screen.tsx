@@ -38,6 +38,7 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
       columnTestId="home-detail-column"
       sheetTestId="home-detail-sheet"
       wide={wide}
+      detailWidth="fixed" // story 5031 (C1 step 5c · PO): from lg the detail is a fixed 340 and the list takes the rest
       list={<HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />}
       detail={<HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />}
       detailLabel={t('detailRequest')}
