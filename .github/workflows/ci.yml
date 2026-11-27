@@ -2485,6 +2485,11 @@ jobs:
       - name: "Verify no muted-foreground on tint background (story #3839)"
         run: pnpm --filter web verify:no-muted-on-tint
 
+      # story 5048 ③d 래칫 가드 — 박힌 디자인 값(임의 크기 · 임의 모서리 · 임의 글자 · 직접 그림자 · 인라인 px)과 옛 별칭 색 «새 사용»이 기준선보다 늘면 RED
+      # (키트 규칙: 간격 4/8/12/16/24/32 · 높이 40 · 글자 16 · 그림자 0 · 색은 역할 토큰). 기준선 = scripts/hardcoded-design-values-baseline.json.
+      - name: "Verify no new hardcoded design values — ratchet (story #5048 ③d)"
+        run: pnpm --filter web verify:no-hardcoded-design-values
+
       # story #3826(UX-v3·FE 2) AC1 diff 가드 — globals.css 원시 토큰(--proof-*) 값 교체
       # PR의 diff가 그 파일의 --proof-* 값·radius 값에만 있는지(alias·.dark·tsx diff 0).
       - name: "Verify v3 raw-token PR diff scope (story #3826 AC1)"
