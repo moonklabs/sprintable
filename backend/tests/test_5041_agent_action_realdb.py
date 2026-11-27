@@ -7,6 +7,7 @@ Real database + the real app (the auth / org dependencies are overridden the way
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -107,7 +108,7 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False, human_key: bool = False):
+async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False, human_key: bool = False, project_id=None):
     """whoever the next call is made by (an agent is `api_key=True` with its member id; a person is a plain session)"""
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
@@ -123,6 +124,8 @@ async def _act_as(app, Session, user_id, org_id, *, api_key: bool = False, human
 
     async def _auth():
         claims = {"app_metadata": {"org_id": str(org_id)}}
+        if project_id is not None:
+            claims["app_metadata"]["project_id"] = str(project_id)
         if api_key:
             claims["app_metadata"]["api_key_id"] = "test-key"
         if human_key:
@@ -185,6 +188,7 @@ async def test_agent_delete_story_is_kept_not_run_and_not_refused():
         async with Session() as s:
             cards = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext == str(reqs[0].id)))).scalars().all()
         assert len(cards) == 1 and cards[0].mentioned_ids == [d["admin_om"]], "one card, to the person who made the agent"
+        assert cards[0].msg_metadata["card"] == {"kind": "agent_action", "ref": str(reqs[0].id)}, "the web draws it from the request (kind + id), never from the message"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -464,6 +468,383 @@ async def test_the_replay_carries_only_the_authorization_of_the_pressing_request
     assert seen["authorization"] == "Bearer person"
     assert "cookie" not in seen and "x-agent-api-key" not in seen
     assert seen["x-org-id"] == "o", "the org / project are the SNAPSHOT's, not whatever the pressing request said"
+
+
+async def _room_for_run(Session, d, *, who_asked: str = "admin", agent_in_room: bool = True, run_agent=None, run_status: str = "running", outsider: bool = False):
+    """a room with the person who asked and the agent, and a run of the agent started by that person's message"""
+    from app.models.agent_run import AgentRun
+    from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+
+    async with Session() as s:
+        conv = Conversation(id=uuid.uuid4(), org_id=d["org_id"], project_id=d["project_id"], type="group", title="room")
+        s.add(conv)
+        await s.commit()
+        s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d[f"{who_asked}_om"]))
+        if agent_in_room:
+            s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=d["agent_id"]))
+        if outsider:
+            # a person in the room who may NOT see this project (a plain org member with no grant): the card's line would be read by them
+            from app.models.project import OrgMember
+            from app.models.user import User
+            from app.services.agent_anchor_sync import ensure_human_member
+
+            uid = uuid.uuid4()
+            s.add(User(id=uid, email=f"outsider-{uid.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=d["org_id"], user_id=uid, role="member")
+            s.add(om)
+            await s.commit()
+            await ensure_human_member(s, om.id)
+            s.add(ConversationParticipant(id=uuid.uuid4(), conversation_id=conv.id, member_id=om.id))
+        await s.commit()
+        msg = ConversationMessage(id=uuid.uuid4(), conversation_id=conv.id, sender_id=d[f"{who_asked}_om"], content="스프린트 닫아 줘", mentioned_ids=[d["agent_id"]])
+        s.add(msg)
+        await s.commit()
+        run = AgentRun(id=uuid.uuid4(), org_id=d["org_id"], agent_id=run_agent or d["agent_id"], project_id=d["project_id"], status=run_status, conversation_id=conv.id, triggering_message_id=msg.id, trigger="chat")
+        s.add(run)
+        await s.commit()
+        return conv.id, run.id
+
+
+@pytest.mark.anyio
+async def test_the_card_goes_to_the_room_the_run_came_from_and_names_the_person_who_asked():
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        conv_id, run_id = await _room_for_run(Session, d, who_asked="member")
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            resp = await c.post(f"/api/v2/sprints/{d['sprint_id']}/close", headers={"X-Sprintable-Run-Id": str(run_id)})
+        assert resp.status_code == 202 and resp.json()["card_delivered"] is True, resp.text
+        (req,) = await _requests(Session, d["org_id"])
+        async with Session() as s:
+            cards = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext == str(req.id)))).scalars().all()
+        assert [c.conversation_id for c in cards] == [conv_id], "ONE card, in the room the person asked in (not a DM)"
+        assert cards[0].mentioned_ids == [d["member_om"]], "it names the person who asked — a plain member; whoever may do it on screen may still press"
+        assert req.requested_for == d["member_om"] and req.hitl_metadata["cards"][0]["conversation_id"] == str(conv_id)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_run_that_does_not_lead_to_a_room_falls_back_to_the_dm_and_nothing_is_guessed():
+    """no header · another agent's run · the agent is not in that room: the card goes to the DM of the person who made the agent, as before"""
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from app.models.member import Member
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            other = Member(id=uuid.uuid4(), org_id=d["org_id"], type="agent", name="Other Agent", is_active=True)
+            s.add(other)
+            await s.commit()
+        _c1, someone_elses_run = await _room_for_run(Session, d, run_agent=other.id)
+        _c2, not_in_room = await _room_for_run(Session, d, agent_in_room=False)
+        _c3, finished_run = await _room_for_run(Session, d, run_status="completed")      # a stale header: that run is over
+        _c4, with_outsider = await _room_for_run(Session, d, outsider=True)               # someone in the room may not see the project
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            a = await c.delete(f"/api/v2/stories/{d['story_id']}")                                                                    # no header
+            b = await c.delete(f"/api/v2/tasks/{d['task_id']}", headers={"X-Sprintable-Run-Id": str(someone_elses_run)})               # a run of another agent
+            e = await c.delete(f"/api/v2/docs/{d['doc_id']}", headers={"X-Sprintable-Run-Id": str(not_in_room)})                      # the agent is not in that room
+            g = await c.delete(f"/api/v2/goals/{d['goal_id']}", headers={"X-Sprintable-Run-Id": "not-a-uuid"})
+            h = await c.post(f"/api/v2/sprints/{d['sprint_id']}/close", headers={"X-Sprintable-Run-Id": str(finished_run)})
+            i = await c.post("/api/v2/rewards", headers={"X-Sprintable-Run-Id": str(with_outsider)}, json={"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 1, "reason": "x", "granted_by": str(d["agent_id"])})
+        assert [x.status_code for x in (a, b, e, g, h, i)] == [202] * 6
+        async with Session() as s:
+            ids = [str(r.id) for r in await _requests(Session, d["org_id"])]
+            rows = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action"]["request_id"].astext.in_(ids)))).scalars().all()
+        assert len(rows) == 6 and {r.conversation_id for r in rows}.isdisjoint({_c1, _c2, _c3, _c4}), "every card is in the person's DM, none in those rooms"
+        assert all(r.mentioned_ids == [d["admin_om"]] for r in rows)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def _sql(Session, stmt, **params):
+    from sqlalchemy import text
+
+    async with Session() as s:
+        res = await s.execute(text(stmt), params)
+        await s.commit()
+        return res
+
+
+async def _make_stuck(Session, request_id, minutes=10):
+    """a press that claimed the request and never finished (the process died): approved + running, pressed `minutes` ago"""
+    await _sql(Session, "UPDATE agent_hitl_requests SET status='approved', responded_at = now() - make_interval(mins => :m), metadata = jsonb_set(metadata, '{execution}', '{\"state\":\"running\"}'::jsonb, true) WHERE id = :i", m=minutes, i=request_id)
+
+
+@pytest.mark.anyio
+async def test_the_generic_hitl_routes_neither_decide_nor_list_an_agent_action():
+    """Kadir's audit M1 + M2: the generic PATCH would close the request without running anything (the card then says «running» for good); the generic list would show another agent's stored call"""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            request_id = (await c.post("/api/v2/rewards", json={"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 7, "reason": "secret recipient", "granted_by": str(d["agent_id"])})).json()["request_id"]
+        await _act_as(app, Session, d["admin_user"], d["org_id"], project_id=d["project_id"])
+        async with _client_for(app) as c:
+            patched = await c.patch(f"/api/v2/hitl/requests/{request_id}", json={"status": "approved"})
+            listed = await c.get("/api/v2/hitl/requests")
+        assert patched.status_code == 409, patched.text
+        (req,) = await _requests(Session, d["org_id"])
+        assert req.status == "pending" and "execution" not in req.hitl_metadata, "the status was not flipped"
+        assert request_id not in listed.text and "secret recipient" not in listed.text and "body_b64" not in listed.text, "the generic list never carries the stored call"
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True, project_id=d["project_id"])
+        async with _client_for(app) as c:
+            listed_by_agent = await c.get("/api/v2/hitl/requests")
+        assert "body_b64" not in listed_by_agent.text and request_id not in listed_by_agent.text
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_agent_reads_only_its_own_ask_and_never_the_stored_call():
+    from app.main import app
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            other = Member(id=uuid.uuid4(), org_id=d["org_id"], type="agent", name="Other Agent", is_active=True)
+            s.add(other)
+            await s.commit()
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=d["project_id"], member_id=other.id, permission="granted", role="member"))
+            await s.commit()
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            request_id = (await c.delete(f"/api/v2/stories/{d['story_id']}")).json()["request_id"]
+            own = await c.get(f"/api/v2/agent-actions/{request_id}")
+            await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+        await _act_as(app, Session, other.id, d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            theirs = await c.get(f"/api/v2/agent-actions/{request_id}")
+        assert own.status_code == 200 and own.json()["state"] == "pending" and "snapshot" not in own.text and "body_b64" not in own.text
+        assert theirs.status_code == 404, "another agent does not even learn it exists"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_press_that_never_finished_is_given_back_pressable_and_the_reward_is_paid_once():
+    """Kadir's audit M3 + the PO's rule: nothing rests on «check before you press» — the replay carries the request id and the ledger keeps it, so the second press returns the first grant"""
+    from app.main import app
+    from app.models.reward import RewardLedger
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        body = {"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 5, "reason": "once", "granted_by": str(d["agent_id"])}
+        async with _client_for(app) as c:
+            request_id = (await c.post("/api/v2/rewards", json=body)).json()["request_id"]
+        await _act_as(app, Session, d["admin_user"], d["org_id"])
+        async with _client_for(app) as c:
+            first = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+        assert first.json()["state"] == "executed"
+        # the process died after the grant and before the result was written: the request is «approved · running», pressed 10 minutes ago
+        await _make_stuck(Session, request_id)
+        async with _client_for(app) as c:
+            view = await c.get(f"/api/v2/agent-actions/{request_id}")
+            again = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+            third = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+        assert view.json()["state"] == "retry", "past the time limit it is given back, not «running» for good"
+        assert again.status_code == 200 and again.json()["state"] == "executed", again.text
+        assert third.status_code == 409, "and after it ended, once more is refused"
+        async with Session() as s:
+            rows = (await s.execute(select(RewardLedger).where(RewardLedger.project_id == d["project_id"]))).scalars().all()
+        assert len(rows) == 1 and str(rows[0].agent_action_request_id) == request_id, "paid ONCE; the ledger names the request"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_second_grant_for_the_same_request_id_is_refused_by_the_database():
+    """the unique index is what makes «once» true even when two presses race past the look-up"""
+    from app.models.reward import RewardLedger
+    from sqlalchemy.exc import IntegrityError
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        rid = uuid.uuid4()
+        async with Session() as s:
+            for _ in range(2):
+                s.add(RewardLedger(id=uuid.uuid4(), org_id=d["org_id"], project_id=d["project_id"], member_id=d["admin_om"], amount=1, reason="x", agent_action_request_id=rid))
+            with pytest.raises(IntegrityError):
+                await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_delete_that_finds_the_thing_gone_after_an_unfinished_press_is_done_not_failed():
+    from app.main import app
+    from app.models.pm import Story
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            request_id = (await c.delete(f"/api/v2/stories/{d['story_id']}")).json()["request_id"]
+        await _sql(Session, "DELETE FROM stories WHERE id = :i", i=d["story_id"])        # the first press did delete it, then the process died
+        await _make_stuck(Session, request_id)
+        await _act_as(app, Session, d["admin_user"], d["org_id"])
+        async with _client_for(app) as c:
+            again = await c.post(f"/api/v2/agent-actions/{request_id}/decision", json={"decision": "approve"})
+        assert again.status_code == 200 and again.json()["state"] == "executed", again.text
+        assert not await _exists(Session, Story, d["story_id"])
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_cron_sweep_declines_the_expired_and_gives_back_the_stuck_and_tells_the_agent():
+    from app.models.conversation import ConversationMessage
+    from app.services import agent_action
+    from sqlalchemy import select
+
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            old = (await c.delete(f"/api/v2/stories/{d['story_id']}")).json()["request_id"]
+            stuck = (await c.delete(f"/api/v2/tasks/{d['task_id']}")).json()["request_id"]
+        await _sql(Session, "UPDATE agent_hitl_requests SET expires_at = now() - interval '1 minute' WHERE id = :i", i=old)
+        await _make_stuck(Session, stuck)
+        async with Session() as s:
+            counts = await agent_action.sweep(s)
+            await s.commit()
+        assert counts == {"expired": 1, "unfinished": 1}
+        reqs = {str(r.id): r for r in await _requests(Session, d["org_id"])}
+        assert reqs[old].status == "rejected" and reqs[old].response_text == "expired"
+        assert reqs[stuck].status == "pending" and reqs[stuck].hitl_metadata["execution"]["reason"] == "unfinished"
+        async with Session() as s:
+            told = (await s.execute(select(ConversationMessage).where(ConversationMessage.msg_metadata["agent_action_result"]["request_id"].astext.in_([old, stuck])))).scalars().all()
+        assert sorted(m.msg_metadata["agent_action_result"]["result"] for m in told) == ["expired", "unfinished"] and all(m.mentioned_ids == [d["agent_id"]] for m in told)
+        async with Session() as s:
+            again = await agent_action.sweep(s)
+        assert again == {"expired": 0, "unfinished": 0}, "a second pass finds nothing (and tells nobody twice)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_card_names_what_it_would_do_and_to_whom():
+    """Kadir's audit M4: a grant says who gets it (and the agent's free text is quoted); a goal says how many stories go with it; a pin says which pin"""
+    from app.main import app
+    from app.models.pm import Story
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            for i in range(3):
+                s.add(Story(id=uuid.uuid4(), org_id=d["org_id"], project_id=d["project_id"], title=f"in goal {i}", status="backlog", epic_id=d["goal_id"]))
+            await s.commit()
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            await c.post("/api/v2/rewards", json={"project_id": str(d["project_id"]), "member_id": str(d["admin_om"]), "amount": 5, "reason": "well done", "granted_by": str(d["agent_id"])})
+            await c.delete(f"/api/v2/goals/{d['goal_id']}")
+        by_key = {r.hitl_metadata["action_key"]: r for r in await _requests(Session, d["org_id"])}
+        reward = by_key["reward.give"]
+        assert "“well done”" in reward.title and "5" in reward.title, reward.title
+        assert reward.hitl_metadata["target_label"].split(" · ")[0] not in ("", None), "it starts with the recipient's name"
+        assert "3" in by_key["goal.delete"].title, by_key["goal.delete"].title
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_an_action_without_arguments_stores_no_query_and_no_body():
+    """audit L3: nothing rides along that the card does not show — and a stored row that has one does not run"""
+    from app.main import app
+    from app.services.agent_action import snapshot_hash, snapshot_is_sound
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        await _act_as(app, Session, d["agent_id"], d["org_id"], api_key=True)
+        async with _client_for(app) as c:
+            r = await c.request("DELETE", f"/api/v2/stories/{d['story_id']}?force=1", content=b'{"extra":"thing"}', headers={"content-type": "application/json"})
+        assert r.status_code == 202
+        (req,) = await _requests(Session, d["org_id"])
+        snap = req.hitl_metadata["snapshot"]
+        assert snap["query"] == "" and snap["body_b64"] == ""
+        tampered = {**snap, "query": "force=1"}
+        tampered["sha256"] = snapshot_hash(tampered)  # even with a hash that matches, an action that takes no arguments does not run with one
+        assert snapshot_is_sound("story.delete", snap) and not snapshot_is_sound("story.delete", tampered)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+def test_text_from_elsewhere_becomes_one_plain_line():
+    """codex pass: an agent's reward reason must not fake the card's own structure (line breaks, direction marks, control characters)"""
+    from app.services.agent_action import plain_text
+
+    assert plain_text("a\nb\r\n\tc  d", 80) == "a b c d"
+    assert plain_text("ok\u202eevil\u200b", 80) == "okevil", "direction / zero-width format characters go"
+    assert plain_text("x" * 500, 120) == "x" * 120
+    assert plain_text(None, 10) == ""
+
+
+@pytest.mark.anyio
+async def test_a_replay_that_hangs_is_cancelled_so_a_stale_running_request_has_no_live_replay():
+    import httpx
+    from starlette.requests import Request
+
+    from app.services import agent_action
+
+    class _Hang(httpx.AsyncClient):
+        async def request(self, method, url, **kw):  # noqa: ANN001
+            await asyncio.sleep(30)
+
+    scope = {"type": "http", "method": "POST", "path": "/x", "headers": [(b"authorization", b"Bearer p")], "app": object()}
+    snap = {"method": "DELETE", "path": "/api/v2/stories/1", "query": "", "org_id": "o", "project_id": "p", "body_b64": ""}
+    orig, orig_t = agent_action.httpx.AsyncClient, agent_action.EXECUTE_TIMEOUT
+    agent_action.httpx.AsyncClient = lambda **kw: _Hang()  # type: ignore[assignment]
+    agent_action.EXECUTE_TIMEOUT = timedelta(milliseconds=200)
+    try:
+        with pytest.raises(TimeoutError):
+            await agent_action.execute_as_presser(Request(scope), snap, request_id=uuid.uuid4())
+        assert agent_action.replaying_request_id() is None, "the idempotency context is reset even when the replay is cancelled"
+    finally:
+        agent_action.httpx.AsyncClient = orig  # type: ignore[assignment]
+        agent_action.EXECUTE_TIMEOUT = orig_t
+    assert agent_action.EXECUTE_TIMEOUT > timedelta(seconds=60) and agent_action.RUNNING_STALE_AFTER > agent_action.EXECUTE_TIMEOUT
 
 
 def test_every_registered_action_is_asked_for_by_exactly_one_route():

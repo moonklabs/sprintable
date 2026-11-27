@@ -144,6 +144,7 @@ async def hitl_timeouts(
                 HitlRequest.status == "pending",
                 HitlRequest.expires_at.is_not(None),
                 HitlRequest.expires_at < now,
+                HitlRequest.request_type != "agent_action",  # story 5041: its own pass below — a declined ask says so to the agent, the same as a press that finds it expired
             )
         )
         expired = list(result.scalars().all())
@@ -153,9 +154,13 @@ async def hitl_timeouts(
             req.status = "expired"
             expired_count += 1
 
+        # story 5041: an agent's ask a person presses — expired ones are declined and the agent is told; a press that never finished is given back (see services/agent_action.sweep)
+        from app.services import agent_action
+
+        swept = await agent_action.sweep(session)
         await session.commit()
 
-        return _ok({"expired_count": expired_count, "notified_count": 0})
+        return _ok({"expired_count": expired_count + swept["expired"], "notified_count": 0, "agent_action": swept})
     except Exception as exc:
         logger.exception("cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

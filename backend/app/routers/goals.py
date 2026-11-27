@@ -10,7 +10,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -469,8 +469,17 @@ async def delete_goal(
         # story 5041 — kept as an ask a person presses (see delete_story)
         from app.services import agent_action
 
+        from app.models.pm import Story
+        from app.services.i18n_catalog import t
+
+        # the goal takes its stories with it — the card says how many
+        from app.services.project_auth import require_project_access
+
+        await require_project_access(session, uuid.UUID(auth.user_id), goal.project_id, org_id)  # before anything of the project is counted
+        _n = int(await session.scalar(select(func.count()).select_from(Story).where(Story.epic_id == goal.id, Story.deleted_at.is_(None))) or 0)
         return await agent_action.request_approval(
-            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=goal.project_id, action_key="goal.delete", target_label=goal.title,
+            request, session, auth=auth, agent=resolved, org_id=org_id, project_id=goal.project_id, action_key="goal.delete",
+            target_label=lambda loc, _g=goal, _c=_n: t("agent_action.target.goal_with_stories", loc, title=_g.title, n=_c),
         )
 
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):

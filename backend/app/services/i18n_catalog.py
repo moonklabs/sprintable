@@ -1297,6 +1297,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     "agent_action.result.expired": {"ko": "아무도 누르지 않아 거절로 닫혔어요 — {what}", "en": "Nobody pressed it in time, so it closed as a refusal — {what}"},
     "agent_action.result.failed": {"ko": "승인됐지만 실행하지 못했어요 — {what} ({reason})", "en": "Approved, but it could not be done — {what} ({reason})"},
     "agent_action.result.changed": {"ko": "그새 바뀌어서 실행하지 않았어요 — {what} ({reason})", "en": "It changed in the meantime, so nothing was done — {what} ({reason})"},
+    "agent_action.target.goal_with_stories": {"ko": "{title} (안의 스토리 {n}개도 함께 지워져요)", "en": "{title} (its {n} stories go with it)"},
+    "agent_action.result.unfinished": {"ko": "눌렀지만 끝나지 않았어요 — {what}. 다시 누르면 이어서 처리해요(같은 요청은 두 번 처리되지 않아요)", "en": "It was pressed but did not finish — {what}. Pressing again continues it (the same request is never done twice)"},
 }
 
 

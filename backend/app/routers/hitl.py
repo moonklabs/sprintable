@@ -162,6 +162,14 @@ async def resolve_hitl_request(
     if resolved.type != "human":
         return _err("FORBIDDEN", "HITL 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)", 403)
 
+    # story 5041: an agent's ask a person presses is decided through ITS card only (POST /api/v2/agent-actions/{id}/decision runs the stored call as the presser). A status flip here would close it without doing
+    # anything and leave the card saying «running» for good.
+    _asked_type = (await repo.session.execute(
+        select(HitlRequest.request_type).where(HitlRequest.id == request_id, HitlRequest.org_id == org_id, HitlRequest.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if _asked_type == "agent_action":
+        return _err("USE_THE_CARD", "This request is decided on its card (agent-actions), not here", 409)
+
     # story #2043 AC3: 고위험 승인은 사유 없이 통과 못 한다 — Gate 쪽(gates.py:730, story #2027)과
     # 동일 불변식을 HitlRequest 승인 경로에도. 화면 버튼 비활성만으론 불충분(AC 원문) — 서버가
     # 거부한다. response_text를 사유 필드로 재사용(신규 필드 0 — HitlRequestResponse에 이미 있는

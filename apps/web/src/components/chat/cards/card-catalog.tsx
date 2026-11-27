@@ -3,6 +3,7 @@
 import type { ComponentType } from 'react';
 import { useTranslations } from 'next-intl';
 import { CardFrame } from './card-frame';
+import { AgentActionCard } from './agent-action-card';
 import { DeployCard } from './deploy-card';
 import { EntityCard } from './entity-card';
 import { KanbanCard } from './kanban-card';
@@ -18,6 +19,7 @@ type CardPart = ComponentType<{ kind: CardKind; refId: string }>;
 const EntityPart: CardPart = ({ kind, refId }) => (isEntityCardKind(kind) ? <EntityCard kind={kind} refId={refId} /> : null);
 const KanbanPart: CardPart = ({ refId }) => <KanbanCard sprintId={refId} />;
 const DeployPart: CardPart = ({ refId }) => <DeployCard agentId={refId} />;
+const AgentActionPart: CardPart = ({ refId }) => <AgentActionCard requestId={refId} />;
 
 export const CARD_PARTS: Readonly<Record<CardKind, CardPart | null>> = {
   story: EntityPart,
@@ -31,6 +33,7 @@ export const CARD_PARTS: Readonly<Record<CardKind, CardPart | null>> = {
   gate: null,
   kanban: KanbanPart,
   deploy: DeployPart,
+  agent_action: AgentActionPart,
 };
 
 /** the card of a kind this build cannot draw (an older app meeting a newer server · a kind with no part yet) — said as such, never an empty hole and never a guess */

@@ -45,6 +45,7 @@ class RewardRepository:
         granted_by: uuid.UUID,
         reference_type: str | None = None,
         reference_id: uuid.UUID | None = None,
+        agent_action_request_id: uuid.UUID | None = None,
     ) -> RewardLedger | None:
         member_check = await self.session.execute(
             select(TeamMember.id).where(
@@ -65,11 +66,18 @@ class RewardRepository:
             granted_by=granted_by,
             reference_type=reference_type,
             reference_id=reference_id,
+            agent_action_request_id=agent_action_request_id,
         )
         self.session.add(entry)
         await self.session.flush()
         await self.session.refresh(entry)
         return entry
+
+    async def find_by_agent_action_request(self, request_id: uuid.UUID) -> RewardLedger | None:
+        """the grant that answered this agent-action request, if any (story 5041: a grant is made once per request)"""
+        return (await self.session.execute(
+            select(RewardLedger).where(RewardLedger.org_id == self.org_id, RewardLedger.agent_action_request_id == request_id)
+        )).scalar_one_or_none()
 
     async def leaderboard(
         self,

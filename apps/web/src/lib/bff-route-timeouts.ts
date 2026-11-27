@@ -68,6 +68,8 @@ export const LONG_ROUTES = {
   channelDraftSubmit: dbOnlyRoute('services/channel_posts.py publish_recipe_approved_draft — 명령을 대기열에만(publish_outcome=publishing) · 발행과 레시피 published 이벤트는 워커'),
   /** 게이트 전이 · 대신 결재 — 레시피 external_publish 게이트 승인이어도 발행은 대기열에만(story #4336). */
   gateTransition: dbOnlyRoute('gates.py transition · override → gate_service.py transition_gate → publish_recipe_approved_draft — 대기열에만(publish_outcome=publishing) · 발행은 워커'),
+  /** 에이전트 요청 승인 누름(story 5041) — 저장된 호출 «하나»(지우기 · 닫기 · 보상 · 핀 지우기)를 그 사람 세션으로 한 번 다시 실행: 전부 DB만(외부 호출 없음). */
+  agentActionDecision: dbOnlyRoute('routers/agent_actions.py decide_agent_action → services/agent_action.py execute_as_presser — 등록된 동작 하나(stories·tasks·goals·docs·sprints 지우기 · 스프린트 닫기 · 보상 · 핀 지우기)의 DB 쓰기만'),
   /** 첨부 변환(story #4336 PR2 ②) — 요청 안 예산 40초(작은 파일 · 캐시 적중은 바로). 넘으면 202 + 작업 — 받기 30 · Gotenberg 120 · 올리기 30은 워커. */
   attachmentConvert: route(40_000, 'routers/attachments.py convert_attachment(asyncio.timeout CONVERT_REQUEST_BUDGET_SECONDS 40 · 넘으면 202 작업 attachment_convert)'),
   /** 루프 컨텍스트 팩(story #4336 PR2 ②) — 요청 안은 임베드(10) · 검색 · 캐시 확인까지. 캐시 미스(LLM 25 × 2)는 202 + 작업(loop_context_pack). */

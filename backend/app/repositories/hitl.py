@@ -170,6 +170,9 @@ class HitlRepository:
             HitlRequest.org_id == org_id,
             HitlRequest.project_id == project_id,
             HitlRequest.deleted_at.is_(None),
+            # story 5041: an agent's ask a person presses is NOT a row of this list — its stored call (path · body · the recipient of a grant) is not for whoever can list the project's requests;
+            # the card reads it through /api/v2/agent-actions/{id}, which tells the viewer in the server's own words
+            HitlRequest.request_type != "agent_action",
         )
         if status:
             stmt = stmt.where(HitlRequest.status == status)
@@ -220,6 +223,7 @@ class HitlRepository:
             HitlRequest.id == request_id,
             HitlRequest.org_id == org_id,
             HitlRequest.deleted_at.is_(None),
+            HitlRequest.request_type != "agent_action",  # story 5041: decided only through its card (it runs the stored call; a bare status flip would close it without doing anything)
         )
         if project_id is not None:
             stmt = stmt.where(HitlRequest.project_id == project_id)

@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 
 # Order and spelling are the web's `CARD_KINDS`. A kind this list does not have is refused at write; an older web meeting a newer kind draws its «this app version cannot show it» card.
-CARD_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "gate", "kanban", "deploy")
+CARD_KINDS: tuple[str, ...] = ("story", "epic", "task", "sprint", "doc", "artifact", "hypothesis", "evidence", "gate", "kanban", "deploy", "agent_action")
 
 
 # What an agent may ask to be shown with the `show card` tool: the kinds with a project we can check an agent's access against (`kanban` is the board of a sprint — its reference is the sprint's id), and `deploy`
