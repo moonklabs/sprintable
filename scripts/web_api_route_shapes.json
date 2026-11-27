@@ -110,6 +110,21 @@
 "kind": "unknown"
 },
 {
+"method": "DELETE",
+"path": "/api/v2/agent-action-policy",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agent-action-policy",
+"kind": "unknown"
+},
+{
+"method": "PUT",
+"path": "/api/v2/agent-action-policy",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/agent-actions/{}",
 "kind": "unknown"
