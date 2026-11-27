@@ -74,7 +74,7 @@ export function DocAssigneeControl({
             : 'flex size-7 items-center justify-center rounded-full border border-dashed border-muted-foreground/50 text-muted-foreground transition-colors hover:text-foreground'
         }
       >
-        {assigned ? (initials ?? <User className="size-3.5" />) : <UserPlus className="size-3.5" />}
+        {assigned ? (initials ?? <User className="size-ds-icon-sm" />) : <UserPlus className="size-ds-icon-sm" />}
       </button>
       {open ? (
         // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.

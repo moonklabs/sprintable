@@ -165,7 +165,7 @@ export default function DocViewPage() {
             {/* story 4892 — ⋯ 메뉴 = ds Menu(Base UI: 열고 닫기 · 화살표 · Esc · 초점 복원). 항목 · 이름 · 규칙(공유 lg 미만 전용 · 읽기 전용 문서엔 삭제 없음 · 삭제는 사람만)은 그대로. */}
             <Menu>
               <MenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors outline-none hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action touch:size-11">
-                <Icon name="more_horiz" size={16} />
+                <Icon name="more_horiz" size="md" />
               </MenuTrigger>
               <MenuContent align="end" className="w-48">
                 <MenuItem className="lg:hidden" icon="share" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">

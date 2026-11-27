@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(__dirname, '..');
-const DIRS = ['components/chat', 'app/(authenticated)/chats', 'components/kanban', 'components/epics', 'components/sprints']; // ④-② 채팅 · ④-④ 칸반(+epics · sprints) — 다음 영역은 여기에 한 줄씩
+const DIRS = ['components/chat', 'app/(authenticated)/chats', 'components/kanban', 'components/epics', 'components/sprints', 'components/docs', 'app/(authenticated)/[ws]/[proj]/docs', 'components/retro']; // ④-② 채팅 · ④-④ 칸반(+epics · sprints) · ④-⑥ 문서(+retro) — 다음 영역은 여기에 한 줄씩
 const RAW = /(?<![\w:-])(?:size|h|w)-(?:3\.5|4|4\.5|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/;
 const RAW_ICON_PROP = /\bsize=\{(?:14|16|18|20|24|32)\}/;
 // «토큰 밖이 맞는 곳» — `파일::태그 앞 부분` 정확히 일치만(같은 파일에 새 자리가 생기면 RED) · 사유 한 줄. 이 목록이 자라는 diff는 PO가 본다.
@@ -52,7 +52,7 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
       }
       for (const m of text.matchAll(/<((?:[a-z]\w*\.)*[A-Z][A-Za-z0-9]*)\b/g)) {
         const name = m[1]!.split('.').pop()!; // `<item.Icon …>` 처럼 객체 멤버로 쓴 아이콘도 본다(codex 지적)
-        if (!(lucide.has(name) || /Icon$/.test(name))) continue;
+        if (!(lucide.has(name) || /(?:Icon|Glyph)$/.test(name))) continue;
         const tag = openingTag(text, m.index!);
         const key = `${rel}::${tag.replace(/\s+/g, ' ').slice(0, 60)}`;
         const bad = RAW.test(tag.replace(/data-[\w-]+="[^"]*"/g, '')) || (name === 'Icon' && RAW_ICON_PROP.test(tag));
@@ -60,7 +60,7 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
         if (Object.keys(ALLOWED).some((k) => key.startsWith(k))) continue;
         hits.push(key);
       }
-      for (const m of text.matchAll(/\w*Glyph\([^)]*['"`][^'"`]*\b(?:size|h|w)-(?:3\.5|4|5|6|8|\[\d+px\])\b/g)) hits.push(`${rel}::${m[0].slice(0, 60)}`);
+      for (const m of text.matchAll(/\w*Glyph\([^)]*['"`][^'"`]*\b(?:size|h|w)-(?:3\.5|4|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/g)) hits.push(`${rel}::${m[0].slice(0, 60)}`);
     }
     expect(hits).toEqual([]);
   });

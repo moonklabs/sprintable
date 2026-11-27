@@ -506,7 +506,7 @@ export default function DocSlugPage() {
       {/* story 4892 — ⋯ 메뉴 = ds Menu(읽기 화면과 같은 부품). 항목 · 이름 · 규칙은 그대로(공유 · 복사는 lg 미만 전용 · 읽기 전용 문서엔 주소 바꾸기 · 삭제 없음 · 삭제는 사람만). */}
       <Menu>
         <MenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors outline-none hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action touch:size-11">
-          <Icon name="more_horiz" size={16} />
+          <Icon name="more_horiz" size="md" />
         </MenuTrigger>
         <MenuContent align="end" className="w-48">
           {/* story #4361(유나 실측 390/360) — 도구 줄 오른쪽 무리가 편집 카드(overflow-hidden) 밖으로 밀려 폰에서 «공유» · «⋯»(360은

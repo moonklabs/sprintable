@@ -154,7 +154,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
     return (
       <NodeViewWrapper data-testid="page-embed-circular">
         <div className="flex items-center gap-2 rounded-xl border border-destructive-border bg-destructive-tint px-4 py-3 text-sm text-foreground">
-          <AlertCircle className="size-4 shrink-0 text-destructive" />
+          <AlertCircle className="size-ds-icon-sm shrink-0 text-destructive" />
           <span>{tDocs('pageEmbedSelf')}</span>
         </div>
       </NodeViewWrapper>
@@ -171,7 +171,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           onSubmit={handleSubmit}
           className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3"
         >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
+          <FileText className="size-ds-icon-sm shrink-0 text-muted-foreground" />
           <Input
             ref={inputRef}
             type="text"
@@ -194,7 +194,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
         </form>
         {error ? (
           <p id={errorId} role="alert" className="mt-1.5 flex items-start gap-1.5 break-keep px-1 text-xs text-destructive [overflow-wrap:anywhere]">
-            <AlertCircle className="mt-px size-3.5 shrink-0" />
+            <AlertCircle className="mt-px size-ds-icon-sm shrink-0" />
             <span>{error}</span>
           </p>
         ) : null}
@@ -207,7 +207,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
     return (
       <NodeViewWrapper data-testid="page-embed-loading">
         <div className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 text-sm text-muted-foreground">
-          <RefreshCw className="size-4 shrink-0 animate-spin" />
+          <RefreshCw className="size-ds-icon-sm shrink-0 animate-spin" />
           <span>{tDocs('pageEmbedLoading')}</span>
         </div>
       </NodeViewWrapper>
@@ -219,7 +219,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
     return (
       <NodeViewWrapper data-testid="page-embed-error">
         <div className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
-          <AlertCircle className="size-4 shrink-0 text-muted-foreground" />
+          <AlertCircle className="size-ds-icon-sm shrink-0 text-muted-foreground" />
           {/* story #4371(유나 판) — 한국어 오류 문장이 낱말 중간(음절)에서 꺾이지 않게(입력칸 오류 줄과 같은 break-keep). */}
           <span className="min-w-0 flex-1 break-keep text-sm text-muted-foreground [overflow-wrap:anywhere]">{error}</span>
           <button
@@ -250,7 +250,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>
           ) : (
-            <FileText className="size-5 shrink-0 text-brand-text" />
+            <FileText className="size-ds-icon-md shrink-0 text-brand-text" />
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">

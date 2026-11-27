@@ -138,7 +138,7 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
               className="h-auto min-w-0 flex-1 bg-ds-surface-sunk px-2.5 py-1.5 font-mono lg:text-xs dark:bg-ds-background"
             />
             <Button size="sm" variant="outline" onClick={() => void copy()} className="flex-shrink-0">
-              {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}
+              {copied ? <Check className="mr-1 size-ds-icon-sm text-success" /> : <Copy className="mr-1 size-ds-icon-sm" />}
               {copied ? labels.linkCopied : labels.copyLink}
             </Button>
           </div>

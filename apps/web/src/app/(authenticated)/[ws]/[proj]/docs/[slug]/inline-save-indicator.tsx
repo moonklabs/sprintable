@@ -42,7 +42,7 @@ export function InlineSaveIndicator({
   if (status === 'saving') {
     return (
       <span aria-label={tc('saving')} title={tc('saving')} className="flex items-center">
-        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        <Loader2 className="size-ds-icon-sm animate-spin text-muted-foreground" />
       </span>
     );
   }
@@ -70,7 +70,7 @@ export function InlineSaveIndicator({
         // 그대로 두고 underline으로 hover 피드백을 표현(대비 하락 0).
         className="flex max-w-30 items-center gap-1 truncate text-xs text-destructive hover:underline md:max-w-none"
       >
-        <XCircle className="size-3.5 shrink-0" />
+        <XCircle className="size-ds-icon-sm shrink-0" />
         <span className="truncate">{t('statusError')} · {t('retry')}</span>
       </button>
     );

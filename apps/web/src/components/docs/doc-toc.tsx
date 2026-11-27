@@ -57,7 +57,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
         onClick={() => setOpen((v) => !v)}
         onKeyDown={keys.onTriggerKeyDown}
         title={t('tocSection')}
-        iconStart={<Icon name="list" size={14} />}
+        iconStart={<Icon name="list" size="md" />}
       >
         {t('tocSection')}
       </Button>
