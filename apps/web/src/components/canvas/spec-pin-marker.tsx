@@ -23,7 +23,7 @@ export function SpecPinMarker({ active, onClick, className, style }: SpecPinMark
       style={style}
       className={cn(
         // 4910 — 코멘트 핀(AnchorPin open)과 같은 ds 채움 · 고리(같은 대비 값 — styles/pin-contrast.4910.test.ts). 구분 신호는 여전히 아이콘.
-        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none bg-ds-pin text-ds-on-pin ring-2 ring-ds-surface transition-transform',
+        'flex h-5 w-5 shrink-0 items-center leading-none justify-center rounded-full rounded-bl-none bg-ds-pin text-ds-on-pin ring-2 ring-ds-surface transition-transform',
         active && 'outline-2 outline-offset-2 outline-ds-action',
         onClick && 'hover:scale-110',
         className,
