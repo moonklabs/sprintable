@@ -30,15 +30,17 @@ export interface IconButtonProps extends Omit<ButtonPrimitive.Props, 'children' 
   /** 글자가 없는 단추라 접근성 이름이 필수다(없으면 컴파일 에러). */
   label: string;
   icon: IconName;
+  /** 단추 상자를 40보다 작게 줄여 쓰는 자리(예: `size-ds-tag` 28 — 칩 줄 안)에서만 아이콘 단계를 직접 정한다(28 칸엔 `sm` 16). 안 주면 단추 크기 표를 따른다. */
+  iconSize?: IconSize;
 }
 
 /** 단추 크기별 안쪽 아이콘 단계 — 한 표(story 5048 ④ PO 11-27). md · lg는 높이 40 하나(40 높이 조작 = md 20) · xl 48 큰 아이콘 단추 = lg 24. 전에는 16 · 18 · 22를 숫자로 줬다. */
 const ICON_BUTTON_STEP = { md: 'md', lg: 'md', xl: 'lg' } as const satisfies Record<'md' | 'lg' | 'xl', IconSize>;
 
-export function IconButton({ label, icon, size, variant, className, ...props }: IconButtonProps) {
+export function IconButton({ label, icon, iconSize, size, variant, className, ...props }: IconButtonProps) {
   return (
     <ButtonPrimitive data-slot="ds-icon-button" aria-label={label} title={label} className={cn(iconButtonVariants({ variant, size }), className)} {...props}>
-      <Icon name={icon} size={ICON_BUTTON_STEP[size ?? 'md']} />
+      <Icon name={icon} size={iconSize ?? ICON_BUTTON_STEP[size ?? 'md']} />
     </ButtonPrimitive>
   );
 }

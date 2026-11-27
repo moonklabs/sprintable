@@ -74,7 +74,7 @@ export function RoomHead({ rename, tag, subline, chips, moreCount = 0, addLabel,
           </li>
         ))}
         {moreCount > 0 ? <li data-testid="room-head-more" className="text-ds-mono-md tabular-nums text-ds-ink-3">+{moreCount}</li> : null}
-        {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" className="size-ds-tag" /></li> : null}
+        {onAdd ? <li><IconButton icon="add" iconSize="sm" label={addLabel} onClick={onAdd} data-testid="room-head-add" className="size-ds-tag" /></li> : null}
       </ul>
       )}
     </header>
