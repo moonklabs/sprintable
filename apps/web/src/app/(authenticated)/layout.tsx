@@ -12,6 +12,7 @@ import { isLocalModeServer } from '@/lib/embedded-api-origin';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { AuUsageBanner } from '@/ee/components/billing/au-usage-banner';
+import { isPanelPath } from '@/components/desktop-panel/panel-path';
 import { DesktopSetupDocWatch } from '@/components/desktop/desktop-setup-doc-watch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
@@ -277,12 +278,17 @@ async function AuthenticatedLayoutBody({
                 dashboard-shell.tsx의 ActivationChecklistBanner 래퍼와 동일 값 — 이 children이
                 그 형제로 렌더되는 위치라 시각 정합)+하단 여백을 준다. empty:hidden으로 배너가
                 null일 때 래퍼 자체도 완전히 접힌다(같은 패턴, activation-checklist-banner 선례). */}
-            <div className="px-3 pt-3 mb-3 empty:hidden">
-              <AuUsageBanner />
-            </div>
-            {children}
-            {/* story #4427 — 데스크톱 설정 진행 중 탭의 문서 · 가이드 열기 셈(설정 없는 탭은 아무것도 안 함) */}
-            <DesktopSetupDocWatch />
+            {/* story 5042 (C9): a page of the desktop app's work panel is one small view — no usage banner above it, no setup watcher beside it */}
+            {isPanelPath(currentPath) ? children : (
+              <>
+                <div className="px-3 pt-3 mb-3 empty:hidden">
+                  <AuUsageBanner />
+                </div>
+                {children}
+                {/* story #4427 — 데스크톱 설정 진행 중 탭의 문서 · 가이드 열기 셈(설정 없는 탭은 아무것도 안 함) */}
+                <DesktopSetupDocWatch />
+              </>
+            )}
           </CrossProjectToastProvider>
         </StorageCapacityToastProvider>
       </DashboardShell>

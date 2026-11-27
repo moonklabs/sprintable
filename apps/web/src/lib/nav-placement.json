@@ -371,6 +371,13 @@
    ],
    "why": "폰 짝짓기 흐름 — 설정 «이 컴퓨터 · 폰»에서 엶"
   },
+  "/desktop/panel/work-item/[agentId]": {
+   "slot": "settings",
+   "doors": [
+    "flow"
+   ],
+   "why": "맥 앱 작업 패널의 일감 탭이 자기 뷰에 직접 여는 한 장 — 사람이 걸어 들어가는 화면이 아님(story 5042)"
+  },
   "/desktop/remote": {
    "slot": "settings",
    "doors": [

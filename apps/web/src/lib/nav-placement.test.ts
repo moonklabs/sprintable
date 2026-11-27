@@ -42,9 +42,9 @@ const SETTINGS_INSIDE: Array<[string, string]> = [
 ];
 
 describe('⭐ ① 모든 화면이 한 줄씩(빠짐 0 · 남는 줄 0)', () => {
-  it('디스크의 page.tsx 집합 = 표의 키 집합(87쪽)', () => {
+  it('디스크의 page.tsx 집합 = 표의 키 집합(88쪽)', () => {
     expect([...routes].sort()).toEqual(Object.keys(ROUTE_PLACEMENT).sort());
-    expect(routes).toHaveLength(87);
+    expect(routes).toHaveLength(88);
   });
 });
 

@@ -178,6 +178,7 @@ const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
   // 옛 주소를 지우지 않고 새 화면으로 보내기만 하는 쪽(story 5031 · 코드로 확인: 각 page.tsx가 redirect()만 한다)
   '/organization/connectors': '리다이렉트만(채널 연결 화면으로) — 이 주소로 거는 링크는 주석뿐', '/dashboard': '리다이렉트만(대화 /chats로) — 옛 대시보드 주소', '/dashboard/settings': '리다이렉트만(/settings로) — 옛 주소',
   '/desktop/pair': '폰 연결 흐름', '/desktop/setup': '맥 앱 셋업 흐름', '/desktop/remote': '맥 앱이 `#code`를 달아 직접 여는 원격 제어 흐름(채팅 에이전트 줄의 링크는 /desktop#앵커로 감)', '/desktop/remote-on': '원격 제어 흐름',
+  '/desktop/panel/work-item/[agentId]': '맥 앱 작업 패널의 일감 탭이 자기 뷰에 직접 여는 한 장(사람이 걸어 들어가는 화면이 아님 · story 5042)',
   '/internal-dogfood': '내부 도그푸딩(프록시 전용)',
   // 켜지지 않은 시안 — 정본은 지금 서 있는 화면이고 v3 쪽은 켜지도 떼지도 않는다(PO 결정 11-10)
   '/today': 'v3 «오늘» 시안(플래그 꺼짐 — 정본은 /org-briefing · 라우트와 플래그 그대로)', '/chat': 'v3 «대화» 시안(플래그 꺼짐 — 정본은 /chats · 라우트와 플래그 그대로)', '/connect-rules': 'v3 «연결·규칙» 시안(플래그 꺼짐 — 정본은 설정의 채널 연결 · 콘텐츠 규칙 · 라우트와 플래그 그대로)',
