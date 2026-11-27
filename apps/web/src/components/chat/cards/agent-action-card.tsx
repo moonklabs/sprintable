@@ -6,6 +6,7 @@ import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
 import { CardFrame } from './card-frame';
 import { fetchAgentAction, pressAgentAction, type AgentActionView } from './agent-action-access';
+import { EntityCard } from './entity-card';
 import { useCardRead } from './use-card-read';
 
 /**
@@ -48,6 +49,9 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
         </div>
         <p className="m-0 min-w-0 break-words text-ds-small text-ds-ink-2">{view.prompt}</p>
         {view.requestedBy ? <p className="m-0 min-w-0 break-words text-ds-small text-ds-ink-3">{t('agentActionAskedBy', { name: view.requestedBy })}</p> : null}
+        {/* what it is about — the object's own card (title · status; a click opens it in the side panel, read for THIS viewer); once a delete is done there is nothing left to open */}
+        {view.target && !view.gone ? <EntityCard kind={view.target.kind} refId={view.target.id} /> : null}
+        {view.gone ? <p className="m-0 text-ds-small text-ds-ink-2" data-testid="agent-action-gone">{t('agentActionGone')}</p> : null}
         {open && phase.kind !== 'confirm' ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" loading={busy} disabled={busy} onClick={() => (view.irreversible ? setPhase({ kind: 'confirm' }) : void press('approve'))}>{t('agentActionApprove')}</Button>

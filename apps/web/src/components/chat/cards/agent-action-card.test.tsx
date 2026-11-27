@@ -116,6 +116,60 @@ describe('an open ask', () => {
   });
 });
 
+describe('the object the ask is about (story 5041 follow-up)', () => {
+  const STORY = '0d6e953f-6d43-42c1-a87c-b023544497db';
+  const withTarget = (over: Record<string, unknown> = {}) => view({ action_key: 'story.delete', target: { kind: 'story', id: STORY }, ...over });
+  const storyStub = (read: () => Response) => stub({ read });
+
+  it('an open ask shows the object it is about as the object\'s own card (read for the viewer) — and nothing is sent', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); seen.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === `/api/agent-actions/${REQ}`) return json(200, withTarget());
+      if (url.includes(`/api/stories/${STORY}`)) return json(200, { data: { id: STORY, title: '일회용 스토리', status: 'backlog' } });
+      return json(404);
+    }));
+    await show();
+    expect(container.querySelector('[data-testid="chat-card-agent-action"]')).toBeTruthy();
+    expect(seen.some((u) => u.includes(`/api/stories/${STORY}`))).toBe(true);
+    expect(writes()).toEqual([]);
+    expect(container.querySelector('[data-testid="agent-action-gone"]')).toBeNull();
+  });
+
+  it('⭐after a delete is done there is nothing to open: «지워졌어요», no object card, no read of the object', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); seen.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === `/api/agent-actions/${REQ}`) return json(200, withTarget({ state: 'executed', decided_by: { id: 'p1', name: '윤재' } }));
+      return json(404);
+    }));
+    await show();
+    expect(container.querySelector('[data-testid="agent-action-gone"]')?.textContent).toBe('지워졌어요');
+    expect(container.querySelector('[data-testid="chat-card-story"]')).toBeNull();
+    expect(seen.some((u) => u.includes('/api/stories/'))).toBe(false);
+  });
+
+  it('a close (not a delete) keeps the object: executed, and the sprint is still there to open', async () => {
+    storyStub(() => json(200, view({ action_key: 'sprint.close', state: 'executed', target: { kind: 'sprint', id: STORY } })));
+    await show();
+    expect(container.querySelector('[data-testid="agent-action-gone"]')).toBeNull();
+  });
+
+  it('a grant has no object: no object card, no «지워졌어요»', async () => {
+    storyStub(() => json(200, view({ action_key: 'reward.give', target: null })));
+    await show();
+    expect(container.querySelector('[data-testid="agent-action-gone"]')).toBeNull();
+    expect(container.querySelector('[data-testid^="chat-card-story"]')).toBeNull();
+  });
+
+  it('a target of a kind the web cannot draw is ignored, not drawn as a guess', async () => {
+    storyStub(() => json(200, view({ action_key: 'story.delete', target: { kind: 'weird', id: STORY } })));
+    await show();
+    expect(container.querySelector('[data-testid="chat-card-agent-action"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="agent-action-gone"]')).toBeNull();
+  });
+});
+
 describe('a press that did not finish', () => {
   it('shows «끝나지 않았어요», says pressing again continues it, and keeps the buttons', async () => {
     stub({ read: () => json(200, view({ state: 'retry', execution: { state: 'failed', reason: 'unfinished' } })) }); await show();

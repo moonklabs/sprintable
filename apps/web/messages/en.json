@@ -6252,6 +6252,7 @@
     "agentActionStateChanged": "Changed meanwhile",
     "agentActionStateRetry": "Not finished",
     "agentActionRetryLine": "The earlier press did not finish. Press again to continue it — the same request is never done twice",
+    "agentActionGone": "It is deleted",
     "agentActionStateRejected": "Declined",
     "agentActionStateExpired": "Expired",
     "agentActionByApproved": "{name} approved it and it was done",

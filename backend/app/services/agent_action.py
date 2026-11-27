@@ -461,6 +461,7 @@ def _reason_of(resp: httpx.Response) -> str:
 async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any, kind: str, reason: str = "", locale: str = "ko") -> None:
     """tell the asking agent how it ended — a message in their DM (the way gate decisions reach an agent), best-effort"""
     from app.routers.conversations import _dispatch_conversation_event
+    from app.routers.events import _get_or_create_system_publisher
     from app.services.approval_delivery import _get_or_create_approval_dm
 
     spec = SPECS.get(req.hitl_metadata.get("action_key", ""))
@@ -471,8 +472,10 @@ async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any,
     try:
         async with session.begin_nested():
             conv = await _get_or_create_approval_dm(session, org_id=req.org_id, project_id=req.project_id, requester_id=req.agent_id, approver_id=presser.id)
+            # the line is the SERVER's, not the person's: spoken by «시스템 발행» (the org's one server sender), so the person who pressed does not see it as their own bubble — the card says who pressed
+            system = await _get_or_create_system_publisher(session, req.org_id)
             msg = ConversationMessage(
-                conversation_id=conv.id, sender_id=presser.id, content=content, mentioned_ids=[req.agent_id],
+                conversation_id=conv.id, sender_id=system.id, content=content, mentioned_ids=[req.agent_id],
                 msg_metadata={
                     "activation": {"audience": [str(req.agent_id)], "kind": "result", "expects_response": False},
                     "agent_action_result": {"request_id": str(req.id), "result": kind},
@@ -480,6 +483,6 @@ async def notify_agent(session: AsyncSession, *, req: HitlRequest, presser: Any,
             )
             session.add(msg)
             await session.flush()
-            await _dispatch_conversation_event(session, conv, msg, req.org_id, presser)
+            await _dispatch_conversation_event(session, conv, msg, req.org_id, system)
     except Exception:  # noqa: BLE001 — a failed reply never undoes the decision
         logger.warning("agent_action result reply failed request=%s", req.id, exc_info=True)
