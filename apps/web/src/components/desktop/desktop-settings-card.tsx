@@ -8,6 +8,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ds/card';
 import { Toggle } from '@/components/ds/toggle';
+import { QuickAskShortcutRow } from './quick-ask-shortcut-row';
 import { DESKTOP_NOTICE_KINDS, desktopApp, desktopSettings, subscribeDesktopApp, subscribeDesktopSettings, writeDesktopSettings, type DesktopSettingsPatch, type SprintableDesktop } from '@/lib/desktop-app';
 
 export function DesktopSettingsCard() {
@@ -47,6 +48,8 @@ export function DesktopSettingsCard() {
         {sw('trayIcon', t('trayIcon'), settings.trayIcon, (on) => ({ trayIcon: on }))}
         {sw('keepRunning', t('keepRunning'), settings.keepRunning, (on) => ({ keepRunning: on }), t('keepRunningNote'))}
       </ul>
+      {/* story 5047 (C14): the quick-ask shortcut — a row only when the app gives the value AND the hand (an older app · a test build: none) */}
+      <QuickAskShortcutRow bridge={bridge} />
       <p className="text-ds-small text-ds-failed" role="status" data-testid="desktop-settings-failed">{failed ? t('failed') : ''}</p>
     </Card>
   );

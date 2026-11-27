@@ -8101,7 +8101,26 @@
       "keepRunningNote": "알림 · 독 배지 · 메뉴 막대 아이콘이 계속 돼요. 에이전트는 이 설정과 상관없이 계속 일해요. 앱을 끝내려면 ⌘Q.",
       "failed": "바꾸지 못했어요 — 다시 시도해 주세요",
       "stateOn": "켜짐",
-      "stateOff": "꺼짐"
+      "stateOff": "꺼짐",
+      "quickAsk": {
+        "title": "빠른 묻기 단축키",
+        "note": "어느 앱 위에서든 이 키로 빠른 묻기 창을 열어요",
+        "current": "지금 키: {key}",
+        "statusRegistered": "이 키로 열려요",
+        "statusConflict": "다른 앱이 이미 쓰고 있어요 — 다른 키를 골라 주세요",
+        "statusFailed": "지금은 단축키를 쓸 수 없어요",
+        "statusOff": "빠른 묻기가 꺼져 있어요",
+        "change": "바꾸기",
+        "cancel": "취소",
+        "changeAria": "빠른 묻기 단축키 바꾸기",
+        "cancelAria": "빠른 묻기 단축키 바꾸기 취소",
+        "listening": "새 키를 눌러 주세요 · Esc로 취소",
+        "busy": "바꾸는 중…",
+        "saved": "바꿨어요",
+        "invalid": "이 키는 쓸 수 없어요 — 수정키(⌘ ⌥ ⌃) 하나가 필요해요",
+        "conflictTried": "다른 앱이 이미 쓰고 있어요 — 다른 키를 골라 주세요 · 지금 키는 그대로예요",
+        "failedTried": "지금은 단축키를 바꿀 수 없어요 · 지금 키는 그대로예요"
+      }
     },
     "remoteControl": {
       "title": "원격 제어",

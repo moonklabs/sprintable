@@ -56,6 +56,20 @@ export function desktopSettingsOf(raw: unknown): DesktopSettings | null {
   });
 }
 
+/** story 5047 (C14): the quick-ask shortcut as the app tells it — the key (the app's own text and the label a person reads, «⌥Space») and where it stands: `registered` (it opens the window) · `conflict` (another app holds the key) · `failed`
+ *  (the system refused for a reason it did not say) · `off` (not running). A fixed shape; anything else is «no shortcut» (null). */
+export const QUICK_SHORTCUT_STATUSES = ['registered', 'conflict', 'failed', 'off'] as const;
+export interface QuickShortcutView { readonly accelerator: string; readonly label: string; readonly status: (typeof QUICK_SHORTCUT_STATUSES)[number] }
+export type QuickShortcutAnswer = { ok: true; shortcut: QuickShortcutView } | { ok: false; code: string; shortcut?: QuickShortcutView };
+
+export function quickShortcutOf(raw: unknown): QuickShortcutView | null {
+  const o = raw as Record<string, unknown> | null | undefined;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (typeof o.accelerator !== 'string' || o.accelerator === '' || o.accelerator.length > 64 || typeof o.label !== 'string' || o.label === '' || o.label.length > 32) return null;
+  if (!(QUICK_SHORTCUT_STATUSES as readonly string[]).includes(o.status as string)) return null;
+  return Object.freeze({ accelerator: o.accelerator, label: o.label, status: o.status as QuickShortcutView['status'] });
+}
+
 export interface SprintableDesktop {
   readonly inApp: true;
   readonly device: { readonly name: string };
@@ -92,6 +106,10 @@ export interface SprintableDesktop {
   setSettings?(patch: DesktopSettingsPatch): Promise<{ ok: true; settings: DesktopSettings } | { ok: false; code: string }>;
   /** story 5038: the settings as they change (the current ones at once). Absent in an older app. Read it through `subscribeDesktopSettings`. */
   subscribeSettings?(listener: (s: DesktopSettings) => void): () => void;
+  /** story 5047 (C14): the quick-ask shortcut when this page loaded — only an app that runs the quick-ask window has it (an older app · a test build: absent → the page draws no shortcut row). Read it through `quickShortcutNow`. */
+  readonly quickAskShortcut?: QuickShortcutView;
+  /** story 5047: change it — the key as text («Alt+Space»); the app checks it, tries it, and keeps the old key when the new one is refused. Answers the shortcut as KEPT, or `{ ok:false, code, shortcut }` (`invalid` · `conflict` · `failed` · `bad_request`). Absent in an older app. Call it through `writeQuickShortcut`. */
+  setQuickAskShortcut?(accelerator: string): Promise<QuickShortcutAnswer>;
 }
 
 /** story 4693: the two files the app looks for, and the runtime each one means (the app's own table — design 4693 §2) */
@@ -148,6 +166,7 @@ export function desktopAppOf(candidate: unknown): SprintableDesktop | undefined 
   // 5038: the settings hands are optional the same way (an older app has none → no desktop settings); present means a function
   if (d.setSettings !== undefined && typeof d.setSettings !== 'function') return undefined;
   if (d.subscribeSettings !== undefined && typeof d.subscribeSettings !== 'function') return undefined;
+  if (d.setQuickAskShortcut !== undefined && typeof d.setQuickAskShortcut !== 'function') return undefined; // 5047: the same way
   if (readable.length === (d.runtimes as unknown[]).length) return d as SprintableDesktop;
   // a name this web does not know was left out: the same bridge, without it — ONE copy per (bridge · list the app gave): `desktopApp()` is read by useSyncExternalStore, which wants the same object while nothing changed
   const hit = trimmed.get(d as object);
@@ -394,4 +413,40 @@ export function __resetDesktopAppForTest(): void {
   derived = null;
   listeners.clear();
   stopBridge = null;
+}
+
+
+// ── story 5047 (C14): the quick-ask shortcut — read at load; a write answers with the shortcut AS KEPT (no push: this page is the only place it is changed). Drawn ONLY when the app gives the value AND the hand. ───────────────────────
+/** the shortcut right now, or null (a browser · an older app · a test build · a value that is not the fixed shape · no write hand — then there is nothing the page may offer) */
+export function quickShortcutNow(bridge: SprintableDesktop | undefined = rawBridge()): QuickShortcutView | null {
+  if (!bridge || typeof bridge.setQuickAskShortcut !== 'function') return null;
+  return quickShortcutOf(bridge.quickAskShortcut);
+}
+
+export type QuickShortcutWrite =
+  | { kind: 'ok'; shortcut: QuickShortcutView }
+  /** the app answered no: `invalid` (not a shortcut) · `conflict` (another app holds it) · `failed` (the system would not say why / anything else) — and the shortcut as kept, when it said */
+  | { kind: 'refused'; code: 'invalid' | 'conflict' | 'failed'; shortcut: QuickShortcutView | null }
+  /** nothing usable came back (the call threw · an answer in no known shape) */
+  | { kind: 'error' };
+
+/** how long the page waits for the app's answer to a change before it says «no answer» (a hand that never answers must not leave the row busy for good — codex 5047) */
+export const QUICK_SHORTCUT_WAIT_MS = 10_000;
+
+export async function writeQuickShortcut(accelerator: string, bridge: SprintableDesktop | undefined = rawBridge()): Promise<QuickShortcutWrite> {
+  if (!bridge || typeof bridge.setQuickAskShortcut !== 'function') return { kind: 'error' };
+  let answer: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    answer = await Promise.race([
+      Promise.resolve(bridge.setQuickAskShortcut(accelerator)),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('no answer')), QUICK_SHORTCUT_WAIT_MS); }),
+    ]);
+  } catch { return { kind: 'error' }; } finally { clearTimeout(timer); }
+  const a = answer as { ok?: unknown; shortcut?: unknown; code?: unknown } | null;
+  if (!a || typeof a !== 'object') return { kind: 'error' };
+  const kept = quickShortcutOf(a.shortcut);
+  if (a.ok === true) return kept ? { kind: 'ok', shortcut: kept } : { kind: 'error' };
+  if (a.ok === false) return { kind: 'refused', code: a.code === 'invalid' || a.code === 'conflict' ? a.code : 'failed', shortcut: kept };
+  return { kind: 'error' };
 }
