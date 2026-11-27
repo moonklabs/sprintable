@@ -349,6 +349,13 @@
    "why": "실행 기록 — «전체 보기» 줄에서 (에이전트 목록 위, 옛 주소 그대로 · story 5035)",
    "from": "/organization/workforce"
   },
+  "/quick": {
+   "slot": "outside",
+   "doors": [
+    "flow"
+   ],
+   "why": "Mac 앱 빠른 묻기 창(⌥Space)이 보이는 한 장 — 공개 정적 껍데기, 창이 보일 수 있는 유일한 쪽"
+  },
   "/rewards": {
    "slot": "agents",
    "doors": [

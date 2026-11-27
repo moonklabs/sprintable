@@ -229,7 +229,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story 4983 (P5) — `phone-files/page.tsx`(폰 앱의 «프로젝트 파일» 화면 · default export · dynamic만) 하나로 147→148.
     // story 5031 (C1) — `loop-queue/loading.tsx`(«지금 개입할 것»이 메뉴 목적지가 되어 로딩 화면을 가짐 · default export만) 하나로 148→149.
     // story 5042 (C9) — `desktop/panel/work-item/[agentId]/page.tsx`(데스크톱 앱 작업 패널의 일감 탭이 여는 한 장 · default export만) 하나로 149→150.
-    expect(fileCount).toBe(150);
+    // story 5047 (C14) — `quick/page.tsx`(Mac 앱 빠른 묻기 창이 보이는 한 장 · default export만) 하나로 150→151.
+    expect(fileCount).toBe(151);
     expect(violations).toEqual([]);
   });
 });

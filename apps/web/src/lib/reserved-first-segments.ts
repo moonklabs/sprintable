@@ -83,6 +83,8 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   'phone-files',
   // story 4915 (PR 2) — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (app/session-unconfirmed/page.tsx); unlisted, `/session-unconfirmed` could be read as a workspace slug.
   'session-unconfirmed',
+  // story 5047 (C14) — the page the Mac app's quick-ask window shows (app/quick/page.tsx; a public exact path in proxy.ts); unlisted, `/quick` could be read as a workspace slug.
+  'quick',
   'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'set-password', 'settings', 'share', 'terms',
   // story #3962(2026-09-17) — 새 최상위 app/today(v3 첫 화면, (authenticated) 밖

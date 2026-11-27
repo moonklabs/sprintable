@@ -8733,5 +8733,36 @@
         "incomplete": "The file did not arrive whole. Try downloading again."
       }
     }
+  },
+  "quick": {
+    "onlyInApp": "Quick ask opens only in the Sprintable app",
+    "placeholder": "Ask anything",
+    "inputLabel": "What to send",
+    "placesLabel": "Where to send",
+    "hintNoTarget": "@ picks where to send · Enter sends · Esc closes",
+    "hintReady": "Enter sends · Esc closes",
+    "sending": "Sending…",
+    "loading": "Loading…",
+    "loadFailed": "Could not load the places to send",
+    "noMatch": "Nothing matches",
+    "kindAgent": "Agent",
+    "kindChannel": "Channel",
+    "channelFallback": "Project channel",
+    "loginNeeded": "You need to sign in",
+    "openApp": "Open app",
+    "retry": "Send again",
+    "retryAnyway": "Send again anyway",
+    "discard": "The unsent text will be lost — press Esc once more to close",
+    "attachLabel": "Send the window in front too",
+    "attachDenied": "Screen recording must be allowed",
+    "openSettings": "Open settings",
+    "capturing": "Capturing the window…",
+    "previewAlt": "Preview of the window to send",
+    "removePicture": "Remove",
+    "failure": {
+      "rejected": "The server did not accept it — your text is kept",
+      "server": "The server had a problem and could not send it — your text is kept",
+      "offline": "The connection dropped and we could not confirm it was sent — check the conversation first"
+    }
   }
 }

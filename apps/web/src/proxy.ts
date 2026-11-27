@@ -40,6 +40,9 @@ const PUBLIC_EXACT = [
   '/desktop/get/macos',
   '/desktop/get/windows', // [SID:4998] the Windows app: the same public redirect (route.ts §desktop/get/windows) — EXACT
   '/desktop/get/linux', // [SID:4999] the Linux app: the same public redirect (route.ts §desktop/get/linux) — EXACT
+  // story 5047 (C14) — the page the Mac app's quick-ask window (⌥Space) shows: a static shell with no data (app/quick/page.tsx). The window may show NO other page (desktop-electron/src/quick-ask.ts isQuickUrl), so a signed-out visit
+  // must not be redirected to /login: the page itself says «로그인이 필요해요» (every data call behind it is still checked). EXACT, not a prefix.
+  '/quick',
   // story 4915 (PR 2) — the «다시 시도» page the proxy rewrites an unconfirmed page load to (static, no data; a direct visit is harmless)
   '/session-unconfirmed',
   '/llms-baos.txt',

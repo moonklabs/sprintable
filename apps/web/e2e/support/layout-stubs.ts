@@ -14,6 +14,7 @@ import type { Plugin } from 'esbuild';
 export const STUBS: Record<string, string> = {
   '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const switchOrg = async () => ({}); export const switchProject = async () => ({}); export const logoutUser = async () => {}; export const refreshSessionAfterChange = async () => {};',
   '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
+  '@/hooks/use-chat-sse': 'export const newClientNonce = () => "nonce-layout"; export function sentMessageFromAnswer() { return null; }', // story 5047: the quick-ask page's sender takes only the nonce
   '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
   '@/lib/phone-bridge': `export const isPhoneApp = () => !!window.__phone;
     export const phoneCall = async (k) => {
