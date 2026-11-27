@@ -42,8 +42,9 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
     await draw('profile');
     expect(rows().length).toBe(settingsNavGroups(gates).flatMap((x) => x.items).length);
     for (const r of rows()) expect(r.className).toContain('min-h-ds-row');
-    // story 5031 (C1 step 5c · PO): from lg the rows are 40 (the kit's control height — `lg:min-h-ds-control`), below lg they keep the 56 above (a phone's whole-screen list is as before)
-    for (const r of rows()) expect(r.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-ds-row', 'lg:min-h-ds-control', 'lg:py-ds-1']));
+    // story 5031 (C1 step 5c · PO): from lg the rows are 40 (the kit's control height — `lg:min-h-ds-control`), 44 for a finger from lg too (`lg:touch:min-h-ds-touch` — codex 5c: a tablet is ≥ lg), below lg they keep the 56 above (a phone's whole-screen list is as before).
+    // This pins the CLASS TOKENS only; the computed heights (56 phone · 40 lg · 44 lg + touch) are measured in Chromium by e2e/home-settings-5c.5031.layout.spec.ts.
+    for (const r of rows()) expect(r.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-ds-row', 'lg:min-h-ds-control', 'lg:py-ds-1', 'lg:touch:min-h-ds-touch']));
     const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
     expect(tabs.map((t) => t.getAttribute('data-settings-tab'))).toEqual(settingsNavGroups(gates).flatMap((x) => x.items).filter((i) => i.kind === 'tab').map((i) => i.id));
   });
@@ -96,5 +97,19 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
   it('⭐no old small-heading / old colour classes in the list file (text-[10px] · muted-foreground)', () => {
     const src = readFileSync(resolve(__dirname, 'settings-nav-list.tsx'), 'utf8').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
     expect(src).not.toMatch(/text-\[(?:9|10|11)px\]|muted-foreground|text-foreground|bg-muted/);
+  });
+});
+
+// codex 5c: the loading skeleton row stands in the place of a real row, so it has the SAME height rule (or the column jumps when the rows arrive): 56 phone · 40 lg · 44 lg + touch — the tokens of `min-h-ds-row` / `h-ds-row` etc. are the same three.
+describe('SettingsNav — the skeleton row and a real row have one height rule (codex 5c)', () => {
+  it('⭐the skeleton\'s height classes are the real row\'s min-height classes, token for token (base · lg · lg+touch)', async () => {
+    await draw('profile', () => {}, { ...gates, adminChecked: false });
+    const sk = container.querySelectorAll<HTMLElement>('[data-testid="settings-tab-skeleton"]');
+    expect(sk.length, 'the unchecked gates draw skeleton rows').toBeGreaterThan(0);
+    const real = rows()[0]!.className.split(/\s+/);
+    const pick = (cls: string[], prefix: string) => cls.find((c) => c.startsWith(prefix))?.slice(prefix.length);
+    const rule = (cls: string[], dim: 'min-h' | 'h') => [pick(cls, `${dim}-ds-`), pick(cls, `lg:${dim}-ds-`), pick(cls, `lg:touch:${dim}-ds-`)];
+    expect(rule(real, 'min-h')).toEqual(['row', 'control', 'touch']);
+    for (const s of sk) expect(rule(s.className.split(/\s+/), 'h'), 'same three tokens').toEqual(rule(real, 'min-h'));
   });
 });

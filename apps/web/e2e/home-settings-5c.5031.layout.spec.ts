@@ -68,9 +68,19 @@ async function build() {
         import { ListDetailShell } from './src/components/ds/list-detail-shell';
         import { useDetailBesideList } from './src/hooks/use-detail-beside-list';
         import { HOME_TWO_COLUMN_MIN } from './src/components/home/home-layout';
+        import { HomeScreen } from './src/components/home/home-screen';
+        import { ToastProvider } from './src/components/ui/toast';
+        import { deriveHome } from './src/components/home/derive-home';
         import { SettingsNav } from './src/app/(authenticated)/settings/settings-nav-list';
         import { settingsNavGroups } from './src/app/(authenticated)/settings/settings-nav';
-        const groups = settingsNavGroups({ adminChecked: true, isAdmin: true, inPhoneApp: false, supportWidget: true, billing: true });
+        // codex 5c: the settings list with its loading skeleton rows drawn too (admin not checked yet → the organization / people groups hold placeholder rows)
+        const groups = settingsNavGroups({ adminChecked: false, isAdmin: true, inPhoneApp: false, supportWidget: true, billing: true });
+        // the REAL home screen with the longest names a person can have: a 40-letter Korean name with no space, a 60-letter Latin one, long titles and reasons — in the 340 detail column and in the list rows
+        const LONG_KO = '가'.repeat(40), LONG_EN = 'Abcdefghij'.repeat(6), LONG_TITLE = '결제수단을바꾸는일'.repeat(9), LONG_TITLE_EN = 'ReallyLongWorkItemTitleWithoutAnySpaces'.repeat(2);
+        const need = (over) => ({ id: 'g1', source: 'gate', state: 'approval', risk: 'low', workItemType: 'story', workItemId: 's1', workItemTitle: LONG_TITLE, requestedByName: LONG_KO, reason: LONG_TITLE_EN, createdAt: '2026-11-11T09:00:00Z', conversationId: 'c1', conversationProjectId: null, recipePublish: false, projectId: null, ...over });
+        const realSnapshot = { needsMe: [need({}), need({ id: 'g2', state: 'signature', risk: 'high', requestedByName: LONG_EN, workItemTitle: LONG_TITLE_EN, reason: LONG_TITLE, createdAt: '2026-11-11T10:00:00Z' })], needsMeCount: 2, agentProgress: [{ runId: 'r1', agentName: LONG_EN, workItemTitle: LONG_TITLE, status: 'running', startedAt: '2026-11-11T10:30:00Z', cancel: null }] };
+        const realModel = deriveHome({ snapshot: realSnapshot, notifications: [], stories: [], completedToday: [], viewerMemberId: null });
+        const realSources = { snapshot: realSnapshot, notificationHrefById: {}, runConversationById: {} };
         // the home's width rule, as the home screen has it: a wrapper that measures the body (ref) + the real hook + the real constants — the wrapper / hook / constant use in home-screen.tsx is pinned from its source below
         function HomeScene({ cfg }) {
           const { ref, wide } = useDetailBesideList(HOME_TWO_COLUMN_MIN);
@@ -92,6 +102,8 @@ async function build() {
         window.__mount = (cfg) => {
           const body = cfg.screen === 'home'
             ? (<div id="home-root" className={cfg.home.root}><HomeScene cfg={cfg} /></div>)
+            : cfg.screen === 'home-real'
+            ? (<div id="home-root" className={cfg.home.root}><ToastProvider><HomeScreen model={realModel} sources={realSources} /></ToastProvider></div>)
             : cfg.screen === 'default-shell'
             ? (<div id="home-root" className="w-full p-6">
                 <ListDetailShell testId="plain" wide={cfg.wide} list={<div id="list" className="min-w-0 border p-4" style={{ height: '200px' }}>list</div>} detail={<div id="detail" className="border p-4" style={{ height: '200px' }}>detail</div>}
@@ -120,7 +132,10 @@ async function build() {
   return built;
 }
 
-type Cfg = { screen: 'home' | 'settings' | 'default-shell'; win: number; wide: boolean; listColumnOpen: boolean; fill?: boolean };
+// the first test used to pay for the esbuild bundle + the Tailwind build inside its own 30 s (a cold, busy runner made a control run fail two tests on that alone): build once, up front, with its own room
+test.beforeAll(async () => { test.setTimeout(180_000); await build(); });
+
+type Cfg = { screen: 'home' | 'home-real' | 'settings' | 'default-shell'; win: number; wide: boolean; listColumnOpen: boolean; fill?: boolean };
 async function open(page: Page, cfg: Cfg) {
   const { js, css } = await build();
   await page.setViewportSize({ width: cfg.win, height: 900 });
@@ -139,6 +154,8 @@ async function open(page: Page, cfg: Cfg) {
 }
 
 const box = (page: Page, sel: string) => page.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, w: r.width, h: r.height }; }, sel);
+/** the skeleton rows' heights, as a sorted list of the distinct values (a Set does not cross the page boundary) */
+const skeletonHeights = (page: Page) => page.evaluate(() => [...new Set([...document.querySelectorAll('[data-testid="settings-tab-skeleton"]')].map((r) => Math.round(r.getBoundingClientRect().height)))].sort((a, b) => a - b));
 const overflow = (page: Page) => page.evaluate(() => { const s = document.getElementById('scroller')!; return s.scrollWidth - s.clientWidth; });
 
 // the window width the shell takes away from the body's cell: the icon bar 56 + the list column 256 + the inset's margin 8 (the inset has no LEFT margin beside the list column — only right/top/bottom: `lg:peer-data-[variant=inset]:m-(--shell-inset) ml-0`); the body's own padding is 24 + 24
@@ -217,6 +234,7 @@ for (const win of [1440, 1280, 1100] as const) {
     expect(nav.w, 'the navigation column is 256').toBe(256);
     expect(rows.length).toBeGreaterThan(6);
     expect(new Set(rows), 'every section row is 40 high').toEqual(new Set([40]));
+    expect(await skeletonHeights(page), 'the loading skeleton rows are the same 40 (the column does not jump when the rows arrive)').toEqual([40]);
     expect(Math.round(nav.w + pane.w), 'the pane takes the rest of the cell').toBe(Math.round(cell.w));
     expect(await overflow(page)).toBe(0);
   });
@@ -226,7 +244,79 @@ test('[SID:5031] settings 390 (phone): the list is as before — rows 56, the li
   await open(page, { screen: 'settings', win: 390, wide: false, listColumnOpen: true });
   const rows = await page.evaluate(() => [...document.querySelectorAll('[data-settings-tab], [data-settings-link]')].map((r) => Math.round(r.getBoundingClientRect().height)));
   expect(Math.min(...rows), 'a phone row is not shortened').toBeGreaterThanOrEqual(56);
+  expect(await skeletonHeights(page), 'and the skeleton rows are 56 too').toEqual([56]);
   const nav = (await box(page, '[data-testid="settings-nav-column"]'))!, cell = (await box(page, '#cell'))!;
   expect(Math.round(nav.w), 'the list takes the whole width').toBe(Math.round(cell.w));
   expect(await overflow(page)).toBe(0);
 });
+
+// codex 5c: the exact 1024 boundary of the settings list, and a FINGER (coarse pointer) from lg up — the 44 floor of the repo's `touch` variant applies at lg too (a tablet is ≥ lg); a phone keeps its 56 with or without touch.
+test('[SID:5031] settings 1024 (the lg boundary exactly): the shell list column is folded, the navigation is 256, the rows and the skeleton rows are 40', async ({ page }) => {
+  await open(page, { screen: 'settings', win: 1024, wide: true, listColumnOpen: false });
+  const peer = (await box(page, '#peer-gap'))!, nav = (await box(page, '[data-testid="settings-nav-column"]'))!, cell = (await box(page, '#cell'))!, pane = (await box(page, '[data-testid="settings-pane"]'))!;
+  const rows = await page.evaluate(() => [...document.querySelectorAll('[data-settings-tab], [data-settings-link]')].map((r) => Math.round(r.getBoundingClientRect().height)));
+  console.log(`[5c settings] win 1024 peer ${peer.w} · nav ${nav.w} · pane ${Math.round(pane.w)} · rows ${[...new Set(rows)].join('/')}`);
+  expect([peer.w, nav.w]).toEqual([0, 256]);
+  expect(new Set(rows)).toEqual(new Set([40]));
+  expect(await skeletonHeights(page)).toEqual([40]);
+  expect(Math.round(nav.w + pane.w)).toBe(Math.round(cell.w));
+  expect(await overflow(page)).toBe(0);
+});
+
+test.describe('a finger (coarse pointer)', () => {
+  test.use({ hasTouch: true });
+  for (const win of [1280, 1024] as const) {
+    test(`[SID:5031] settings ${win} with touch: the rows and the skeleton rows are 44 (the touch floor), not 40`, async ({ page }) => {
+      await open(page, { screen: 'settings', win, wide: true, listColumnOpen: false });
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), 'the scene is a coarse-pointer one').toBe(true);
+      const rows = await page.evaluate(() => [...document.querySelectorAll('[data-settings-tab], [data-settings-link]')].map((r) => Math.round(r.getBoundingClientRect().height)));
+      console.log(`[5c settings touch] win ${win} rows ${[...new Set(rows)].join('/')} · skeleton ${(await skeletonHeights(page)).join('/')}`);
+      expect(new Set(rows)).toEqual(new Set([44]));
+      expect(await skeletonHeights(page)).toEqual([44]);
+      expect(await overflow(page)).toBe(0);
+    });
+  }
+  test('[SID:5031] settings 390 with touch: a phone keeps its 56 (rows and skeleton) — the touch floor is the lg rule only', async ({ page }) => {
+    await open(page, { screen: 'settings', win: 390, wide: false, listColumnOpen: true });
+    const rows = await page.evaluate(() => [...document.querySelectorAll('[data-settings-tab], [data-settings-link]')].map((r) => Math.round(r.getBoundingClientRect().height)));
+    expect(new Set(rows)).toEqual(new Set([56]));
+    expect(await skeletonHeights(page)).toEqual([56]);
+  });
+});
+
+// codex 5c: the REAL home screen with the longest names (40 Korean letters with no space · 60 Latin letters · long titles / reasons): in the 340 detail column and in the list rows nothing runs past its box, at the threshold and wide
+for (const win of [THRESHOLD_WIN, 1440] as const) {
+  test(`[SID:5031] home ${win} (the real HomeScreen · very long names and titles): the detail card and every list row hold their content, no overflow`, async ({ page }) => {
+    await open(page, { screen: 'home-real', win, wide: true, listColumnOpen: true });
+    const check = () => page.evaluate(() => {
+      const inside = (outer: Element, sel: string) => { const o = outer.getBoundingClientRect(); return [...outer.querySelectorAll(sel)].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > o.right + 0.5 || r.left < o.left - 0.5); }).map((e) => `${e.tagName.toLowerCase()}:${(e.textContent ?? '').slice(0, 20)}`); };
+      // text that runs past its own box: an element whose content is wider than it (scrollWidth > clientWidth) — except a deliberate one-line cut (overflow hidden + text-overflow ellipsis) and the 1px screen-reader-only text (`sr-only`)
+      const spill = (outer: Element) => [...outer.querySelectorAll('*')].filter((e) => { const cs = getComputedStyle(e); return e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 1 && !(cs.overflowX === 'hidden' && cs.textOverflow === 'ellipsis'); }).map((e) => `${e.tagName.toLowerCase()}:${(e.textContent ?? '').slice(0, 20)}`);
+      const detail = document.querySelector('[data-testid="home-detail"]')!;
+      const col = document.querySelector('[data-testid="home-detail-column"]')!.getBoundingClientRect();
+      const rows = [...document.querySelectorAll('[data-row-key]')];
+      return { detailW: Math.round(col.width), detailScroll: detail.scrollWidth - detail.clientWidth, detailOut: [...inside(detail, '*'), ...spill(detail)], rows: rows.length, rowsScroll: rows.map((r) => r.scrollWidth - r.clientWidth), rowsOut: rows.flatMap((r) => [...inside(r, '*'), ...spill(r)]) };
+    });
+    let m = await check();
+    console.log(`[5c home real] win ${win} detail ${m.detailW} · rows ${m.rows} · detail overflow ${m.detailScroll} · out ${m.detailOut.length + m.rowsOut.length}`);
+    expect(m.detailW).toBe(HOME_DETAIL_W);
+    expect(m.rows).toBeGreaterThanOrEqual(2);
+    expect(m.detailScroll, 'the detail card does not scroll sideways').toBeLessThanOrEqual(0);
+    expect(m.detailOut, 'nothing in the detail card runs past it').toEqual([]);
+    expect(m.rowsScroll.every((x) => x <= 0), 'no list row scrolls sideways').toBe(true);
+    expect(m.rowsOut, 'nothing in a list row runs past it').toEqual([]);
+    await page.locator('[data-row-key]').nth(1).click(); // the other row's detail (the Latin name · the signature card)
+    m = await check();
+    expect(m.detailScroll).toBeLessThanOrEqual(0);
+    expect(m.detailOut).toEqual([]);
+    // a row that is NOT a request (a working run — its detail is the «facts» card with the agent's long name): the section is folded by default
+    await page.locator('section[aria-label="일하는 중"] button').first().click();
+    await page.locator('[data-row-key="run:r1"]').click();
+    expect(await page.locator('[data-testid="home-detail-facts"]').count(), 'the facts card is the detail now').toBe(1);
+    m = await check();
+    expect(m.detailScroll).toBeLessThanOrEqual(0);
+    expect(m.detailOut, 'the facts card holds a long agent name').toEqual([]);
+    expect(m.rowsOut).toEqual([]);
+    expect(await overflow(page)).toBe(0);
+  });
+}

@@ -76,7 +76,7 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
             <Card className="p-3" data-testid="home-detail-request">
               <p className="m-0 text-ds-small font-semibold text-ds-ink-3">{t('detailRequest')}</p>
               <p className="m-0 mt-1 break-keep text-ds-body text-ds-ink [overflow-wrap:anywhere]">{need.reason ?? t('detailNoReason')}</p>
-              {need.requestedByName ? <p className="m-0 mt-1 text-ds-small text-ds-ink-3">{t('detailRequestedBy', { name: need.requestedByName })}</p> : null}
+              {need.requestedByName ? <p className="m-0 mt-1 min-w-0 break-keep text-ds-small text-ds-ink-3 [overflow-wrap:anywhere]">{t('detailRequestedBy', { name: need.requestedByName })}</p> : null}
             </Card>
             <Card className="p-3" data-testid="home-detail-target">
               <p className="m-0 text-ds-small font-semibold text-ds-ink-3">{t('detailTarget')}</p>
@@ -92,15 +92,15 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
         ) : (
           <Card className="p-3" data-testid="home-detail-facts">
             <p className="m-0 text-ds-small font-semibold text-ds-ink-3">{t('detailKind')}</p>
-            <p className="m-0 mt-1 text-ds-body text-ds-ink">{kindLabel(t, row.kind)}{row.actor?.name ? ` · ${row.actor.name}` : ''}</p>
+            <p className="m-0 mt-1 min-w-0 break-keep text-ds-body text-ds-ink [overflow-wrap:anywhere]">{kindLabel(t, row.kind)}{row.actor?.name ? ` · ${row.actor.name}` : ''}</p>
           </Card>
         )}
       </div>
 
       {link || conversationHref ? (
         <footer className="border-t border-ds-line bg-ds-surface px-4 py-3" data-testid="home-detail-actions">
-          {need ? <p className="m-0 mb-2 text-ds-small text-ds-ink-3">{t('detailWhat')} <span className="text-ds-ink">{rowTitle(t, row)}</span></p> : null}
-          <div className="flex flex-wrap items-center gap-2">
+          {need ? <p className="m-0 mb-2 min-w-0 break-keep text-ds-small text-ds-ink-3 [overflow-wrap:anywhere]">{t('detailWhat')} <span className="text-ds-ink">{rowTitle(t, row)}</span></p> : null}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {link ? (
               <Button asChild variant={isNeed ? 'primary' : 'secondary'}>
                 <Link href={link.href}>{actionLabel(t, link.action)}</Link>

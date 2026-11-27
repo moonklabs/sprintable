@@ -23,11 +23,14 @@ interface SettingsNavProps {
 }
 
 // story 5031 (C1 step 5c · PO): from lg the section rows are 40 high (the kit's control height — they were the list's 56 with a 224 column); below lg they stay 56 (a phone's whole-screen list, as before). The sides stay 16 (`px-4` of the row).
-const LG_ROW = 'lg:min-h-ds-control lg:py-ds-1';
+// codex 5c: the kit's 44 touch floor applies from lg too (a tablet / an iPad is ≥ lg with a finger) — the repo's own `touch` variant (design-system.css: coarse pointer · no hover · the phone shell), stacked with lg so a phone keeps its 56.
+const LG_ROW = 'lg:min-h-ds-control lg:py-ds-1 lg:touch:min-h-ds-touch';
+// the loading skeleton row has the SAME height rule as a real row (56 phone · 40 lg · 44 lg+touch), or the column jumps when the rows arrive (settings-nav-list.test.tsx pins the two class sets as one rule)
+const SKELETON_H = 'h-ds-row lg:h-ds-control lg:touch:h-ds-touch';
 
 function SettingsNavSkeleton() {
   return (
-    <div className="flex h-14 items-center gap-3 border-b border-ds-line px-4" data-testid="settings-tab-skeleton" aria-hidden="true">
+    <div className={cn('flex items-center gap-3 border-b border-ds-line px-4', SKELETON_H)} data-testid="settings-tab-skeleton" aria-hidden="true">
       <div className="size-ds-icon-sm animate-pulse rounded bg-ds-surface-high" />
       <div className="h-3 w-24 animate-pulse rounded bg-ds-surface-high" />
     </div>
