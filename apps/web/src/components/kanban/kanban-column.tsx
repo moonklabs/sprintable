@@ -165,7 +165,7 @@ export function KanbanColumn({
                 onClick={onToggleCollapse} aria-expanded={!collapsed}
                 className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="size-ds-icon-sm" />
               </button>
               {/* story #3865(AC1, PO CHANGES 2026-09-14 11:40Z 정정) — 이 컬럼 wrapper는
                   wipExceeded일 때만 bg-destructive-tint를 입는다(colClass) — 평시(미초과)엔
@@ -226,7 +226,7 @@ export function KanbanColumn({
                     onClick={onToggleCollapse} aria-expanded={!collapsed}
                     className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
-                    <ChevronUp className="h-3.5 w-3.5" />
+                    <ChevronUp className="size-ds-icon-sm" />
                   </button>
                 )}
                 {onCreateStory ? (
@@ -237,7 +237,7 @@ export function KanbanColumn({
                     onClick={startCompose}
                     className={`flex h-5 w-5 items-center justify-center rounded transition hover:bg-muted ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="size-ds-icon-sm" />
                   </button>
                 ) : null}
               </div>

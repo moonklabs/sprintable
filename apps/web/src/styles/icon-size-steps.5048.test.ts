@@ -1,14 +1,14 @@
 // story 5048 ④-② (PO 11-27) — 아이콘 크기는 «단계»(sm 16 · md 20 · lg 24)로만 준다. 키트는 24 하나(글 16 : 아이콘 24) — 우리 글 14에는 조작 안 20 · 촘촘한 줄 안(13~14 글 옆) 16 · 빈 화면 · 큰 머리 24.
 // 12 · 10은 12 글자 옆 칩 · 배지 안에서만 — 숫자로 직접 둔다(정적 검사는 «어느 글자 옆인지» 모르므로 허용). 14 · 16 · 18 · 20 · 32 같은 직접 크기(`size-3.5` · `h-4 w-4` · `size-8` · `size-[17px]` · `<Icon size={14}>`)는 이 영역에선 0.
 // 영역 PR마다 DIRS가 늘어난다(채팅 → 칸반 → 문서 → …). 되돌리면(직접 크기로) RED. nav/*(민)는 경계라 끝까지 제외.
-// 검사 대상 = lucide 가져온 이름 + 이름이 `Icon`(으로 끝나는) 컴포넌트 태그(동적 아이콘 변수 `<Icon>` · `<KindIcon>` · `<EntityIcon>` 포함)의 className + `…Glyph(…, 'size-…')` 호출 인자.
+// 검사 대상 = lucide 가져온 이름 + 이름이 `Icon`(으로 끝나는 · `<x.Icon>` 객체 멤버 꼴 포함) 컴포넌트 태그(동적 아이콘 변수 `<Icon>` · `<KindIcon>` · `<EntityIcon>` 포함)의 className + `…Glyph(…, 'size-…')` 호출 인자.
 // 태그는 따옴표 · 중괄호를 따라 끝을 찾는다(`[&>svg]:` 의 `>` 에 속지 않음).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(__dirname, '..');
-const DIRS = ['components/chat', 'app/(authenticated)/chats']; // ④-② 채팅(부품 + 채팅 화면 쪽) — 다음 영역은 여기에 한 줄씩
+const DIRS = ['components/chat', 'app/(authenticated)/chats', 'components/kanban', 'components/epics', 'components/sprints']; // ④-② 채팅 · ④-④ 칸반(+epics · sprints) — 다음 영역은 여기에 한 줄씩
 const RAW = /(?<![\w:-])(?:size|h|w)-(?:3\.5|4|4\.5|5|6|8|\[\d+(?:\.\d+)?px\])(?![\w.-])/;
 const RAW_ICON_PROP = /\bsize=\{(?:14|16|18|20|24|32)\}/;
 // «토큰 밖이 맞는 곳» — `파일::태그 앞 부분` 정확히 일치만(같은 파일에 새 자리가 생기면 RED) · 사유 한 줄. 이 목록이 자라는 diff는 PO가 본다.
@@ -50,8 +50,8 @@ describe('아이콘 크기는 단계로만 — 5048 ④-②', () => {
       for (const g of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*'lucide-react'/g)) {
         for (const raw of g[1]!.split(',')) { const n = raw.trim().replace(/^type\s+/, '').split(/\s+as\s+/).pop()!.trim(); if (n && /^[A-Z]/.test(n)) lucide.add(n); }
       }
-      for (const m of text.matchAll(/<([A-Z][A-Za-z0-9]*)\b/g)) {
-        const name = m[1]!;
+      for (const m of text.matchAll(/<((?:[a-z]\w*\.)*[A-Z][A-Za-z0-9]*)\b/g)) {
+        const name = m[1]!.split('.').pop()!; // `<item.Icon …>` 처럼 객체 멤버로 쓴 아이콘도 본다(codex 지적)
         if (!(lucide.has(name) || /Icon$/.test(name))) continue;
         const tag = openingTag(text, m.index!);
         const key = `${rel}::${tag.replace(/\s+/g, ' ').slice(0, 60)}`;

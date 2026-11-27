@@ -1726,7 +1726,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         disabled={savingStatus || isCurrent}
                         onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                       >
-                        <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                        <Check className={`size-ds-icon-sm ${isCurrent ? '' : 'opacity-0'}`} />
                         {getStatusLabel?.(col.id) ?? t(statusKeyMap[col.id] ?? col.i18nKey)}
                       </MenuItem>
                     );
@@ -1795,7 +1795,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       aria-label={t('panelMoreActions')}
                       data-testid="story-detail-more"
                     >
-                      <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                      <MoreHorizontal className="size-ds-icon-sm" aria-hidden="true" />
                     </Button>
                   }
                 />
@@ -2272,7 +2272,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : null}
               {uploadingAttachment && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
+                  <Loader2 className="size-ds-icon-sm animate-spin" /> {t('loading')}
                 </div>
               )}
               {/* story #2105 2차 — handleAttachFiles가 재시도 전 setAttachError(false)를 먼저

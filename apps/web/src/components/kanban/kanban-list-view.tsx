@@ -82,7 +82,7 @@ function StatusGroup({
         className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-ds-surface-high"
         onClick={() => setExpanded((p) => !p)} aria-expanded={expanded}
       >
-        {expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
+        {expanded ? <ChevronDown className="size-ds-icon-sm shrink-0" /> : <ChevronRight className="size-ds-icon-sm shrink-0" />}
         {/* 유나 design:changes(PR#3687, 2026-09-01) — kanban-column.tsx L169과 동일 구조
             (label→CountBadge 밀어내기 위험). min-w-0+truncate로 긴 org 라벨을 흡수,
             title로 전체 문구 확인. */}

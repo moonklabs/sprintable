@@ -95,7 +95,7 @@ export function ConceptCardSection({
           const href = getEntityHref('doc', doc.id, flatHref);
           return (
             <li key={doc.id} className="flex items-start gap-2 text-xs text-foreground">
-              <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <FileText className="mt-0.5 size-ds-icon-sm shrink-0 text-muted-foreground" aria-hidden />
               {href ? (
                 <a href={href} className="[overflow-wrap:anywhere] hover:underline">{doc.title}</a>
               ) : (
