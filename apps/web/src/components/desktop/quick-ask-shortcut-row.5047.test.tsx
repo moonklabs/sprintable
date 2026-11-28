@@ -55,6 +55,34 @@ describe('[SID:5047] the row draws what the app says', () => {
   });
 });
 
+describe('[SID:5047 · C14 ⓐ] the row promises only what the Mac can tell: another app\'s key is not announced, a quiet key gets a hint', () => {
+  // measured on build 0.2.418 (the Mac measurement, PO 11-28): macOS does not tell an app that ANOTHER app holds a key — a «conflict» is only the app's own duplicate. So no line says «another app already uses it»;
+  // the one thing said for a registered key is what a person can act on: nothing opens → another app may be using it → pick another key.
+  const claim = (m: Record<string, unknown>) => Object.entries(m).filter(([, v]) => typeof v === 'string' && /다른 앱이 이미|already uses/.test(v as string)).map(([key]) => key);
+  it('no line of the shortcut\'s copy says another app already uses the key (ko · en)', () => {
+    expect(claim(k as unknown as Record<string, unknown>)).toEqual([]);
+    expect(claim(q as unknown as Record<string, unknown>)).toEqual([]);
+  });
+  it('a registered key carries the hint (ko · en)', async () => {
+    await mount(bridgeOf(async () => ({ ok: true, shortcut: VIEW })));
+    expect(el('quick-shortcut-hint')!.textContent).toBe(k.registeredHint);
+    expect(k.registeredHint).toMatch(/다른 앱이 이 키를 쓰는 중일 수 있어요/);
+  });
+  it('the hint is English in English', async () => {
+    await mount(bridgeOf(async () => ({ ok: true, shortcut: VIEW })), 'en');
+    expect(el('quick-shortcut-hint')!.textContent).toBe(q.registeredHint);
+  });
+  it.each(['conflict', 'failed', 'off'] as const)('a key that is %s (not registered) carries no hint — it would say «nothing opens» about a key that is already said not to work', async (status) => {
+    await mount(bridgeOf(async () => ({ ok: true, shortcut: VIEW }), { ...VIEW, status }));
+    expect(el('quick-shortcut-status')).not.toBeNull();
+    expect(el('quick-shortcut-hint')).toBeNull();
+  });
+  it('the refused-key lines still say the old key stays', () => {
+    expect(k.conflictTried).toMatch(/지금 키는 그대로예요/);
+    expect(q.conflictTried).toMatch(/unchanged/);
+  });
+});
+
 describe('[SID:5047] changing it', () => {
   it('[바꾸기] listens: the line says «새 키를 눌러 주세요 · Esc로 취소»; Esc cancels and nothing is sent', async () => {
     const b = bridgeOf(async () => ({ ok: true, shortcut: VIEW }));

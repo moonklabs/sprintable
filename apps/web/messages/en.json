@@ -8177,7 +8177,8 @@
         "note": "Opens the quick ask window from on top of any app",
         "current": "Key now: {key}",
         "statusRegistered": "This key opens it",
-        "statusConflict": "Another app already uses it — pick another key",
+        "registeredHint": "If nothing opens when you press it, another app may be using this key — try a different one",
+        "statusConflict": "This key cannot be used right now — pick another key",
         "statusFailed": "The shortcut cannot be used right now",
         "statusOff": "Quick ask is off",
         "change": "Change",
@@ -8188,7 +8189,7 @@
         "busy": "Changing…",
         "saved": "Changed",
         "invalid": "That key cannot be used — it needs one modifier (⌘ ⌥ ⌃)",
-        "conflictTried": "Another app already uses it — pick another key · the key now is unchanged",
+        "conflictTried": "This key cannot be used right now — pick another key · the key now is unchanged",
         "failedTried": "The shortcut cannot be changed right now · the key now is unchanged"
       }
     },
