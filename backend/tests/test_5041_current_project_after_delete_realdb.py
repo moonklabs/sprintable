@@ -135,3 +135,68 @@ async def test_the_project_delete_road_removes_the_project_row_for_real_and_the_
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_delete_in_flight_does_not_slip_in_between_the_access_check_and_the_write():
+    """codex: `has_project_access` true, the project deleted, THEN the write → the same foreign-key violation. The refresh locks the project row FOR KEY SHARE first: a delete holding the row FOR UPDATE (as the delete road does) makes it WAIT,
+    and when the delete commits the refresh re-checks, finds the project gone and lands on a live one. Deterministic: the test waits until the database says the refresh is blocked on a lock."""
+    import asyncio
+
+    from sqlalchemy import select, text, update
+
+    from app.models.project import Project
+    from app.models.user import User
+    from app.routers.auth import _refresh_session_context
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+        other = await _second_project(Session, d)
+        async with Session() as s:
+            await s.execute(update(User).where(User.id == d["admin_user"]).values(last_project_id=d["project_id"], last_org_id=d["org_id"]))
+            await s.commit()
+
+        # the refresh runs on ITS OWN engine (own connection pool): with one shared pool the refresh would wait for a connection the open delete holds — a wait inside the pool, not on the database lock this test is about
+        engine2, Session2 = await _session_factory()
+
+        async def refresh():
+            async with Session2() as s:
+                user = (await s.execute(select(User).where(User.id == d["admin_user"]))).scalar_one()
+                md = await _refresh_session_context(user, s, d["org_id"], d["project_id"])
+                await s.commit()
+                return md
+
+        async with Session() as deleter:
+            # the delete road's first step: the project row FOR UPDATE — and it stays open (the delete is «in flight»)
+            await deleter.execute(select(Project.id).where(Project.id == d["project_id"]).with_for_update())
+            task = asyncio.create_task(refresh())
+            waiting = 0
+            for _ in range(200):  # until the database says some backend is waiting on a lock (the refresh) — no fixed sleep
+                # inside an open transaction `pg_stat_activity` is a SNAPSHOT taken at its first read: drop it before every look, or the poll keeps seeing the moment before the refresh connected
+                await deleter.execute(text("SELECT pg_stat_clear_snapshot()"))
+                waiting = (await deleter.execute(text("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()"))).scalar_one()
+                if waiting or task.done():
+                    break
+                await asyncio.sleep(0.05)
+            if task.done():
+                raise AssertionError(f"the refresh finished without waiting: {task.result()}")  # (or it raised: `result()` says why)
+            if not waiting:
+                act = (await deleter.execute(text("SELECT pid, state, wait_event_type, wait_event, left(query, 110) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"))).all()
+                where = [f"{f.f_code.co_filename.split('/')[-1]}:{f.f_lineno}" for f in task.get_stack(limit=4)]
+                raise AssertionError(f"the refresh did not wait for the delete in flight — backends: {act} — the refresh is at {where}")
+            try:
+                await asyncio.wait_for(deleter.execute(text("DELETE FROM projects WHERE id = :p"), {"p": d["project_id"]}), timeout=10)
+            except asyncio.TimeoutError:
+                locks = (await deleter.execute(text("SELECT pid, wait_event_type, wait_event, left(query, 90) FROM pg_stat_activity WHERE datname = current_database() AND state <> 'idle'"))).all()
+                raise AssertionError(f"the delete itself did not finish — backends: {locks}") from None
+            await deleter.commit()
+        try:
+            md = await asyncio.wait_for(task, timeout=10)
+        except asyncio.TimeoutError:
+            raise AssertionError("the refresh did not finish after the delete committed") from None
+        assert md.get("project_id") == str(other), md
+    finally:
+        await engine2.dispose()
+        await engine.dispose()
