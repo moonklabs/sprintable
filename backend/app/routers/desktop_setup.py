@@ -104,6 +104,27 @@ def _human_only(auth: AuthContext) -> uuid.UUID:
     return uuid.UUID(str(auth.user_id))
 
 
+async def _person_or_open_screen(request: Request, db: AsyncSession, auth: AuthContext, org_id: uuid.UUID | None = None) -> uuid.UUID:
+    """story 5041 (A1, PO 11-28) — the READ roads of the desktop setup page: a person's session as before; an AGENT is answered the same 403 and a CARD with a button to the screen is put in front of the person (nothing is kept to approve) —
+    no plain 403 is left on a road an agent is asked to read. A person's own API key and every caller that is not an agent get the road's own refusal, unchanged. The organisation is the road's own, or the one the agent's key carries."""
+    try:
+        return _human_only(auth)
+    except HTTPException as refusal:
+        from app.services.agent_action import SCREENS, OpenScreenRequired, calling_agent
+
+        oid = org_id
+        claimed = auth.org_id or ((getattr(auth, "claims", None) or {}).get("app_metadata") or {}).get("org_id")
+        if oid is None and claimed:
+            try:
+                oid = uuid.UUID(str(claimed))
+            except ValueError:
+                oid = None
+        agent = await calling_agent(db, auth, oid, request) if (oid is not None and "desktop_setups" in SCREENS) else None
+        if agent is not None:
+            raise OpenScreenRequired("desktop_setups", org_id=oid, agent=agent, detail=refusal.detail) from None
+        raise
+
+
 class SetupCodeRequest(BaseModel):
     challenge: str = Field(min_length=43, max_length=43)
     device_name: str = Field(min_length=1, max_length=200)
@@ -727,13 +748,14 @@ class SetupRecipesResponse(BaseModel):
 
 @router.get("/recipes", response_model=SetupRecipesResponse)
 async def get_setup_recipes(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     """PO 16:03Z — the recipes the desktop setup page can start, each with its setup rows worked out by the same function the
     confirmation checks with (the web draws them as they come)."""
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     return SetupRecipesResponse(
         recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)],
         agent_room=await setup_agent_room(db, org_id),
@@ -743,6 +765,7 @@ async def get_setup_recipes(
 
 @router.get("/recipes/for-new-org", response_model=SetupRecipesResponse)
 async def get_setup_recipes_for_new_org(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ):
@@ -751,7 +774,7 @@ async def get_setup_recipes_for_new_org(
     409 has_organization (they read `/recipes`)."""
     from app.services.org_project_create import has_active_org
 
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth)
     retry = hit_person_limits("desktop-recipes-new-org", str(user_id), *RECIPES_NEW_ORG_LIMITS)
     if retry is not None:
         raise _rate_limited(retry)
@@ -781,6 +804,7 @@ class AttachableAgentsResponse(BaseModel):
 
 @router.get("/setup/agents", response_model=AttachableAgentsResponse)
 async def get_attachable_agents(
+    request: Request,
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -789,7 +813,7 @@ async def get_attachable_agents(
     """story #4565 — the existing agents the setup page may offer for a role («이미 있는 에이전트»): this org's, in this project,
     on a desktop runtime — with how many live keys each has (the page's «the move cuts its current connection» line). A
     person who is an owner or admin of the org only, as for the confirmation."""
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     try:
         return AttachableAgentsResponse(
             agents=[AttachableAgent(**a) for a in await list_attachable_agents(db, user_id=user_id, org_id=org_id, project_id=project_id)],
@@ -800,12 +824,13 @@ async def get_attachable_agents(
 
 @router.get("/setups", response_model=SetupListResponse)
 async def get_setups(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     """The org's desktop setups for the web list (who · which device · state · keys still active)."""
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     try:
         return SetupListResponse(setups=[SetupItem(**s) for s in await list_setups(db, user_id=user_id, org_id=org_id)])
     except DesktopSetupError as e:
@@ -890,13 +915,14 @@ class SetupStatusResponse(BaseModel):
 
 @router.get("/setups/{setup_id}", response_model=SetupStatusResponse)
 async def get_setup_status(
+    request: Request,
     setup_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     """PO 08:31Z — one setup's state and the signals read from its events (web progress · folder fallback · failure ⑥)."""
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     try:
         return SetupStatusResponse(**await setup_status(db, setup_id=setup_id, user_id=user_id, org_id=org_id))
     except DesktopSetupError as e:
@@ -912,13 +938,14 @@ class SetupHandsResponse(BaseModel):
 
 @router.get("/setups/{setup_id}/hands", response_model=SetupHandsResponse)
 async def get_setup_hands(
+    request: Request,
     setup_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     """story #4426 ② — «human hands N · first result after M minutes · docs opened K» for one setup (the admin surface is 3801)."""
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     try:
         return SetupHandsResponse(**await setup_hands(db, setup_id=setup_id, user_id=user_id, org_id=org_id))
     except DesktopSetupError as e:
@@ -936,6 +963,7 @@ class RevokeResponse(BaseModel):
 
 @router.get("/computers", response_model=ComputerListResponse)
 async def get_computers(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
@@ -943,7 +971,7 @@ async def get_computers(
     """story 4734 — the org's desktop setups grouped into computers for the web «연결된 기기» (one line per computer; its setups inside)."""
     from app.services.desktop_computers import list_computers
 
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth, org_id)
     try:
         return ComputerListResponse(**await list_computers(db, user_id=user_id, org_id=org_id))
     except DesktopSetupError as e:
@@ -1142,9 +1170,10 @@ async def post_device_token_code(
 
 @router.post("/device-token-codes/peek", response_model=DeviceTokenCodePeek)
 async def post_device_token_code_peek(
+    request: Request,
     body: DeviceTokenCodeBody, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user),
 ):
-    user_id = _human_only(auth)
+    user_id = await _person_or_open_screen(request, db, auth)
     try:
         peeked = await device_codes.peek_code(db, code=body.code, user_id=user_id)
     except DesktopSetupError as e:

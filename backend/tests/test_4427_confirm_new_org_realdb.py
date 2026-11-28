@@ -356,7 +356,7 @@ async def test_an_agent_key_is_refused_on_both_new_routes():
 
     agent = AuthContext(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {"api_key_id": "k", "org_id": str(uuid.uuid4())}})
     with pytest.raises(HTTPException) as e:
-        await get_setup_recipes_for_new_org(db=None, auth=agent)
+        await get_setup_recipes_for_new_org(request=None, db=None, auth=agent)  # story 5041 A1: the road takes the request now (an agent's call gets a «open the screen» card when it has one); a direct call has none, so the road's own refusal stays
     assert (e.value.status_code, e.value.detail["code"]) == (403, "person_session_required")
     with pytest.raises(HTTPException) as e:
         await post_confirm_new_org(body=None, background_tasks=None, db=None, auth=agent)
