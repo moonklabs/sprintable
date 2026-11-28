@@ -28,7 +28,7 @@
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
  *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
  *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 (home «대화 열기» / «다시 시도», agent name links, the chats retry = ds button) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
- *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · `descMidBreak` at 1440: the agents list's description breaks INSIDE a word («관 / 리해요») — remove the entry after mirko's 6058 PageHead merge.
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -344,11 +344,6 @@ const BASELINE: Record<string, Finding> = {
   'chats-empty-1440': { oldSlots: ['popover-trigger'] },
   'chats-error-1440': { oldSlots: ['popover-trigger'] },
   'chats-long-1440': { oldSlots: ['button', 'popover-trigger'] },
-  'agents-default-1440': { descMidBreak: true },
-  'agents-loading-1440': { descMidBreak: true },
-  'agents-empty-1440': { descMidBreak: true },
-  'agents-error-1440': { descMidBreak: true },
-  'agents-long-1440': { descMidBreak: true },
   'settings-default-1440': { dupTitle: true },
   'settings-loading-1440': { dupTitle: true },
   'settings-empty-1440': { dupTitle: true },
