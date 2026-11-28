@@ -50,4 +50,13 @@ describe('[SID:5048] 누름 띠 — 눈에 보이는 크기는 그대로, 누름
     await render(true);
     expect(q('chat-bubble-avatar-hit')).toBeNull();
   });
+  it('⭐the two presses do not overlap: «⋯» (ml-1 · w-8 · band 6 px) ends at 4 + 32 + 6 = 42 px and the touch reply twin starts at 42 px (ml-[42px]) — each is a full 44 × 44 press (a reply twin at 40 left the «⋯» a 42-wide press)', async () => {
+    await render(false);
+    const menu = q('chat-bubble-menu-button')!;
+    expect(menu.className).toContain('ml-1'); expect(menu.className).toMatch(/(^|\s)w-8(\s|$)/);
+    expect(q('chat-bubble-menu-hit')!.className).toContain('-inset-1.5');
+    const reply = container.querySelector('[data-testid="chat-bubble-reply-button-touch"]') as HTMLElement | null;
+    if (reply) expect(reply.className).toContain('ml-[42px]'); // the reply twin is drawn where a thread can be opened (onOpenThread) — this render has none: the class pin lives in chat-bubble.4887-reply.test
+  });
 });
+

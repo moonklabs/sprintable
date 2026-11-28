@@ -143,7 +143,9 @@ export function Avatar({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={avatarUrl} alt={a11yName ?? ''} className="h-full w-full object-cover" onError={() => setImgError(true)} />
         ) : name?.trim() ? (
+          // data-slot: the initials grow with the circle (0.4x), like the ds Avatar's — a picture's letter, not text of the type scale: the computed-style probe (story 5048 AC4) counts them apart.
           <span
+            data-slot="avatar-initials"
             className={cn('flex h-full w-full items-center justify-center font-semibold', avatarColor(isAgent))}
             style={{ fontSize: initSize }}
             aria-label={a11yName}
