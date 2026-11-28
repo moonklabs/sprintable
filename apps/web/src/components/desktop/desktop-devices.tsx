@@ -397,8 +397,9 @@ function DeviceRow({ device, deviceName, linked = false, onDisconnect }: { devic
           </summary>
           <ul className="space-y-1 px-4 pb-3 pl-9 text-xs text-muted-foreground" data-testid="desktop-device-agents">
             {agents.map((a) => (
-              <li key={a.member_id} className="break-keep" data-testid="desktop-device-agent">
-                <Link href={flatHref(`/organization/workforce/${a.member_id}`)} className="font-medium text-foreground hover:underline">{a.name ?? a.member_id}</Link>
+              <li key={a.member_id} className="relative break-keep touch:flex touch:min-h-ds-touch touch:flex-wrap touch:items-center touch:gap-x-1" data-testid="desktop-device-agent">
+                {/* story 5048 T0 AC4 — the name is the row's one press: a stretched link (its `after` covers the row) and, on touch only, the row is 44 tall (the list's line was 16 px — a press a thumb cannot hit). A mouse sees the same list. */}
+                <Link href={flatHref(`/organization/workforce/${a.member_id}`)} className="font-medium text-foreground hover:underline after:absolute after:inset-0">{a.name ?? a.member_id}</Link>
                 {a.role ? ` · ${stageRoleLabel(a.role, tOrg)}` : null}
               </li>
             ))}
