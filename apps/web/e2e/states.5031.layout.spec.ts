@@ -17,6 +17,7 @@
  *   error → retry   the read failed + [다시 시도]       the read failed + [다시 시도]    the read failed + [다시 시도]         the profile read failed + [다시 시도]
  *   long text       66-letter names · long titles    long room titles               a 128-letter agent name             long project names (projects tab)
  *   390 · 1440      every scene runs at both
+ *   + the home's sixth state, «partial» (codex 6062 round 2): the model is there and a side read (notifications) failed → the list stays and the notice «일부만 불러왔어요 + [다시 시도]» stands over it — its retry is a phone press too.
  * «없음 — 이유»: the settings NAVIGATION column is a static list — it has no empty / error of its own, and its only loading is the skeleton rows (drawn in the settings «loading» scene) — so the settings states are the PANE's, and the pane here is
  *   ONE tab (profile · projects): this is NOT a check of every settings tab. The projects tab does not say a failed read — it draws the empty list (a finding), so the settings «error» is the profile tab's. The home «loading» scene has no spinner text —
  *   its loading is two grey cards. The agents «error» is the route's generic error block (the list's own read failed).
@@ -47,7 +48,7 @@ const SRC = path.join(WEB, 'src');
 const APP = path.join(SRC, 'app');
 
 type PlaceId = 'home' | 'chats' | 'agents' | 'settings';
-type StateId = 'default' | 'loading' | 'empty' | 'error' | 'long';
+type StateId = 'default' | 'loading' | 'empty' | 'error' | 'long' | 'partial';
 const PLACES: Array<{ id: PlaceId; path: string; label: string }> = [
   { id: 'home', path: '/org-briefing', label: '홈' },
   { id: 'chats', path: '/chats', label: '채팅' },
@@ -55,6 +56,8 @@ const PLACES: Array<{ id: PlaceId; path: string; label: string }> = [
   { id: 'settings', path: '/settings', label: '설정' },
 ];
 const STATES: StateId[] = ['default', 'loading', 'empty', 'error', 'long'];
+/** states only ONE place has: the home's «partial» = the model is there (today's read answered) and a side read failed (notifications) → the list stays and the notice «일부만 불러왔어요 + [다시 시도]» stands over it (org-briefing-shell `home-incomplete-notice`) */
+const EXTRA_STATES: Partial<Record<PlaceId, StateId[]>> = { home: ['partial'] };
 const WIDTHS = [1440, 390] as const;
 
 // ── the bundle ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -217,6 +220,7 @@ function answers(place: PlaceId, state: StateId): Record<string, Answer> {
     if (state === 'loading') a['GET /api/today'] = ok(today(rows, runs), { __delay: HOLD });
     if (state === 'empty') a['GET /api/today'] = today([]);
     if (state === 'error') a['GET /api/today'] = fail();
+    if (state === 'partial') { a['GET /api/today'] = today(rows, runs); a['GET /api/notifications'] = fail(); }
     if (state === 'long') a['GET /api/today'] = today(
       [need({ work_item: { id: 's1', type: 'story', title: LONG_TITLE }, requested_by: { name: LONG_KO }, reason: LONG_TITLE_EN }), need({ source_id: 'g2', kind: 'signature', risk: 'high', work_item: { id: 's2', type: 'story', title: LONG_TITLE_EN }, requested_by: { name: LONG_EN }, reason: LONG_TITLE, created_at: '2026-11-27T10:00:00Z' })],
       [run('r1', LONG_EN, LONG_TITLE)]);
@@ -301,7 +305,9 @@ async function open(page: Page, place: PlaceId, state: StateId, width: number) {
 const measure = (page: Page) => page.evaluate(() => {
   const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]') && (e as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility?.() !== false; };
   const label = (e: Element) => ((e.getAttribute('data-testid') || e.getAttribute('aria-label') || e.textContent || e.tagName) as string).trim().replace(/\s+/g, ' ').slice(0, 28);
-  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea, [role="checkbox"], [role="switch"]')].filter(shown);
+  // a disabled control is not pressed by a finger (it does nothing, and a disabled button answers hit tests as what is under it): it is left out of the whole press check — size · corners · covered — the same way (codex 6062 round 2, MEDIUM 3)
+  const isDisabled = (e: Element) => (e as HTMLButtonElement).disabled === true || e.getAttribute('aria-disabled') === 'true' || !!e.closest('[aria-disabled="true"], fieldset:disabled');
+  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea, [role="checkbox"], [role="switch"]')].filter(shown).filter((e) => !isDisabled(e));
   // PRESSABLE, not drawn: what a finger reaches is where `elementFromPoint` answers the press itself (or something in it) — a box widened by padding / a negative margin that an ancestor's overflow clips (a `truncate` parent) is still 44 by getBoundingClientRect and is NOT pressable there (codex 6062 round 1, MEDIUM 1).
   // So the press' size is the run of points around its centre that hit it (1 px steps; a `::after` that widens the press counts, a clipped box does not); the four inner corners + the centre of its drawn box must hit it too.
   const hits = (e: Element, x: number, y: number) => { const h = document.elementFromPoint(x, y); return !!h && (e === h || e.contains(h) || (h.closest('label')?.contains(e) ?? false)); };
@@ -315,29 +321,46 @@ const measure = (page: Page) => page.evaluate(() => {
     for (let i = 0; i < 300 && rt + 1 < innerWidth && hits(e, rt + 1, cy); i++) rt++;
     return { w: rt - l + 1, h: b - t + 1, covered: false };
   };
-  // each press is brought to the middle of the view first (a row half behind the sticky instruction strip / the tab bar is not «unreachable»: it is scrolled) and put back after
-  const scrollerEl = document.getElementById('scroller');
-  const scrollWas = scrollerEl ? scrollerEl.scrollTop : 0;
+  // each press is brought to the middle of the view first (a row half behind the sticky instruction strip / the tab bar, or one far down a long list, is not «unreachable»: it is scrolled) — only by the scroll boxes a PERSON can scroll
+  // (`overflow-y: auto | scroll`: the shell's `#scroller`, a list's own box), never by `scrollIntoView()`: that also scrolls `overflow:hidden` boxes (a `truncate` slot), which would bring a CLIPPED press into reach and make it look pressable
+  // (codex 6062 round 2, MEDIUM 1). What was scrolled is put back, and every element's scroll position is compared before / after the measure (`scrollDrift`).
+  const scrollOf = () => { const m = new Map<Element, string>(); for (const el of document.querySelectorAll('*')) if (el.scrollTop || el.scrollLeft) m.set(el, `${el.scrollTop},${el.scrollLeft}`); return m; };
+  const scrollBefore = scrollOf();
+  const scrolled = new Map<Element, number>();
+  const bringIntoView = (e: Element) => {
+    for (let a = e.parentElement; a; a = a.parentElement) {
+      const oy = getComputedStyle(a).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && a.scrollHeight > a.clientHeight) {
+        if (!scrolled.has(a)) scrolled.set(a, a.scrollTop);
+        const ar = a.getBoundingClientRect(); const er = e.getBoundingClientRect();
+        a.scrollTop += (er.top + er.height / 2) - (ar.top + ar.height / 2);
+      }
+    }
+  };
   const reached = presses.map((e) => {
     const r0 = e.getBoundingClientRect();
-    e.scrollIntoView({ block: 'center', inline: 'nearest' });
+    bringIntoView(e);
     const x = reach(e);
     const r = e.getBoundingClientRect();
-    // the corners are asked 3 px inside the box, or further in where the box is rounded (a point in the cut-off corner of a pill is not the press)
-    const inset = Math.max(3, parseFloat(getComputedStyle(e).borderTopLeftRadius) * 0.3 + 1 || 0);
+    // the corners are asked 3 px inside the box, or further in where the box is rounded (a point in the cut-off corner of a pill is not the press): 30 % of the LARGEST of the four radii (a % radius is of the shorter side), at most just short of half the shorter side
+    const cs = getComputedStyle(e);
+    const radius = Math.max(...[cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map((v) => (v.endsWith('%') ? (parseFloat(v) / 100) * Math.min(r.width, r.height) : parseFloat(v)) || 0));
+    const inset = Math.min(Math.max(3, radius * 0.3 + 1), Math.max(1, Math.min(r.width, r.height) / 2 - 1));
     const pts: [string, number, number][] = [['top-left', r.left + inset, r.top + inset], ['top-right', r.right - inset, r.top + inset], ['bottom-left', r.left + inset, r.bottom - inset], ['bottom-right', r.right - inset, r.bottom - inset], ['centre', r.left + r.width / 2, r.top + r.height / 2]];
     // only a press that CLAIMS ≥ 44 by its drawn box is asked (a smaller one is `small` already); a point outside the viewport is not asked
     const missed = x.covered || r.width < 43.5 || r.height < 43.5 ? [] : pts.filter(([, px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight && !hits(e, px, py)).map(([n]) => `${label(e)} ${n}`);
     return { e, ...x, missed, r0: { x: r0.left, y: r0.top, w: r0.width, h: r0.height } };
   });
-  if (scrollerEl) scrollerEl.scrollTop = scrollWas;
+  for (const [el, top] of scrolled) el.scrollTop = top; // put every scroll box back
+  // nothing but what it was: every element's scroll position after the measure is the one before it
+  const scrollAfter = scrollOf();
+  const scrollDrift = [...new Set([...scrollBefore.keys(), ...scrollAfter.keys()])].filter((el) => (scrollBefore.get(el) ?? '0,0') !== (scrollAfter.get(el) ?? '0,0')).map((el) => `${(el.id && `#${el.id}`) || el.getAttribute('data-testid') || el.tagName} ${scrollBefore.get(el) ?? '0,0'} -> ${scrollAfter.get(el) ?? '0,0'}`);
   const small = reached.filter((x) => x.w < 43.5 || x.h < 43.5).map((x) => `${label(x.e)} ${Math.round(x.w)}x${Math.round(x.h)}`);
-  // a press whose own centre answers as something else is not reachable either — unless it is disabled (a disabled button is not asked to be pressed)
-  const isDisabled = (e: Element) => (e as HTMLButtonElement).disabled === true || e.getAttribute('aria-disabled') === 'true' || !!e.closest('[aria-disabled="true"], fieldset:disabled');
-  const unreached = reached.flatMap((x) => (x.covered && !isDisabled(x.e) ? [`${label(x.e)} centre (covered by something else)`] : x.missed));
+  // a press whose own centre answers as something else is not reachable either
+  const unreached = reached.flatMap((x) => (x.covered ? [`${label(x.e)} centre (covered by something else)`] : x.missed));
   const covered = reached.filter((x) => x.covered).map((x) => label(x.e));
   // the presses whose reach is not what their box says — drawn on the evidence picture of a red scene (assertScene)
-  const trouble = reached.filter((x) => x.w < 43.5 || x.h < 43.5 || x.missed.length > 0 || (x.covered && !isDisabled(x.e))).map((x) => ({ label: label(x.e), ...x.r0, reachH: Math.round(x.h) }));
+  const trouble = reached.filter((x) => x.w < 43.5 || x.h < 43.5 || x.missed.length > 0 || x.covered).map((x) => ({ label: label(x.e), ...x.r0, reachH: Math.round(x.h) }));
   const leaves = [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && shown(e) && !e.closest('[data-slot="ds-chip"]'));
   const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 20)} ${getComputedStyle(e).fontSize}`);
   const ALLOWED = ['textarea', 'sidebar-wrapper', 'sidebar-inset', 'sidebar-gap', 'sidebar-container', 'sidebar', 'tabs', 'tabs-list', 'tabs-trigger', 'tabs-content'];
@@ -363,6 +386,8 @@ const measure = (page: Page) => page.evaluate(() => {
   const desc = [...document.querySelectorAll('#cell p, #cell div')].find((e) => e.children.length === 0 && (e.textContent || '').startsWith('조직 내 전체 프로젝트의'));
   let descMidBreak = false;
   const textNode = desc?.firstChild;
+  // the word-break check only means something when it LOOKED: the description is there and is a text node (otherwise a missing / reshaped description would pass in silence — codex 6062 round 2, LOW)
+  const descChecked = !!desc && !!textNode && textNode.nodeType === 3;
   if (textNode && textNode.nodeType === 3) {
     const text = textNode.textContent || '';
     let prevTop: number | null = null;
@@ -379,7 +404,7 @@ const measure = (page: Page) => page.evaluate(() => {
     h1, lit, dupTitle, stripLines, descMidBreak,
     overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
-    small, unreached, covered, trouble, tiny, oldSlots, chromeOldSlots,
+    small, unreached, covered, trouble, scrollDrift, descChecked, tiny, oldSlots, chromeOldSlots,
   };
 });
 
@@ -396,6 +421,7 @@ const BASELINE: Record<string, Finding> = {
   'home-empty-1440': { oldSlots: ['card×1'] },
   'home-error-1440': { oldSlots: ['button×1'] },
   'home-long-1440': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×3'] },
+  'home-partial-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['button×1', 'card×1', 'tooltip-trigger×3'] },
   'chats-default-1440': { oldSlots: ['button×5', 'popover-trigger×1'] },
   'chats-loading-1440': { oldSlots: ['popover-trigger×1'] },
   'chats-empty-1440': { oldSlots: ['popover-trigger×1'] },
@@ -411,6 +437,7 @@ const BASELINE: Record<string, Finding> = {
   'home-empty-390': { oldSlots: ['card×1'] },
   'home-error-390': { oldSlots: ['button×1'] },
   'home-long-390': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×2'] },
+  'home-partial-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['button×1', 'card×1', 'tooltip-trigger×2'] },
   'chats-default-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
   'chats-loading-390': { oldSlots: ['popover-trigger×1'] },
   'chats-empty-390': { oldSlots: ['popover-trigger×1'] },
@@ -427,14 +454,16 @@ const BASELINE: Record<string, Finding> = {
   'settings-long-390': { h1: 0 },
 };
 // <BASELINE-END>
+/** the agents scenes that have no description to check (none expected: every agents scene draws it) */
+const NO_DESC = new Set<string>([]);
 /** the shell's OWN chrome (top bar · icon rail · phone tab bar) draws non-ds parts too — measured once, not in every scene (the same in all of them) */
 const CHROME_OLD = ['button×2', 'dropdown-menu-trigger×1', 'popover-trigger×1'];
 
 async function assertScene(page: Page, place: PlaceId, key: string, phone: boolean) {
   const m = await measure(page);
   // STATES_COLLECT=<file>: write what the scene measured instead of asserting it — how BASELINE is filled (and re-filled after a fix)
-  // (a collect run is a MEASURING run, never a verdict: on CI — or with CI set in the environment — the variable is ignored, so an inherited one cannot turn the scenes green without asserting)
-  if (process.env['STATES_COLLECT'] && !process.env['CI']) { appendFileSync(process.env['STATES_COLLECT'], `${JSON.stringify({ key, ...m })}\n`); return; }
+  // (a collect run is a MEASURING run, never a verdict: with CI set in the environment AT ALL — empty or not — the variable is ignored, so an inherited one cannot turn the scenes green without asserting)
+  if (process.env['STATES_COLLECT'] && process.env['CI'] === undefined) { appendFileSync(process.env['STATES_COLLECT'], `${JSON.stringify({ key, ...m })}\n`); return; }
   const base = BASELINE[key] ?? {};
   const label = PLACES.find((p) => p.id === place)!.label;
   if (phone && m.trouble.length > 0) { // a red press scene leaves a second picture: each press whose reach is not its box, outlined in red with the height a finger reaches
@@ -449,7 +478,9 @@ async function assertScene(page: Page, place: PlaceId, key: string, phone: boole
   expect(m.h1.length, `${key}: the number of h1 (1 is the rule) — drawn: ${m.h1.join(' | ') || 'none'}`).toBe(base.h1 ?? 1);
   expect(m.dupTitle, `${key}: the title is said twice (the bar's path and the body's h1)`).toBe(base.dupTitle ?? false);
   expect(m.stripLines, `${key}: the lines the agents' «전체 보기» strip stands on (the rule: one — every link whole, none alone on a second line)`).toBe(base.stripLines ?? (place === 'agents' ? 1 : 0));
+  if (place === 'agents') expect(m.descChecked, `${key}: the agents list's description was not found as a text node — the word-break check did not look (scenes without one are listed in NO_DESC)`).toBe(!NO_DESC.has(key));
   expect(m.descMidBreak, `${key}: the agents list's description breaks INSIDE a word`).toBe(base.descMidBreak ?? false);
+  expect(m.scrollDrift, `${key}: the measure left a scroll position changed`).toEqual([]);
   expect(m.oldSlots, `${key}: old (non-ds) parts drawn in the body`).toEqual(base.oldSlots ?? []);
   expect(m.tiny, `${key}: text under 12 px`).toEqual(base.tiny ?? []);
   if (phone) expect(m.small, `${key}: presses whose pressable run (where the finger reaches them) is under 44 px`).toEqual(base.small ?? []);
@@ -466,6 +497,7 @@ async function expectState(page: Page, place: PlaceId, state: StateId) {
     if (state === 'loading') { await expect(page.locator('.animate-pulse').first()).toBeVisible(); await expect(page.getByTestId('home-list')).toHaveCount(0); }
     if (state === 'empty') await expect(t(messages['home']!['emptyAllTitle']!).first()).toBeVisible();
     if (state === 'error') { await expect(t(messages['orgBriefing']!['loadErrorTitle']!).first()).toBeVisible(); await expect(page.getByRole('button', { name: messages['common']!['retry']! })).toBeVisible(); }
+    if (state === 'partial') { await expect(page.getByTestId('home-list')).toBeVisible(); await expect(page.getByTestId('home-incomplete-notice')).toBeVisible(); await expect(page.getByTestId('home-incomplete-notice').getByRole('button', { name: messages['common']!['retry']! })).toBeVisible(); }
   }
   if (place === 'chats') {
     if (state === 'default') await expect(t('런칭 준비').first()).toBeVisible();
@@ -503,7 +535,7 @@ for (const width of WIDTHS) {
   test.describe(`the four places in five states · ${width}`, () => {
     if (phone) test.use({ hasTouch: true, isMobile: true });
     for (const p of PLACES) {
-      for (const state of STATES) {
+      for (const state of [...STATES, ...(EXTRA_STATES[p.id] ?? [])]) {
         test(`${p.label} · ${state} · ${width}`, async ({ page }) => {
           const { errs } = await open(page, p.id, state, width);
           await settle(page); // the fonts are in and the boxes hold still on two reads in a row

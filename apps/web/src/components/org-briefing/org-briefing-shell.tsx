@@ -138,7 +138,8 @@ export function OrgBriefingShell() {
             // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
             <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">
               <span>{loadError ? t('loadErrorTitle') : th('partialNotice')}</span>
-              <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+              {/* story 5031 (C1 [6]): the same phone press as the no-model error's (44 where a finger is; the look is the same) */}
+              <Button size="sm" variant="outline" onClick={retry} className="touch:min-h-ds-touch touch:min-w-ds-touch">{tc('retry')}</Button>
             </div>
           ) : null}
           {/* story 5033 (C3) — the home opens on the control board: one line per project (progress · the faces placed in it · what needs you), the «열외» lane, one filter; «내 손이 필요해요» (the list + its detail) stays right under it.
