@@ -281,12 +281,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string; hostRun: boolean }[]>([]);
-  // story 5046 (C13): per working agent, the server's `host_run` of the last GET /working read — the SSE working event lists WHO works, not whether a host runs them (an unknown agent is read again, and is «not a host» until known)
-  // …kept only for agents that work NOW: an agent that leaves the working list is forgotten (it may come back run by something else — a host, then the channel plugin), and an agent already asked for is not asked again for every event
-  const hostRunRef = useRef<Map<string, boolean>>(new Map());
-  const hostRunAskedRef = useRef<Set<string>>(new Set()); // agents a read was asked for (an answer that does not name them keeps them here: they are not asked again for every event)
-  const hostRunInflightRef = useRef<Set<string>>(new Set()); // …of those, the ones whose read has not been answered yet: if that read is outdated or fails they go back to «not asked» (else they would wait for ever)
-  const workingFetchSeqRef = useRef(0); // the newest GET /working only: an older answer that arrives late must not overwrite a newer one
+  // story 5046 (C13): the room's working list has ONE reader (`fetchWorking` below). GET /working is the only source of an agent's `host_run`; the SSE `conversation.working` event says THAT the list changed and who works — never whether a host runs them. There is no per-agent memory: what is drawn is the newest answer.
+  const workingReaderRef = useRef<{ running: boolean; again: boolean; fails: number; timer: ReturnType<typeof setTimeout> | null }>({ running: false, again: false, fails: 0, timer: null });
+  const threadIdRef = useRef(threadId);
+  const commandTargetsRef = useRef(commandTargets);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -556,41 +554,48 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
-  const fetchWorking = useCallback(async () => {
+  useEffect(() => { threadIdRef.current = threadId; commandTargetsRef.current = commandTargets; }, [threadId, commandTargets]);
+  const namedWorking = useCallback((list: ReadonlyArray<{ member_id: string; host_run?: boolean }>, hostKnown: boolean) => list
+    .map((w) => ({ id: w.member_id, name: (commandTargetsRef.current ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostKnown && w.host_run === true }))
+    .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name), []);
+  // One read at a time. An event (or a changed target list) that comes while a read is on its way sets `again`: that read's answer is OLD — nothing of it is shown, the reader reads once more. A failed read is tried again (2 s · 4 s · 6 s);
+  // until an answer is shown no choice is drawn (the safe side: the message goes the old way).
+  const fetchWorking = useCallback(async function readWorking(): Promise<void> {
+    const st = workingReaderRef.current;
+    if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+    if (st.running) { st.again = true; return; }
+    st.running = true;
     try {
-      const seq = ++workingFetchSeqRef.current;
-      const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
-      if (!res.ok) return; // (a read that fails or is outdated leaves its agents in `hostRunInflightRef` — the next SSE event hands them back to «not asked»)
-      const json = await res.json() as { data?: Array<{ member_id: string; host_run?: boolean }> };
-      if (seq !== workingFetchSeqRef.current) return; // a newer read has been asked for since — this answer is old
-      hostRunInflightRef.current.clear(); // the newest read is answered: every agent asked for is answered (one the list does not name stays «asked»)
-      hostRunRef.current = new Map((json.data ?? []).map((w) => [w.member_id, w.host_run === true] as const)); // the whole answer replaces what was known (nobody stale stays)
-      const next = (json.data ?? [])
-        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: w.host_run === true }))
-        .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
-      setTypingAgents(next);
-    } catch { /* non-critical */ }
-  }, [threadId, commandTargets]);
+      for (;;) {
+        st.again = false;
+        let list: Array<{ member_id: string; host_run?: boolean }> | null = null;
+        try {
+          const res = await fetchWithAuth(`/api/conversations/${threadIdRef.current}/working`);
+          if (res.ok) list = ((await res.json()) as { data?: Array<{ member_id: string; host_run?: boolean }> }).data ?? [];
+        } catch { /* non-critical */ }
+        if (st.again) continue;
+        if (list === null) {
+          st.fails += 1;
+          if (st.fails <= 3) st.timer = setTimeout(() => { st.timer = null; void readWorking(); }, 2000 * st.fails);
+          break;
+        }
+        st.fails = 0;
+        setTypingAgents(namedWorking(list, true));
+        break;
+      }
+    } finally { st.running = false; }
+  }, [namedWorking]);
 
   // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 typing 갱신(payload 가
   // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
+  // story 5046 (C13): the event shows WHO works at once — with «not a host» (no choice) — and asks the reader for the answer that says whether a host runs them.
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
-    workingFetchSeqRef.current += 1; // this event is newer than any read still on its way: that read's answer is old when it lands (it must not bring back an agent the event says stopped)
-    for (const id of hostRunInflightRef.current) hostRunAskedRef.current.delete(id); hostRunInflightRef.current.clear(); // the read that was on its way is outdated by this event → what it was asked for is asked again below
-    const now = new Set((payload.working ?? []).map((w) => w.member_id));
-    for (const id of [...hostRunRef.current.keys()]) if (!now.has(id)) hostRunRef.current.delete(id); // stopped working → forgotten (it may start again run by something else)
-    for (const id of [...hostRunAskedRef.current]) if (!now.has(id)) hostRunAskedRef.current.delete(id);
-    const next = (payload.working ?? [])
-      .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostRunRef.current.get(w.member_id) === true }))
-      .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
-    setTypingAgents(next);
-    // story 5046 (C13): an agent this room has not been read for (its `host_run` is unknown and nobody asked yet) → read the list ONCE more; until then it is «not a host» (no choice drawn). One that the answer does not name is not asked again for every event.
-    const unknown = [...now].filter((id) => !hostRunRef.current.has(id) && !hostRunAskedRef.current.has(id));
-    if (unknown.length > 0) { for (const id of unknown) { hostRunAskedRef.current.add(id); hostRunInflightRef.current.add(id); } void fetchWorking(); }
-  }, [threadId, commandTargets, fetchWorking]);
+    setTypingAgents(namedWorking(payload.working ?? [], false));
+    void fetchWorking();
+  }, [threadId, namedWorking, fetchWorking]);
 
-  useEffect(() => { void fetchWorking(); }, [fetchWorking]);
+  useEffect(() => { void fetchWorking(); return () => { const st = workingReaderRef.current; if (st.timer) { clearTimeout(st.timer); st.timer = null; } }; }, [fetchWorking, threadId, commandTargets]);
 
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가

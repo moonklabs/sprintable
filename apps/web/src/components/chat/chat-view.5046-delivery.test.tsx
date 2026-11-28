@@ -138,11 +138,12 @@ describe('the choice reaches the send body', () => {
 });
 
 describe('story 5046 (C13): the choice is only for agents a HOST runs (the server\'s `host_run` of GET /working)', () => {
+  const chip = () => container.querySelector('[data-testid="delivery-choice"]');
   it('⭐a working agent the server says is NOT run by a host (a webhook · the channel plugin) → no choice, and the send has no word', async () => {
     stubFetch(true, false);
     await mount();
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+    expect(chip()).toBeNull();
     await send();
     expect('delivery_mode' in posts()[0]!.body!).toBe(false);
   });
@@ -150,104 +151,110 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     stubFetch(true, 'absent');
     await mount();
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+    expect(chip()).toBeNull();
   });
   it('⭐an agent that starts working AFTER the room opened (the SSE event lists who works, not who runs them) → the list is read again, and the choice is drawn once the server says a host runs it', async () => {
-    stubFetch(false, true); // nobody works when the room opens
+    stubFetch(false, true);
     await mount();
     const before = workingReads();
-    stubFetch(true, true);   // …then the agent starts, and a host runs it
+    stubFetch(true, true);
     await act(async () => { emitWorking(); });
     await settle();
     expect(workingReads()).toBe(before + 1);
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+    expect(chip()).not.toBeNull();
   });
-  it('⭐an agent that stops and comes back run by something else (a host, then the channel plugin) is read again: a stale «host» is not kept (codex)', async () => {
+  it('⭐an agent that stops and comes back run by something else (a host, then the channel plugin) is judged by the newest answer: nothing stale is kept (codex)', async () => {
     stubFetch(true, true);
     await mount();
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();   // run by a host
-    await act(async () => { emitWorking([]); });                                          // it stops
+    expect(chip()).not.toBeNull();
+    await act(async () => { emitWorking([]); });
     await settle();
-    stubFetch(true, false);                                                               // …and comes back, now run by the plugin
+    stubFetch(true, false);
     await act(async () => { emitWorking(); });
     await settle();
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+    expect(chip()).toBeNull();
   });
-  it('⭐an agent the list does not name is asked for ONCE, not for every event (codex: no request flood)', async () => {
-    stubFetch(false, true); // the REST answer names nobody (the agent finished meanwhile)
-    await mount();
-    const before = workingReads();
-    await act(async () => { emitWorking(); });
-    await settle();
-    await act(async () => { emitWorking(); });
-    await settle();
-    await act(async () => { emitWorking(); });
-    await settle();
-    expect(workingReads()).toBe(before + 1);
-  });
-  it('only the newest read of the list counts (a late old answer cannot overwrite a newer one) — the guard stands in the view', () => {
-    const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
-    expect(view).toContain('const seq = ++workingFetchSeqRef.current;');
-    expect(view).toContain('if (seq !== workingFetchSeqRef.current) return;');
-  });
-  it('⭐a read still on its way when SSE says «stopped» does not bring the agent back when it lands (codex: the choice must not come alive again)', async () => {
+  it('⭐while an event is shown the choice is not drawn until the answer says a host runs them (the names come at once, the choice only with the answer)', async () => {
     stubFetch(true, true);
     await mount();
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+    expect(chip()).not.toBeNull();
     let release!: () => void;
     workingGate = new Promise<void>((r) => { release = r; });
-    await act(async () => { emitWorking([A1, 'a2222222-2222-4222-8222-222222222222']); }); // an agent not known yet → a read is asked, and held at the gate
+    await act(async () => { emitWorking(); });   // the event: names now, the answer is held
     await settle();
-    await act(async () => { emitWorking([]); });                                            // …then SSE says nobody works any more
-    await settle();
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
-    workingGate = null;
-    await act(async () => { release(); });                                                  // the old read lands now
-    await settle();
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
-  });
-  it('⭐a read an SSE event outdated is asked again for the same agent, so it is not left waiting for ever (codex: no wedge)', async () => {
-    stubFetch(false, true); // the room opens with nobody working; the agent starts
-    await mount();
-    const before = workingReads();
-    let release!: () => void;
-    workingGate = new Promise<void>((r) => { release = r; });
-    stubFetch(true, true); workingGate = new Promise<void>((r) => { release = r; });
-    await act(async () => { emitWorking(); });   // asks a read (held at the gate)
-    await settle();
-    await act(async () => { emitWorking(); });   // a newer event: the held read is outdated → the agent is asked for again
-    await settle();
-    expect(workingReads()).toBe(before + 2);
+    expect(chip()).toBeNull();
     workingGate = null;
     await act(async () => { release(); });
     await settle();
-    await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+    expect(chip()).not.toBeNull();
   });
-  it('⭐a failed read is asked again at the next event (codex: a failure does not leave the agent waiting for ever)', async () => {
+  it('⭐a read still on its way when SSE says «stopped» does not bring the agent back when it lands — its answer is old and nothing of it is shown, not even for a moment (codex)', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    let release1!: () => void;
+    let release2!: () => void;
+    workingGate = new Promise<void>((r) => { release1 = r; });
+    await act(async () => { emitWorking(); });        // a read (the first) is asked, and held at the gate — the server still says «A1 works» to it
+    await settle();
+    stubFetch(false, true);                           // …then the agent stops: the server now says nobody works
+    await act(async () => { emitWorking([]); });      // the SSE event: nobody works any more
+    await settle();
+    expect(chip()).toBeNull();
+    const gate2 = new Promise<void>((r) => { release2 = r; });
+    workingGate = gate2;                              // the reader's SECOND read is held too, so the moment between the two can be seen
+    await act(async () => { release1(); });           // the old read lands: its answer is old, nothing of it is shown
+    await settle();
+    expect(chip(), 'the old answer must not show the choice while the newer read is still on its way').toBeNull();
+    workingGate = null;
+    await act(async () => { release2(); });
+    await settle();
+    expect(chip()).toBeNull();
+  });
+  it('⭐events that arrive while a read is on its way are ONE more read, not one each (no request flood), and the answer shown is the newest', async () => {
+    stubFetch(false, true);
+    await mount();
+    const before = workingReads();
+    stubFetch(true, true);
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { emitWorking(); });
+    await settle();
+    await act(async () => { emitWorking(); });
+    await act(async () => { emitWorking(); });
+    await act(async () => { emitWorking(); });
+    await settle();
+    workingGate = null;
+    await act(async () => { release(); });
+    await settle();
+    expect(workingReads()).toBe(before + 2);   // the held read + ONE more for the three events behind it
+    await type('hi');
+    expect(chip()).not.toBeNull();
+  });
+  it('⭐a read that fails is tried again by itself (codex: no waiting for ever for the next event), and no choice is drawn until an answer is shown', async () => {
     stubFetch(false, true);
     await mount();
     stubFetch(true, true);
     workingFails = true;
-    await act(async () => { emitWorking(); }); // the read fails
+    await act(async () => { emitWorking(); });        // the read fails
     await settle();
     await type('hi');
-    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();   // not known → no choice (the safe side)
+    expect(chip()).toBeNull();
     workingFails = false;
-    await act(async () => { emitWorking(); }); // the next event asks again — and now it is answered
+    await act(async () => { await new Promise((r) => setTimeout(r, 2200)); });   // the retry (after 2 s) is answered
     await settle();
-    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
-  });
-  it('an agent the room already knows (host_run known) is not read again for each event', async () => {
-    stubFetch(true, true);
-    await mount();
-    const before = workingReads();
-    await act(async () => { emitWorking(); });
-    await settle();
-    expect(workingReads()).toBe(before);
+    expect(chip()).not.toBeNull();
+  }, 10_000);
+  it('the reader is one place: an event outdates a read on its way (nothing of the old answer is shown) — the pins stand in the view', () => {
+    const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
+    expect(view).toContain('if (st.running) { st.again = true; return; }');
+    expect(view).toContain('if (st.again) continue;');
+    expect(view).toContain('setTypingAgents(namedWorking(payload.working ?? [], false));');
+    expect(view).not.toContain('hostRunRef');
   });
 });
 
