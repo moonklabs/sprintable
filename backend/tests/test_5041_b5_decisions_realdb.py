@@ -98,12 +98,17 @@ async def test_the_first_hypothesis_an_agent_creates_is_a_card_that_names_the_st
         assert r.status_code == 202 and r.json()["status"] == "pending_approval", r.text
         reqs = await _requests(Session, d["org_id"])
         assert len(reqs) == 1 and reqs[0].hitl_metadata["action_key"] == "hypothesis.guided_create"
-        # codex: what is on the card is what runs — a statement or metric too long to be shown whole is refused (422), never shown cut
-        long_one = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": "x" * 61})
-        long_two = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "metric": "m" * 25})
-        for r in (long_one, long_two):
-            assert r.status_code == 422 and r.json()["error"]["code"] == "CARD_TEXT_TOO_LONG", r.text
-        assert len(await _requests(Session, d["org_id"])) == 1
+        # what is on the card is what runs: a long statement and metric (a person may write them as long as they like) are on the card WHOLE — not one character cut
+        long_statement = "A long hypothesis, written the way a person writes one: " + " ".join(f"word{i}" for i in range(80))  # ~ 500 characters
+        long_metric = "weekly active sign-ups per hundred new visitors, first-touch attribution"
+        ok_long = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": long_statement, "metric": long_metric})
+        assert ok_long.status_code == 202, ok_long.text
+        cards = [x for x in await _requests(Session, d["org_id"]) if "word79" in x.title]
+        assert len(cards) == 1 and long_statement in cards[0].title and long_metric in cards[0].title, cards[0].title if cards else "no card"
+        # only a text far beyond anything the card can store is refused (422, never shown cut)
+        far = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": "x" * 2001})
+        assert far.status_code == 422 and far.json()["error"]["code"] == "CARD_TEXT_TOO_LONG", far.text
+        assert len(await _requests(Session, d["org_id"])) == 2
         assert "A shorter form lifts sign-ups APPROVE ME" in reqs[0].title and "12.5" in reqs[0].title and "\n" not in reqs[0].title, reqs[0].title
 
         async def _rows():

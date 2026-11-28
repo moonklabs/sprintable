@@ -70,10 +70,11 @@ class ActionSpec:
     path_re: re.Pattern[str]
     reversible: str        # 'no' | 'partly'
     takes_body: bool = False  # only an action whose endpoint reads a body (a reward) may carry one; for the rest the stored call has NO query and NO body — nothing rides along that the card does not show
+    label_cap: int = 120      # how much of the target's text the card's one sentence carries; an action whose body is free text the person must read WHOLE before pressing (a hypothesis) raises it
 
 
-def _spec(key: str, what: str, method: str, pattern: str, reversible: str, takes_body: bool = False) -> ActionSpec:
-    return ActionSpec(key=key, what_key=f"agent_action.what.{what}", method=method, path_re=re.compile(pattern), reversible=reversible, takes_body=takes_body)
+def _spec(key: str, what: str, method: str, pattern: str, reversible: str, takes_body: bool = False, label_cap: int = 120) -> ActionSpec:
+    return ActionSpec(key=key, what_key=f"agent_action.what.{what}", method=method, path_re=re.compile(pattern), reversible=reversible, takes_body=takes_body, label_cap=label_cap)
 
 
 # The registry — one place that says which calls an agent may ASK for (every one of them is a call a person may make on screen). The route handlers name their key; nothing else
@@ -90,7 +91,8 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("project.delete", "project_delete", "DELETE", rf"^/api/v2/projects/{_UUID}$", "no"),
     # story 5041 B5 — two decisions an agent may ASK for (rows 98 · 101): the road demands a person, so there is no `auto` slot
     _spec("goal.activate", "goal_activate", "POST", rf"^/api/v2/(?:goals|epics)/{_UUID}/transition$", "partly", takes_body=True),
-    _spec("hypothesis.guided_create", "hypothesis_guided_create", "POST", r"^/api/v2/hypotheses/guided$", "partly", takes_body=True),
+    # the statement is free text of any length (the hypothesis model has no limit): the card carries it — and the metric — WHOLE; the one hard bound (`HYPOTHESIS_STATEMENT_MAX` · `HYPOTHESIS_METRIC_MAX`) only protects what is stored on the card
+    _spec("hypothesis.guided_create", "hypothesis_guided_create", "POST", r"^/api/v2/hypotheses/guided$", "partly", takes_body=True, label_cap=2600),
     # story 5041 B4b — a computer / a desktop line disconnected, an agent's run stopped, an event only a person may publish: roads of a person (an organisation owner / admin, a session, an assignee), so there is no `auto` slot
     _spec("desktop_computer.disconnect", "desktop_computer_disconnect", "DELETE", rf"^/api/v2/desktop/computers/{_UUID}$", "no"),
     _spec("desktop_setup.disconnect", "desktop_setup_disconnect", "DELETE", rf"^/api/v2/desktop/setups/{_UUID}$", "no"),
@@ -132,6 +134,10 @@ async def gate_agent_on_story(
     return await gate_agent_call(
         request, session, auth=auth, agent=agent, org_id=org_id, project_id=row[0], action_key=action_key, target_label=f"{row[1] or '—'}{label_suffix}",
     )
+
+
+HYPOTHESIS_STATEMENT_MAX = 2000  # a hypothesis the card can carry whole (its label cap is 2600: statement + metric + direction + number all fit)
+HYPOTHESIS_METRIC_MAX = 400
 
 
 def card_text(value: Any, fallback: str, limit: int = 60) -> str:
@@ -345,7 +351,7 @@ def plain_text(text_: str | None, limit: int) -> str:
 
 
 def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
-    return t(spec.what_key, locale, target=plain_text(target_label, 120) or "—")
+    return t(spec.what_key, locale, target=plain_text(target_label, spec.label_cap) or "—")
 
 
 # story 5041 B6 — «화면 열기»: roads whose purpose is that a PERSON does it on the screen themselves (a connection, a credential: nothing of it may be kept for a later press). An agent that calls one gets its 403 as
@@ -467,7 +473,7 @@ def card_texts(req: HitlRequest, locale: str) -> tuple[str, str]:
     if spec is None:
         return req.title, req.prompt
     return (
-        _what(spec, meta.get("target_label", ""), locale)[:300],
+        _what(spec, meta.get("target_label", ""), locale)[: spec.label_cap + 180],
         t("agent_action.prompt.irreversible" if spec.reversible == "no" else "agent_action.prompt.partly", locale),
     )
 
@@ -536,12 +542,12 @@ async def request_approval(
     agent_name = agent.name or "—"
     req = HitlRequest(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, agent_id=agent.id, request_type=REQUEST_TYPE,
-        title=what[:300],
+        title=what[: spec.label_cap + 180],
         prompt=t("agent_action.prompt.irreversible" if spec.reversible == "no" else "agent_action.prompt.partly", locale),
         requested_for=asker or (approvers[0] if approvers else agent.id),
         status="pending", expires_at=now + EXPIRES_AFTER,
         hitl_metadata={
-            "action_key": action_key, "snapshot": snap, "target_label": (target_label or "")[:200],
+            "action_key": action_key, "snapshot": snap, "target_label": (target_label or "")[: spec.label_cap + 80],
             "requested_by_agent": {"id": str(agent.id), "name": agent.name}, "cards": [],
         },
     )

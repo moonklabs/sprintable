@@ -605,7 +605,7 @@ async def transition_goal_endpoint(
                 target_label=agent_action.card_text(_row[1], "—", 100),
             )
             if _decision is None:  # never (no auto slot) — and were it ever, the agent keeps the road's own refusal
-                raise HTTPException(status_code=403, detail={"code": "HUMAN_CONFIRM_REQUIRED", "message": "active(activation) 전이는 휴먼만 가능합니다."})
+                raise HTTPException(status_code=403, detail={"code": "HUMAN_CONFIRM_REQUIRED", "message": "starting a goal (the activation) is a person's decision"})
             return _decision
     caller = await resolve_member(auth, org_id, session)
     try:

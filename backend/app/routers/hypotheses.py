@@ -171,10 +171,6 @@ async def create_hypothesis(
 
 # story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff): /draft와 동일 이유로 /{id}
 # 계열보다 먼저 선언 — "guided"가 hypothesis_id UUID로 오파싱되는 걸 막는다.
-_CARD_STATEMENT_MAX = 60  # the card is one line of at most ~120 characters: statement · metric · direction · target (a float is at most 24 characters) all fit WHOLE
-_CARD_METRIC_MAX = 24
-
-
 def _plain_number(value: float) -> str:
     """the number as it runs, lossless (a float's repr) and without a needless «.0» — the card shows exactly the threshold the replay sends"""
     text = repr(float(value))
@@ -197,23 +193,24 @@ async def create_hypothesis_guided(
 
     _agent = await agent_action.calling_agent(session, auth, org_id, request)
     if _agent is not None:
-        # what the person reads on the card is what runs: the statement and the metric the agent chose must fit on it WHOLE (the card is one short line) — otherwise the call is refused, never shown cut
+        # what the person reads on the card is what runs: the card carries the statement and the metric WHOLE (the hypothesis model has no length limit, so the agent's road is not narrower than a person's); only a text far beyond
+        # anything a card can store is refused — never shown cut
         from app.services.project_auth import require_project_access
 
         await require_project_access(session, _agent.id, body.project_id, org_id)  # the agent's own project first (404) — what it may learn about the card's limits comes after
-        _statement = agent_action.card_text(body.statement, "—", 10_000)
-        _metric = agent_action.card_text(body.metric, "—", 10_000)
-        if len(_statement) > _CARD_STATEMENT_MAX or len(_metric) > _CARD_METRIC_MAX:
+        _statement = agent_action.card_text(body.statement, "—", 10_000_000)
+        _metric = agent_action.card_text(body.metric, "—", 10_000_000)
+        if len(_statement) > agent_action.HYPOTHESIS_STATEMENT_MAX or len(_metric) > agent_action.HYPOTHESIS_METRIC_MAX:
             raise HTTPException(status_code=422, detail={
                 "code": "CARD_TEXT_TOO_LONG",
-                "message": f"an approval card shows the statement (up to {_CARD_STATEMENT_MAX} characters) and the metric (up to {_CARD_METRIC_MAX}) whole — shorten them",
+                "message": f"an approval card carries the statement (up to {agent_action.HYPOTHESIS_STATEMENT_MAX} characters) and the metric (up to {agent_action.HYPOTHESIS_METRIC_MAX}) whole — shorten them",
             })
         _decision = await agent_action.gate_agent_call(
             request, session, auth=auth, agent=_agent, org_id=org_id, project_id=body.project_id, action_key="hypothesis.guided_create",
             target_label=f"{_statement} · {_metric} {body.direction} {_plain_number(body.target)}",
         )
         if _decision is None:  # never (no auto slot) — and were it ever, the agent keeps the road's own refusal
-            _raise(svc.HypothesisServiceError("HUMAN_ONLY", "guided 가설 생성은 휴먼 전용입니다."))
+            _raise(svc.HypothesisServiceError("HUMAN_ONLY", "creating the first hypothesis (the guided form) is a person's decision"))
         return _decision
     caller = await resolve_member(auth, org_id, session, project_id=body.project_id)
     try:

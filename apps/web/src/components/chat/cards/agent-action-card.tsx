@@ -47,7 +47,8 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
     <CardFrame state="ready" data-testid="chat-card-agent-action">
       <div className="flex min-w-0 flex-col gap-2 px-3 py-2">
         <div className="flex min-w-0 items-start gap-2">
-          <span className="min-w-0 flex-1 break-words text-ds-body font-medium text-ds-ink line-clamp-3">{view.title}</span>
+          {/* story 5041 B5 — what the person is asked to approve is shown WHOLE (a hypothesis can be long: what is on the card is what runs); once the card is settled it folds to three lines so a finished card does not fill the room */}
+          <span className={`min-w-0 flex-1 break-words text-ds-body font-medium text-ds-ink${open ? '' : ' line-clamp-3'}`} data-testid="agent-action-title">{view.title}</span>
           <StateChip t={t} view={view} />
         </div>
         <p className="m-0 min-w-0 break-words text-ds-small text-ds-ink-2">{view.prompt}</p>
