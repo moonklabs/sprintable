@@ -280,7 +280,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return () => { cancelled = true; };
   }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
-  const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
+  const [typingAgents, setTypingAgents] = useState<{ id: string; name: string; hostRun: boolean }[]>([]);
+  // story 5046 (C13): per working agent, the server's `host_run` of the last GET /working read — the SSE working event lists WHO works, not whether a host runs them (an unknown agent is read again, and is «not a host» until known)
+  const hostRunRef = useRef<Map<string, boolean>>(new Map());
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -554,10 +556,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     try {
       const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
       if (!res.ok) return;
-      const json = await res.json() as { data?: Array<{ member_id: string }> };
+      const json = await res.json() as { data?: Array<{ member_id: string; host_run?: boolean }> };
+      for (const w of json.data ?? []) hostRunRef.current.set(w.member_id, w.host_run === true);
       const next = (json.data ?? [])
-        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
-        .filter((a): a is { id: string; name: string } => !!a.name);
+        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: w.host_run === true }))
+        .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
       setTypingAgents(next);
     } catch { /* non-critical */ }
   }, [threadId, commandTargets]);
@@ -567,10 +570,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
     const next = (payload.working ?? [])
-      .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
-      .filter((a): a is { id: string; name: string } => !!a.name);
+      .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostRunRef.current.get(w.member_id) === true }))
+      .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
     setTypingAgents(next);
-  }, [threadId, commandTargets]);
+    // story 5046 (C13): an agent this room has not been read for yet (its `host_run` is unknown) → read the list again; until then it is «not a host» (no choice drawn)
+    if ((payload.working ?? []).some((w) => !hostRunRef.current.has(w.member_id))) void fetchWorking();
+  }, [threadId, commandTargets, fetchWorking]);
 
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);
 
@@ -1290,7 +1295,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               prefillCommand={prefillCommand}
               incomingFiles={incomingFiles}
               onDraftChange={handleDraftChange}
-              workingAgents={typingAgents.map((a) => ({ id: a.id, name: a.name, runtimeType: (commandTargets ?? []).find((tg) => tg.agentId === a.id)?.runtimeType ?? null }))}
+              workingAgents={typingAgents.map((a) => ({ id: a.id, name: a.name, runtimeType: (commandTargets ?? []).find((tg) => tg.agentId === a.id)?.runtimeType ?? null, hostRun: a.hostRun }))}
             />
           </SupportLauncherClearance>
 

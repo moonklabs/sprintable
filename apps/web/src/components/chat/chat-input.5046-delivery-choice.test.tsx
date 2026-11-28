@@ -6,9 +6,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatInput } from './chat-input';
+import { choiceDrawnFor } from './delivery-timing';
 
 type SendSpy = ReturnType<typeof vi.fn<(content: string, mentionedIds?: string[], attachments?: unknown[], deliveryMode?: 'after_turn') => Promise<void>>>;
 const newSpy = (): SendSpy => vi.fn<(content: string, mentionedIds?: string[], attachments?: unknown[], deliveryMode?: 'after_turn') => Promise<void>>(async () => {});
@@ -32,9 +35,9 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 const ME = { member_id: 'me-1', name: '나' };
 const A1 = { member_id: 'a-1', name: '미르코' };
 const A2 = { member_id: 'a-2', name: '카디르' };
-const WORKING = [{ id: 'a-1', name: '미르코', runtimeType: 'claude-code' }];
+const WORKING = [{ id: 'a-1', name: '미르코', runtimeType: 'claude-code', hostRun: true }]; // a HOST runs it (the server's `host_run`)
 
-async function mount(o: { participants: { member_id: string; name: string }[]; working?: { id: string; name: string; runtimeType: string | null }[]; onSend?: SendSpy }) {
+async function mount(o: { participants: { member_id: string; name: string }[]; working?: { id: string; name: string; runtimeType: string | null; hostRun?: boolean }[]; onSend?: SendSpy }) {
   const onSend = o.onSend ?? newSpy();
   await act(async () => {
     root.render(
@@ -107,7 +110,7 @@ describe('what the send carries', () => {
 
 describe('the one-line «cannot interrupt»', () => {
   it('OpenCode while «지금» is on: one line naming it; «끝나고 이어서» takes it away', async () => {
-    await mount({ participants: [ME, A1], working: [{ id: 'a-1', name: '미르코', runtimeType: 'opencode' }] });
+    await mount({ participants: [ME, A1], working: [{ id: 'a-1', name: '미르코', runtimeType: 'opencode', hostRun: true }] });
     await type('hi');
     expect(container.querySelector('[data-testid="delivery-choice-note"]')!.textContent).toBe('지금 끼어들 수 없는 에이전트: 미르코 — 끝난 뒤 전해요');
     await act(async () => { btn('끝나고 이어서').click(); });
@@ -116,5 +119,37 @@ describe('the one-line «cannot interrupt»', () => {
   it('another runtime: no line', async () => {
     await mount({ participants: [ME, A1], working: WORKING });
     await type('hi'); expect(container.querySelector('[data-testid="delivery-choice-note"]')).toBeNull();
+  });
+});
+
+describe('story 5046 (C13): the choice is for agents a HOST runs — nothing else reads `delivery_mode`', () => {
+  const draws = async (working: { id: string; name: string; runtimeType: string | null; hostRun?: boolean }[], participants = [ME, A1]) => {
+    await mount({ participants, working });
+    await type('hi');
+    return choice() !== null;
+  };
+  it('⭐a working agent that is NOT run by a host (a webhook · the channel plugin: `host_run` false) → no choice, and the message goes the old way', async () => {
+    const onSend = newSpy();
+    await mount({ participants: [ME, A1], working: [{ id: 'a-1', name: '미르코', runtimeType: 'claude-code', hostRun: false }], onSend });
+    await type('hi');
+    expect(choice()).toBeNull();
+    await send();
+    expect(onSend.mock.calls[0]![3]).toBeUndefined();
+  });
+  it('⭐the server did not say (an old server: no `host_run`) → no choice — the old behaviour, nothing promised', async () => {
+    expect(await draws([{ id: 'a-1', name: '미르코', runtimeType: 'claude-code' }])).toBe(false);
+  });
+  it('⭐the decision itself (pure): nobody · an unknown · a mix → no; every one run by a host → yes', () => {
+    expect(choiceDrawnFor([])).toBe(false);
+    expect(choiceDrawnFor([{}])).toBe(false);                                  // unknown (an old server)
+    expect(choiceDrawnFor([{ hostRun: false }])).toBe(false);
+    expect(choiceDrawnFor([{ hostRun: true }, { hostRun: false }])).toBe(false); // a mix: «끝나고 이어서» would be kept for one and broken for the other
+    expect(choiceDrawnFor([{ hostRun: true }, {}])).toBe(false);
+    expect(choiceDrawnFor([{ hostRun: true }])).toBe(true);
+    expect(choiceDrawnFor([{ hostRun: true }, { hostRun: true }])).toBe(true);
+  });
+  it('the composer asks that decision (not its own condition) — the wiring', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'chat-input.tsx'), 'utf8');
+    expect(src).toContain('choiceDrawnFor(reachedWorking)');
   });
 });

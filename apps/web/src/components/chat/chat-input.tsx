@@ -25,7 +25,7 @@ import { isSystemPublisher, resolveRuntimeStatus, runtimeLabel } from '@/lib/run
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import type { DeliveryMode, SendAttachment } from '@/hooks/use-chat-sse';
-import { DeliveryChoice, type DeliveryChoiceValue } from './delivery-timing';
+import { choiceDrawnFor, DeliveryChoice, type DeliveryChoiceValue } from './delivery-timing';
 import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { ENTITY_ICONS } from './embed-card';
@@ -207,7 +207,7 @@ interface ChatInputProps {
   /** story 4906 — told the whole text of the box whenever it changes (the room's «moved from 홈» note goes when the box is emptied). */
   onDraftChange?: (text: string) => void;
   /** story 5046 (C13): the agents of the room that are working right now (name · runtime) — the delivery choice is drawn only when the message would reach one of them */
-  workingAgents?: { id: string; name: string; runtimeType: string | null }[];
+  workingAgents?: { id: string; name: string; runtimeType: string | null; /** the server's word (`host_run` of GET /working): a HOST runs this agent. Only those read `delivery_mode` — the choice is drawn for them alone. Absent = not known = not drawn. */ hostRun?: boolean }[];
 }
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, incomingFiles, onDraftChange, workingAgents }: ChatInputProps) {
@@ -478,7 +478,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // story 5046 (C13): the working agents this message would REACH — one named in the text, or the only other member of the room (a 1:1). Only then is «when» worth a choice.
   const onlyOther = steerTargets.length === 1 ? steerTargets[0]!.member_id : null;
   const reachedWorking = (workingAgents ?? []).filter((a) => mentionedNow.includes(a.id) || a.id === onlyOther);
-  const deliveryChoiceShown = !steerMode && reachedWorking.length > 0 && (text.trim().length > 0 || pendingFiles.length > 0);
+  // …and only when EVERY one of them is run by a host (a webhook or the channel plugin reads `delivery_mode` nowhere: «끝나고 이어서» there would be a promise nothing keeps). A mix, an unknown or an old server's answer (no `host_run`) → no choice: the message goes the old way.
+  const deliveryChoiceShown = !steerMode && reachedWorking.length > 0 && choiceDrawnFor(reachedWorking) && (text.trim().length > 0 || pendingFiles.length > 0);
   const cannotInterject = reachedWorking.filter((a) => a.runtimeType === 'opencode').map((a) => a.name); // the one runtime known not to take a message into a running turn (it waits for the turn to end anyway)
 
   const handleSend = async () => {

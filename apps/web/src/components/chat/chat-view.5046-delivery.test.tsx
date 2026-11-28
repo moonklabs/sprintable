@@ -4,7 +4,6 @@
 // Harness as chat-view.4440.test.tsx (the real SSE hook over a fake EventSource, a stubbed fetch). Red when: the default send carries the word (`delivery_mode` must be absent — «지금» is the server's default) ·
 // «끝나고 이어서» is not in the body · the working agent of a 1:1 does not make the choice appear · a message waiting for its record is not read again (and one that has its record keeps being read) ·
 // the line under the bubble is drawn for the record.
-import { RealtimeProvider } from '@/components/realtime-provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,6 +22,7 @@ class FakeEventSource {
   readyState = 1;
   constructor(public url: string) { FakeEventSource.instances.push(this); }
   addEventListener(type: string, cb: (e: { data: string }) => void) { (this.listeners[type] ??= []).push(cb); }
+  emit(type: string, data: unknown) { for (const cb of this.listeners[type] ?? []) cb({ data: JSON.stringify(data) }); }
   close() { /* noop */ }
 }
 
@@ -39,13 +39,16 @@ let calls: Call[];
 let listAnswer: () => Record<string, unknown>[];
 let sentAnswer: Record<string, unknown>;
 
-function stubFetch(working = true) {
+/** `hostRun`: what the server's /working says per working agent — `true`/`false` (a host runs it or not), `'absent'` = an old server that has no `host_run` */
+let hostRunNow: boolean | 'absent' = true;
+function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
+  hostRunNow = hostRun;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
-    if (url.endsWith('/working')) return { ok: true, json: async () => ({ data: working ? [{ member_id: A1 }] : [] }) };
+    if (url.endsWith('/working')) return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) };
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
@@ -64,6 +67,8 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); vi.useRealTimers(); });
 
 async function mount() {
+  // the provider comes from the SAME module graph as the view (`vi.resetModules()` after each test gives the view fresh modules; a provider imported once at the top would be a different context — the view would never hear the stream in the second test on)
+  const { RealtimeProvider } = await import('@/components/realtime-provider');
   const { ChatView } = await import('./chat-view');
   const { ChatRailProvider } = await import('../../app/(authenticated)/chats/chat-rail-context');
   await act(async () => {
@@ -88,6 +93,9 @@ const type = async (v: string) => {
 const btn = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label) as HTMLButtonElement;
 const send = async () => { await act(async () => { (container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement).click(); }); await settle(); };
 const posts = () => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages'));
+/** the multiplexer listens on whichever stream the provider opened — every open one is told (a listener that is not attached hears nothing) */
+const emitWorking = () => { for (const es of FakeEventSource.instances) es.emit('conversation.working', { conversation_id: 'thread-1', working: [{ member_id: A1, state: 'working' }] }); };
+const workingReads = () => calls.filter((c) => c.method === 'GET' && c.url.endsWith('/working')).length;
 const listReads = () => calls.filter((c) => c.method === 'GET' && c.url.includes('/messages?')).length;
 
 const mine = (extra: Record<string, unknown> = {}) => ({
@@ -120,6 +128,42 @@ describe('the choice reaches the send body', () => {
     expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
     await send();
     expect('delivery_mode' in posts()[0]!.body!).toBe(false);
+  });
+});
+
+describe('story 5046 (C13): the choice is only for agents a HOST runs (the server\'s `host_run` of GET /working)', () => {
+  it('⭐a working agent the server says is NOT run by a host (a webhook · the channel plugin) → no choice, and the send has no word', async () => {
+    stubFetch(true, false);
+    await mount();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+    await send();
+    expect('delivery_mode' in posts()[0]!.body!).toBe(false);
+  });
+  it('⭐an old server (no `host_run` in the answer) → no choice: the old behaviour, nothing promised', async () => {
+    stubFetch(true, 'absent');
+    await mount();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+  });
+  it('⭐an agent that starts working AFTER the room opened (the SSE event lists who works, not who runs them) → the list is read again, and the choice is drawn once the server says a host runs it', async () => {
+    stubFetch(false, true); // nobody works when the room opens
+    await mount();
+    const before = workingReads();
+    stubFetch(true, true);   // …then the agent starts, and a host runs it
+    await act(async () => { emitWorking(); });
+    await settle();
+    expect(workingReads()).toBe(before + 1);
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+  });
+  it('an agent the room already knows (host_run known) is not read again for each event', async () => {
+    stubFetch(true, true);
+    await mount();
+    const before = workingReads();
+    await act(async () => { emitWorking(); });
+    await settle();
+    expect(workingReads()).toBe(before);
   });
 });
 
