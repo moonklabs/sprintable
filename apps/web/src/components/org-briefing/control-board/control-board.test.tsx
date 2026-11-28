@@ -283,9 +283,17 @@ describe('[SID:5048] the card is one press: the name is a stretched link, the ha
       expect(btn.className, id).toMatch(/(^|\s)relative(\s|$)/); expect(btn.className, id).toMatch(/(^|\s)z-10(\s|$)/);
     }
   });
+  it('⭐keyboard order is unchanged: handle → the name link → «⋯» (the stretched link adds NO tab stop and moves none) — and a right-click on the link still opens the SAME menu as the «⋯» button', async () => {
+    await mount({ grants: GRANTS, agents: linked });
+    const card = q('[data-testid="control-face-link"]')!.closest('[data-testid="control-face"]') as HTMLElement;
+    const stops = [...card.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')].map((e) => e.getAttribute('data-testid') ?? e.tagName.toLowerCase());
+    expect(stops).toEqual(['control-face-handle', 'control-face-link', 'control-face-menu']); // the order the card always had; the `after` is a pseudo-element, not a node
+    const link = q('[data-testid="control-face-link"]')!;
+    await act(async () => { link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 5, clientY: 5 })); });
+    expect(menuItems().map((m) => m.textContent)).toEqual(['Beta에 넣기', 'Alpha에서 빼기']);
+  });
   it('a face with NO conversation draws the name as plain text (no link, nothing to press)', async () => {
     await mount({ grants: GRANTS, agents: [stateRow('Cho')] });
     expect(q('[data-testid="control-face-link"]')).toBeNull();
   });
 });
-
