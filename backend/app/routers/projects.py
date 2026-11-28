@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -148,6 +148,7 @@ async def update_project(
 
 @router.delete("/{id}", status_code=200)
 async def delete_project(
+    request: Request,
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -158,6 +159,21 @@ async def delete_project(
 
     repo = ProjectRepository(session, org_id)
     project = await repo.get(id)
+    # story 5041 B3 — an AGENT's deletion of a project is ALWAYS a card (or, by the user's setting, a block — never «go on»): a person presses it and the stored call runs as them, so the road still asks the presser to be an
+    # organisation owner / admin. The card says what goes with the project, in numbers. The agent must see the project (the gate asks the AGENT's identity: 404 otherwise, the same as the road's own answer).
+    from app.services import agent_action
+
+    _agent = await agent_action.calling_agent(session, auth, org_id, request)
+    if _agent is not None:
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        _decision = await agent_action.gate_agent_call(
+            request, session, auth=auth, agent=_agent, org_id=org_id, project_id=id, action_key="project.delete",
+            target_label=await agent_action.deletion_card_label(session, org_id=org_id, project_id=id, name=project.name),
+        )
+        if _decision is None:  # never (no auto slot) — and were it ever, the agent does not walk into the owner / admin path
+            raise HTTPException(status_code=403, detail="Project 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+        return _decision
     # 미접근 멤버에겐 존재 비노출(404).
     if project is None or not await has_project_access(
         session, uuid.UUID(auth.user_id), id, org_id

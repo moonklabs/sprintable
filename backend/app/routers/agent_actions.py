@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.database import get_db
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.models.hitl import HitlRequest
+from app.services.i18n_catalog import t
 from app.services import agent_action as svc
 from app.services.member_resolver import lookup_members_by_ids, resolve_member
 from app.services.project_auth import has_project_access
@@ -185,7 +186,12 @@ async def get_agent_action(
             agent = None  # a key that is no agent's (a person's key): not an agent reading its own ask, and no session either
         if agent is None or agent.type != "agent":
             raise HTTPException(status_code=403, detail={"code": "AGENT_ACTION_PERSON_SESSION_REQUIRED", "message": "AGENT_ACTION_PERSON_SESSION_REQUIRED"})
-        return await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id), _locale_of(request))
+        view = await _view(session, await _load(session, auth, org_id, request_id, agent_member_id=agent.id), _locale_of(request))
+        if view.get("action_key") == "org.delete":
+            # story 5041 B3: the card of an organisation's deletion says in numbers what goes with it — organisation-wide totals, for the person who decides. The agent (which may hold only some of the projects) reads its own ask without them.
+            view["title"] = t(svc.SPECS["org.delete"].what_key, _locale_of(request), target="—")
+            view["prompt"] = None
+        return view
     await _person(auth, org_id, session)
     req = await _load(session, auth, org_id, request_id)
     return await _view(session, req, _locale_of(request), always_allow_available=await _always_allow_available(session, req, org_id, uuid.UUID(auth.user_id)))
@@ -263,6 +269,13 @@ async def decide_agent_action(
         )
     await session.commit()  # the claim is visible to everyone before the call starts — a second press loses here, not after
 
+    # story 5041 B3 — the request row hangs on its project (and the project on its organisation): pressing «delete the project / the organisation» takes the row away with its target. The card's own view is read now, while the row is there
+    row_goes_with_target = action_key in ("project.delete", "org.delete")
+    pre_view = None
+    if row_goes_with_target:
+        await session.refresh(req)
+        pre_view = await _view(session, req, _locale_of(request))
+
     try:
         resp = await svc.execute_as_presser(request, snap, request_id=rid)
     except Exception as exc:  # noqa: BLE001 — the call itself blew up: close the request as failed (nothing is retried)
@@ -283,6 +296,21 @@ async def decide_agent_action(
     now = datetime.now(timezone.utc).isoformat()
     # a delete that finds the thing already gone, on a request that was pressed before and did not finish: the first press did it — that is the result asked for
     already_done = was_retry and action_key.endswith(".delete") and resp.status_code == 404
+    if row_goes_with_target and 200 <= resp.status_code < 300:
+        # the project (or the organisation) is gone: its request row is gone with it, or is left behind a project nobody can reach any more (the access check that reads a card says 404 for it). Either way the card is not read again
+        # through `_load` — the person who pressed is told from the view read before the call, and the agent is told only if its row can still be reached
+        await svc._finish(session, request_id=rid, execution={"state": "executed", "http_status": resp.status_code, "at": now})
+        await session.commit()
+        try:
+            session.expire_all()
+            left = await svc.request_row_if_any(session, rid)
+            if left is not None:
+                await svc.notify_agent(session, req=left, presser=presser, kind="approved", reason="", locale=_locale_of(request))
+                await session.commit()
+        except Exception:  # noqa: BLE001 — nobody is left to tell (the room is gone with it); the deletion itself is done and said so
+            logger.warning("agent_action: the result of a deletion could not be sent to the agent request=%s", rid, exc_info=True)
+            await session.rollback()
+        return {**pre_view, "state": "executed", "execution": {"state": "executed", "http_status": resp.status_code, "reason": None}, "decided_at": now}
     if 200 <= resp.status_code < 300 or already_done:
         await svc._finish(session, request_id=rid, execution={"state": "executed", "http_status": resp.status_code, "at": now})
         kind, reason = "approved", ""

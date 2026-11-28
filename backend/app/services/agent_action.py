@@ -85,6 +85,9 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("doc.delete", "doc_delete", "DELETE", rf"^/api/v2/docs/{_UUID}$", "no"),
     _spec("sprint.delete", "sprint_delete", "DELETE", rf"^/api/v2/sprints/{_UUID}$", "no"),
     _spec("sprint.close", "sprint_close", "POST", rf"^/api/v2/sprints/{_UUID}/close$", "partly"),
+    # story 5041 B3 — the two big deletions: always a card (no `auto` slot), and the card says how much goes with it, in numbers
+    _spec("org.delete", "org_delete", "DELETE", rf"^/api/v2/organizations/{_UUID}$", "no", takes_body=True),
+    _spec("project.delete", "project_delete", "DELETE", rf"^/api/v2/projects/{_UUID}$", "no"),
     # story 5041 B4b — a computer / a desktop line disconnected, an agent's run stopped, an event only a person may publish: roads of a person (an organisation owner / admin, a session, an assignee), so there is no `auto` slot
     _spec("desktop_computer.disconnect", "desktop_computer_disconnect", "DELETE", rf"^/api/v2/desktop/computers/{_UUID}$", "no"),
     _spec("desktop_setup.disconnect", "desktop_setup_disconnect", "DELETE", rf"^/api/v2/desktop/setups/{_UUID}$", "no"),
@@ -141,11 +144,35 @@ async def calling_agent(session: AsyncSession, auth: Any, org_id: uuid.UUID, req
 
     if request is None:
         return None
+    # an agent's call carries its key (`api_key_id`); a person's session — or a person's own personal key — never does: no database read is spent on them, and a caller that is not an agent keeps the road exactly as it was
+    meta = (getattr(auth, "claims", None) or {}).get("app_metadata") or {}
+    if not meta.get("api_key_id") or meta.get("human_api_key_id"):
+        return None
     try:
         resolved = await resolve_member(auth, org_id, session)
     except HTTPException:
         return None
     return resolved if resolved.type == "agent" else None
+
+
+async def deletion_card_label(session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID | None, name: str):
+    """story 5041 B3 — what a person reads on the approval card of an agent's org / project deletion: the name and, in numbers, what goes with it (organisation: projects · stories · conversations; project: stories · tasks · conversations).
+    Returns the label as a function of the request's language (the card is built in it)."""
+    from sqlalchemy import func
+
+    from app.models.conversation import Conversation
+    from app.models.pm import Story, Task
+    from app.models.project import Project
+
+    if project_id is None:
+        projects = (await session.execute(select(func.count()).select_from(Project).where(Project.org_id == org_id, Project.deleted_at.is_(None)))).scalar_one()
+        stories = (await session.execute(select(func.count()).select_from(Story).where(Story.org_id == org_id))).scalar_one()
+        conversations = (await session.execute(select(func.count()).select_from(Conversation).where(Conversation.org_id == org_id))).scalar_one()
+        return lambda locale: t("agent_action.deletion_counts_org", locale, name=card_text(name, "—", 40), projects=projects, stories=stories, conversations=conversations)
+    stories = (await session.execute(select(func.count()).select_from(Story).where(Story.project_id == project_id))).scalar_one()
+    tasks = (await session.execute(select(func.count()).select_from(Task).join(Story, Story.id == Task.story_id).where(Story.project_id == project_id))).scalar_one()
+    conversations = (await session.execute(select(func.count()).select_from(Conversation).where(Conversation.project_id == project_id))).scalar_one()
+    return lambda locale: t("agent_action.deletion_counts_project", locale, name=card_text(name, "—", 40), stories=stories, tasks=tasks, conversations=conversations)
 
 
 async def gate_agent_for_org(
@@ -625,6 +652,12 @@ async def _unclaim(session: AsyncSession, *, request_id: uuid.UUID) -> None:
         ),
         {"id": request_id},
     )
+
+
+async def request_row_if_any(session: AsyncSession, request_id: uuid.UUID) -> HitlRequest | None:
+    """the request row, if it is still there — for the one caller whose target (a project, an organisation) was just deleted and may have taken the row with it"""
+    session.expire_all()
+    return (await session.execute(select(HitlRequest).where(HitlRequest.id == request_id).execution_options(populate_existing=True))).scalar_one_or_none()
 
 
 async def _finish(session: AsyncSession, *, request_id: uuid.UUID, execution: dict[str, Any]) -> None:

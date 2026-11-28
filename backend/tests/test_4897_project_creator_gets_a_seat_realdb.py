@@ -60,7 +60,8 @@ async def test_the_seat_is_a_plain_member_seat_not_admin_rights(caller):
     try:
         pid = await _create(Session, w, caller, f"limits-{caller}")
         r = await _as(Session, w, caller, "DELETE", f"/api/v2/projects/{pid}")
-        assert r.status_code in (403, 404), (r.status_code, r.text)
+        # story 5041 B3: an AGENT's delete of a project is no longer a bare 403 — it is an approval card a person presses (202, nothing deleted by the ask); a person's own delete is still refused
+        assert r.status_code in (403, 404) or (caller == "agent_plain" and r.status_code == 202), (r.status_code, r.text)
         r = await _as(Session, w, caller, "GET", f"/api/v2/projects/{pid}")
         assert r.status_code == 200, "and the refused delete left the project in place"
         async with Session() as s:

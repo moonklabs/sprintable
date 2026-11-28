@@ -331,7 +331,8 @@ async def test_agent_delete_project_forbidden():
         client = _client_for(app)
         try:
             resp = await client.delete(f"/api/v2/projects/{seeded['project_id']}")
-            assert resp.status_code == 403, resp.text
+            # story 5041 B3: an agent's project deletion is not done on the agent's own rights — it is kept as an approval card (202) for a person to press; nothing is deleted by the ask
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text
         finally:
             await client.aclose()
     finally:

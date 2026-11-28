@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
@@ -193,6 +194,7 @@ async def get_org_impact(
 
 @router.delete("/{id}", status_code=200)
 async def delete_organization(
+    request: Request,
     id: uuid.UUID,
     body: DeleteOrganization,
     auth: AuthContext = Depends(get_current_user),
@@ -209,6 +211,27 @@ async def delete_organization(
     from app.services.member_resolver import resolve_member
 
     org_id = id
+    # story 5041 B3 — an AGENT's deletion of the organisation is ALWAYS a card (or, by the user's setting, a block — never «go on»): a person presses it and the stored call runs as them, so the road still asks the presser to be
+    # the owner and to have typed the name. The card says what goes with it, in numbers. The agent's own `confirmation` must already be the organisation's name (the road's own 422 otherwise — no card for a call that cannot succeed).
+    from app.services import agent_action
+
+    _agent = await agent_action.calling_agent(session, auth, org_id, request)
+    if _agent is not None:
+        from app.models.organization import Organization
+
+        _forbidden = HTTPException(status_code=403, detail="Only owner can delete organization")
+        _name = (await session.execute(select(Organization.name).where(Organization.id == org_id))).scalar_one_or_none()
+        if _name is None:
+            raise _forbidden
+        if body.confirmation != _name:
+            raise HTTPException(status_code=422, detail="Confirmation does not match organization name")
+        _decision = await agent_action.gate_agent_for_org(
+            request, session, auth=auth, agent=_agent, org_id=org_id, action_key="org.delete", refuse=_forbidden,
+            target_label=await agent_action.deletion_card_label(session, org_id=org_id, project_id=None, name=_name),
+        )
+        if _decision is None:  # never (no auto slot) — and were it ever, the agent does not walk into the owner's path
+            raise _forbidden
+        return _decision
     role = await repo.get_member_role(org_id=org_id, user_id=uuid.UUID(auth.user_id))
     if role == "owner":
         resolved = await resolve_member(auth, org_id, session)
