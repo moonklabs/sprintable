@@ -282,7 +282,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string; hostRun: boolean }[]>([]);
   // story 5046 (C13): per working agent, the server's `host_run` of the last GET /working read — the SSE working event lists WHO works, not whether a host runs them (an unknown agent is read again, and is «not a host» until known)
+  // …kept only for agents that work NOW: an agent that leaves the working list is forgotten (it may come back run by something else — a host, then the channel plugin), and an agent already asked for is not asked again for every event
   const hostRunRef = useRef<Map<string, boolean>>(new Map());
+  const hostRunAskedRef = useRef<Set<string>>(new Set());
+  const workingFetchSeqRef = useRef(0); // the newest GET /working only: an older answer that arrives late must not overwrite a newer one
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -554,10 +557,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
   const fetchWorking = useCallback(async () => {
     try {
+      const seq = ++workingFetchSeqRef.current;
       const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
       if (!res.ok) return;
       const json = await res.json() as { data?: Array<{ member_id: string; host_run?: boolean }> };
-      for (const w of json.data ?? []) hostRunRef.current.set(w.member_id, w.host_run === true);
+      if (seq !== workingFetchSeqRef.current) return; // a newer read has been asked for since — this answer is old
+      hostRunRef.current = new Map((json.data ?? []).map((w) => [w.member_id, w.host_run === true] as const)); // the whole answer replaces what was known (nobody stale stays)
       const next = (json.data ?? [])
         .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: w.host_run === true }))
         .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
@@ -569,12 +574,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
+    const now = new Set((payload.working ?? []).map((w) => w.member_id));
+    for (const id of [...hostRunRef.current.keys()]) if (!now.has(id)) hostRunRef.current.delete(id); // stopped working → forgotten (it may start again run by something else)
+    for (const id of [...hostRunAskedRef.current]) if (!now.has(id)) hostRunAskedRef.current.delete(id);
     const next = (payload.working ?? [])
       .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostRunRef.current.get(w.member_id) === true }))
       .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
     setTypingAgents(next);
-    // story 5046 (C13): an agent this room has not been read for yet (its `host_run` is unknown) → read the list again; until then it is «not a host» (no choice drawn)
-    if ((payload.working ?? []).some((w) => !hostRunRef.current.has(w.member_id))) void fetchWorking();
+    // story 5046 (C13): an agent this room has not been read for (its `host_run` is unknown and nobody asked yet) → read the list ONCE more; until then it is «not a host» (no choice drawn). One that the answer does not name is not asked again for every event.
+    const unknown = [...now].filter((id) => !hostRunRef.current.has(id) && !hostRunAskedRef.current.has(id));
+    if (unknown.length > 0) { for (const id of unknown) hostRunAskedRef.current.add(id); void fetchWorking(); }
   }, [threadId, commandTargets, fetchWorking]);
 
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);

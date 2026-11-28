@@ -5,6 +5,8 @@
 // «끝나고 이어서» is not in the body · the working agent of a 1:1 does not make the choice appear · a message waiting for its record is not read again (and one that has its record keeps being read) ·
 // the line under the bubble is drawn for the record.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -94,7 +96,7 @@ const btn = (label: string) => Array.from(container.querySelectorAll('button')).
 const send = async () => { await act(async () => { (container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement).click(); }); await settle(); };
 const posts = () => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages'));
 /** the multiplexer listens on whichever stream the provider opened — every open one is told (a listener that is not attached hears nothing) */
-const emitWorking = () => { for (const es of FakeEventSource.instances) es.emit('conversation.working', { conversation_id: 'thread-1', working: [{ member_id: A1, state: 'working' }] }); };
+const emitWorking = (ids: string[] = [A1]) => { for (const es of FakeEventSource.instances) es.emit('conversation.working', { conversation_id: 'thread-1', working: ids.map((member_id) => ({ member_id, state: 'working' })) }); };
 const workingReads = () => calls.filter((c) => c.method === 'GET' && c.url.endsWith('/working')).length;
 const listReads = () => calls.filter((c) => c.method === 'GET' && c.url.includes('/messages?')).length;
 
@@ -156,6 +158,35 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     expect(workingReads()).toBe(before + 1);
     await type('hi');
     expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+  });
+  it('⭐an agent that stops and comes back run by something else (a host, then the channel plugin) is read again: a stale «host» is not kept (codex)', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();   // run by a host
+    await act(async () => { emitWorking([]); });                                          // it stops
+    await settle();
+    stubFetch(true, false);                                                               // …and comes back, now run by the plugin
+    await act(async () => { emitWorking(); });
+    await settle();
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+  });
+  it('⭐an agent the list does not name is asked for ONCE, not for every event (codex: no request flood)', async () => {
+    stubFetch(false, true); // the REST answer names nobody (the agent finished meanwhile)
+    await mount();
+    const before = workingReads();
+    await act(async () => { emitWorking(); });
+    await settle();
+    await act(async () => { emitWorking(); });
+    await settle();
+    await act(async () => { emitWorking(); });
+    await settle();
+    expect(workingReads()).toBe(before + 1);
+  });
+  it('only the newest read of the list counts (a late old answer cannot overwrite a newer one) — the guard stands in the view', () => {
+    const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
+    expect(view).toContain('const seq = ++workingFetchSeqRef.current;');
+    expect(view).toContain('if (seq !== workingFetchSeqRef.current) return;');
   });
   it('an agent the room already knows (host_run known) is not read again for each event', async () => {
     stubFetch(true, true);
