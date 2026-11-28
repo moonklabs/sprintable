@@ -284,7 +284,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story 5046 (C13): per working agent, the server's `host_run` of the last GET /working read — the SSE working event lists WHO works, not whether a host runs them (an unknown agent is read again, and is «not a host» until known)
   // …kept only for agents that work NOW: an agent that leaves the working list is forgotten (it may come back run by something else — a host, then the channel plugin), and an agent already asked for is not asked again for every event
   const hostRunRef = useRef<Map<string, boolean>>(new Map());
-  const hostRunAskedRef = useRef<Set<string>>(new Set());
+  const hostRunAskedRef = useRef<Set<string>>(new Set()); // agents a read was asked for (an answer that does not name them keeps them here: they are not asked again for every event)
+  const hostRunInflightRef = useRef<Set<string>>(new Set()); // …of those, the ones whose read has not been answered yet: if that read is outdated or fails they go back to «not asked» (else they would wait for ever)
   const workingFetchSeqRef = useRef(0); // the newest GET /working only: an older answer that arrives late must not overwrite a newer one
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -559,9 +560,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     try {
       const seq = ++workingFetchSeqRef.current;
       const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
-      if (!res.ok) return;
+      if (!res.ok) return; // (a read that fails or is outdated leaves its agents in `hostRunInflightRef` — the next SSE event hands them back to «not asked»)
       const json = await res.json() as { data?: Array<{ member_id: string; host_run?: boolean }> };
       if (seq !== workingFetchSeqRef.current) return; // a newer read has been asked for since — this answer is old
+      hostRunInflightRef.current.clear(); // the newest read is answered: every agent asked for is answered (one the list does not name stays «asked»)
       hostRunRef.current = new Map((json.data ?? []).map((w) => [w.member_id, w.host_run === true] as const)); // the whole answer replaces what was known (nobody stale stays)
       const next = (json.data ?? [])
         .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: w.host_run === true }))
@@ -575,6 +577,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
     workingFetchSeqRef.current += 1; // this event is newer than any read still on its way: that read's answer is old when it lands (it must not bring back an agent the event says stopped)
+    for (const id of hostRunInflightRef.current) hostRunAskedRef.current.delete(id); hostRunInflightRef.current.clear(); // the read that was on its way is outdated by this event → what it was asked for is asked again below
     const now = new Set((payload.working ?? []).map((w) => w.member_id));
     for (const id of [...hostRunRef.current.keys()]) if (!now.has(id)) hostRunRef.current.delete(id); // stopped working → forgotten (it may start again run by something else)
     for (const id of [...hostRunAskedRef.current]) if (!now.has(id)) hostRunAskedRef.current.delete(id);
@@ -584,7 +587,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setTypingAgents(next);
     // story 5046 (C13): an agent this room has not been read for (its `host_run` is unknown and nobody asked yet) → read the list ONCE more; until then it is «not a host» (no choice drawn). One that the answer does not name is not asked again for every event.
     const unknown = [...now].filter((id) => !hostRunRef.current.has(id) && !hostRunAskedRef.current.has(id));
-    if (unknown.length > 0) { for (const id of unknown) hostRunAskedRef.current.add(id); void fetchWorking(); }
+    if (unknown.length > 0) { for (const id of unknown) { hostRunAskedRef.current.add(id); hostRunInflightRef.current.add(id); } void fetchWorking(); }
   }, [threadId, commandTargets, fetchWorking]);
 
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);

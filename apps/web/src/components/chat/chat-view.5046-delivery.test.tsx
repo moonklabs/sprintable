@@ -45,6 +45,8 @@ let sentAnswer: Record<string, unknown>;
 let hostRunNow: boolean | 'absent' = true;
 /** a read of GET /working that is held on its way (a late answer) until the gate opens */
 let workingGate: Promise<void> | null = null;
+/** the next reads of GET /working fail (an error answer) while this is true */
+let workingFails = false;
 function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
   hostRunNow = hostRun;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -52,13 +54,13 @@ function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
-    if (url.endsWith('/working')) { if (workingGate) await workingGate; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) }; }
+    if (url.endsWith('/working')) { if (workingGate) await workingGate; if (workingFails) return { ok: false, status: 500, json: async () => ({}) }; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) }; }
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
 
 beforeEach(() => {
-  calls = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null;
+  calls = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null; workingFails = false;
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -206,6 +208,38 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     await act(async () => { release(); });                                                  // the old read lands now
     await settle();
     expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+  });
+  it('⭐a read an SSE event outdated is asked again for the same agent, so it is not left waiting for ever (codex: no wedge)', async () => {
+    stubFetch(false, true); // the room opens with nobody working; the agent starts
+    await mount();
+    const before = workingReads();
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    stubFetch(true, true); workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { emitWorking(); });   // asks a read (held at the gate)
+    await settle();
+    await act(async () => { emitWorking(); });   // a newer event: the held read is outdated → the agent is asked for again
+    await settle();
+    expect(workingReads()).toBe(before + 2);
+    workingGate = null;
+    await act(async () => { release(); });
+    await settle();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+  });
+  it('⭐a failed read is asked again at the next event (codex: a failure does not leave the agent waiting for ever)', async () => {
+    stubFetch(false, true);
+    await mount();
+    stubFetch(true, true);
+    workingFails = true;
+    await act(async () => { emitWorking(); }); // the read fails
+    await settle();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();   // not known → no choice (the safe side)
+    workingFails = false;
+    await act(async () => { emitWorking(); }); // the next event asks again — and now it is answered
+    await settle();
+    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
   });
   it('an agent the room already knows (host_run known) is not read again for each event', async () => {
     stubFetch(true, true);
