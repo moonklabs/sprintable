@@ -257,8 +257,15 @@ export default function SettingsPage() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
-  const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  // story 5031 (C1, codex 3): everything the project tab holds ABOUT a project — the line that says how the last press went, the row being edited, the project whose delete is being asked — belongs to the
+  // organization it was made in. It is stored WITH that organization and drawn only while it is the one on screen (derived in the render, like `projects`): after an in-place switch the first frame must not hold
+  // another organization's delete confirmation (its «확인» would send DELETE for a project of the organization just left) or its success line.
+  const [projectActionMessageRaw, setProjectActionMessageRaw] = useState<{ type: 'success' | 'error'; text: string; orgId: typeof orgId } | null>(null);
+  const projectActionMessage = projectActionMessageRaw && projectActionMessageRaw.orgId === orgId ? { type: projectActionMessageRaw.type, text: projectActionMessageRaw.text } : null;
+  const setProjectActionMessage = (m: { type: 'success' | 'error'; text: string } | null) => setProjectActionMessageRaw(m ? { ...m, orgId } : null);
+  const [editingProjectRaw, setEditingProjectRaw] = useState<{ id: string; orgId: typeof orgId } | null>(null);
+  const editingProjectId = editingProjectRaw && editingProjectRaw.orgId === orgId ? editingProjectRaw.id : null;
+  const setEditingProjectId = (id: string | null) => setEditingProjectRaw(id ? { id, orgId } : null);
   const [editProjectName, setEditProjectName] = useState('');
   const [editProjectDescription, setEditProjectDescription] = useState('');
   const [savingProject, setSavingProject] = useState(false);
@@ -271,7 +278,9 @@ export default function SettingsPage() {
   const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-  const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
+  const [deleteProjectConfirmRaw, setDeleteProjectConfirmRaw] = useState<{ id: string; orgId: typeof orgId } | null>(null);
+  const deleteProjectConfirmId = deleteProjectConfirmRaw && deleteProjectConfirmRaw.orgId === orgId ? deleteProjectConfirmRaw.id : null;
+  const setDeleteProjectConfirmId = (id: string | null) => setDeleteProjectConfirmRaw(id ? { id, orgId } : null);
 
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
@@ -430,6 +439,10 @@ export default function SettingsPage() {
     // (the failure of the previous organization is reset by the read the new organization starts at once — `refreshProjects` sets `loading` — in the effect below)
     setProjects([]);
     setMemberProjectId('');
+    // what was asked or being edited in the organization just left is dropped for good (the render already hides it; this keeps it from coming back if the person returns)
+    setDeleteProjectConfirmRaw(null);
+    setEditingProjectRaw(null);
+    setProjectActionMessageRaw(null);
   }, [orgId]);
 
   // Fetch org and project context
@@ -640,6 +653,7 @@ export default function SettingsPage() {
 
   const handleUpdateProject = async () => {
     if (!editingProjectId || !editProjectName.trim()) return;
+    if (orgIdRef.current !== orgId) return; // asked from a closure of an organization that is no longer shown: no request at all
     setSavingProject(true);
     const res = await fetch(`/api/projects/${editingProjectId}`, {
       method: 'PATCH',
@@ -743,6 +757,8 @@ export default function SettingsPage() {
   };
 
   const handleDeleteProject = async (projectId: string) => {
+    // BEFORE any request: a delete asked from a closure of an organization that is no longer shown (the project is the other organization's) is never sent
+    if (orgIdRef.current !== orgId) { setDeleteProjectConfirmId(null); return; }
     setDeletingProjectId(projectId);
     setProjectActionMessage(null);
 

@@ -20,6 +20,7 @@ const C = koMessages.common;
 let container: HTMLDivElement;
 let root: Root;
 let projectListUrls: string[];
+let writes: Array<{ method: string; url: string }>;
 let projectPostImpl: (() => unknown) | null = null; // a project create (POST) the test holds in flight
 
 beforeEach(() => {
@@ -28,7 +29,9 @@ beforeEach(() => {
   root = createRoot(container);
   projectListUrls = [];
   commitTexts.length = 0;
+  commitInputValues.length = 0;
   projectPostImpl = null;
+  writes = [];
   vi.spyOn(console, 'error').mockImplementation(() => {}); // the page logs the failed read (the logging is not what this file pins)
 });
 afterEach(async () => {
@@ -62,6 +65,7 @@ async function mountPage(query: string, projectsImpl: (url: string, call: number
       projectListUrls.push(url);
       return projectsImpl(url, projectListUrls.length) as ReturnType<typeof json>;
     }
+    if (url.startsWith('/api/projects/') && (method === 'DELETE' || method === 'PATCH')) { writes.push({ method, url }); return method === 'DELETE' ? json({ ok: true }) : json({ id: 'p-a', name: '바뀐이름', description: null }); }
     if (url === '/api/projects' && method === 'POST' && projectPostImpl) return projectPostImpl() as ReturnType<typeof json>;
     return json(null, 404);
   }));
@@ -69,8 +73,9 @@ async function mountPage(query: string, projectsImpl: (url: string, call: number
 }
 // what the DOM said at the end of EVERY commit (a layout effect runs in the commit, before the passive effects that clear/refresh the list) — so the very first frame after an organization switch can be read
 const commitTexts: string[] = [];
+const commitInputValues: string[][] = [];
 function CommitProbe() {
-  useLayoutEffect(() => { commitTexts.push(document.body.textContent ?? ''); });
+  useLayoutEffect(() => { commitTexts.push(document.body.textContent ?? ''); commitInputValues.push([...document.querySelectorAll('input')].map((i) => i.value)); });
   return null;
 }
 async function render() {
@@ -83,6 +88,8 @@ async function switchOrgTo(orgId: string) {
   await render();
 }
 
+// a held request the test never made must fail the test (a no-op default would let it pass without the request ever being held)
+const notHeld = (what: string) => () => { throw new Error(`the held request «${what}» was never made`); };
 const text = () => document.body.textContent ?? '';
 const hasText = (s: string) => text().includes(s);
 const banner = () => document.querySelector('[data-slot="ds-banner"][data-tone="failed"]');
@@ -111,7 +118,7 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
   });
 
   it('⭐(c) «다시 시도» asks again: a second read, the rows appear and the failure is gone; while it reads, neither the empty text nor the failure shows', async () => {
-    let release: (v: unknown) => void = () => {};
+    let release: (v: unknown) => void = notHeld('release');
     await mountPage('tab=projects', (_url, call) => (call === 1
       ? json(null, 500)
       : new Promise((resolve) => { release = resolve; })));
@@ -146,7 +153,7 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
   });
 
   it('⭐(e) a LATE failing answer for the old organization never writes after the organization switched', async () => {
-    let failOld: (v: unknown) => void = () => {};
+    let failOld: (v: unknown) => void = notHeld('failOld');
     await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
       ? new Promise((resolve) => { failOld = resolve; })
       : json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])));
@@ -159,7 +166,7 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
   });
 
   it('⭐(e2) switching organization resets an old organization\'s failure: the new organization reads again from «loading», not from the old error', async () => {
-    let release: (v: unknown) => void = () => {};
+    let release: (v: unknown) => void = notHeld('release');
     await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
       ? json(null, 500)
       : new Promise((resolve) => { release = resolve; })));
@@ -174,7 +181,7 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
   });
 
   it('⭐(e3) a LATE throw for the old organization never writes either (the catch is guarded too)', async () => {
-    let throwOld: (e: unknown) => void = () => {};
+    let throwOld: (e: unknown) => void = notHeld('throwOld');
     await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
       ? new Promise((_resolve, reject) => { throwOld = reject; })
       : json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])));
@@ -221,8 +228,8 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
   };
 
   it('⭐(g) a create that finishes AFTER the switch to another organization neither drops the new organization\'s read nor leaves its success line there', async () => {
-    let finishCreate: (v: unknown) => void = () => {};
-    let releaseNew: (v: unknown) => void = () => {};
+    let finishCreate: (v: unknown) => void = notHeld('finishCreate');
+    let releaseNew: (v: unknown) => void = notHeld('releaseNew');
     projectPostImpl = () => new Promise((resolve) => { finishCreate = resolve; });
     await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
       ? json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])
@@ -238,5 +245,71 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
     expect(hasText('새프로젝트')).toBe(false); // …and org-1's row / «만들었어요» line is not shown under org-2
     expect(hasText(T.projectCreated.replace('{name}', '새프로젝트'))).toBe(false);
     expect(projectListUrls.filter((u) => u.includes('org_id=org-1'))).toHaveLength(1); // no org-1 re-read after the switch
+  });
+
+  // codex 3 (MEDIUM): the delete confirmation / the edit row / the result line are about a project of ONE organization; after an in-place switch the first frame must not hold them, and nothing may be sent for them.
+  const press = async (label: string) => {
+    const b = [...document.querySelectorAll('button')].filter((x) => x.getAttribute('aria-label') === label || x.textContent?.trim() === label).pop() as HTMLButtonElement | undefined; // the LAST match: a dialog sits at the end of the body
+    if (!b) throw new Error(`no button «${label}»`);
+    await act(async () => { b.click(); });
+  };
+  const rowsOfOrg1 = (url: string) => (url.includes('org_id=org-1') ? json([{ id: 'p-a', name: '알파', description: null }]) : new Promise(() => {}));
+
+  it('(h) the same organization works as before: delete → ask → confirm sends ONE DELETE for that project and says so', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${T.deleteProject} — 알파`);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(true);
+    await press(T.deleteProject); // the dialog's own «삭제»
+    await flush();
+    expect(writes).toEqual([{ method: 'DELETE', url: '/api/projects/p-a' }]);
+    expect(hasText(T.projectDeleted)).toBe(true);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(false);
+  });
+
+  it('⭐(i) a delete confirmation left open in organization 1 is not on the screen of organization 2 — not in the first frame, and nothing is deleted', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${T.deleteProject} — 알파`);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(true); // the confirmation really is open
+    const mark = commitTexts.length;
+    await switchOrgTo('org-2');
+    expect(commitTexts.length).toBeGreaterThan(mark);
+    expect(commitTexts.slice(mark).some((t) => t.includes(T.projectDeleteConfirmTitle))).toBe(false); // reverted (raw id) → the first frame still asks, and its «삭제» deletes organization 1's project
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(false);
+    expect(writes).toEqual([]);
+  });
+
+  it('⭐(j) a row being edited in organization 1 is not an edit in organization 2 — no draft box in the first frame, nothing is sent', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${C.edit} — 알파`);
+    expect([...document.querySelectorAll('input')].map((i) => i.value)).toContain('알파'); // the edit boxes really are open with the draft
+    const mark = commitInputValues.length;
+    await switchOrgTo('org-2');
+    expect(commitInputValues.length).toBeGreaterThan(mark);
+    expect(commitInputValues.slice(mark).some((v) => v.includes('알파'))).toBe(false);
+    expect(writes).toEqual([]);
+  });
+
+  it('⭐(k) the result line of organization 1 is not under organization 2 — not even in the first frame', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${T.deleteProject} — 알파`);
+    await press(T.deleteProject);
+    await flush();
+    expect(hasText(T.projectDeleted)).toBe(true);
+    const mark = commitTexts.length;
+    await switchOrgTo('org-2');
+    expect(commitTexts.length).toBeGreaterThan(mark);
+    expect(commitTexts.slice(mark).some((t) => t.includes(T.projectDeleted))).toBe(false); // reverted (raw message) → organization 1's line is under organization 2
+    expect(hasText(T.projectDeleted)).toBe(false);
+  });
+
+  it('⭐(l) coming BACK to organization 1 does not bring its old delete confirmation or edit row back', async () => {
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1') ? json([{ id: 'p-a', name: '알파', description: null }]) : json([])));
+    await press(`${T.deleteProject} — 알파`);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(true);
+    await switchOrgTo('org-2');
+    await switchOrgTo('org-1');
+    expect(hasText('알파')).toBe(true); // organization 1's list is back
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(false); // reverted (no drop on leaving) → the question is asked again
+    expect(writes).toEqual([]);
   });
 });
