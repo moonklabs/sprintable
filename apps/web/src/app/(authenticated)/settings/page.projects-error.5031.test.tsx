@@ -9,7 +9,21 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 
-const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+const { useDashboardContextMock, captured } = vi.hoisted(() => ({
+  useDashboardContextMock: vi.fn(),
+  // the props the page hands to its two project components, every render (the REAL components still draw; this only lets a test call an old or a current callback by hand)
+  captured: { deleteConfirms: [] as Array<() => void>, editSaves: [] as Array<() => void> },
+}));
+vi.mock('@/components/settings/project-delete-dialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/settings/project-delete-dialog')>();
+  const { createElement } = await import('react');
+  return { ...actual, ProjectDeleteDialog: (p: Parameters<typeof actual.ProjectDeleteDialog>[0]) => { captured.deleteConfirms.push(p.onConfirm); return createElement(actual.ProjectDeleteDialog, p); } };
+});
+vi.mock('@/components/settings/projects-section', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/settings/projects-section')>();
+  const { createElement } = await import('react');
+  return { ...actual, ProjectsSection: (p: Parameters<typeof actual.ProjectsSection>[0]) => { captured.editSaves.push(p.onEditSave); return createElement(actual.ProjectsSection, p); } };
+});
 vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 
@@ -30,6 +44,8 @@ beforeEach(() => {
   projectListUrls = [];
   commitTexts.length = 0;
   commitInputValues.length = 0;
+  captured.deleteConfirms.length = 0;
+  captured.editSaves.length = 0;
   projectPostImpl = null;
   writes = [];
   vi.spyOn(console, 'error').mockImplementation(() => {}); // the page logs the failed read (the logging is not what this file pins)
@@ -311,5 +327,45 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
     expect(hasText('알파')).toBe(true); // organization 1's list is back
     expect(hasText(T.projectDeleteConfirmTitle)).toBe(false); // reverted (no drop on leaving) → the question is asked again
     expect(writes).toEqual([]);
+  });
+
+  // codex 3 follow-up — the LAST lines of defence, called by hand: a callback the page handed out in organization 1 and that is still held after the switch must send nothing.
+  it('⭐(m) the «삭제» callback held from organization 1 is called after the switch to organization 2: no DELETE is sent and nothing changes on the screen', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${T.deleteProject} — 알파`);
+    expect(captured.deleteConfirms.length).toBeGreaterThan(0); // the page really handed the dialog its «삭제»
+    const oldConfirm = captured.deleteConfirms[captured.deleteConfirms.length - 1]!;
+    await switchOrgTo('org-2');
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(false); // the dialog is gone; only the held callback is left
+    await act(async () => { oldConfirm(); });
+    await flush();
+    expect(writes).toEqual([]); // reverted (no check BEFORE the request) → DELETE /api/projects/p-a goes out from organization 2's screen
+    expect(hasText(T.projectDeleted)).toBe(false);
+    expect(hasText(T.projectDeleteFailed)).toBe(false);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(false);
+  });
+
+  it('⭐(n) the «저장» callback of organization 2\'s first render, called while organization 1\'s edit row was still held: no PATCH is sent (the edit does not carry over)', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${C.edit} — 알파`);
+    expect(captured.editSaves.length).toBeGreaterThan(0);
+    const mark = captured.editSaves.length;
+    await switchOrgTo('org-2');
+    expect(captured.editSaves.length).toBeGreaterThan(mark);
+    const firstSaveOfOrg2 = captured.editSaves[mark]!; // what the page handed the section in organization 2's FIRST render (the effect that drops the edit has not run yet)
+    await act(async () => { firstSaveOfOrg2(); });
+    await flush();
+    expect(writes).toEqual([]); // reverted (the edit row taken raw) → PATCH /api/projects/p-a goes out from organization 2's screen
+  });
+
+  it('(o) the «저장» callback held from organization 1 is called after the switch: no PATCH either', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await press(`${C.edit} — 알파`);
+    const oldSave = captured.editSaves[captured.editSaves.length - 1]!;
+    await switchOrgTo('org-2');
+    await act(async () => { oldSave(); });
+    await flush();
+    expect(writes).toEqual([]);
+    expect(hasText(T.projectUpdated)).toBe(false);
   });
 });
