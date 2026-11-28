@@ -1,4 +1,4 @@
-"""story 5043 (C10 · PO 11-28): a send that is sent AGAIN with the token (`client_nonce`) of a message this sender already made in this room is that message — not a second copy.
+"""story 5043 (C10 · PO 11-28): a send that is sent AGAIN with the token (`client_nonce`) of a message this sender already made in this room is that message — not a second copy (the token lives in its own table, `conversation_message_nonces`).
 
 The 6d measurement of the shared browser's draft saw «two identical messages» after a send whose answer did not arrive; the live walk made it again (the answer was cut on its way back, the person pressed Send once more).
 The web made a new token for every call and the server only echoed it. Real PostgreSQL (the partial unique index is what stands for ONE), the HTTP road end to end (ASGI), the harness of test_2889_send_message_references_realdb."""
@@ -114,6 +114,14 @@ async def _rows(Session, conv_id, sender_id=None):
         return list((await s.execute(q)).scalars().all())
 
 
+async def _nonce_rows(Session, conv_id, sender_id):
+    from sqlalchemy import select
+    from app.models.conversation import ConversationMessageNonce
+    async with Session() as s:
+        rows = (await s.execute(select(ConversationMessageNonce).where(ConversationMessageNonce.conversation_id == conv_id, ConversationMessageNonce.sender_id == sender_id))).scalars().all()
+        return sorted([(r.client_nonce, r.message_id) for r in rows])
+
+
 async def _post(client, conv_id, content, nonce=None):
     body: dict = {"content": content}
     if nonce is not None:
@@ -158,7 +166,8 @@ async def test_the_same_token_sent_again_is_the_same_message_not_a_second_copy(w
     assert again.json()["data"]["id"] == first.json()["data"]["id"]
     assert again.json()["data"]["content"] == "the line"
     rows = await _rows(Session, room.id, me.id)
-    assert len(rows) == 1 and rows[0].client_nonce == "nonce-aaa"
+    assert len(rows) == 1
+    assert await _nonce_rows(Session, room.id, me.id) == [("nonce-aaa", rows[0].id)]
 
 
 @with_world
@@ -204,7 +213,7 @@ async def test_without_a_token_nothing_changes_two_sends_are_two_messages(world)
     b = await _post(c, room.id, "same words")
     assert a.status_code == b.status_code == 201 and a.json()["data"]["id"] != b.json()["data"]["id"]
     rows = await _rows(Session, room.id, me.id)
-    assert len(rows) == 2 and all(r.client_nonce is None for r in rows)
+    assert len(rows) == 2 and await _nonce_rows(Session, room.id, me.id) == []   # (no token → no row: as before)
 
 
 @with_world
@@ -256,14 +265,57 @@ async def test_a_replay_sends_no_second_event_and_bumps_nothing(world):
 
 
 @with_world
-async def test_the_index_is_the_partial_unique_one_the_migration_says(world):
-    """the schema (the migration's, applied to this database): a nullable column and ONE partial unique index over (room · sender · token) where the token is set."""
+async def test_the_table_is_the_one_the_migration_says(world):
+    """the schema (the migration's, applied to this database): ONE small table of its own — primary key (room · sender · token) by name, both foreign keys cascade, and NOTHING added to the big messages table."""
     from sqlalchemy import text
     async with world["Session"]() as s:
-        col = (await s.execute(text("select data_type, character_maximum_length, is_nullable from information_schema.columns where table_name='conversation_messages' and column_name='client_nonce'"))).one()
-        idx = (await s.execute(text("select indexdef from pg_indexes where tablename='conversation_messages' and indexname='uq_conversation_messages_client_nonce'"))).scalar_one()
-    assert col == ("character varying", 64, "YES")
-    assert "UNIQUE" in idx and "(conversation_id, sender_id, client_nonce)" in idx and "client_nonce IS NOT NULL" in idx
+        cols = (await s.execute(text("select column_name, data_type, character_maximum_length, is_nullable from information_schema.columns where table_name='conversation_message_nonces' order by ordinal_position"))).all()
+        pk = (await s.execute(text("select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum)) from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum = any(c.conkey) where c.conname='pk_conversation_message_nonces' and c.contype='p'"))).scalar_one()
+        fks = (await s.execute(text("select confrelid::regclass::text, confdeltype from pg_constraint where conrelid='conversation_message_nonces'::regclass and contype='f' order by 1"))).all()
+        on_messages = (await s.execute(text("select count(*) from information_schema.columns where table_name='conversation_messages' and column_name='client_nonce'"))).scalar_one()
+    assert [(c[0], c[1], c[2], c[3]) for c in cols] == [("conversation_id", "uuid", None, "NO"), ("sender_id", "uuid", None, "NO"), ("client_nonce", "character varying", 64, "NO"), ("message_id", "uuid", None, "NO"), ("created_at", "timestamp with time zone", None, "NO")]
+    assert pk == "conversation_id,sender_id,client_nonce"
+    assert fks == [("conversation_messages", "c"), ("conversations", "c")]   # (c = ON DELETE CASCADE)
+    assert on_messages == 0, "the big messages table was touched"
+
+
+@with_world
+async def test_a_DM_send_that_forks_a_group_is_found_again_by_its_token_where_it_was_asked(world):
+    """the lens's fork hole: the first send forked a group (the message lives in the fork), its answer was lost, the retry comes to the ORIGINAL DM → the forked message again (same id, `forked` keys) — no second fork."""
+    from sqlalchemy import func, select
+    from app.models.conversation import Conversation, ConversationParticipant
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
+    c, Session, org, users, members = world["client"], world["Session"], world["org"], world["users"], world["members"]
+    async with Session() as s:
+        outsider_user = User(id=uuid.uuid4(), email=f"c-{uuid.uuid4().hex[:8]}@test.local", hashed_password="x")
+        s.add(outsider_user)
+        await s.flush()
+        outsider = Member(id=uuid.uuid4(), org_id=org.id, type="human", user_id=outsider_user.id, name="C")
+        s.add(outsider)
+        await s.flush()
+        from app.models.conversation import Conversation as Conv
+        room = (await s.execute(select(Conv).where(Conv.id == world["rooms"][0].id))).scalar_one()
+        s.add(ProjectAccess(project_id=room.project_id, member_id=outsider.id, permission="granted", role="member"))
+        dm = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=room.project_id, type="dm", created_by=members[0].id)
+        s.add(dm)
+        await s.flush()
+        s.add_all([ConversationParticipant(conversation_id=dm.id, member_id=m.id) for m in members])
+        await s.commit()
+        dm_id, outsider_id = dm.id, outsider.id
+    body = {"content": "hello and a third person", "mentioned_ids": [str(outsider_id)], "client_nonce": "nonce-fork"}
+    first = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)
+    assert first.status_code == 201 and first.json().get("forked") is True, first.text
+    async with Session() as s:
+        groups_before = (await s.execute(select(func.count()).select_from(Conversation).where(Conversation.type == "group", Conversation.created_by == members[0].id))).scalar_one()
+    again = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)
+    assert again.status_code == 200, again.text
+    assert again.json()["data"]["id"] == first.json()["data"]["id"]
+    assert again.json().get("forked") is True and again.json()["forked_conversation_id"] == first.json()["forked_conversation_id"]
+    async with Session() as s:
+        groups_after = (await s.execute(select(func.count()).select_from(Conversation).where(Conversation.type == "group", Conversation.created_by == members[0].id))).scalar_one()
+    assert groups_after == groups_before, "the retry forked a second group"
 
 
 # ── what the codex security lens of this change asked for ──
@@ -344,13 +396,13 @@ async def test_the_race_road_leaves_no_seat_and_no_thread_count_behind(world):
     assert len(seats) == 2
 
 
-def test_only_THIS_unique_index_is_the_nonce_conflict_by_the_databases_own_words():
+def test_only_THIS_primary_key_is_the_nonce_conflict_by_the_databases_own_words():
     from sqlalchemy.exc import IntegrityError
     from app.routers.conversations import _is_nonce_conflict
 
     class _Cause(Exception):
         def __init__(self, sqlstate, name):
-            super().__init__("duplicate key value violates unique constraint \"uq_conversation_messages_client_nonce\"")  # (the SAME words in every case: only the structured fields differ)
+            super().__init__("duplicate key value violates unique constraint \"pk_conversation_message_nonces\"")  # (the SAME words in every case: only the structured fields differ)
             self.sqlstate, self.constraint_name = sqlstate, name
 
     def _err(sqlstate, name):
@@ -358,20 +410,7 @@ def test_only_THIS_unique_index_is_the_nonce_conflict_by_the_databases_own_words
         orig.__cause__ = _Cause(sqlstate, name)
         return IntegrityError("stmt", {}, orig)
 
-    assert _is_nonce_conflict(_err("23505", "uq_conversation_messages_client_nonce"))
+    assert _is_nonce_conflict(_err("23505", "pk_conversation_message_nonces"))
     assert not _is_nonce_conflict(_err("23505", "some_other_unique"))
-    assert not _is_nonce_conflict(_err("23503", "uq_conversation_messages_client_nonce"))
-    assert not _is_nonce_conflict(IntegrityError("stmt", {}, Exception("uq_conversation_messages_client_nonce in the text only")))
-
-
-def test_the_migration_refuses_a_look_alike_index():
-    import importlib.util, pathlib
-    p = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0509_conversation_messages_client_nonce.py"
-    spec = importlib.util.spec_from_file_location("m0509", p)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    ok = "CREATE UNIQUE INDEX uq_conversation_messages_client_nonce ON public.conversation_messages USING btree (conversation_id, sender_id, client_nonce) WHERE (client_nonce IS NOT NULL)"
-    assert m._index_shape_ok(ok)
-    assert not m._index_shape_ok(ok.replace("UNIQUE ", ""))
-    assert not m._index_shape_ok(ok.replace(" WHERE (client_nonce IS NOT NULL)", ""))
-    assert not m._index_shape_ok(ok.replace("sender_id, ", ""))
+    assert not _is_nonce_conflict(_err("23503", "pk_conversation_message_nonces"))
+    assert not _is_nonce_conflict(IntegrityError("stmt", {}, Exception("pk_conversation_message_nonces in the text only")))
