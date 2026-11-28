@@ -64,7 +64,7 @@ async def test_a_project_an_agent_deletes_is_a_card_naming_what_goes_with_it_and
         reqs = await _requests(Session, d["org_id"])
         assert len(reqs) == 1 and reqs[0].hitl_metadata["action_key"] == "project.delete"
         # the seed holds two stories and one task: the numbers are on the card, with the name
-        assert "5041 Project" in reqs[0].title and re.search(r"(장 2개|2 stories)", reqs[0].title) and re.search(r"(할 일 1개|1 tasks)", reqs[0].title), reqs[0].title
+        assert "5041 Project" in reqs[0].title and re.search(r"(스토리 2개|2 stories)", reqs[0].title) and re.search(r"(할 일 1개|1 tasks)", reqs[0].title), reqs[0].title
 
         async def _alive():
             async with Session() as s:
@@ -154,7 +154,7 @@ async def test_an_organisation_an_agent_deletes_is_a_card_only_the_owner_can_pre
         assert r.status_code == 202 and r.json()["status"] == "pending_approval", r.text
         reqs = await _requests(Session, d["org_id"])
         assert len(reqs) == 1 and reqs[0].hitl_metadata["action_key"] == "org.delete"
-        assert "5041 Org" in reqs[0].title and re.search(r"(프로젝트 1개|1 projects)", reqs[0].title) and re.search(r"(장 2개|2 stories)", reqs[0].title), reqs[0].title
+        assert "5041 Org" in reqs[0].title and re.search(r"(프로젝트 1개|1 projects)", reqs[0].title) and re.search(r"(스토리 2개|2 stories)", reqs[0].title), reqs[0].title
 
         async def _alive():
             async with Session() as s:

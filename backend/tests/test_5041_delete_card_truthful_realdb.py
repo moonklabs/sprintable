@@ -62,12 +62,12 @@ async def test_the_project_card_says_out_of_sight_and_the_data_stays_and_the_con
         assert r.status_code == 202, r.text
         card = (await _requests(Session, d["org_id"]))[0]
         title = card.title
-        stories = _n(title, r"장 (\d+)개", r"(\d+) stories")
+        stories = _n(title, r"스토리 (\d+)개", r"(\d+) stories")
         tasks = _n(title, r"할 일 (\d+)개", r"(\d+) tasks")
         rooms = _n(title, r"대화 (\d+)개", r"(\d+) conversations")
         assert (stories, tasks, rooms) == (2, 1, 2), title
         # what the card says about them: out of sight, the data stays; the rooms stay — and NOT «gone with it»
-        assert re.search(r"보이지 않게|out of sight", title) and re.search(r"자료는 남아요|the data stays", title), title
+        assert re.search(r"목록에서 사라져요|out of sight", title) and re.search(r"자료는 지워지지 않아요|the data stays", title), title
         assert re.search(r"대화 \d+개는 남아요|conversations stay", title), title
         assert not re.search(r"함께 사라|gone with it|go with it", title), title
 
@@ -112,9 +112,9 @@ async def test_the_organisation_card_says_it_is_closed_and_the_data_stays_and_th
         card = (await _requests(Session, d["org_id"]))[0]
         title = card.title
         projects = _n(title, r"프로젝트 (\d+)개", r"of (\d+) projects")
-        stories = _n(title, r"장 (\d+)개", r"(\d+) stories")
+        stories = _n(title, r"스토리 (\d+)개", r"(\d+) stories")
         assert (projects, stories) == (1, 2), title
-        assert re.search(r"조직을 닫음|organization is closed", title) and re.search(r"무효가 돼요|stop working", title) and re.search(r"자료는 남아요|stays", title), title
+        assert re.search(r"조직을 닫음|organization is closed", title) and re.search(r"무효가 돼요|stop working", title) and re.search(r"자료는 지워지지 않아요|stays", title), title
         assert not re.search(r"함께 사라|gone with it|go with it", title), title
 
         await _act_as(app, Session, uid, d["org_id"])
