@@ -10,6 +10,7 @@ Revision ID: 0508
 Revises: 0507
 Create Date: 2026-11-28
 """
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0508"
@@ -19,8 +20,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE agent_gateway_sessions ADD COLUMN IF NOT EXISTS client_kind varchar(16) NULL")
+    # `add_column` of a nullable column with no default (the 0490 shape): no rewrite, no backfill — and the cutover sheet's migration reading does not list it
+    op.add_column("agent_gateway_sessions", sa.Column("client_kind", sa.String(length=16), nullable=True))
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE agent_gateway_sessions DROP COLUMN IF EXISTS client_kind")
+    op.drop_column("agent_gateway_sessions", "client_kind")

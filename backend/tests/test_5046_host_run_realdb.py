@@ -12,7 +12,7 @@ from __future__ import annotations
 import pathlib
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
@@ -62,11 +62,12 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _session_row(Session, agent, kind):
+async def _session_row(Session, agent, kind, *, age_sec=0):
+    t = datetime.now(timezone.utc) - timedelta(seconds=age_sec)
     async with Session() as s:
         await s.execute(
             text("INSERT INTO agent_gateway_sessions (id, agent_id, connected_at, last_seen_at, last_ack_seq, client_kind) VALUES (:i, :a, :t, :t, 0, :k)"),
-            {"i": uuid.uuid4(), "a": agent, "t": datetime.now(timezone.utc), "k": kind},
+            {"i": uuid.uuid4(), "a": agent, "t": t, "k": kind},
         )
         await s.commit()
 
@@ -92,6 +93,28 @@ async def test_host_run_is_every_live_session_saying_host_and_nothing_else():
         assert await _host_run(Session, [a, b, c, d]) == {a}
         assert await _host_run(Session, [b, c, d]) == set()      # another agent's row never leaks into the answer
         assert await _host_run(Session, []) == set()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_a_row_that_only_waits_to_expire_is_not_a_live_host(monkeypatch):
+    """codex (security lens): a lifespan end STAMPS the row to expire instead of deleting it — a host that is gone, then a webhook marks the agent working, must not read as host-run"""
+    from app.core.config import settings
+    from app.routers.agent_gateway import _SESSION_FRESH_TTL
+
+    monkeypatch.setattr(settings, "presence_online_redis_enabled", False)  # the rows' own freshness is the liveness (the Redis road reads liveness from Redis)
+    engine, Session, w = await _world()
+    try:
+        old = _SESSION_FRESH_TTL + 60
+        a, b, c = w.g_p, w.g_2, w.g_admin
+        await _session_row(Session, a, "host", age_sec=old)                 # only a stale host row → no live stream at all
+        await _session_row(Session, b, "host")                              # a live host row …
+        await _session_row(Session, b, None, age_sec=old)                   # … beside a STALE other row (a dead plugin connection): the stale one is not counted
+        await _session_row(Session, c, "host", age_sec=old)                 # a stale host row beside a LIVE plugin row → not host-run (the live one decides)
+        await _session_row(Session, c, None)
+        assert await _host_run(Session, [a, b, c]) == {b}
     finally:
         await engine.dispose()
 
