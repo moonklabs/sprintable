@@ -308,13 +308,20 @@ def test_the_backend_prod_pin_of_step_4c_is_declared_and_says_what_not_to_do():
     mod = _load()
     pins, _ = mod._load_allowlist()
     entry = pins["sprintable-backend-prod"]
-    assert str(entry["until"]) == "2026-11-27" and entry["declared_by"], entry   # a day to judge again, not a day to delete: the guard takes 30 days at most
+    # a day to judge again, not a day to delete (the guard takes 30 days at most): the PO renews it on that day (11-28: 11-27 → 12-27),
+    # so the test pins that it IS a real date and someone owns it — not one literal day, which would turn every renewal red.
+    from datetime import date as _date
+    assert _date.fromisoformat(str(entry["until"])) and entry["declared_by"], entry
     reason = " ".join(str(entry["reason"]).split())
     for token in ("CUTOVER-prod 4c", "--to-latest", "사고", "508", "8c 뒤에 지우지 않는다", "REMOVALS-prod", "다시 판단할 날", "12단계 1번 블록"):
         assert token in reason, token
     # and the guard accepts exactly the live shape of the evening (the real revision 100% by name, the forwarder revision only as a tag at 0%)
-    from datetime import date
-    assert mod._expired(entry, date(2026, 10, 29)) is None
+    from datetime import date, timedelta
+    # judged on a re-judge day at most 29 days before `until` the guard takes it; the day after `until` it says «expired» —
+    # measured from the entry's own date, so a renewal (11-28: 11-27 → 12-27) does not turn this red the way a fixed 10-29 did.
+    until = date.fromisoformat(str(entry["until"]))
+    assert mod._expired(entry, until - timedelta(days=29)) is None
+    assert mod._expired(entry, until + timedelta(days=1)) is not None
     live = [{"revisionName": "sprintable-backend-prod-00342-mn9", "percent": 100}, {"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 0, "tag": "fwd"}]
     assert mod._is_pinned(live) is True, "it is a pin: that is why it is declared"
     after_8c = [{"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 100}, {"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 0, "tag": "fwd"}]
