@@ -12,7 +12,7 @@ main.py 핸들러가 {data:null,error:{code,message,...},meta:null}로 감싼다
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -171,8 +171,13 @@ async def create_hypothesis(
 
 # story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff): /draft와 동일 이유로 /{id}
 # 계열보다 먼저 선언 — "guided"가 hypothesis_id UUID로 오파싱되는 걸 막는다.
+_CARD_STATEMENT_MAX = 70
+_CARD_METRIC_MAX = 30
+
+
 @router.post("/guided", response_model=HypothesisResponse, status_code=201)
 async def create_hypothesis_guided(
+    request: Request,
     body: HypothesisGuidedCreate,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -181,6 +186,26 @@ async def create_hypothesis_guided(
     """guided 3부 폼(statement·metric·target·direction) → status=measuring까지 1콜.
     응답은 표준 HypothesisResponse(FE가 읽을 필드는 다른 생성 경로와 동일 — id/statement/
     metric_definition/status/measure_after 등, status가 "measuring"으로 확定됨)."""
+    # story 5041 B5 — an AGENT's «create the first hypothesis and start measuring» (a person's decision) is an approval card a person presses, or what the user's setting says — never «go on» (no auto slot)
+    from app.services import agent_action
+
+    _agent = await agent_action.calling_agent(session, auth, org_id, request)
+    if _agent is not None:
+        # what the person reads on the card is what runs: the statement and the metric the agent chose must fit on it WHOLE (the card is one short line) — otherwise the call is refused, never shown cut
+        _statement = agent_action.card_text(body.statement, "—", 10_000)
+        _metric = agent_action.card_text(body.metric, "—", 10_000)
+        if len(_statement) > _CARD_STATEMENT_MAX or len(_metric) > _CARD_METRIC_MAX:
+            raise HTTPException(status_code=422, detail={
+                "code": "CARD_TEXT_TOO_LONG",
+                "message": f"an approval card shows the statement (up to {_CARD_STATEMENT_MAX} characters) and the metric (up to {_CARD_METRIC_MAX}) whole — shorten them",
+            })
+        _decision = await agent_action.gate_agent_call(
+            request, session, auth=auth, agent=_agent, org_id=org_id, project_id=body.project_id, action_key="hypothesis.guided_create",
+            target_label=f"{_statement} · {_metric} {body.direction} {body.target:g}",
+        )
+        if _decision is None:  # never (no auto slot) — and were it ever, the agent keeps the road's own refusal
+            _raise(svc.HypothesisServiceError("HUMAN_ONLY", "guided 가설 생성은 휴먼 전용입니다."))
+        return _decision
     caller = await resolve_member(auth, org_id, session, project_id=body.project_id)
     try:
         return await svc.create_hypothesis_guided(session, org_id, caller, body)

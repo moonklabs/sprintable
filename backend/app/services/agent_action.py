@@ -88,6 +88,9 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     # story 5041 B3 — the two big deletions: always a card (no `auto` slot), and the card says how much goes with it, in numbers
     _spec("org.delete", "org_delete", "DELETE", rf"^/api/v2/organizations/{_UUID}$", "no", takes_body=True),
     _spec("project.delete", "project_delete", "DELETE", rf"^/api/v2/projects/{_UUID}$", "no"),
+    # story 5041 B5 — two decisions an agent may ASK for (rows 98 · 101): the road demands a person, so there is no `auto` slot
+    _spec("goal.activate", "goal_activate", "POST", rf"^/api/v2/(?:goals|epics)/{_UUID}/transition$", "partly", takes_body=True),
+    _spec("hypothesis.guided_create", "hypothesis_guided_create", "POST", r"^/api/v2/hypotheses/guided$", "partly", takes_body=True),
     # story 5041 B4b — a computer / a desktop line disconnected, an agent's run stopped, an event only a person may publish: roads of a person (an organisation owner / admin, a session, an assignee), so there is no `auto` slot
     _spec("desktop_computer.disconnect", "desktop_computer_disconnect", "DELETE", rf"^/api/v2/desktop/computers/{_UUID}$", "no"),
     _spec("desktop_setup.disconnect", "desktop_setup_disconnect", "DELETE", rf"^/api/v2/desktop/setups/{_UUID}$", "no"),
