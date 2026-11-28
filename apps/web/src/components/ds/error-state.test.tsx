@@ -49,6 +49,8 @@ describe('ds ErrorState', () => {
   it('⭐role=alert · 제목은 잉크(붉은 글자 클래스 0) · 붉은 건 아이콘뿐 · 아이콘은 기본 lg 24(inline은 sm 16)', async () => {
     await render(<ErrorState title="일감을 불러오지 못했어요" description="잠시 뒤에 다시 해 주세요" />);
     expect(err().getAttribute('role')).toBe('alert');
+    expect(err().getAttribute('aria-live')).toBe('assertive'); // 옛 ui Alert(destructive)가 기본으로 달던 셋 — 호출처 시험(content · 사이트 글 로드 실패)이 같은 값을 읽는다
+    expect(err().getAttribute('aria-atomic')).toBe('true');
     const [title, desc] = Array.from(err().querySelectorAll('p'));
     expect(title!.textContent).toBe('일감을 불러오지 못했어요');
     expect(title!.className).toContain('text-ds-ink');

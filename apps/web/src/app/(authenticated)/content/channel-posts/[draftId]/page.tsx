@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ErrorState } from '@/components/ds/error-state';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -868,6 +869,7 @@ export default function ChannelPostEditPage() {
   >(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0); // story 5048 ⑤: 「불러오기 실패」의 «다시 시도» — 올리면 아래 읽기 효과가 다시 돈다(404 · 403엔 안 쓴다)
   // story #3662(campaigns/[campaignId]/page.tsx:76 선례, 유나 確定) — notFound/loadError
   // 하나였던 것에 forbidden을 더해 서버 status를 그대로 세 갈래로 가른다(추정 0).
   const [notFound, setNotFound] = useState(false);
@@ -1210,7 +1212,7 @@ export default function ChannelPostEditPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, draftId, channelLabel]);
+  }, [orgId, draftId, channelLabel, reloadTick]);
 
   // story #3500(BE #3498, PO 確定 2026-09-05 — BE 미착지, 계약만 고정) — 잔량은
   // 규칙과 별개 왕복(draft/versions 로드를 막지 않는다, `limit`과 동형 원칙).
@@ -2201,36 +2203,32 @@ export default function ChannelPostEditPage() {
   if (notFound) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
-        <Alert variant="destructive">
-          <AlertDescription>{t('editNotFound')}</AlertDescription>
-        </Alert>
-        {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
-            읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
-            새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
-        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
-          {t('channelPostsCalendarBackToListCta')}
-        </Link>
+        <ErrorState title={t('editNotFound')}>
+          {/* story #3667(3662 후속, 유나 #4016 적기만 ②) — 링크로 들어와 404/403을
+              읽은 사용자에게 «나가는 길» 하나(막다른 길 클래스, 3650과 같은 결).
+              새 낱말 0 — channel-posts/calendar 페이지가 이미 쓰는 키 재사용. */}
+          <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
+            {t('channelPostsCalendarBackToListCta')}
+          </Link>
+        </ErrorState>
       </div>
     );
   }
   if (forbidden) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-3 p-6">
-        <Alert variant="destructive">
-          <AlertDescription>{t('editForbidden')}</AlertDescription>
-        </Alert>
-        <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
-          {t('channelPostsCalendarBackToListCta')}
-        </Link>
+        <ErrorState title={t('editForbidden')}>
+          <Link href={flatHref('/content/channel-posts')} className="text-sm font-medium text-primary underline">
+            {t('channelPostsCalendarBackToListCta')}
+          </Link>
+        </ErrorState>
       </div>
     );
   }
   if (loadError || !draft) {
     return (
       <div className="mx-auto w-full max-w-2xl p-6">
-        <Alert variant="destructive">
-          <AlertDescription>{t('editLoadFailed')}</AlertDescription>
-        </Alert>
+        <ErrorState title={t('editLoadFailed')} onRetry={() => setReloadTick((n) => n + 1)} />
       </div>
     );
   }

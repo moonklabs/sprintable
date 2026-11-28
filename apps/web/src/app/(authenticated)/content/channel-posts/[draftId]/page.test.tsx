@@ -2438,6 +2438,27 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
   });
 
+  it('⭐story 5048 ⑤ — 불러오기 실패(500)의 「다시 시도」는 다시 읽는다(요청이 늘어난다) · 404 · 403엔 없다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<ChannelPostEditPage />)); });
+    await flush();
+    const retry = [...container.querySelectorAll('[data-slot="ds-error-state"] button')].find((b) => b.textContent === koMessages.common.retry) as HTMLButtonElement;
+    expect(retry).toBeDefined();
+    const before = fetchMock.mock.calls.length;
+    await act(async () => { retry.click(); });
+    await flush();
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
+    for (const status of [404, 403]) {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json: async () => ({}) })));
+      await act(async () => { root.render(wrap(<ChannelPostEditPage key={status} />)); });
+      await flush();
+      const box = container.querySelector('[data-slot="ds-error-state"]');
+      expect(box, String(status)).not.toBeNull();
+      expect([...box!.querySelectorAll('button')].some((b) => b.textContent === koMessages.common.retry), String(status)).toBe(false);
+    }
+  });
+
   it('로드 실패(500) — 오류 알림을 보인다 · 나가는 링크는 0(막다른 길 아닌 다시 시도 부류)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     await act(async () => {
@@ -2446,6 +2467,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.querySelector('[data-slot="ds-error-state"]')).not.toBeNull(); // story 5048 ⑤: the ds ErrorState
     // story #3667(3662 후속) — 그 외 실패(3644/3632 봉투)엔 목록 링크를 안 그린다.
     expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
   });
@@ -2481,6 +2503,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(alertEl).not.toBeNull();
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
     expect(alertEl?.getAttribute('aria-atomic')).toBe('true');
+    expect(alertEl?.getAttribute('data-slot')).toBe('ds-error-state'); // story 5048 ⑤: the whole-page «cannot show this» is the ds ErrorState (was the ui destructive Alert)
   });
 
   it('로드 실패(403) — 「볼 권한이 없습니다」+목록으로 나가는 링크', async () => {
@@ -2491,6 +2514,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editForbidden);
+    expect(container.querySelector('[data-slot="ds-error-state"]')).not.toBeNull(); // story 5048 ⑤: the ds ErrorState
     expect(container.textContent).not.toContain(koMessages.content.editLoadFailed);
     const backLink = container.querySelector('a[href="/content/channel-posts"]');
     expect(backLink).not.toBeNull();
@@ -2505,6 +2529,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.querySelector('[data-slot="ds-error-state"]')).not.toBeNull(); // story 5048 ⑤: the ds ErrorState
     expect(container.textContent).not.toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editForbidden);
     expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
@@ -2530,6 +2555,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     await flush();
 
     expect(container.textContent).toContain(koMessages.content.editLoadFailed);
+    expect(container.querySelector('[data-slot="ds-error-state"]')).not.toBeNull(); // story 5048 ⑤: the ds ErrorState
     expect(container.textContent).not.toContain(koMessages.content.editNotFound);
     expect(container.textContent).not.toContain(koMessages.content.editForbidden);
     expect(container.querySelector('a[href="/content/channel-posts"]')).toBeNull();
