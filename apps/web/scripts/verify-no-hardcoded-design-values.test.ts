@@ -70,8 +70,10 @@ describe('실 저장소 — 지금 src가 기준선과 같다 · 되돌리면 RE
     expect({ increased: r.increased, stale: r.stale }).toEqual({ increased: [], stale: [] });
   });
   it('⭐되돌리기 시뮬레이션: 박힌 값 하나가 새로 들어오면 그 분류가 increased', () => {
+    // 기준선 «위로» 하나 — 실측 + 1이 아니다. 큰 수 분류(옛 별칭 색 · 편집체)는 다른 PR이 수를 줄이면 실측 < 기준선이 되는데(경고만 · 기준선은 다음 정리 때),
+    // 그때 «실측 + 1»은 기준선과 같아져 increased가 아니게 된다(6063: 옛 Alert를 걷어 old-alias-color 6097 → 6093 → 이 시험이 빨개짐). 비교 논리는 기준선 기준이다.
     for (const c of CATEGORIES) {
-      const r = compareToBaseline({ ...actual, [c.id]: (actual[c.id] ?? 0) + 1 }, baseline);
+      const r = compareToBaseline({ ...actual, [c.id]: (baseline[c.id] ?? 0) + 1 }, baseline);
       expect(r.increased.map((d) => d.id), c.id).toContain(c.id);
     }
   });
