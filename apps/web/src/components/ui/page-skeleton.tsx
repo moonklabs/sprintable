@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 
 interface PageSkeletonProps {
   /** `rows`(기본) = 머리 + 설명 + 줄 다섯 — 도착 화면 문법(PageHeader 제목 · 설명 → 줄 목록). `cards` = 머리 + 카드 넷(2열) — 성과 보드 전용. */
@@ -16,11 +16,10 @@ interface PageSkeletonProps {
 // 도착 때 블록 높이와 폭이 바뀌었다. 치수는 유나 판정(2차 · 실물 클래스): 제목 h-8 md:h-9.5(PageHeader page = text-2xl md:text-display, 32px × 줄간격 1.2 ≈ 38px — story 4831에서 md:h-9 + text-3xl 30px에서 옮김) · 설명 h-4 w-64 ·
 // 줄 5 × h-14 · 성과 보드만 eyebrow(h-3 w-10) + 카드 4(grid-cols-2 gap-3 sm:grid-cols-4 — 실물은 1440에서 한 줄 넷).
 export function PageSkeleton({ variant = 'rows', eyebrow = false, className = 'space-y-6 p-6' }: PageSkeletonProps) {
-  // story #4274(까디르 검수 P3) — 화면 읽기 프로그램에 «불러오는 중»을 상태로 알린다(role="status" = 암묵적 aria-live polite · aria-busy · 보이지 않는 라벨은 common.loading).
+  // story #4274(까디르 검수 P3) — 화면 읽기 프로그램에 «불러오는 중»을 상태로 알린다. story 5048 ⑤-⑦: ds SkeletonGroup(role=status · aria-busy · 이름 = common.loading — 막대는 장식)이 그 한 마디를 한다(옛: ui/skeleton + sr-only 글자).
   const t = useTranslations('common');
   return (
-    <div className={className} role="status" aria-busy="true">
-      <span className="sr-only">{t('loading')}</span>
+    <SkeletonGroup label={t('loading')} className={className}>
       <div className="space-y-2">
         {eyebrow ? <Skeleton className="h-3 w-10" /> : null}
         <Skeleton className="h-8 w-40 md:h-9.5" />
@@ -29,16 +28,16 @@ export function PageSkeleton({ variant = 'rows', eyebrow = false, className = 's
       {variant === 'cards' ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-xl" />
+            <Skeleton key={i} className="h-24" />
           ))}
         </div>
       ) : (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 rounded-lg" />
+            <Skeleton key={i} className="h-14" />
           ))}
         </div>
       )}
-    </div>
+    </SkeletonGroup>
   );
 }
