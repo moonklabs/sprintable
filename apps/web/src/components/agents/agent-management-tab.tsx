@@ -340,8 +340,9 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
               'data-testid': `agent-row-${agent.id}`,
               // the checkbox (only a desktop runtime's row has one, for an admin) stands above the stretched link; the decorative placeholder of the other rows is not a press and takes no `z-10`
               leadingClassName: isAdmin && isDesktopRuntime(agent.runtime_type) ? 'relative z-10' : undefined,
+              // a phone: the name link is stretched over the row, so its keyboard-focus ring (clipped by the title slot's `truncate`) is drawn on the ROW, with the attention queue's tokens (`a` here is the name link alone)
               // a phone: the row's right-hand box (status chips · gaps) is not a press — it lets a tap through to the stretched name link; only the «⋯» trigger (a press of its own) takes the tap itself
-              className: 'touch:[&>[data-slot=ds-list-row-trailing]]:pointer-events-none touch:[&>[data-slot=ds-list-row-trailing]_[data-slot=ds-row-actions-trigger]]:pointer-events-auto',
+              className: 'touch:[&>[data-slot=ds-list-row-trailing]]:pointer-events-none touch:[&>[data-slot=ds-list-row-trailing]_[data-slot=ds-row-actions-trigger]]:pointer-events-auto touch:has-[a:focus-visible]:ring-2 touch:has-[a:focus-visible]:ring-inset touch:has-[a:focus-visible]:ring-ds-action',
               leading: isAdmin ? (
                 isDesktopRuntime(agent.runtime_type) ? (
                   <Checkbox

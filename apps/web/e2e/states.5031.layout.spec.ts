@@ -580,6 +580,30 @@ test('pressKey: only the side under 44 is in a `small` key — a text link\'s wi
   expect(pressKey('x', 24, 20)).toBe('x 24x20');
 });
 
+// the agents' rows (codex PR-B round 2): the name link is stretched over the row on a phone, so the keyboard-focus ring belongs on the ROW there (the link's own ring is clipped by the title slot's `truncate`); on a pointer device (no stretch) the row gets no ring from the link.
+// Measured, not drawn: the row root's inset ring (a `box-shadow`) exists or not while the name link has `:focus-visible`; the row's height is the only size read (no text width).
+for (const width of WIDTHS) {
+  test.describe(`the agents row · keyboard focus on the name link · ${width}`, () => {
+    if (width < 500) test.use({ hasTouch: true, isMobile: true });
+    test(width < 500 ? 'the focus ring is on the WHOLE row' : 'the row gets no ring from the link (pointer devices)', async ({ page }) => {
+      await open(page, 'agents', 'default', width);
+      await settle(page);
+      await page.keyboard.press('Tab'); // keyboard modality: so a focus() is a :focus-visible one
+      await page.locator('[data-testid="agent-row-a2"] a[href]').focus();
+      const m = await page.evaluate(() => {
+        const a = document.querySelector('[data-testid="agent-row-a2"] a[href]') as HTMLElement;
+        const row = a.closest('[data-slot="ds-list-row"]') as HTMLElement;
+        return { focusVisible: a.matches(':focus-visible'), shadow: getComputedStyle(row).boxShadow, rowH: row.getBoundingClientRect().height, links: row.querySelectorAll('a[href]').length };
+      });
+      await shot(page, page.locator('[data-testid="agent-row-a2"]'), `states-agents-focus-ring-${width}`);
+      expect(m.focusVisible, 'the name link has keyboard focus (:focus-visible)').toBe(true);
+      expect(m.links, 'the name link is the only link of an agent row (a ring on `a:focus-visible` is then THE name link)').toBe(1);
+      const ringOnRow = m.shadow !== 'none' && m.shadow.includes('inset');
+      if (width < 500) { expect(ringOnRow, `the row root draws the inset ring (box-shadow: ${m.shadow})`).toBe(true); expect(m.rowH, 'the ring is the row (its height)').toBeGreaterThanOrEqual(44); } else expect(ringOnRow, `no ring on the row at a pointer device (box-shadow: ${m.shadow})`).toBe(false);
+    });
+  });
+}
+
 // the shell's own chrome (measured once: it is the same in every scene)
 test('the shell chrome (top bar · icon rail · phone tab bar): the non-ds parts it draws are exactly the listed ones', async ({ page }) => {
   await open(page, 'home', 'default', 1440);
