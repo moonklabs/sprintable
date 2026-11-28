@@ -100,10 +100,15 @@ describe('[SID:5031] ChatView — a failed first read of the messages has a retr
   type Answer = { ok: boolean; json: () => Promise<unknown> };
   const okEmpty = (): Answer => ({ ok: true, json: async () => ({ data: [], meta: { next_cursor: null, has_more: false } }) });
   const fail500 = (): Answer => ({ ok: false, json: async () => ({}) });
+  // `release` throws unless the read was really MADE (its promise handed to a fetch): a read that never went out must fail the test, not pass it silently
   function deferredAnswer() {
-    let release: (a: Answer) => void = () => {};
-    const promise = new Promise<Answer>((resolve) => { release = resolve; });
-    return { promise, release };
+    let resolveIt: (a: Answer) => void = () => {};
+    let taken = false;
+    const promise = new Promise<Answer>((resolve) => { resolveIt = resolve; });
+    return {
+      get promise() { taken = true; return promise; },
+      release: (a: Answer) => { if (!taken) throw new Error('the held read was never made'); resolveIt(a); },
+    };
   }
   const settle = async () => { await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); }); };
   const pollNow = async () => {

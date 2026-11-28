@@ -12,7 +12,7 @@ import koMessages from '../../../../messages/ko.json';
 const { useDashboardContextMock, captured } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   // the props the page hands to its two project components, every render (the REAL components still draw; this only lets a test call an old or a current callback by hand)
-  captured: { deleteConfirms: [] as Array<() => void>, editSaves: [] as Array<() => void> },
+  captured: { deleteConfirms: [] as Array<() => void>, editSaves: [] as Array<() => void>, creates: [] as Array<() => void> },
 }));
 vi.mock('@/components/settings/project-delete-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/settings/project-delete-dialog')>();
@@ -22,7 +22,7 @@ vi.mock('@/components/settings/project-delete-dialog', async (importOriginal) =>
 vi.mock('@/components/settings/projects-section', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/settings/projects-section')>();
   const { createElement } = await import('react');
-  return { ...actual, ProjectsSection: (p: Parameters<typeof actual.ProjectsSection>[0]) => { captured.editSaves.push(p.onEditSave); return createElement(actual.ProjectsSection, p); } };
+  return { ...actual, ProjectsSection: (p: Parameters<typeof actual.ProjectsSection>[0]) => { captured.editSaves.push(p.onEditSave); captured.creates.push(p.onCreate); return createElement(actual.ProjectsSection, p); } };
 });
 vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
@@ -36,6 +36,12 @@ let root: Root;
 let projectListUrls: string[];
 let writes: Array<{ method: string; url: string }>;
 let projectPostImpl: (() => unknown) | null = null; // a project create (POST) the test holds in flight
+let posts: string[]; // the bodies of every POST /api/projects that was sent
+let holdWrites = false; // DELETE / PATCH are held in flight until the test releases them
+let heldWrites: Array<{ method: string; release: (v: unknown) => void }>;
+const routerRefresh = vi.fn();
+const routerPush = vi.fn();
+const assignMock = vi.fn();
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -48,6 +54,13 @@ beforeEach(() => {
   captured.editSaves.length = 0;
   projectPostImpl = null;
   writes = [];
+  posts = [];
+  holdWrites = false;
+  heldWrites = [];
+  routerRefresh.mockClear();
+  routerPush.mockClear();
+  assignMock.mockClear();
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign: assignMock } });
   vi.spyOn(console, 'error').mockImplementation(() => {}); // the page logs the failed read (the logging is not what this file pins)
 });
 afterEach(async () => {
@@ -62,15 +75,16 @@ afterEach(async () => {
 const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
 const json = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => ({ data }) });
 
-async function mountPage(query: string, projectsImpl: (url: string, call: number) => unknown, ctxOrgId = 'org-1') {
+async function mountPage(query: string, projectsImpl: (url: string, call: number) => unknown, ctxOrgId = 'org-1', opts: { currentProject?: boolean } = {}) {
   useDashboardContextMock.mockReturnValue({ orgId: ctxOrgId, orgMemberships: [{ orgId: ctxOrgId, role: 'owner' }], currentMemberType: 'human', currentTeamMemberId: 'tm-1', projectId: null });
   vi.doMock('next/navigation', () => {
     const params = new URLSearchParams(query);
-    return { useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }), useSearchParams: () => params, usePathname: () => '/settings' };
+    return { useRouter: () => ({ replace: vi.fn(), refresh: routerRefresh, push: routerPush, prefetch: vi.fn() }), useSearchParams: () => params, usePathname: () => '/settings' };
   });
   const fetchWithAuthMock = vi.fn(async (input: string) => {
     const url = String(input);
     if (url === '/api/me') return json({ role: 'owner', user_id: 'u1' });
+    if (url === '/api/current-project' && opts.currentProject) return json({ project_id: 'p1', org_id: ctxOrgId });
     if (url === '/api/organizations') return json([{ id: ctxOrgId, name: '우리 조직', slug: 'our', role: 'owner' }]);
     return json(null, 404);
   });
@@ -81,7 +95,11 @@ async function mountPage(query: string, projectsImpl: (url: string, call: number
       projectListUrls.push(url);
       return projectsImpl(url, projectListUrls.length) as ReturnType<typeof json>;
     }
-    if (url.startsWith('/api/projects/') && (method === 'DELETE' || method === 'PATCH')) { writes.push({ method, url }); return method === 'DELETE' ? json({ ok: true }) : json({ id: 'p-a', name: '바뀐이름', description: null }); }
+    if (url.startsWith('/api/projects/') && (method === 'DELETE' || method === 'PATCH')) {
+      writes.push({ method, url });
+      if (holdWrites) return new Promise((resolve) => { heldWrites.push({ method, release: resolve }); }) as never;
+      return method === 'DELETE' ? json({ ok: true }) : json({ id: 'p-a', name: '바뀐이름', description: null }); }
+    if (url === '/api/projects' && method === 'POST') posts.push(String(init?.body));
     if (url === '/api/projects' && method === 'POST' && projectPostImpl) return projectPostImpl() as ReturnType<typeof json>;
     return json(null, 404);
   }));
@@ -367,5 +385,171 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
     await flush();
     expect(writes).toEqual([]);
     expect(hasText(T.projectUpdated)).toBe(false);
+  });
+
+  // codex 4 — create: a request-before check, the navigation after the re-read, and flags that belong to the press that raised them
+  const createdOk = () => ({ ok: true, status: 201, json: async () => ({ data: { id: 'p-new', name: '새프로젝트' } }) });
+  const createButton = () => [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === T.createProjectAction) as HTMLButtonElement;
+  const byLabel = (label: string) => [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label) as HTMLButtonElement;
+
+  it('⭐(p) the «만들기» callback held from organization 1 is called after the switch: no POST is sent', async () => {
+    await mountPage('tab=projects', rowsOfOrg1);
+    await typeInto(nameBox(), '새프로젝트');
+    expect(captured.creates.length).toBeGreaterThan(0);
+    const oldCreate = captured.creates[captured.creates.length - 1]!;
+    await switchOrgTo('org-2');
+    await act(async () => { oldCreate(); });
+    await flush();
+    expect(posts).toEqual([]); // reverted (no check BEFORE the request) → POST /api/projects with org_id org-1 goes out from organization 2's screen
+  });
+
+  const mountForRefreshAfterCreate = async () => {
+    let reads = 0;
+    let releaseRefresh: (v: unknown) => void = notHeld('releaseRefresh');
+    projectPostImpl = createdOk;
+    await mountPage('tab=projects&return=chats', (url) => {
+      if (!url.includes('org_id=org-1')) return new Promise(() => {});
+      reads += 1;
+      return reads === 1 ? json([]) : new Promise((resolve) => { releaseRefresh = resolve; });
+    });
+    await typeInto(nameBox(), '새프로젝트');
+    await pressCreate();
+    await flush();
+    expect(posts).toHaveLength(1); // the create really was sent …
+    expect(reads).toBe(2); // … and its re-read of the list is the held one
+    return { release: (v: unknown) => releaseRefresh(v) };
+  };
+
+  it('(q0) the same organization: when the re-read ends the page refreshes and goes on to the chat of the new project', async () => {
+    const held = await mountForRefreshAfterCreate();
+    await act(async () => { held.release(json([{ id: 'p-new', name: '새프로젝트', description: null }])); });
+    await flush();
+    expect(routerRefresh).toHaveBeenCalledTimes(1);
+    expect(assignMock).toHaveBeenCalledWith('/chats?p=p-new');
+  });
+
+  it('⭐(q) the person switched organization while the list was re-read after a create: no refresh and no jump to the project of the organization just left', async () => {
+    const held = await mountForRefreshAfterCreate();
+    await switchOrgTo('org-2');
+    await act(async () => { held.release(json([{ id: 'p-new', name: '새프로젝트', description: null }])); });
+    await flush();
+    expect(routerRefresh).not.toHaveBeenCalled(); // reverted (no re-check after the re-read) → refresh …
+    expect(assignMock).not.toHaveBeenCalled(); // … and organization 2 is sent to organization 1's new project
+    expect(routerPush).not.toHaveBeenCalled();
+  });
+
+  it('⭐(r) a create of organization 1 that finishes late does not switch off the create organization 2 has just started', async () => {
+    const resolvers: Array<(v: unknown) => void> = [];
+    projectPostImpl = () => new Promise((resolve) => { resolvers.push(resolve); });
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1') ? json([{ id: 'p-a', name: '알파', description: null }]) : json([])));
+    await typeInto(nameBox(), '새프로젝트');
+    await pressCreate();
+    expect(resolvers).toHaveLength(1);
+    await switchOrgTo('org-2');
+    await pressCreate(); // the name box still holds the text: organization 2's own create
+    expect(resolvers).toHaveLength(2);
+    expect(createButton().disabled).toBe(true);
+    await act(async () => { resolvers[0]!(createdOk()); });
+    await flush();
+    expect(createButton().disabled).toBe(true); // reverted (an unscoped «off») → organization 2's create looks finished while it is still out
+  });
+
+  it('⭐(s) a save of organization 1 that finishes late does not switch off the save organization 2 has just started', async () => {
+    holdWrites = true;
+    await mountPage('tab=projects', (url) => json(url.includes('org_id=org-1') ? [{ id: 'p-a', name: '알파', description: null }] : [{ id: 'p-b', name: '둘째', description: null }]));
+    await press(`${C.edit} — 알파`);
+    await press(`${C.save} — 알파`);
+    expect(heldWrites).toHaveLength(1);
+    await switchOrgTo('org-2');
+    await press(`${C.edit} — 둘째`);
+    await press(`${C.save} — 둘째`);
+    expect(heldWrites).toHaveLength(2);
+    expect(byLabel(`${C.save} — 둘째`).disabled).toBe(true);
+    await act(async () => { heldWrites[0]!.release({ ok: true, status: 200, json: async () => ({ data: { id: 'p-a', name: '바뀐', description: null } }) }); });
+    await flush();
+    expect(byLabel(`${C.save} — 둘째`).disabled).toBe(true); // reverted → organization 2's save looks finished
+  });
+
+  it('⭐(t) a delete of organization 1 that finishes late does not close the confirmation organization 2 has just opened', async () => {
+    holdWrites = true;
+    await mountPage('tab=projects', (url) => json(url.includes('org_id=org-1') ? [{ id: 'p-a', name: '알파', description: null }] : [{ id: 'p-b', name: '둘째', description: null }]));
+    await press(`${T.deleteProject} — 알파`);
+    await press(T.deleteProject);
+    expect(heldWrites).toHaveLength(1);
+    await switchOrgTo('org-2');
+    await press(`${T.deleteProject} — 둘째`);
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(true);
+    await act(async () => { heldWrites[0]!.release({ ok: true, status: 200, json: async () => ({ data: {} }) }); });
+    await flush();
+    expect(hasText(T.projectDeleteConfirmTitle)).toBe(true); // reverted → organization 1's late answer closes organization 2's question
+    expect(writes).toEqual([{ method: 'DELETE', url: '/api/projects/p-a' }]); // and nothing was sent for organization 2
+  });
+
+  // codex 4 (MEDIUM): the first load can read the list twice (the context arrives after the first read). The answers are applied in order of asking, never starved by a newer read that is merely out.
+  const mountTwoReads = async () => {
+    const d: Array<(v: unknown) => void> = [];
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1') ? new Promise((resolve) => { d.push(resolve); }) : new Promise(() => {})), 'org-1', { currentProject: true });
+    expect(projectListUrls).toHaveLength(2); // the two reads of the first load
+    expect(d).toHaveLength(2);
+    return d;
+  };
+  const rowsA = () => json([{ id: 'p-a', name: '알파프로젝트', description: null }]);
+  const rowsB = () => json([{ id: 'p-b', name: '베타프로젝트', description: null }]);
+
+  it('⭐(u1) the first read answers, the second never does: the list is drawn (no starvation)', async () => {
+    const d = await mountTwoReads();
+    await act(async () => { d[0]!(rowsA()); });
+    await flush();
+    expect(hasText('알파프로젝트')).toBe(true); // reverted to «only the newest ask may answer» → the tab stays on loading
+  });
+
+  it('(u2) both answer in order: the second one stands', async () => {
+    const d = await mountTwoReads();
+    await act(async () => { d[0]!(rowsA()); });
+    await act(async () => { d[1]!(rowsB()); });
+    await flush();
+    expect(hasText('베타프로젝트')).toBe(true);
+    expect(hasText('알파프로젝트')).toBe(false);
+  });
+
+  it('⭐(u3) the second answers first, the first answers late: the late older one is dropped', async () => {
+    const d = await mountTwoReads();
+    await act(async () => { d[1]!(rowsB()); });
+    await act(async () => { d[0]!(rowsA()); });
+    await flush();
+    expect(hasText('베타프로젝트')).toBe(true);
+    expect(hasText('알파프로젝트')).toBe(false); // reverted (no applied-order rule) → the older list lands over the newer
+  });
+
+  it('⭐(u4) a late older FAILURE after the newer read was applied does not raise the failure banner', async () => {
+    const d = await mountTwoReads();
+    await act(async () => { d[1]!(rowsB()); });
+    await act(async () => { d[0]!(json(null, 500)); });
+    await flush();
+    expect(hasText('베타프로젝트')).toBe(true);
+    expect(hasText(T.projectListLoadFailed)).toBe(false);
+  });
+
+  it('(u5) the first read fails while the second is still out: the failure is shown (it does not wait for the newer read)', async () => {
+    const d = await mountTwoReads();
+    await act(async () => { d[0]!(json(null, 500)); });
+    await flush();
+    expect(hasText(T.projectListLoadFailed)).toBe(true);
+  });
+
+  it('⭐(v) an answer for organization 1 that arrives BEFORE organization 2\'s own answer is not drawn under organization 2 (it answers for the organization it was asked for)', async () => {
+    let releaseOld: (v: unknown) => void = notHeld('releaseOld');
+    let releaseNew: (v: unknown) => void = notHeld('releaseNew');
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
+      ? new Promise((resolve) => { releaseOld = resolve; })
+      : new Promise((resolve) => { releaseNew = resolve; })));
+    await switchOrgTo('org-2');
+    await act(async () => { releaseOld(json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])); });
+    await flush();
+    expect(hasText('첫째조직프로젝트')).toBe(false); // reverted (no organization check on the answer) → organization 1's rows are drawn under organization 2 while its own answer is still out
+    expect(hasText(T.projectListEmpty)).toBe(false);
+    await act(async () => { releaseNew(json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])); });
+    await flush();
+    expect(hasText('둘째조직프로젝트')).toBe(true);
   });
 });
