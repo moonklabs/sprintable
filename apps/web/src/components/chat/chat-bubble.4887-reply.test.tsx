@@ -117,13 +117,13 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     expect(cls, 'the cluster sits row-local: centred on the time line').toContain('top-1/2');
   });
 
-  it('the mouse twin sits on the OUTER side (right of their bubble, left of mine); the touch twin goes beyond «⋯» on the same side (ml-[42px] / mr-[42px]: «⋯» takes the first 36 px and its 6 px press band reaches 42 — story 5048 AC4)', async () => {
+  it('the mouse twin sits on the OUTER side (right of their bubble, left of mine); the touch twin goes beyond «⋯» on the same side (ml-10.5 / mr-10.5: «⋯» takes the first 36 px and its 6 px press band reaches 42 — story 5048 AC4)', async () => {
     await render({ isMine: false });
     expect(btn()!.className).toContain('left-full'); expect(btn()!.className).not.toContain('right-full');
-    expect(btnTouch()!.className).toContain('left-full'); expect(btnTouch()!.className).toContain('ml-[42px]');
+    expect(btnTouch()!.className).toContain('left-full'); expect(btnTouch()!.className).toContain('ml-10.5');
     await render({ isMine: true, message: message({ created_by: 'member-1', sender_type: 'human', sender_name: '민서' }) });
     expect(btn()!.className).toContain('right-full'); expect(btn()!.className).not.toContain('left-full');
-    expect(btnTouch()!.className).toContain('right-full'); expect(btnTouch()!.className).toContain('mr-[42px]');
+    expect(btnTouch()!.className).toContain('right-full'); expect(btnTouch()!.className).toContain('mr-10.5');
   });
 
   it('⭐ the room the mouse reply button takes is set ONLY where the button is drawn: the column cap (--reply-cap 128 px) and the hover-time offset (--reply-room 36 px); inside a thread (no onOpenThread) neither is set, so a thread bubble keeps its 72% and its 8 px', async () => {
