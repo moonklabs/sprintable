@@ -12,32 +12,13 @@ import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
 import { HOME_DETAIL_W, HOME_GAP, HOME_LIST_MIN, HOME_TWO_COLUMN_MIN } from '../src/components/home/home-layout';
 import { tailwindCandidates } from './support/tailwind-candidates';
+import { pick, read, shellClasses } from './support/shell-scene';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
 const SRC = path.join(WEB, 'src');
 const APP = path.join(SRC, 'app');
-const read = (rel: string) => readFileSync(path.join(SRC, rel), 'utf8');
-const pick = (src: string, re: RegExp, what: string) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[1]!; };
 
-function shellClasses() {
-  const sidebar = read('components/ui/sidebar.tsx');
-  const shell = read('app/dashboard/dashboard-shell.tsx');
-  const panel = read('components/ui/contextual-panel-layout.tsx');
-  const [, gridBase, gridCols] = /cn\('([^']+)', inlinePanelOpen \? inlineColumnsClassName : '([^']+)', className\)/.exec(panel) ?? [];
-  if (!gridBase || !gridCols) throw new Error('contextual-panel-layout.tsx: the grid classes not found');
-  const cellBase = pick(panel, /<div className=\{cn\('([^']+)', contentClassName\)\}>/, 'contextual-panel-layout.tsx: the content cell');
-  return {
-    // the sidebar's gap element (the room the list column takes in the row): its own classes, folded = width 0
-    gap: pick(sidebar, /data-slot="sidebar-gap"\s*className=\{cn\(\s*"(relative w-\(--sidebar-width\) bg-transparent)"/, 'sidebar.tsx: the sidebar gap') + ' ' + pick(sidebar, /"(group-data-\[collapsible=offcanvas\]:w-0)"/, 'sidebar.tsx: the offcanvas fold'),
-    wrapper: `${pick(sidebar, /"(group\/sidebar-wrapper [^"]+)"/, 'sidebar.tsx: the provider wrapper')} ${pick(shell, /<SidebarProvider className="([^"]+)"/, 'dashboard-shell.tsx: SidebarProvider class')}`,
-    peer: pick(sidebar, /className="(group peer [^"]+)"\s*data-state=\{state\}/, 'sidebar.tsx: the sidebar peer'),
-    inset: `${pick(sidebar, /data-slot="sidebar-inset"\s*className=\{cn\(\s*"([^"]+)"/, 'sidebar.tsx: the inset main')} ${pick(shell, /<SidebarInset className=\{cn\('([^']+)'/, 'dashboard-shell.tsx: SidebarInset class')}`,
-    scroller: pick(shell, /<div ref=\{setRef\} className="([^"]+)"/, 'dashboard-shell.tsx: the shell scroller'),
-    grid: `${gridBase} ${gridCols} ${pick(shell, /className="([^"]+)"\s*inlineColumnsClassName=/, 'dashboard-shell.tsx: ContextualPanelLayout className')}`,
-    content: `${cellBase} ${pick(shell, /contentClassName=\{cn\(\s*'([^']+)'/, 'dashboard-shell.tsx: ContextualPanelLayout contentClassName')}`,
-  };
-}
 /** the home's body root (org-briefing-shell.tsx) and what the home hands the shell (home-screen.tsx) — read from the sources, so a change there is what is measured */
 function homeSources() {
   return {

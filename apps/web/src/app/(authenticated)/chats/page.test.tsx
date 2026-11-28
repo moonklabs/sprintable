@@ -111,13 +111,13 @@ describe('ChatsPage — story #3790 실패 축', () => {
     expect(container.textContent).not.toContain(koMessages.chats.selectConversationPrompt);
   });
 
-  it('재시도 버튼이 ChatRailContext의 retryConversations를 그대로 부른다', async () => {
+  // story 5031 (C1 [6]) — ONE retry for one failure: the list (rail) beside this outlet owns the press (chat-list-view.test.tsx); this side says the sentence and nothing more
+  it('⭐실패 — 이 쪽(우측 outlet)은 문장만 말하고 «다시 시도» 단추가 없다(재시도는 목록 칸의 하나뿐)', async () => {
     const onRetry = vi.fn();
     await act(async () => { root.render(renderPage(false, 0, true, onRetry)); });
-    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry);
-    expect(retryBtn).not.toBeUndefined();
-    await act(async () => { retryBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry)).toHaveLength(0); // (the old second press in this outlet would make it 1 → RED)
+    expect(onRetry).not.toHaveBeenCalled();
   });
 });
 

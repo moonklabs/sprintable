@@ -133,7 +133,8 @@ function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: Hom
     subtitle,
     trailing: link || conversationHref ? (
       <>
-        {conversationHref ? <Link href={conversationHref} className="text-ds-small text-ds-action hover:underline">{tb('conversationOpenLink')}</Link> : null}
+        {/* story 5031 (C1 [6]): the link's press is 44 high where a finger is (the look is the same) */}
+        {conversationHref ? <Link href={conversationHref} className="text-ds-small text-ds-action hover:underline touch:inline-flex touch:min-h-ds-touch touch:items-center">{tb('conversationOpenLink')}</Link> : null}
         {link ? (
           <Button asChild size="md" variant={needsHand ? 'primary' : 'secondary'}>
             <Link href={link.href} data-home-row-action="">{actionLabel(t, link.action)}</Link>
