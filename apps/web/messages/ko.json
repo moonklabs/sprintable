@@ -4965,6 +4965,8 @@
     "actionPolicyAction_site_post_publish": "사이트 글 공개(본문과 함께)",
     "actionPolicyAction_site_post_publish_draft": "사이트 글 초안 공개",
     "actionPolicyAction_site_post_unpublish": "공개한 사이트 글 비공개로",
+    "actionPolicyAction_goal_activate": "목표 시작(활성화)",
+    "actionPolicyAction_hypothesis_guided_create": "가설 만들고 측정 시작",
     "actionPolicyAction_desktop_computer_disconnect": "컴퓨터 연결 해제",
     "actionPolicyAction_desktop_setup_disconnect": "데스크톱 연결 해제",
     "actionPolicyAction_agent_run_cancel": "에이전트 실행 중지 요청",

@@ -1289,6 +1289,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     "agent_action.what.project_delete": {"ko": "프로젝트 삭제 — {target}", "en": "Delete the project — {target}"},
     "agent_action.deletion_counts_org": {"ko": "«{name}» · 프로젝트 {projects}개 · 장 {stories}개 · 대화 {conversations}개가 함께 사라짐", "en": "«{name}» · takes {projects} projects · {stories} stories · {conversations} conversations with it"},
     "agent_action.deletion_counts_project": {"ko": "«{name}» · 장 {stories}개 · 할 일 {tasks}개 · 대화 {conversations}개가 함께 사라짐", "en": "«{name}» · takes {stories} stories · {tasks} tasks · {conversations} conversations with it"},
+    "agent_action.what.goal_activate": {"ko": "목표 시작(활성화) — {target}", "en": "Activate the goal — {target}"},
+    "agent_action.what.hypothesis_guided_create": {"ko": "가설 만들고 측정 시작 — {target}", "en": "Create a hypothesis and start measuring — {target}"},
     "agent_action.what.ads_boost_request": {"ko": "광고 부스트 요청 — {target}", "en": "Request an ads boost — {target}"},
     "agent_action.what.ads_boost_start": {"ko": "광고 부스트 시작 — {target}", "en": "Start the ads boost — {target}"},
     "agent_action.what.ads_boost_adopt": {"ko": "광고 계정에 이미 있는 캠페인 연결 — {target}", "en": "Adopt the campaign already in the ad account — {target}"},

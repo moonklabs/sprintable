@@ -139,8 +139,9 @@ async def test_guided_create_rejects_agent_caller_realdb():
                     "statement": "S", "metric": "M", "target": 1, "direction": "up",
                 },
             )
-            assert resp.status_code == 403, resp.text
-            assert resp.json()["error"]["code"] == "HUMAN_ONLY"
+            # story 5041 B5: an agent's guided creation is still never done on the agent's own rights (the service says HUMAN_ONLY), but the road no longer answers a bare 403 — it keeps the call as an approval card
+            # (202) a person presses, and nothing is created by the ask (see test_5041_b5_decisions_realdb)
+            assert resp.status_code == 202 and resp.json()["status"] == "pending_approval", resp.text
         finally:
             app.dependency_overrides.clear()
     finally:

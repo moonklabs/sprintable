@@ -284,3 +284,18 @@ describe('parseAgentAction', () => {
     expect(parseAgentAction(view({ reversible: 'yes' }))!.irreversible).toBe(false);
   });
 });
+
+describe('what is asked is shown whole (story 5041 B5)', () => {
+  const LONG = `가설 ${Array.from({ length: 120 }, (_, i) => `낱말${i}`).join(' ')}`;
+  it('an OPEN card draws its title with no line clamp (a person must read all of what they approve) — a settled card folds to three lines', async () => {
+    stub({ read: () => json(200, view({ title: LONG })) }); await show();
+    const open = container.querySelector('[data-testid="agent-action-title"]') as HTMLElement;
+    expect(open.textContent).toBe(LONG);
+    expect(open.className).not.toContain('line-clamp');
+    await act(async () => { root.unmount(); }); container.remove();
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    stub({ read: () => json(200, view({ title: LONG, state: 'executed', decided_by: { id: 'p1', name: '윤재' } })) }); await show();
+    const settled = container.querySelector('[data-testid="agent-action-title"]') as HTMLElement;
+    expect(settled.className).toContain('line-clamp-3');
+  });
+});

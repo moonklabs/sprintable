@@ -574,6 +574,7 @@ class GoalTransitionRequest(BaseModel):
 
 @router.post("/{id}/transition", response_model=GoalResponse)
 async def transition_goal_endpoint(
+    request: Request,
     id: uuid.UUID,
     body: GoalTransitionRequest,
     session: AsyncSession = Depends(get_db),
@@ -589,6 +590,23 @@ async def transition_goal_endpoint(
     from app.services.goal_events import emit_goal_status_changed
     from app.services.member_resolver import resolve_member
 
+    # story 5041 B5 — an AGENT's «start this goal» (to `active`: a person's decision) is an approval card a person presses (their name, their rights), or what the user's setting says — never «go on» (no auto slot): the
+    # agent that would be let through has no right to it. Any other transition keeps the road as it was.
+    if body.status == "active":
+        from app.services import agent_action
+
+        _agent = await agent_action.calling_agent(session, auth, org_id, request)
+        if _agent is not None:
+            _row = (await session.execute(select(Goal.project_id, Goal.title).where(Goal.id == id, Goal.org_id == org_id))).first()
+            if _row is None:
+                raise HTTPException(status_code=404, detail={"code": "EPIC_NOT_FOUND", "message": "EPIC_NOT_FOUND"})
+            _decision = await agent_action.gate_agent_call(
+                request, session, auth=auth, agent=_agent, org_id=org_id, project_id=_row[0], action_key="goal.activate",
+                target_label=agent_action.card_text(_row[1], "—", 100),
+            )
+            if _decision is None:  # never (no auto slot) — and were it ever, the agent keeps the road's own refusal
+                raise HTTPException(status_code=403, detail={"code": "HUMAN_CONFIRM_REQUIRED", "message": "starting a goal (the activation) is a person's decision"})
+            return _decision
     caller = await resolve_member(auth, org_id, session)
     try:
         # E-GLANCE wedge #2: 전이 前 old_status 포착(overlay-gate로 실제 미변경일 수도 있음 —

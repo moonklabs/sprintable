@@ -4965,6 +4965,8 @@
     "actionPolicyAction_site_post_publish": "Publish a site post (with its body)",
     "actionPolicyAction_site_post_publish_draft": "Publish a site post draft",
     "actionPolicyAction_site_post_unpublish": "Unpublish a site post",
+    "actionPolicyAction_goal_activate": "Activate a goal",
+    "actionPolicyAction_hypothesis_guided_create": "Create a hypothesis and start measuring",
     "actionPolicyAction_desktop_computer_disconnect": "Disconnect a computer",
     "actionPolicyAction_desktop_setup_disconnect": "Disconnect a desktop link",
     "actionPolicyAction_agent_run_cancel": "Ask to stop an agent's run",
