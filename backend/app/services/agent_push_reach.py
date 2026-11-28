@@ -63,3 +63,41 @@ async def push_reachable_agent_ids(
     if not to_ask:
         return reached
     return reached | await _agents_with_live_stream(db, to_ask)
+
+
+async def host_run_agent_ids(db: AsyncSession, agent_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story 5046 (C13): the agents of `agent_ids` a HOST runs — every stream row the agent holds says `host` (the client's own word when it opened `/agent/stream`) and it holds at least one.
+
+    A webhook agent (no stream row), the channel plugin and an old host (the row says nothing) are NOT host-run — and an agent with both a host row and another kind is not either (a message can go to
+    either of them, and only the host reads `delivery_mode`). Rows are the liveness: a row goes with its connection (`agent_gateway` deletes it on disconnect and sweeps the dead ones).
+
+    ⚠ The word is the client's own, not a login. This is read ONLY to say what the web should DRAW (the «지금 끼어들기 / 끝나고 이어서» choice) — never a permission, a key, a room's read or a delivery road
+    (the reach decision above does not read it; a census test keeps it that way).
+    """
+    if not agent_ids:
+        return set()
+    from sqlalchemy import func
+
+    from app.core.config import settings
+
+    # LIVE first, by the very rule `set_working` used (a row that only waits to expire after a lifespan end — `_mark_agent_disconnected` stamps it instead of deleting — is not a live stream: a host that is gone and a webhook that
+    # marks the agent working must not read as «a host runs it»)
+    live = await _agents_with_live_stream(db, sorted(agent_ids))
+    if not live:
+        return set()
+    stmt = (
+        select(
+            AgentGatewaySession.agent_id,
+            # NULL (no word) counts as «not host»: bool_and skips NULLs, so a host row beside a NULL row would read as all-host without the coalesce
+            func.bool_and(func.coalesce(AgentGatewaySession.client_kind == "host", False)),
+        )
+        .where(AgentGatewaySession.agent_id.in_(sorted(live)))
+        .group_by(AgentGatewaySession.agent_id)
+    )
+    if not (settings.presence_online_redis_enabled and settings.redis_url):
+        # the rows' own freshness is the liveness there (with Redis presence `last_seen_at` is not kept fresh — liveness came from Redis above); a stale row of an earlier connection is not counted either way
+        from app.routers.agent_gateway import _SESSION_FRESH_TTL  # lazy: the router imports this layer's neighbours
+
+        stmt = stmt.where(AgentGatewaySession.last_seen_at >= datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL))
+    return {a for a, all_host in (await db.execute(stmt)).all() if all_host is True}
+
