@@ -410,7 +410,7 @@ describe('ThreadPanel — story #4430 a reply\'s send answer puts «not delivere
 describe('ThreadPanel — a reply sent again keeps its token (story 5043)', () => {
   it('⭐ lost answer → the same reply again carries the SAME token; after it was accepted the next one is new', async () => {
     const posted: Record<string, unknown>[] = [];
-    let plan: Array<'lost' | 'ok'> = ['lost', 'ok', 'ok'];
+    const plan: Array<'lost' | 'ok'> = ['lost', 'ok', 'ok'];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       if (init?.method === 'POST') {
         posted.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
