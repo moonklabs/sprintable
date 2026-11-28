@@ -80,6 +80,23 @@ describe('[SID:4675] DesktopDevices — the row opens to its agents', () => {
     expect(document.body.textContent).toContain('empty mac'); // (the computer's line carries the name — the setup row inside it does not repeat it)
   });
 
+  it('⭐[SID:5048] the agent name is the line\'s ONE press (a stretched link over the row) and on touch the line is 44 tall — a mouse sees the same list; the words are unchanged', async () => {
+    await render();
+    const [withAgents] = rows();
+    const details = withAgents.querySelector('details') as HTMLDetailsElement;
+    await act(async () => { details.open = true; });
+    const lines = [...withAgents.querySelectorAll('[data-testid=desktop-device-agent]')] as HTMLElement[];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const li of lines) {
+      const a = li.querySelector('a') as HTMLAnchorElement;
+      expect(a.className).toContain('after:absolute'); expect(a.className).toContain('after:inset-0');
+      expect(li.className).toMatch(/(^|\s)relative(\s|$)/); // the band\'s box is the LINE
+      expect(li.className).toContain('touch:min-h-ds-touch'); // 44 on touch only
+      expect(li.className).not.toMatch(/(^|\s)min-h-ds-touch(\s|$)/); // a mouse keeps the old line
+    }
+    expect(lines.map((l) => l.textContent)).toEqual([`조사 · ${koMessages.organization.stageRoleLabelDev}`, '작성 · Writer']);
+  });
+
   it('[연결 끊기] inside the row opens the dialog and leaves the row as it was', async () => {
     await render();
     const row = rows()[0];

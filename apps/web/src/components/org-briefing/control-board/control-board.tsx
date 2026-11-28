@@ -85,17 +85,19 @@ function Face({ face, channel, actions }: { face: BoardFace; channel: BoardProje
   const sentence = row.state === null ? (row.bound_device_name && !embedded ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : tAgents('agentNotConnected')) : sessionStateLabel(row, tState);
   const body = (
     <div
-      className={cn('flex min-w-0 items-center gap-2 rounded-ds-control border border-ds-line bg-ds-surface px-2 py-1.5', isDragging && 'opacity-50')}
+      className={cn('relative flex min-w-0 items-center gap-2 rounded-ds-control border border-ds-line bg-ds-surface px-2 py-1.5', isDragging && 'opacity-50')}
       data-testid="control-face" data-agent-id={face.agentId} data-word={face.word} data-channel={channel?.id ?? BENCH_ID}
       title={`${face.name} · ${sentence}`}
     >
       {actions.canWrite ? (
-        <IconButton ref={setNodeRef} {...listeners} {...attributes} icon="drag_indicator" label={t('faceDragLabel', { name: face.name })} className="touch:hidden cursor-grab" data-testid="control-face-handle" />
+        <IconButton ref={setNodeRef} {...listeners} {...attributes} icon="drag_indicator" label={t('faceDragLabel', { name: face.name })} className="relative z-10 touch:hidden cursor-grab" data-testid="control-face-handle" />
       ) : null}
       <Avatar name={face.name} actorType="agent" size={28} decorative />
       <div className="min-w-0">
+        {/* story 5048 T0 AC4 — the name is the card's ONE press: a stretched link (its `after` covers the whole card, which is ≥ 44 tall). The drawn card · the name · its words are unchanged; the drag handle and the «⋯» sit above it (z-10).
+            The `after` belongs to this link but its containing block is the card (`relative`), so the name's `truncate` does not clip it. */}
         {href
-          ? <Link href={href} className="block max-w-40 truncate text-ds-body font-medium text-ds-ink hover:underline">{face.name}</Link>
+          ? <Link href={href} className="block max-w-40 truncate text-ds-body font-medium text-ds-ink hover:underline after:absolute after:inset-0" data-testid="control-face-link">{face.name}</Link>
           : <span className="block max-w-40 truncate text-ds-body font-medium text-ds-ink">{face.name}</span>}
         <span className="flex items-center gap-1.5 text-ds-small text-ds-ink-2" data-testid="control-face-state">
           <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', DOT[face.word])} data-testid="control-face-dot" />
@@ -104,7 +106,7 @@ function Face({ face, channel, actions }: { face: BoardFace; channel: BoardProje
       </div>
       {actions.canWrite ? (
         <Menu>
-          <MenuTrigger render={<IconButton icon="more_horiz" label={t('faceMenuLabel', { name: face.name })} data-testid="control-face-menu" disabled={actions.busyKey !== null} />} />
+          <MenuTrigger render={<IconButton icon="more_horiz" label={t('faceMenuLabel', { name: face.name })} className="relative z-10" data-testid="control-face-menu" disabled={actions.busyKey !== null} />} />
           <MenuContent align="end"><FaceMenuItems face={face} channel={channel} actions={actions} /></MenuContent>
         </Menu>
       ) : null}

@@ -258,3 +258,42 @@ describe('what a screen reader hears while a face is dragged (names, never ids �
     expect(onDrop).not.toHaveBeenCalled();
   });
 });
+
+// story 5048 T0 AC4 (PO 11-28): the agent name is a text link beside a DECORATIVE avatar — on a phone it was a 20 px press. The card's one press is now the name's stretched link (its `after` covers the card, ≥ 44 tall);
+// the drawn card, the name and its words are unchanged, and the drag handle and the «⋯» sit above it.
+describe('[SID:5048] the card is one press: the name is a stretched link, the handle and «⋯» sit above it', () => {
+  const linked = [stateRow('Ann', { conversation_id: 'c-ann', conversation_project_id: 'p1' }), stateRow('Cho')];
+  it('⭐a face with a conversation has ONE link (the name) whose `after` covers the card (`relative` · `after:absolute after:inset-0`) — the name\'s own words and place are unchanged', async () => {
+    await mount({ grants: GRANTS, agents: linked });
+    const link = q('[data-testid="control-face-link"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.textContent).toBe('Ann'); // the accessible name stays the name alone (the state is not folded into the link)
+    expect(link.getAttribute('href')).toContain('/chats/c-ann');
+    expect(link.className).toContain('after:absolute'); expect(link.className).toContain('after:inset-0');
+    const card = link.closest('[data-testid="control-face"]') as HTMLElement;
+    expect(card.className).toMatch(/(^|\s)relative(\s|$)/); // the `after`'s containing block is the CARD, not the name's truncating box (a `truncate` would clip it)
+    expect(link.className).not.toMatch(/(^|\s)relative(\s|$)/);
+  });
+  it('⭐the drag handle and the «⋯» menu button are ABOVE the stretched link (`relative z-10`) — pressing them still drags / opens the menu', async () => {
+    await mount({ grants: GRANTS, agents: linked });
+    const card = q('[data-testid="control-face-link"]')!.closest('[data-testid="control-face"]') as HTMLElement;
+    for (const id of ['control-face-handle', 'control-face-menu']) {
+      const btn = card.querySelector(`[data-testid="${id}"]`) as HTMLElement;
+      expect(btn, id).not.toBeNull();
+      expect(btn.className, id).toMatch(/(^|\s)relative(\s|$)/); expect(btn.className, id).toMatch(/(^|\s)z-10(\s|$)/);
+    }
+  });
+  it('⭐keyboard order is unchanged: handle → the name link → «⋯» (the stretched link adds NO tab stop and moves none) — and a right-click on the link still opens the SAME menu as the «⋯» button', async () => {
+    await mount({ grants: GRANTS, agents: linked });
+    const card = q('[data-testid="control-face-link"]')!.closest('[data-testid="control-face"]') as HTMLElement;
+    const stops = [...card.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')].map((e) => e.getAttribute('data-testid') ?? e.tagName.toLowerCase());
+    expect(stops).toEqual(['control-face-handle', 'control-face-link', 'control-face-menu']); // the order the card always had; the `after` is a pseudo-element, not a node
+    const link = q('[data-testid="control-face-link"]')!;
+    await act(async () => { link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 5, clientY: 5 })); });
+    expect(menuItems().map((m) => m.textContent)).toEqual(['Beta에 넣기', 'Alpha에서 빼기']);
+  });
+  it('a face with NO conversation draws the name as plain text (no link, nothing to press)', async () => {
+    await mount({ grants: GRANTS, agents: [stateRow('Cho')] });
+    expect(q('[data-testid="control-face-link"]')).toBeNull();
+  });
+});
