@@ -242,13 +242,15 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  /* story 5048 T0 AC4 · Two-Pass 2차 고침(dev 계산 값 — 옛 `ui/button` 6.4 · `rounded-sm` 4.8 · 셸 `rounded-xl` 11.2가 눈금 밖으로 읽힘): 일반 `rounded-*` 단도 «ds 눈금»(4 · 8 · 12 · 16)에 얹는다 —
+   * `--radius`의 곱(×0.6 · ×0.8 · ×1.4 …)이 6.4 · 11.2 · 14.4 같은 눈금 밖 값을 만들었다. 값은 ds 토큰이 정한다(design-system.css) — 이 줄들은 이름만 잇는다(호출부 수정 0). 시험 = styles/radius-scale.5048.test.ts. */
+  --radius-sm: var(--radius-ds-tail);
+  --radius-md: var(--radius-ds-control);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: var(--radius-ds-bubble);
+  --radius-2xl: var(--radius-ds-pill);
+  --radius-3xl: var(--radius-ds-pill);
+  --radius-4xl: var(--radius-ds-pill);
 
   /* GNB hide-on-scroll (D-DOCS-MOB-3) */
   --gnb-mobile-height: 48px;
@@ -363,7 +365,7 @@
      자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신
      `.proof-surface`(story #7d7634ee, 옛 `.proof-cut` 컷코너 폐지 후 계승)를 쓴다(적용
      표면 목록=doc proofline-system-layer-2969 §1.4가 원 정본, 재질은 doc ea94dac4가 갱신). */
-  /* story 5048 T0 ①(선생님 11-26 «키트 결 그대로» · 모서리 단계 8): 0.25rem → 0.5rem(8px). 일반 `rounded-lg` = 8, `rounded-md` = 6.4, `rounded-xl` = 11.2 — 아직 ds 이름(`rounded-ds-*`)으로 안 옮긴 부품이 한 값으로 따라온다. */
+  /* story 5048 T0 ①(선생님 11-26 «키트 결 그대로» · 모서리 단계 8): 0.25rem → 0.5rem(8px). 일반 `rounded-lg` = 8 — 아직 ds 이름(`rounded-ds-*`)으로 안 옮긴 부품이 한 값으로 따라온다(`rounded-sm` · `-md` · `-xl` …은 위 «ds 눈금» 줄이 4 · 8 · 12 · 16으로 잇는다 — 2차 고침). */
   --radius: 0.5rem;
   /* story #2917: sidebar도 --card/--primary/--muted/--border/--ring과 같은 값을 거울처럼
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
