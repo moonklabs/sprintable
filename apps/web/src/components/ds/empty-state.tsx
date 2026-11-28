@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
 import { Icon, type IconName } from './icon';
+import { stateBlockClass } from './state-block';
 
 export interface EmptyStateProps {
   icon?: IconName;
@@ -18,7 +18,7 @@ export interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action, size = 'default', className }: EmptyStateProps) {
   const inline = size === 'inline';
   return (
-    <div data-slot="ds-empty-state" data-size={size} className={cn('flex flex-col items-center gap-2 px-6 text-center', inline ? 'py-4' : 'py-10', className)}>
+    <div data-slot="ds-empty-state" data-size={size} className={stateBlockClass(inline, className)}>
       {icon && !inline ? <Icon name={icon} size="lg" className="text-ds-ink-3" /> : null}
       <p className="m-0 text-ds-card-title font-semibold text-ds-ink">{title}</p>
       {description ? <p className="m-0 max-w-sm text-ds-small text-ds-ink-2">{description}</p> : null}
