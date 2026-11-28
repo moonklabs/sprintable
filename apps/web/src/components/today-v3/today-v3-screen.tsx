@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { Button } from '@/components/ui/button';
 import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/components/org-briefing/derive-today';

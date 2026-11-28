@@ -1197,14 +1197,14 @@ describe('ApprovalRequestCard — 구성원 이름 칸 폴백(story #4286)', () 
 
   it('⭐이름 표를 불러오는 중 — 대기 문장 자리는 스켈레톤(빈칸 문장 «님의 결재…» 0 · id 조각 0)', async () => {
     await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', neutral_facts: { requested_by_member_id: 'member-3fedcba' } }, 'pending');
-    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThanOrEqual(1);
+    expect(container.querySelectorAll('[data-slot="ds-skeleton"]').length).toBeGreaterThanOrEqual(1);
     expect(container.textContent).not.toContain('님의 결재를 기다리는 중');
     expect(container.textContent).not.toContain('member-2');
   });
 
   it('⭐결정 게이트 · 불러오는 중 — 요청자 줄은 그대로 서고 이름 자리만 스켈레톤(유나 결정 3 · 아래가 밀리지 않게)', async () => {
     await mountCard({ status: 'pending', designated_approver_id: 'member-2abcdef', ...DECISION }, 'pending');
-    const lineWithSkeleton = Array.from(container.querySelectorAll('p')).some((p) => p.querySelector('[data-slot="skeleton"]'));
+    const lineWithSkeleton = Array.from(container.querySelectorAll('p')).some((p) => p.querySelector('[data-slot="ds-skeleton"]'));
     expect(lineWithSkeleton).toBe(true);
     expect(container.textContent).not.toContain('member-3');
   });

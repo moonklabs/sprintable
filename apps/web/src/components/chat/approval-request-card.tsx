@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { ApprovalActions, ApprovalCard, type ApprovalResolution, type ApprovalState } from '@/components/ds/approval-card';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
@@ -576,7 +576,7 @@ function ApprovalRequestBody({
     : null;
   const resolver = gate.resolver_id ? memberLookup(memberNames, gate.resolver_id, tc, { loaded: memberNamesLoaded }) : null;
   // [SID:4286 · 유나 결정 3] 이름이 줄을 만드는 자리(요청자 · 처리자 줄)는 불러오는 중에도 줄을 그리고 이름만 자리표시(아래가 밀리지 않게).
-  const nameSkeleton = <Skeleton as="span" variant="text" className="h-3 w-20 align-middle" aria-hidden />;
+  const nameSkeleton = <Skeleton as="span" className="h-3 w-20 align-middle" aria-hidden />;
   // story #3258(customer-zero 2차) AC1 — doc 결재 카드도 결정 재료(요약)를 body에 실어야
   // «채팅 밖으로 안 나가고 결정 끝나는» 계약을 만족한다(decisionQuestion과 동일 원칙,
   // doc.py transition_doc()이 심은 gate.neutral_facts.doc_summary 그대로 no-fiction 렌더).
@@ -616,7 +616,7 @@ function ApprovalRequestBody({
       : t('approvalRequestDiscussionRequestedBanner', { reason: discussionRequested.reason }))
     : undefined;
   const waitingOnText = designatedApprover === null
-    ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+    ? <Skeleton as="span" className="h-3 w-28" aria-hidden />
     : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label });
   const tossButton = (
     <DsButton type="button" variant="quiet" onClick={() => setTossOpen(true)} iconStart={<Forward className="size-ds-icon-md" aria-hidden />}>

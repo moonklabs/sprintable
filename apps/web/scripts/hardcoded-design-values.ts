@@ -113,6 +113,13 @@ export const CATEGORIES: Category[] = [
     re: new RegExp(String.raw`<p(?![\w-])${TAG_ATTRS}>\s*\{\s*t\w*\s*\(\s*['"\x60]loading['"\x60]\s*\)\s*\}\s*</p>`, 'g'),
   },
   {
+    id: 'old-ui-skeleton',
+    label: '옛 `ui/skeleton`(shimmer) 가져오기 `from \'@/components/ui/skeleton\'` (story 5048 ⑤-⑧ — 스켈레톤은 ds Skeleton)',
+    how: '`@/components/ds/skeleton`의 `Skeleton` · `SkeletonGroup`으로 — 막대 높이 · 폭은 그대로(ui `variant="text"`는 명시 높이를 줬으니 ds 기본 rect + 같은 h/w)',
+    strict: false,
+    re: /from\s+['"]@\/components\/ui\/skeleton['"]/g,
+  },
+  {
     id: 'inline-style-px',
     label: '인라인 스타일 크기 `style={{ width|height|minHeight|… : 123 | \'123px\' }}`',
     how: '클래스(간격 단계 · 토큰)로 — 값이 계산식(`clamp(...)`)이면 CSS 변수로',
