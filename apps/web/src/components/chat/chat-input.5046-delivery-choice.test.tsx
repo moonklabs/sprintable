@@ -152,4 +152,31 @@ describe('story 5046 (C13): the choice is for agents a HOST runs — nothing els
     const src = fs.readFileSync(path.join(__dirname, 'chat-input.tsx'), 'utf8');
     expect(src).toContain('choiceDrawnFor(reachedWorking)');
   });
+
+  it('⭐the choice is judged when the send GOES OUT, not before an upload that took a while: the agent stops being a host meanwhile → no word is sent (codex)', async () => {
+    const onSend = newSpy();
+    let finish!: (v: { url: string }) => void;
+    const upload = vi.fn(() => new Promise<{ url: string }>((r) => { finish = r; }));
+    const render = async (hostRun: boolean, incoming?: { nonce: number; files: File[] }) => {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <ChatInput threadId="c1" onSend={onSend} participants={[ME, A1]} currentTeamMemberId="me-1" workingAgents={[{ id: 'a-1', name: '미르코', runtimeType: 'claude-code', hostRun }]} onUploadFile={upload as never} incomingFiles={incoming ?? null} />
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    await render(true, { nonce: 1, files: [new File(['x'], 'a.txt', { type: 'text/plain' })] });
+    await type('hi');
+    await act(async () => { btn('끝나고 이어서').click(); });
+    expect(choice()).not.toBeNull();
+    await act(async () => { (container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement).click(); });   // the upload starts and is held
+    await render(false);                                   // …the agent is not a host any more: the choice goes from the screen
+    expect(choice()).toBeNull();
+    await act(async () => { finish({ url: 'https://x/a.txt' }); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0]![3], 'no delivery word may go out once the screen no longer offers the choice').toBeUndefined();
+  });
 });
+

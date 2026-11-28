@@ -482,6 +482,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const deliveryChoiceShown = !steerMode && reachedWorking.length > 0 && choiceDrawnFor(reachedWorking) && (text.trim().length > 0 || pendingFiles.length > 0);
   const cannotInterject = reachedWorking.filter((a) => a.runtimeType === 'opencode').map((a) => a.name); // the one runtime known not to take a message into a running turn (it waits for the turn to end anyway)
 
+  // story 5046 (codex): what the choice is at the moment the SEND goes out — after an upload that took a while the agent may not be a host any more (the choice is gone from the screen): the call must not carry a word the screen no longer offers
+  const choiceNowRef = useRef<{ shown: boolean; delivery: DeliveryChoiceValue }>({ shown: false, delivery: 'now' });
+  useEffect(() => { choiceNowRef.current = { shown: deliveryChoiceShown, delivery }; });
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
@@ -508,7 +512,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
           attachments && attachments.length > 0 ? attachments : undefined,
           // story 5046: the 4th word only when «끝나고 이어서» is chosen AND the choice is drawn — «지금» (the default) sends the call exactly as it was before this story
-          ...(deliveryChoiceShown && delivery === 'after_turn' ? (['after_turn'] as const) : []),
+          ...(choiceNowRef.current.shown && choiceNowRef.current.delivery === 'after_turn' ? (['after_turn'] as const) : []),
         );
       } catch (e) {
         // story 4847 — the send that registers an attachment in a room with no project is refused by code: say that, not «전송 실패»
