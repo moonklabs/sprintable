@@ -27,6 +27,16 @@ const SIZE_PROPS = [
 const LEGACY_COLOR = String.raw`(?:background|foreground|card(?:-foreground)?|popover(?:-foreground)?|primary(?:-foreground)?|secondary(?:-foreground)?|muted(?:-foreground)?|accent(?:-foreground)?|destructive(?:-[a-z]+)?|border|input|ring|brand(?:-[a-z]+)?|success(?:-[a-z]+)?|warning(?:-[a-z]+)?|info(?:-[a-z]+)?|proof-[a-z0-9-]+)`;
 const COLOR_UTILS = 'bg|text|border(?:-[trblxy])?|ring|fill|stroke|divide|outline|decoration|from|to|via|accent|caret';
 
+/**
+ * 열린 태그 안 속성 — `<` `>` 를 건너지 않고(줄바꿈은 받는다), 따옴표 문자열(`title="x>y"`)과 `{…}`(두 겹까지 — `style={{ … }}` · `onClick={() => …}`) 안의 `>` 는 속성의 일부로 본다.
+ * 그래서 여러 줄로 쓴 태그도 센다(story 5048 ⑤ 가드 · PO 11-28). 세 갈래의 첫 글자가 서로 달라(`"` `'` `{` / 그 밖) 되짚기가 끝없이 늘지 않는다.
+ */
+const TAG_ATTRS = String.raw`(?:"[^"]*"|'[^']*'|[^<>{}"']|\{(?:[^{}]|\{[^{}]*\})*\})*`;
+/** 속성 이름 앞 경계 — `data-role` · `aria-role` 같은 다른 속성이 걸리지 않게. */
+const ATTR_START = String.raw`(?<![\w:-])`;
+/** 속성 값이 `"x"` · `'x'` · `{'x'}` · `{"x"}` · `{\`x\`}` 어느 꼴이든. */
+const attrIs = (name: string, value: string) => String.raw`${ATTR_START}${name}\s*=\s*(?:"${value}"|'${value}'|\{\s*['"\`]${value}['"\`]\s*\})`;
+
 export interface Category {
   id: string;
   /** 사람이 읽는 이름 */
@@ -80,6 +90,27 @@ export const CATEGORIES: Category[] = [
     how: '정의 한 곳에서 16으로(②d처럼) — 호출부 0곳 변경',
     strict: false,
     re: new RegExp(`${BOUNDARY_BEFORE}${VARIANTS}text-editorial-(?:ui|meta)${BOUNDARY_AFTER}`, 'g'),
+  },
+  {
+    id: 'hand-drawn-alert',
+    label: '손으로 그린 알림 `<p|div|span role="alert">` (story 5048 ⑤ — 에러는 ErrorState · 화면 일부는 Banner)',
+    how: '영역 전체를 못 그리면 `ds/ErrorState` · 화면 일부 알림이면 `ds/Banner tone="failed"`로 — 다시 시도가 없는 «행동 실패 한 줄»은 부분 메시지라 남아도 됨(새로 늘리지 않는다)',
+    strict: false,
+    re: new RegExp(String.raw`<(?:p|div|span)(?![\w-])${TAG_ATTRS}${attrIs('role', 'alert')}`, 'g'),
+  },
+  {
+    id: 'ui-alert-destructive',
+    label: '옛 `ui/alert` 파괴 변형 `<Alert variant="destructive">` (story 5048 ⑤)',
+    how: '`ds/ErrorState`(영역 전체) · `ds/Banner tone="failed"`(일부)로',
+    strict: false,
+    re: new RegExp(String.raw`<Alert(?![\w-])${TAG_ATTRS}${attrIs('variant', 'destructive')}`, 'g'),
+  },
+  {
+    id: 'text-only-loading',
+    label: '글자만 «불러오는 중» `<p>{t(\'loading\')}</p>` (story 5048 ⑤ — 로딩은 ds SkeletonGroup)',
+    how: '`ds/SkeletonGroup`(이름 = 불러오는 중 · 막대 장식)으로 — 버튼 안 «불러오는 중…» 라벨은 옳은 쓰임이라 세지 않는다(`<p>` 한 줄만)',
+    strict: false,
+    re: new RegExp(String.raw`<p(?![\w-])${TAG_ATTRS}>\s*\{\s*t\w*\s*\(\s*['"\x60]loading['"\x60]\s*\)\s*\}\s*</p>`, 'g'),
   },
   {
     id: 'inline-style-px',

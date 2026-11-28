@@ -6,7 +6,8 @@
     "arbitrary-size 143: 4의 배수가 아닌 값(15 · 18 · 22 · 30 …) + 민 nav/* `w-[216px]` 2 — 허용 목록이 아니라 정리 대상. arbitrary-radius 13 · inline-style-px 11(`chat-view --reading-w` clamp 포함). 이 값은 선생님 지침 [5] «임의 수치 금지»를 줄기만 하게 막는 것이다.",
     "direct-shadow 89: 정의 한 곳에서 none이라 보이진 않음 — 호출부 클래스를 지우는 일은 화면 손댈 때 같이. arbitrary-radius · direct-shadow는 키트 결(모서리 규칙 · 그림자 0).",
     "old-alias-color 6071 · editorial-text 375: 값은 이미 ds를 따라옴 — «새 사용 0»만 지키고(늘면 RED) 줄어드는 건 경고만(큰 수라 strict 아님).",
-    "이 PR은 기존 수를 줄이지 않는다(래칫만) — 줄이는 일은 화면을 손댈 때 같이."
+    "이 PR은 기존 수를 줄이지 않는다(래칫만) — 줄이는 일은 화면을 손댈 때 같이.",
+    "story 5048 ⑤ 정적 가드(PO 11-28): 상태 모양 «옛 모양으로 되돌리면 RED» — hand-drawn-alert 179(`<p|div|span role=\"alert\">` · 여러 줄 태그도 셈 · 대부분 «다시 시도 없는 부분 메시지»라 목표는 전부 걷기가 아니라 «새로 안 늘리기») · ui-alert-destructive 32(옛 `ui/alert` 파괴 변형) · text-only-loading 32(`<p>{t('loading')}</p>` 글자만 — 버튼 안 «불러오는 중…» 라벨은 안 셈). 셋 다 큰 수 분류(strict 아님 — 남의 PR이 줄여도 막지 않고 «기준선을 N으로 내릴 수 있음»만 찍음)."
   ],
   "counts": {
     "arbitrary-size": 143,
@@ -15,6 +16,9 @@
     "direct-shadow": 89,
     "old-alias-color": 6071,
     "editorial-text": 375,
-    "inline-style-px": 11
+    "inline-style-px": 11,
+    "hand-drawn-alert": 179,
+    "ui-alert-destructive": 32,
+    "text-only-loading": 32
   }
 }
