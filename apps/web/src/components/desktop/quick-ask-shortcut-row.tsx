@@ -62,6 +62,7 @@ export function QuickAskShortcutRow({ bridge }: { bridge: SprintableDesktop }) {
     <div ref={root} className="space-y-2" data-testid="quick-shortcut-row">
       <h3 className="text-ds-body font-semibold text-ds-ink-2">{t('title')}</h3>
       <p className="text-ds-small text-ds-ink-3">{t('note')}</p>
+      {view.status === 'registered' ? <p className="text-ds-small text-ds-ink-3" data-testid="quick-shortcut-hint">{t('registeredHint')}</p> : null}
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-ds-body text-ds-ink" data-testid="quick-shortcut-label">{t('current', { key: view.label })}</span>
         <span className={view.status === 'registered' ? 'text-ds-small text-ds-ink-3' : 'text-ds-small text-ds-failed'} data-testid="quick-shortcut-status">{statusText}</span>
