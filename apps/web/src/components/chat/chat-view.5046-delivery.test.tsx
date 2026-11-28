@@ -72,7 +72,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); vi.useRealTimers(); });
 
-async function mount() {
+let mountedThread = 'thread-1';
+async function mount(threadId = 'thread-1') {
+  mountedThread = threadId;
   // the provider comes from the SAME module graph as the view (`vi.resetModules()` after each test gives the view fresh modules; a provider imported once at the top would be a different context — the view would never hear the stream in the second test on)
   const { RealtimeProvider } = await import('@/components/realtime-provider');
   const { ChatView } = await import('./chat-view');
@@ -82,7 +84,7 @@ async function mount() {
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <RealtimeProvider currentTeamMemberId="me-1">
           <ChatRailProvider>
-            <ChatView threadId="thread-1" currentTeamMemberId="me-1" commandTargets={TARGETS} participants={PARTICIPANTS} />
+            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={TARGETS} participants={PARTICIPANTS} />
           </ChatRailProvider>
         </RealtimeProvider>
       </NextIntlClientProvider>,
@@ -249,11 +251,51 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     await settle();
     expect(chip()).not.toBeNull();
   }, 10_000);
+  it('⭐another room (the view is reused for the next thread): the old room\'s list and its host_run are not this room\'s — no choice is drawn from them while the new room\'s read is on its way (codex)', async () => {
+    stubFetch(true, true);
+    await mount('thread-1');
+    await type('hi');
+    expect(chip()).not.toBeNull();                       // room 1: a host runs the working agent
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    stubFetch(true, false);                              // room 2: the same agent id, run by the plugin there
+    await mount('thread-2');                             // the view is given another thread; the read for it is held
+    await settle();
+    await type('hi again');
+    expect(chip(), 'room 1\'s «host» must not decide for room 2').toBeNull();
+    workingGate = null;
+    await act(async () => { release(); });
+    await settle();
+    expect(chip()).toBeNull();
+  });
+  it('⭐the view goes while a read is on its way: its answer is never shown and a failure leaves no retry timer behind (codex)', async () => {
+    stubFetch(false, true);
+    await mount();
+    const before = workingReads();
+    stubFetch(true, true);
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    workingFails = true;
+    await act(async () => { emitWorking(); });           // a read is asked, held at the gate, and it will FAIL
+    await settle();
+    await act(async () => { root.unmount(); });          // the view goes
+    root = createRoot(container);                        // (a fresh root so the shared teardown has something to unmount)
+    workingGate = null;
+    await act(async () => { release(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 2300)); });   // longer than the first retry (2 s)
+    expect(workingReads(), 'no read after the view went (no retry timer left)').toBe(before + 1);
+  }, 10_000);
+  it('a room starts with a full retry budget (the budget of the room before is not carried over)', () => {
+    const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
+    expect(view).toContain('const st: WorkingReader = { thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false };');
+    expect(view).toContain("return () => { st.dead = true; if (st.timer) { clearTimeout(st.timer); st.timer = null; } };");
+  });
   it('the reader is one place: an event outdates a read on its way (nothing of the old answer is shown) — the pins stand in the view', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
     expect(view).toContain('if (st.running) { st.again = true; return; }');
     expect(view).toContain('if (st.again) continue;');
-    expect(view).toContain('setTypingAgents(namedWorking(payload.working ?? [], false));');
+    expect(view).toContain('setTypingState({ thread: threadId, list: namedWorking(payload.working ?? [], false) });');
+    expect(view).toContain('if (st.dead) return;');
     expect(view).not.toContain('hostRunRef');
   });
 });
