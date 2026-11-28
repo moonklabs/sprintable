@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { ChevronLeft, PanelRight } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { useMe, type Me } from './use-me';

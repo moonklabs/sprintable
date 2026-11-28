@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { Button } from '@/components/ui/button';
 
 /**

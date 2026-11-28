@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { EmbedCard } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
 import { actorRowLabels } from '@/lib/member-display';

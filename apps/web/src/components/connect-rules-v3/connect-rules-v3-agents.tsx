@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher, runtimeLabel } from '@/lib/runtime-capabilities';
 import {

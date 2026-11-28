@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ds/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { isLinkableRef } from '@/components/verify/evidence-section';
