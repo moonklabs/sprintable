@@ -97,6 +97,17 @@ interface MessageGroup {
 // Deeplink (ade2d6d5): scroll-to-message가 대상 탐색을 위해 이전 페이지를 로드하는 최대 횟수(런어웨이 방지).
 // 50/page × 10 = ~500개. 그 안에 없으면 no-op(graceful).
 const MAX_SCROLL_LOAD_ATTEMPTS = 10;
+/** one row of the room's working list as the server tells it — by GET /working and by the SSE `conversation.working` event alike; `host_run` (a desktop host runs this agent) rides on the row itself */
+type WorkingRow = { member_id: string; host_run?: boolean };
+const NO_WORKING_ROWS: WorkingRow[] = [];
+const NO_TYPING_AGENTS: { id: string; name: string; hostRun: boolean }[] = []; // (one array for «none», so a room with no list does not make a new one every render)
+/** the working list as the screen needs it: names from the CURRENT target list (put on when drawn — the parent rebuilds that list on every render, so nothing may be read or remembered by it), `hostRun` true ONLY for a row that says so */
+function namedWorkingAgents(rows: readonly WorkingRow[], targets: ReadonlyArray<{ agentId: string; agentName?: string }> | undefined): { id: string; name: string; hostRun: boolean }[] {
+  if (rows.length === 0) return NO_TYPING_AGENTS;
+  return rows
+    .map((w) => ({ id: w.member_id, name: (targets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: w.host_run === true }))
+    .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
+}
 
 // story #3493 — 날짜 구분선(day divider)은 "기록"도 "약속"도 아니다(개별 시각이 decay하는
 // 값이 아니라, 그 날 하루 전체를 대표하는 고정 달력 라벨 — formatRelativeTime을 쓰면 그룹
@@ -281,7 +292,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return () => { cancelled = true; };
   }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
-  const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
+  // The working list is what the server last SAID — a read of GET /working or an SSE event, each row carrying `host_run` — tagged with the room it is for. Nothing is merged or remembered per agent: a newer list replaces the older one whole.
+  const [workingRows, setWorkingRows] = useState<{ thread: string; rows: WorkingRow[] }>({ thread: threadId, rows: [] });
+  const workingSeqRef = useRef(0); // bumped by every SSE event (an event carries the whole list): a read that was asked for BEFORE one is older than it and is not shown
+  const workingReadRef = useRef(0); // one number per read, newest wins: a read that is not the newest (an older one landing late — of this room or of the room before) is not shown
+  const workingNow = workingRows.thread === threadId ? workingRows.rows : NO_WORKING_ROWS;
+  const typingAgents = useMemo(() => namedWorkingAgents(workingNow, commandTargets), [workingNow, commandTargets]);
+  // story 5046 (codex 6th): what the COMPOSER judges is every row the server said — a row whose name this room cannot put (an agent that is not in the target list) is not shown in the «…is typing» line, but it still counts as a working agent that may be reached by a mention, and it is not a host (name '' · no runtime): the choice must not be drawn over it
+  const composerWorking = useMemo(() => workingNow.map((w) => {
+    const tg = (commandTargets ?? []).find((x) => x.agentId === w.member_id);
+    return { id: w.member_id, name: tg?.agentName ?? '', runtimeType: tg?.runtimeType ?? null, hostRun: w.host_run === true && !!tg?.agentName };
+  }), [workingNow, commandTargets]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -502,8 +523,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
-    setTypingAgents((prev) => (prev.some((a) => a.id === agentId) ? prev.filter((a) => a.id !== agentId) : prev));
-  }, []);
+    // (a reply asks for no new read: the server clears the agent's working state with the reply and sends the `conversation.working` event right after — that event is the newer list)
+    setWorkingRows((prev) => (prev.thread === threadId && prev.rows.some((a) => a.member_id === agentId) ? { thread: prev.thread, rows: prev.rows.filter((a) => a.member_id !== agentId) } : prev));
+  }, [threadId]);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     clearTyping(msg.created_by); // 답장 도착 → 해당 에이전트 typing 즉시 해제(AC1)
@@ -551,42 +573,60 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [threadId, addMessage]);
 
   // AC4: 재연결 시 누락 메시지 backfill
+  // 1aeecdde P2: working 목록 — 처음 · 재연결 때 GET /working 한 번(통째로 바꿈), 그 뒤는 conversation.working SSE 이벤트의 값만(story 5046: 이벤트도 행마다 host_run을 싣는다).
+  // 이름=commandTargets(없으면 미표시 graceful). 읽는 동안 이벤트나 답글이 오면 그 읽기는 더 옛것이라 보이지 않는다(workingSeqRef).
+  const fetchWorking = useCallback(async (): Promise<boolean> => {
+    const seq = workingSeqRef.current;
+    const ticket = ++workingReadRef.current;
+    try {
+      const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
+      if (!res.ok) return false;
+      const json = await res.json() as { data?: WorkingRow[] };
+      if (seq === workingSeqRef.current && ticket === workingReadRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });
+      return true;
+    } catch { return false; }
+  }, [threadId]);
+  // A read that is asked for again when it fails (2 s · 4 s · 6 s) — the first read and the read a reconnect makes alike. Without it a newer read that FAILS would leave nothing: the older read that succeeded was set aside for it.
+  // A retry belongs to the room (and the view's life) it was asked in: the generation number ends it when the room changes or the view goes.
+  const workingRetryGenRef = useRef(0);
+  const workingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readWorkingWithRetry = useCallback((gen: number, attempt: number): void => {
+    void fetchWorking().then((ok) => {
+      if (ok || attempt >= 3 || gen !== workingRetryGenRef.current) return;
+      workingRetryTimerRef.current = setTimeout(() => { workingRetryTimerRef.current = null; if (gen === workingRetryGenRef.current) readWorkingWithRetry(gen, attempt + 1); }, 2000 * (attempt + 1));
+    });
+  }, [fetchWorking]);
+  // Every start of a read is its OWN chain (a new number; the older chain's timer is taken away): a reconnect that comes while an earlier chain is still waiting to retry does not add a second chain, it replaces it.
+  const startWorkingRead = useCallback((): void => {
+    if (workingRetryTimerRef.current) { clearTimeout(workingRetryTimerRef.current); workingRetryTimerRef.current = null; }
+    readWorkingWithRetry(++workingRetryGenRef.current, 0);
+  }, [readWorkingWithRetry]);
+
   // story #3081(정본 ③) — backfill이 놓친 신규 메시지를 채워도 이 fetchMessages 경로는
   // addMessage(SSE 실시간 수신)와 달리 markRead를 안 태웠다 — 활성 뷰어가 하단을 보고
   // 있어도 배지가 안 꺼지는 갭. fetchMessages가 반환하는 실 데이터(merged 결과)로
   // 최신 메시지를 판별해 addMessage와 동일 조건(isNearBottom)으로 mark-read한다.
   const handleReconnect = useCallback(() => {
+    startWorkingRead(); // story 5046: an event missed while the stream was down: the working list is read again whole (it is not left as it was) — and again if that read fails
     void fetchMessages().then((latest) => {
       const markReadIso = resolveBackfillMarkReadIso(latest, isNearBottom());
       if (markReadIso) markRead(markReadIso);
     });
-  }, [fetchMessages, isNearBottom, markRead]);
+  }, [fetchMessages, startWorkingRead, isNearBottom, markRead]);
 
-  // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
-  // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
-  const fetchWorking = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
-      if (!res.ok) return;
-      const json = await res.json() as { data?: Array<{ member_id: string }> };
-      const next = (json.data ?? [])
-        .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
-        .filter((a): a is { id: string; name: string } => !!a.name);
-      setTypingAgents(next);
-    } catch { /* non-critical */ }
-  }, [threadId, commandTargets]);
-
-  // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 typing 갱신(payload 가
-  // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
+  // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 목록 갱신(payload 가 working 목록을 실음 — story 5046: 행마다 host_run도). 이벤트의 값이 곧 목록이다(합치지 않고 통째로 바꿈).
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
-    const next = (payload.working ?? [])
-      .map((w) => ({ id: w.member_id, name: (commandTargets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName }))
-      .filter((a): a is { id: string; name: string } => !!a.name);
-    setTypingAgents(next);
-  }, [threadId, commandTargets]);
+    workingSeqRef.current += 1;
+    setWorkingRows({ thread: threadId, rows: payload.working ?? [] });
+  }, [threadId]);
 
-  useEffect(() => { void fetchWorking(); }, [fetchWorking]);
+  // the first read — a room that is already working when the view opens is not left waiting for an event
+  useEffect(() => {
+    startWorkingRead();
+    return () => { workingRetryGenRef.current += 1; if (workingRetryTimerRef.current) { clearTimeout(workingRetryTimerRef.current); workingRetryTimerRef.current = null; } };
+  }, [startWorkingRead]);
+
 
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
@@ -1307,7 +1347,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               prefillCommand={prefillCommand}
               incomingFiles={incomingFiles}
               onDraftChange={handleDraftChange}
-              workingAgents={typingAgents.map((a) => ({ id: a.id, name: a.name, runtimeType: (commandTargets ?? []).find((tg) => tg.agentId === a.id)?.runtimeType ?? null }))}
+              workingAgents={composerWorking}
             />
           </SupportLauncherClearance>
 
