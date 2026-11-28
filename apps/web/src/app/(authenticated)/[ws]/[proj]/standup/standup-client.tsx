@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DateNav } from '@/components/ds/date-nav';
+import { ErrorState } from '@/components/ds/error-state';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorTextarea } from '@/components/ui/operator-control';
@@ -572,13 +573,12 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
 
         <div className="space-y-6 p-6">
           {loadError ? (
-            <div className="rounded-xl border border-border bg-background p-6">
-              <EmptyState
-                title={loadError}
-                description={t('loadFailedDescription')}
-                action={<Button variant="hero" onClick={() => setRefreshToken((value) => value + 1)}>{t('retry')}</Button>}
-              />
-            </div>
+            <ErrorState
+              title={loadError}
+              description={t('loadFailedDescription')}
+              retryLabel={t('retry')}
+              onRetry={() => setRefreshToken((value) => value + 1)}
+            />
           ) : null}
 
           {!loadError ? (

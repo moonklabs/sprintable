@@ -239,7 +239,7 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     hangGoalsList(); // proj-2의 목록은 안 끝난다
     await act(async () => { root.render(wrap(<GoalsClient projectId="proj-2" />)); });
     expect(container.textContent).not.toContain('E-CANVAS'); // 이전 프로젝트의 목록이 남지 않는다
-    expect(container.textContent).toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).not.toBeNull();
   });
 
   // codex 5543-epics 2차 BLOCKING — 프로젝트를 옮기는 사이 응답이 뒤섞이는 경우. 위 시험은 새 프로젝트의 읽기를 «영영 안 끝나게»만 해서 못 잡았다.
@@ -279,7 +279,7 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('E-B-GOAL');
     expect(container.textContent).not.toContain('E-A-GOAL');
-    expect(container.textContent).not.toContain(koMessages.goals.loading); // 로딩 자리에 갇히지 않는다
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).toBeNull(); // 로딩 자리에 갇히지 않는다
   });
 
   it('⭐새 프로젝트(B)의 읽기가 실패해도 이전 프로젝트(A)의 목록이 B 아래 남지 않는다', async () => {
@@ -335,7 +335,7 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     store.set('goals-view:proj-B', 'swimlane');
     await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); }); // B는 스윔레인 — 목록은 안 읽는다
     await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); }); // A로 돌아온다 — A의 새 읽기가 나가 있다(매달림)
-    expect(container.textContent).toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).not.toBeNull();
     expect(container.textContent).not.toContain(koMessages.goals.noGoals); // 비운 목록을 «진짜 빈 프로젝트»로 보이지 않는다
     expect(container.textContent).not.toContain('E-A-GOAL');
   });
@@ -359,7 +359,7 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     // 거절되지 않았다면 A를 다시 읽는 요청이 나가 있다 — 그 응답이 «끝나도» B 화면에 닿지 않아야 한다(끝나지 않은 채 두면 해가 보이지 않는 헛통과가 된다)
     await act(async () => { pending.get('proj-A')!(goals('E-A-LATE-REFETCH')); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('E-B-GOAL');
-    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).toBeNull();
     expect(container.textContent).not.toContain('E-A-GOAL');
     expect(container.textContent).not.toContain('E-A-LATE-REFETCH');
   });

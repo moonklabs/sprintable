@@ -11,6 +11,7 @@ import { Chip } from '@/components/ds/chip';
 import { ListRow } from '@/components/ds/list-row';
 import { Metric } from '@/components/ds/metric';
 import { ProgressBar } from '@/components/ds/progress-bar';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -179,7 +180,9 @@ export function GoalDetailColumn({ goal, projectId, onUpdate, editRequested, onE
             <Card className="overflow-hidden" data-testid="goal-detail-stories">
               <div className="px-3 pt-3"><CardTitle>{t('stories')}</CardTitle></div>
               {storiesState.status === 'loading' ? (
-                <p className="m-0 px-3 pb-3 text-ds-small text-ds-ink-3">{t('loading')}</p>
+                <SkeletonGroup label={t('loading')} className="flex flex-col gap-2 px-3 pb-3">
+                  {[0, 1, 2].map((i) => <Skeleton key={i} variant="text" size="small" />)}
+                </SkeletonGroup>
               ) : storiesState.status === 'error' ? (
                 <p className="m-0 px-3 pb-3 text-ds-small text-ds-failed">{t('storiesLoadFailed')}</p>
               ) : stories.length === 0 ? (

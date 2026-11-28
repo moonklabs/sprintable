@@ -46,6 +46,7 @@ import type { HypothesisDeclarationValue } from '@/services/hypothesis-declarati
 import { toEpicHypothesisCreatePayload, toEpicHypothesisLink } from '@/services/hypothesis-declaration-epic';
 import { SteerDispatchModal } from './steer-dispatch-modal';
 import { Banner } from '@/components/ds/banner';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { Button as DsButton } from '@/components/ds/button';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { handleListKeys } from '@/lib/list-keys';
@@ -583,9 +584,9 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
             안 그려져 h1이 0개가 되던 gap. 시각은 무변(스크린리더 전용) — sr-only h1로
             "페이지 h1 항상 정확히 1개" 불변식을 로딩 분기에서도 지킨다. */}
         <h1 className="sr-only">{t('title')}</h1>
-        <div className="flex h-64 items-center justify-center">
-          <p className="text-sm text-muted-foreground">{t('loading')}</p>
-        </div>
+        <SkeletonGroup label={t('loading')} className="flex flex-col gap-3 p-6">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
+        </SkeletonGroup>
       </>
     );
   }
