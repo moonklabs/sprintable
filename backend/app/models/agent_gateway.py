@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, func
+from sqlalchemy import BigInteger, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,3 +33,6 @@ class AgentGatewaySession(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     last_ack_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    # story 5046 (C13): what the CLIENT said it is when it opened the stream — `host` (the desktop app's daemon) or NULL (the channel plugin · an old host · anything else). The client's OWN word, not a
+    # login: it is read only to say which working agents the «지금 / 끝나고 이어서» choice is for (host_run) — never for a permission or a delivery road.
+    client_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)

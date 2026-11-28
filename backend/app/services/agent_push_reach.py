@@ -63,3 +63,29 @@ async def push_reachable_agent_ids(
     if not to_ask:
         return reached
     return reached | await _agents_with_live_stream(db, to_ask)
+
+
+async def host_run_agent_ids(db: AsyncSession, agent_ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story 5046 (C13): the agents of `agent_ids` a HOST runs — every stream row the agent holds says `host` (the client's own word when it opened `/agent/stream`) and it holds at least one.
+
+    A webhook agent (no stream row), the channel plugin and an old host (the row says nothing) are NOT host-run — and an agent with both a host row and another kind is not either (a message can go to
+    either of them, and only the host reads `delivery_mode`). Rows are the liveness: a row goes with its connection (`agent_gateway` deletes it on disconnect and sweeps the dead ones).
+
+    ⚠ The word is the client's own, not a login. This is read ONLY to say what the web should DRAW (the «지금 끼어들기 / 끝나고 이어서» choice) — never a permission, a key, a room's read or a delivery road
+    (the reach decision above does not read it; a census test keeps it that way).
+    """
+    if not agent_ids:
+        return set()
+    from sqlalchemy import func
+
+    rows = (await db.execute(
+        select(
+            AgentGatewaySession.agent_id,
+            # NULL (no word) counts as «not host»: bool_and skips NULLs, so a host row beside a NULL row would read as all-host without the coalesce
+            func.bool_and(func.coalesce(AgentGatewaySession.client_kind == "host", False)),
+        )
+        .where(AgentGatewaySession.agent_id.in_(sorted(agent_ids)))
+        .group_by(AgentGatewaySession.agent_id)
+    )).all()
+    return {a for a, all_host in rows if all_host is True}
+

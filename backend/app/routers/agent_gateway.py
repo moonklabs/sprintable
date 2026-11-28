@@ -635,6 +635,12 @@ async def _stream_access_revoked_db(key_uuid: uuid.UUID, agent_id: uuid.UUID) ->
     return await key_access_revoked_db(key_uuid, agent_id, agent_only=True)
 
 
+def client_kind_of(headers) -> str | None:
+    """story 5046 (C13): the client's own word about what it is — `host` ONLY for exactly that word in `X-Sprintable-Client` (anything else, other case, padding, a list, empty, missing → None).
+    Not a login: it only decides which working agents the web draws the «지금 / 끝나고 이어서» choice for (`host_run`)."""
+    return "host" if headers.get("x-sprintable-client") == "host" else None
+
+
 @router.get("/stream")
 async def agent_stream(
     request: Request,
@@ -652,6 +658,7 @@ async def agent_stream(
         raise HTTPException(status_code=403, detail="API key required for agent stream")
 
     agent_id = uuid.UUID(auth.user_id)
+    _client_kind = client_kind_of(request.headers)  # story 5046 (C13)
 
     # agent_id ê²ì¦
     async with async_session_factory() as db:
@@ -871,6 +878,7 @@ async def agent_stream(
                     agent_id=agent_id,
                     connected_at=datetime.now(timezone.utc),
                     last_seen_at=datetime.now(timezone.utc),
+                    client_kind=_client_kind,  # story 5046 (C13): the client's own word — display only (host_run)
                 ))
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
