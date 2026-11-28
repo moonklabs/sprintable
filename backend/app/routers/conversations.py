@@ -2849,17 +2849,10 @@ async def list_working_members(
         e for e in await chat_presence.list_working(str(conversation_id))
         if e["member_id"] != str(sender.id)
     ]
-    # story 5046 (C13): per working agent — does a HOST run it? (the web draws the «지금 끼어들기 / 끝나고 이어서» choice only for those; a webhook or the channel plugin reads `delivery_mode` nowhere). The client's own word,
-    # used for what is DRAWN and nothing else. A failed read answers «not host-run» (the choice is simply not drawn) — it never costs the list.
-    host_run: set[str] = set()
-    if items:
-        from app.services.agent_push_reach import host_run_agent_ids
+    # story 5046 (C13): per working agent — does a HOST run it? (the web draws the «지금 끼어들기 / 끝나고 이어서» choice only for those). One helper, the same answer the SSE event carries.
+    from app.services.agent_push_reach import with_host_run
 
-        try:
-            host_run = {str(a) for a in await host_run_agent_ids(db, {uuid.UUID(str(e["member_id"])) for e in items})}
-        except Exception:
-            logger.warning("host_run read failed conversation_id=%s — answered as not host-run", conversation_id, exc_info=True)
-    return {"data": [{**e, "host_run": str(e["member_id"]) in host_run} for e in items]}
+    return {"data": await with_host_run(db, items)}
 
 
 @router.patch("/{conversation_id}/mute")

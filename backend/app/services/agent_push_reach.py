@@ -9,6 +9,7 @@ waiting with nothing said (4759 walk: first instruction 23:30:16Z, no reply for 
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_gateway import AgentGatewaySession
 
 
-async def _agents_with_live_stream(db: AsyncSession, agent_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+async def _agents_with_live_stream(db: AsyncSession, agent_ids: list[uuid.UUID], *, fresh_rows_when_unknown: bool = False) -> set[uuid.UUID]:
     """The agents of `agent_ids` that hold a live gateway stream — judged as `agent_verify._has_fresh_session` judges one agent
     (that is the connection test's rule), in one pass for all of them:
 
@@ -35,9 +36,14 @@ async def _agents_with_live_stream(db: AsyncSession, agent_ids: list[uuid.UUID])
         live = {a for a, online in zip(agent_ids, answers) if online}
         unknown = [a for a, online in zip(agent_ids, answers) if online is None]
         if unknown:
-            rows = (await db.execute(
-                select(AgentGatewaySession.agent_id).where(AgentGatewaySession.agent_id.in_(unknown)).distinct()
-            )).scalars().all()
+            stmt = select(AgentGatewaySession.agent_id).where(AgentGatewaySession.agent_id.in_(unknown))
+            if fresh_rows_when_unknown:
+                # story 5046 (codex): Redis could not answer (an outage) → the row is the only sign; a row that only waits to expire (a lifespan end stamps instead of deleting) is not one. `set_working` keeps its old reading (any row);
+                # the display-only `host_run` asks for the stricter one
+                from app.routers.agent_gateway import _SESSION_FRESH_TTL  # lazy: the router imports this layer's neighbours
+
+                stmt = stmt.where(AgentGatewaySession.last_seen_at >= datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL))
+            rows = (await db.execute(stmt.distinct())).scalars().all()
             live |= set(rows)
         return live
 
@@ -82,7 +88,7 @@ async def host_run_agent_ids(db: AsyncSession, agent_ids: set[uuid.UUID]) -> set
 
     # LIVE first, by the very rule `set_working` used (a row that only waits to expire after a lifespan end — `_mark_agent_disconnected` stamps it instead of deleting — is not a live stream: a host that is gone and a webhook that
     # marks the agent working must not read as «a host runs it»)
-    live = await _agents_with_live_stream(db, sorted(agent_ids))
+    live = await _agents_with_live_stream(db, sorted(agent_ids), fresh_rows_when_unknown=True)
     if not live:
         return set()
     stmt = (
@@ -100,4 +106,18 @@ async def host_run_agent_ids(db: AsyncSession, agent_ids: set[uuid.UUID]) -> set
 
         stmt = stmt.where(AgentGatewaySession.last_seen_at >= datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL))
     return {a for a, all_host in (await db.execute(stmt)).all() if all_host is True}
+
+
+async def with_host_run(db: AsyncSession, items: list[dict]) -> list[dict]:
+    """story 5046 (C13): the working list (`chat_presence.list_working` rows: member_id · state · …) with `host_run` per agent — ONE answer for GET /working and for the SSE `conversation.working` event, so the web draws the
+    «지금 끼어들기 / 끝나고 이어서» choice from the value it was handed and never merges two sources. A failed read answers «not host-run» for everyone (the choice is simply not drawn) — it never costs the list. Display only (see
+    `host_run_agent_ids`)."""
+    if not items:
+        return []
+    host: set[str] = set()
+    try:
+        host = {str(a) for a in await host_run_agent_ids(db, {uuid.UUID(str(e["member_id"])) for e in items})}
+    except Exception:
+        logging.getLogger(__name__).warning("host_run read failed — answered as not host-run", exc_info=True)
+    return [{**e, "host_run": str(e["member_id"]) in host} for e in items]
 
