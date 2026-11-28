@@ -536,3 +536,18 @@ describe('Avatar — story #3888 CHANGES② 코너 텍스트 배지 size>40 경�
     expect(container.querySelector('.ring-proof-blue')).not.toBeNull();
   });
 });
+
+// story 5048 T0 AC4 — the legacy avatar's initials grow with the circle (0.4x) like the ds Avatar's: marked so the computed-style probe counts them apart from the type scale (18 px → 7 · 28 px → 11).
+describe('[SID:5048] 이니셜 글자 표지(옛 아바타)', () => {
+  it.each([[18, 7], [28, 11], [44, 18]])('⭐크기 %s의 이니셜 글자는 %spx(0.4배)이고 data-slot="avatar-initials"로 표지된다', async (size, px) => {
+    await act(async () => { root.render(wrap(<Avatar name="친절 오호" actorType="human" size={size} />)); });
+    const el = container.querySelector('[data-slot="avatar-initials"]') as HTMLElement;
+    expect(el).not.toBeNull();
+    expect(el.style.fontSize).toBe(`${px}px`);
+  });
+  it('이니셜이 아닌 단(이름 없음 → 아이콘)에는 표지가 없다', async () => {
+    await act(async () => { root.render(wrap(<Avatar name={null} actorType="human" size={28} />)); });
+    expect(container.querySelector('[data-slot="avatar-initials"]')).toBeNull();
+  });
+});
+

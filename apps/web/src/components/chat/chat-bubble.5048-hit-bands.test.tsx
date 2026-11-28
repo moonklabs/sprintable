@@ -19,7 +19,7 @@ let container: HTMLDivElement;
 let root: Root;
 const message = (): ChatMessage => ({ id: 'm5048', memo_id: 'conv-1', created_by: 'member-2', sender_name: '친절', sender_type: 'human', sender_avatar_url: null, sender_runtime_type: null, content: 'hello', attachments: [], created_at: '2026-07-20T00:00:00.000Z' });
 async function render(isMine: boolean) {
-  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatBubble message={message()} isMine={isMine} /></NextIntlClientProvider>); });
+  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatBubble message={message()} isMine={isMine} onOpenThread={() => {}} /></NextIntlClientProvider>); });
 }
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) }))); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
@@ -50,4 +50,18 @@ describe('[SID:5048] 누름 띠 — 눈에 보이는 크기는 그대로, 누름
     await render(true);
     expect(q('chat-bubble-avatar-hit')).toBeNull();
   });
+  it('⭐the two presses do not overlap: «⋯» (ml-1 · w-8 · band 6 px) ends at 4 + 32 + 6 = 42 px and the touch reply twin starts at 42 px (ml-10.5) — each is a full 44 × 44 press (a reply twin at 40 left the «⋯» a 42-wide press)', async () => {
+    await render(false);
+    const menu = q('chat-bubble-menu-button')!;
+    expect(menu.className).toContain('ml-1'); expect(menu.className).toMatch(/(^|\s)w-8(\s|$)/);
+    expect(q('chat-bubble-menu-hit')!.className).toContain('-inset-1.5');
+    const reply = container.querySelector('[data-testid="chat-bubble-reply-button-touch"]') as HTMLElement | null;
+    expect(reply, 'the reply twin is drawn (a thread can be opened) — a test that skips it would pass on a revert').not.toBeNull();
+    expect(reply!.className).toContain('left-full'); expect(reply!.className).toContain('ml-10.5');
+    await render(true);
+    const mine = container.querySelector('[data-testid="chat-bubble-reply-button-touch"]') as HTMLElement | null;
+    expect(mine).not.toBeNull();
+    expect(mine!.className).toContain('right-full'); expect(mine!.className).toContain('mr-10.5');
+  });
 });
+

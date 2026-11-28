@@ -1091,7 +1091,7 @@ export function ChatBubble({
                 data-testid="chat-bubble-reply-button-touch"
                 aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
                 onClick={handleOpenThread}
-                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-10' : 'left-full ml-10'}`}
+                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-10.5' : 'left-full ml-10.5'}`}
               >
                 <MessageSquareReply className="size-ds-icon-sm" aria-hidden="true" />
               </Button>
