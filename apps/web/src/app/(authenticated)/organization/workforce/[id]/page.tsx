@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
-import { EmptyState } from '@/components/ds/empty-state';
+import { ErrorState } from '@/components/ds/error-state';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
 import { ComputerSummaryValue } from '@/components/agents/computer-summary-value';
@@ -468,19 +468,15 @@ export default function AgentDetailPage() {
     const kind = loadError ?? 'failed';
     const backToList = () => { const flatHref = flatHrefRef.current; router.push(flatHref('/organization/workforce?tab=manage')); }; // (read at the press · the ratchet knows the `flatHref(` wrap by this name)
     return (
-      <div className="w-full max-w-3xl mx-auto p-6" data-testid="agent-detail-load-error" data-kind={kind} role="alert">
-        <EmptyState
-          icon="error"
+      <div className="w-full max-w-3xl mx-auto p-6">
+        <ErrorState
+          data-testid="agent-detail-load-error"
+          data-kind={kind}
           title={ta(kind === 'notfound' ? 'detailNotFound' : 'detailLoadFailed')}
-          action={(
-            <div className="flex flex-wrap justify-center gap-2">
-              {kind === 'failed' ? (
-                <DsButton variant="primary" onClick={() => { setLoading(true); void fetchAgent().then((isCurrent) => { if (isCurrent) setLoading(false); }); }}>{tc('retry')}</DsButton>
-              ) : null}
-              <DsButton variant="secondary" onClick={backToList}>{ta('backToList')}</DsButton>
-            </div>
-          )}
-        />
+          onRetry={kind === 'failed' ? () => { setLoading(true); void fetchAgent().then((isCurrent) => { if (isCurrent) setLoading(false); }); } : undefined}
+        >
+          <DsButton variant="secondary" onClick={backToList}>{ta('backToList')}</DsButton>
+        </ErrorState>
       </div>
     );
   }

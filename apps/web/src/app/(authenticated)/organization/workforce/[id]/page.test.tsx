@@ -432,6 +432,7 @@ describe('AgentDetailPage — id가 바뀔 때(story 4889)', () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? Promise.resolve({ ok: false, status: 500, json: async () => null }) : base(url))));
     await mount();
     expect(container.querySelector('[data-testid="agent-detail-load-error"]')?.getAttribute('role')).toBe('alert');
+    expect(container.querySelector('[data-testid="agent-detail-load-error"]')?.getAttribute('data-slot')).toBe('ds-error-state'); // story 5048 ⑤: the whole-area error is the ds ErrorState (was a hand-wrapped EmptyState)
   });
 });
 

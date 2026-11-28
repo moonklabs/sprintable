@@ -1,12 +1,12 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from './button';
 import { Icon } from './icon';
 import { stateBlockClass } from './state-block';
 
-export interface ErrorStateProps {
+export interface ErrorStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 'role' | 'title' | 'children' | 'className'> {
   /** 한 줄 — 무엇을 못 했나. 안 주면 «문제가 발생했어요». */
   title?: ReactNode;
   description?: ReactNode;
@@ -26,11 +26,11 @@ export interface ErrorStateProps {
  * 뼈대는 `EmptyState`와 같다(`state-block.ts`). 색은 아이콘에만 — 제목은 잉크(붉은 글자 없음 · 대비). `role=alert`라 나타나면 바로 읽힌다.
  * 인라인(목록 사이)도 아이콘을 둔다 — 에러는 색 없이도 «에러»로 알아봐야 해서(빈 상태 inline은 아이콘 없음).
  */
-export function ErrorState({ title, description, onRetry, retryLabel, children, size = 'default', className }: ErrorStateProps) {
+export function ErrorState({ title, description, onRetry, retryLabel, children, size = 'default', className, ...rest }: ErrorStateProps) {
   const t = useTranslations('common');
   const inline = size === 'inline';
   return (
-    <div role="alert" data-slot="ds-error-state" data-size={size} className={stateBlockClass(inline, className)}>
+    <div {...rest} role="alert" data-slot="ds-error-state" data-size={size} className={stateBlockClass(inline, className)}>
       <Icon name="error" size={inline ? 'sm' : 'lg'} className="text-ds-failed" />
       <p className="m-0 break-keep text-ds-card-title font-semibold text-ds-ink [overflow-wrap:anywhere]">{title ?? t('error')}</p>
       {description ? <p className="m-0 max-w-sm break-keep text-ds-small text-ds-ink-2 [overflow-wrap:anywhere]">{description}</p> : null}

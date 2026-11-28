@@ -88,4 +88,13 @@ describe('ds ErrorState', () => {
     await render(<ErrorState title="x"><button type="button">문의하기</button></ErrorState>);
     expect(err().querySelectorAll('button')).toHaveLength(1);
   });
+
+  it('data-* · aria 속성은 루트로 넘어간다(호출처 시험 id · kind) — 단 role은 부품이 정한다', async () => {
+    await render(<ErrorState title="x" data-testid="load-error" data-kind="failed" />);
+    expect(err().getAttribute('data-testid')).toBe('load-error');
+    expect(err().getAttribute('data-kind')).toBe('failed');
+    expect(err().getAttribute('role')).toBe('alert');
+    await render(<ErrorState title="x" {...({ role: 'status' } as object)} />); // 타입이 막지만 JS에서 와도 부품의 role이 이긴다
+    expect(err().getAttribute('role')).toBe('alert');
+  });
 });
