@@ -100,6 +100,9 @@ export function AgentActionCardFace({ view, requestId, onPressed, onSettled }: {
 type T = ReturnType<typeof useTranslations>;
 
 function StateChip({ t, view }: { t: T; view: AgentActionView }) {
+  // story 5041 B6 — a «화면 열기» card keeps nothing to approve (the person does it on the screen): no «waiting for approval» chip while it is open — the title and the button say it — and a closed one says «closed», not «declined»
+  if (view.screen && (view.state === 'pending' || view.state === 'retry')) return null;
+  if (view.screen && view.state === 'rejected') return <Chip>{t('agentActionStateScreenClosed')}</Chip>;
   if (view.state === 'pending') return <Chip>{t('agentActionStatePending')}</Chip>;
   if (view.state === 'retry') return <Chip>{t('agentActionStateRetry')}</Chip>;
   if (view.state === 'running') return <Chip>{t('agentActionStateRunning')}</Chip>;
@@ -111,7 +114,7 @@ function StateChip({ t, view }: { t: T; view: AgentActionView }) {
 function outcomeLine(t: T, view: AgentActionView): string | null {
   if (view.state === 'retry') return t('agentActionRetryLine');
   if (view.state === 'executed') return view.decidedBy ? t('agentActionByApproved', { name: view.decidedBy }) : null;
-  if (view.state === 'rejected') return view.decidedBy ? t('agentActionByRejected', { name: view.decidedBy }) : null;
+  if (view.state === 'rejected') return view.decidedBy ? t(view.screen ? 'agentActionByClosed' : 'agentActionByRejected', { name: view.decidedBy }) : null;
   if (view.state === 'expired') return t('agentActionExpiredLine');
   if (view.state === 'failed') return view.changed ? t('agentActionChangedLine') : t('agentActionFailedLine');
   return null;

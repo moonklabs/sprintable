@@ -257,6 +257,22 @@ describe('«화면 열기» (story 5041 B6)', () => {
     await press('닫기');
     expect(writes()).toEqual([{ method: 'POST', url: `/api/agent-actions/${REQ}/decision`, body: { decision: 'reject' } }]);
   });
+  it('an open screen card does NOT say «waiting for approval» — nothing is kept to approve (the title and the button say what it is); a closed one says «closed», not «declined»', async () => {
+    stub({ read: () => json(200, screenView()) }); await show();
+    expect(container.textContent).not.toContain('승인 기다리는 중');
+    expect(container.querySelector('[data-testid="agent-action-open-screen"]')).not.toBeNull();
+    stub({ read: () => json(200, screenView({ state: 'rejected', decided_by: { id: 'p', name: '민' } })) }); await show();
+    expect(container.textContent).toContain('닫았어요');
+    expect(container.textContent).toContain('민님이 닫았어요');
+    expect(container.textContent).not.toContain('거절');
+  });
+  it('an approval card is unchanged: pending still says «waiting for approval», a declined one still says «declined»', async () => {
+    stub({ read: () => json(200, view()) }); await show();
+    expect(container.textContent).toContain('승인 기다리는 중');
+    stub({ read: () => json(200, view({ state: 'rejected', decided_by: { id: 'p', name: '민' } })) }); await show();
+    expect(container.textContent).toContain('거절했어요');
+    expect(container.textContent).toContain('민님이 거절했어요');
+  });
   it('a closed screen card has no button to the screen', async () => {
     stub({ read: () => json(200, screenView({ state: 'rejected', decided_by: { id: 'p', name: '민' } })) }); await show();
     expect(container.querySelector('[data-testid="agent-action-open-screen"]')).toBeNull();
