@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
@@ -133,7 +133,15 @@ class ConversationMessage(Base, TimestampMixin, SoftDeleteMixin):
         JSONB, nullable=True, server_default=text("'[]'"), default=list
     )
 
+    # story 5043 (C10 · PO 11-28): the sending tab's own token for THIS send (the web makes it before it sends). One (room · sender · token) is ONE message: a send whose answer was lost and is sent again with the same
+    # token is answered with the message that is already there (the partial unique index, `0509`) — never a second copy. NULL = a sender that gives no token (every connector · agent · old client): as before.
+    client_nonce: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
+
+    __table_args__ = (
+        Index("uq_conversation_messages_client_nonce", "conversation_id", "sender_id", "client_nonce", unique=True, postgresql_where=text("client_nonce IS NOT NULL")),
+    )
 
     @validates("content")
     def _content_within_bound(self, _key: str, value: str) -> str:
