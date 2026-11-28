@@ -18,6 +18,7 @@ describe('측정 — 분류마다 박힌 값만 정확히 센다', () => {
     ['hand-drawn-alert', '<p role="alert" className="text-sm">실패</p>'],
     ['ui-alert-destructive', '<Alert variant="destructive"><AlertDescription>실패</AlertDescription></Alert>'],
     ['text-only-loading', "<p className=\"text-sm\">{t('loading')}</p>"],
+    ['old-ui-skeleton', "import { Skeleton } from '@/components/ui/skeleton';"],
   ];
   it.each(cases)('%s — 박힌 클래스를 센다(그 분류에만)', (id, src) => {
     const n = measureContent(src);
@@ -90,6 +91,12 @@ describe('측정 — 분류마다 박힌 값만 정확히 센다', () => {
     measureContent('<div ' + '{a:{b:1}} '.repeat(30_000));
     expect(Date.now() - t0).toBeLessThan(4000);
   }, 6000);
+
+  it('⭐old-ui-skeleton — 작은 · 큰따옴표 import를 세고(shadcn 파일은 큰따옴표), ds Skeleton · 다른 이름은 안 센다', () => {
+    expect(measureContent("import { Skeleton } from '@/components/ui/skeleton';")['old-ui-skeleton']).toBe(1);
+    expect(measureContent('import { Skeleton } from "@/components/ui/skeleton";')['old-ui-skeleton']).toBe(1);
+    expect(measureContent("import { Skeleton } from '@/components/ds/skeleton';\nimport { PageSkeleton } from '@/components/ui/page-skeleton';")['old-ui-skeleton']).toBe(0);
+  });
 
   it('⭐옮긴 모양은 안 센다 — ErrorState · Banner · SkeletonGroup · 버튼 안 «불러오는 중…» · 알림이 아닌 role', () => {
     const moved = `<ErrorState title="x" /><Banner tone="failed">x</Banner><SkeletonGroup label={t('loading')} />
