@@ -92,7 +92,7 @@ export function OrgBriefingShell() {
         <Alert role="status" data-testid="home-create-project-banner">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
             <span>{t('projectRequiredCreate')}</span>
-            <Button asChild size="sm" data-testid="home-create-project-button">
+            <Button asChild size="sm" className="touch:min-h-ds-touch touch:min-w-ds-touch" data-testid="home-create-project-button">
               <Link href={flatHref(`/settings?tab=projects&next=${encodeURIComponent(nextTarget as string)}`)}>{t('projectRequiredCreateButton')}</Link>
             </Button>
           </AlertDescription>

@@ -186,6 +186,12 @@ describe('OrgBriefingShell — story #4935: 프로젝트가 하나도 없는 사
     expect(new URL(href, 'https://x.test').searchParams.get('next')).toBe('/flow?_prRetry=1'); // the address they pressed, intact (encoded once)
   });
 
+  it('⭐touch에서는 «프로젝트 만들기»가 44 이상 — 새 사람이 처음 보는 화면의 단추(story 5048 AC4 · 폰 7/9가 아닌 전부)', async () => {
+    await mountNoProject('next=%2Fflow');
+    const cls = button()!.className;
+    expect(cls).toContain('touch:min-h-ds-touch'); expect(cls).toContain('touch:min-w-ds-touch');
+  });
+
   it('⭐next에 `&`가 들어 있어도(/goals?filter=a&_prRetry=1) 단추가 그 주소를 한 덩어리로 실어 간다 — 인코딩이 빠지면 뒷부분이 떨어져 나간다', async () => {
     await mountNoProject(`next=${encodeURIComponent('/goals?filter=a&_prRetry=1')}`);
     const href = button()!.getAttribute('href')!;
