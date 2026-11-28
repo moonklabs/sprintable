@@ -242,6 +242,8 @@ export default function SettingsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
+  // story 5031 (C1): the project list's read has three honest states — a failed read must not draw as «no projects»
+  const [projectsLoad, setProjectsLoad] = useState<'loading' | 'ok' | 'error'>('loading');
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
@@ -376,16 +378,26 @@ export default function SettingsPage() {
   const projectsSeqRef = useRef(0);
   const refreshProjects = async () => {
     const seq = ++projectsSeqRef.current;
+    setProjectsLoad('loading');
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
-    const res = await fetch(endpoint);
-    if (!res.ok || seq !== projectsSeqRef.current) return;
+    try {
+      const res = await fetch(endpoint);
+      if (seq !== projectsSeqRef.current) return;
+      if (!res.ok) { setProjectsLoad('error'); return; }
 
-    const json = await res.json();
-    if (!json?.data || seq !== projectsSeqRef.current) return;
+      const json = await res.json();
+      if (seq !== projectsSeqRef.current) return;
+      if (!Array.isArray(json?.data)) { setProjectsLoad('error'); return; }
 
-    const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
-    setProjects(nextProjects);
-    setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
+      const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+      setProjects(nextProjects);
+      setProjectsLoad('ok');
+      setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
+    } catch (err) {
+      // a thrown fetch / unreadable body is a failed read too (only the latest ask may say so — a stale one stays silent)
+      if (seq === projectsSeqRef.current) setProjectsLoad('error');
+      throw err;
+    }
   };
 
   const refreshMemberData = async (projectId: string) => {
@@ -401,6 +413,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     projectsSeqRef.current += 1; // anything still in flight for the previous organization is stale now
+    // (the failure of the previous organization is reset by the read the new organization starts at once — `refreshProjects` sets `loading` — in the effect below)
     setProjects([]);
     setMemberProjectId('');
   }, [orgId]);
@@ -952,6 +965,8 @@ export default function SettingsPage() {
             <TabsContent value="projects">
               <ProjectsSection
                 projects={projects}
+                loadState={projectsLoad}
+                onRetry={() => { void refreshProjects().catch((err) => { console.error('프로젝트 목록 다시 불러오기 실패', err); }); }}
                 currentProjectId={currentProjectId}
                 isAdmin={isAdmin}
                 editingId={editingProjectId}

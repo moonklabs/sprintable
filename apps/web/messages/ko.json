@@ -2258,6 +2258,7 @@
     "projectManagement": "프로젝트 관리",
     "projectManagementDescription": "조직 소속 프로젝트를 한 번에 보고, 설정 화면에서 바로 새 프로젝트를 추가해요.",
     "projectListEmpty": "이 조직에 프로젝트가 아직 없어요",
+    "projectListLoadFailed": "프로젝트 목록을 불러오지 못했어요.",
     "currentProjectBadge": "현재 프로젝트",
     "projectNamePlaceholder": "프로젝트 이름",
     "projectDescriptionPlaceholder": "프로젝트 설명 (선택)",

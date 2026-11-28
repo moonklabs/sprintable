@@ -40,6 +40,7 @@ import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ds/error-state';
 import { useToast } from '@/components/ui/toast';
 import { announceChatMessageDeleted, knownDeletedAt, onChatMessageDeleted, tombstoneKnownDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -1109,9 +1110,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               </div>
             ) : messages.length === 0 && messagesLoadFailed ? (
               <div className="flex h-full items-center justify-center">
-                <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
-                  {t('messagesLoadFailed')}
-                </p>
+                {/* story 5031 (C1): a failed first read says so AND offers the way out — a finger on a phone had only the sentence (the auto-poll runs only while the live link is down; the pull-down is a hidden gesture) */}
+                <ErrorState
+                  title={t('messagesLoadFailed')}
+                  onRetry={() => { setLoading(true); void fetchMessages(); }}
+                />
               </div>
             ) : messages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
