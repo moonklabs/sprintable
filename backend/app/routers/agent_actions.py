@@ -269,7 +269,7 @@ async def decide_agent_action(
         )
     await session.commit()  # the claim is visible to everyone before the call starts — a second press loses here, not after
 
-    # story 5041 B3 — the request row hangs on its project (and the project on its organisation): pressing «delete the project / the organisation» takes the row away with its target. The card's own view is read now, while the row is there
+    # story 5041 B3 — the request row hangs on its project (and the project on its organisation): pressing «delete the project / the organisation» deletes its target for real, and the row stays behind it, unreachable (or goes with it). The card's own view is read now, while it can still be read
     row_goes_with_target = action_key in ("project.delete", "org.delete")
     pre_view = None
     if row_goes_with_target:
@@ -297,8 +297,8 @@ async def decide_agent_action(
     # a delete that finds the thing already gone, on a request that was pressed before and did not finish: the first press did it — that is the result asked for
     already_done = was_retry and action_key.endswith(".delete") and resp.status_code == 404
     if row_goes_with_target and 200 <= resp.status_code < 300:
-        # the project (or the organisation) is gone: its request row is gone with it, or is left behind a project nobody can reach any more (the access check that reads a card says 404 for it). Either way the card is not read again
-        # through `_load` — the person who pressed is told from the view read before the call, and the agent is told only if its row can still be reached
+        # the project (or the organisation) is gone — the project row is deleted for real, and the request row that hung on it is left behind a project nobody can reach any more (no delete cascade reaches it; the access check that
+        # reads a card says 404 for it). The card is therefore not read again through `_load` — the person who pressed is told from the view read before the call, and the agent is told only if its row can still be reached
         await svc._finish(session, request_id=rid, execution={"state": "executed", "http_status": resp.status_code, "at": now})
         await session.commit()
         try:

@@ -1234,6 +1234,14 @@ async def _refresh_session_context(
             return {}
         return md
     if rt_org_id is not None and rt_org_id in live_orgs:
+        # story 5041 (④ lap): the session's project is re-applied ONLY while it is still a project the person can reach in this org. One that was deleted since the token was made (the person deleted the project they stand
+        # in — or an agent's card for it was pressed) is no longer a row `users.last_project_id` may point at (a foreign-key violation: the refresh was a 500); the resolution below then lands on a live project, or on none.
+        # The project row is locked FOR KEY SHARE first (the lock the foreign-key write would take anyway): the delete road takes the row FOR UPDATE before it removes it, so a delete in flight finishes first (and the access check below then
+        # says no) or waits for this transaction — it can no longer slip in between «reachable» and the write.
+        if rt_project_id is not None:
+            await session.execute(select(Project.id).where(Project.id == rt_project_id).with_for_update(key_share=True))
+            if not await has_project_access(session, user.id, rt_project_id, rt_org_id):
+                rt_project_id = None
         if rt_project_id is not None:
             user.last_project_id = rt_project_id
         return await _build_app_metadata(user, session, org_id=rt_org_id, project_id=rt_project_id)
