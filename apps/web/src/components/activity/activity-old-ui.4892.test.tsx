@@ -108,7 +108,7 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     }
   });
 
-  it('⭐비었다 · 접근 불가 · 오류는 ds EmptyState(오류에는 ds «다시 시도»)', async () => {
+  it('⭐비었다 · 접근 불가는 ds EmptyState · 오류는 ds ErrorState(오류에는 ds «다시 시도»)', async () => {
     api(auditOk([]), teamOk([]));
     await mountView('audit');
     let es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
@@ -122,7 +122,8 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     await act(async () => { root.unmount(); }); root = createRoot(container);
     api(() => answer(false, 500), teamOk([]));
     await mountView('audit');
-    es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    es = container.querySelector('[data-slot="ds-error-state"]') as HTMLElement;
+    expect(es.getAttribute('role')).toBe('alert'); // story 5048 ⑤-⑨: the error is the ds ErrorState
     expect(es.textContent).toContain(ko.common!.error);
     expect(es.textContent).not.toContain(ko.activityLog!.emptyTitle);                 // ⭐a refused first page is NOT «활동 내역이 없어요» (it was, before 4892)
     expect([...es.querySelectorAll('button[data-slot="ds-button"]')].some((b) => b.textContent?.trim() === ko.common!.retry)).toBe(true);
@@ -131,10 +132,10 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
   it('⭐«다시 시도»가 또 거절당하면 빈 목록이 아니라 오류 상태 그대로(다시 불러오기도 같은 규칙)', async () => {
     api(() => answer(false, 500), teamOk([]));
     await mountView('audit');
-    const retry = () => [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    const retry = () => [...container.querySelectorAll('[data-slot="ds-error-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
     await act(async () => { retry().click(); });
     for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
-    const es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    const es = container.querySelector('[data-slot="ds-error-state"]') as HTMLElement;
     expect(es.textContent).toContain(ko.common!.error);
     expect(es.textContent).not.toContain(ko.activityLog!.emptyTitle);
     expect(urlsOf('/api/activity-logs').length).toBe(2);   // it asked again
@@ -150,13 +151,13 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
       return answer(true, 200, { items: [auditRow('fresh')], total: 1, limit: 30, offset: 0 });     // the filtered request answers fine
     }, teamOk([]));
     await mountView('audit');
-    const retry = [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    const retry = [...container.querySelectorAll('[data-slot="ds-error-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
     await act(async () => { retry.click(); });
     await change(selects()[1]!, 'story');                                                           // a filter change while the retry is still in flight
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();                        // the newer answer is on screen
     await act(async () => { releaseStale(answer(false, 500)); });
     for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
-    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();                      // the stale 500 did not put the error back
+    expect(container.querySelector('[data-slot="ds-error-state"]')).toBeNull();                      // the stale 500 did not put the error back
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
   });
 
@@ -170,13 +171,14 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
       return answer(true, 200, { items: [auditRow('fresh')], total: 1, limit: 30, offset: 0 });
     }, teamOk([]));
     await mountView('audit');
-    const retry = [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    const retry = [...container.querySelectorAll('[data-slot="ds-error-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
     await act(async () => { retry.click(); });
     await change(selects()[1]!, 'story');
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
     await act(async () => { releaseStale(answer(false, 403)); });
     for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();                      // the stale 403 did not turn the list into «접근 불가»
+    expect(container.querySelector('[data-slot="ds-error-state"]')).toBeNull();                      // …nor into an error
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
   });
 
@@ -306,10 +308,10 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     let calls = 0;
     api(() => (++calls === 1 ? answer(false, 502) : answer(true, 200, { items: [auditRow('ok1')], total: 1, limit: 30, offset: 0 })), teamOk([]));
     await mountView('audit');
-    const retry = [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    const retry = [...container.querySelectorAll('[data-slot="ds-error-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
     await act(async () => { retry.click(); });
     for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
-    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
+    expect(container.querySelector('[data-slot="ds-error-state"]')).toBeNull();
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
   });
 

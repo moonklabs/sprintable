@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ArrowLeft } from 'lucide-react';
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
+import { ErrorState } from '@/components/ds/error-state';
 import { Chip } from '@/components/ds/chip';
 import { LAYER } from '@/components/ds/layers';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -154,13 +155,7 @@ export function AgentRunDetail({
       <div className={`space-y-3 ${AGENT_RUNS_BODY_FRAME}`}>
         {slot}
         {head}
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="flex flex-col items-center gap-3 py-12 text-center">
-          <p className="text-ds-body font-medium text-ds-ink">{tc('error')}</p>
-          <p className="text-ds-small text-ds-ink-3">{tc('errorDescription')}</p>
-          <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>
-            {tc('retry')}
-          </Button>
-        </div>
+        <ErrorState description={tc('errorDescription')} onRetry={() => setRetryKey((k) => k + 1)} />
       </div>
     );
   }

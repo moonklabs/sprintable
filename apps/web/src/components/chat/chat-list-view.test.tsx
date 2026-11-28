@@ -1189,6 +1189,14 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
     const rail = readRailCapture(container);
     expect(rail.error).toBe('true');
     expect(rail.loading).toBe('false');
+    // story 5048 ⑤-⑨: the failed list is the ds ErrorState — the ONLY alert and the ONLY retry (the outlet beside it is a plain empty state)
+    const es = container.querySelector('[data-testid="chat-list-load-error"]') as HTMLElement;
+    expect(es.getAttribute('data-slot')).toBe('ds-error-state');
+    expect(es.getAttribute('role')).toBe('alert');
+    expect(es.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    const retry = [...es.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry);
+    expect(retry).toHaveLength(1);
+    expect(retry[0]!.getAttribute('data-slot')).toBe('ds-button');
   });
 
   it('agent 탭 fetch 실패(my는 성공) → 에이전트 탭 활성 시 좌우가 모두 실패를 말한다(my N건 무관)', async () => {

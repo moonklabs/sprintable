@@ -304,9 +304,9 @@ describe('[SID:4903] the agents tab list — the answer of an ask pushed aside b
     stubAgentLists([[row('a1', { id: 'm-1', content: '첫 응답 글', created_at: T_OLD })], [row('a1', { id: 'm-2', content: '새 응답 글', created_at: T_NEW })]], { holds: [{ call: 1, gate: a.gate }, { call: 2, gate: b.gate }] });
     await mountAdminAndOpenAgentTab(false); // ask 1 (held)
     await act(async () => { sse.opts!.onConversationMessage!({ conversation_id: 'zz-unknown', id: 'm-z', content: '모르는 방의 글', created_at: T_NEWER, sender: { id: 'other' } }); }); // an unknown room: the list asks again — ask 2 (held)
-    expect(container.textContent).toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).not.toBeNull();
     a.release(); await flush(); // ask 1 ends (stale)
-    expect(container.textContent).toContain(koMessages.common.loading); // mutant (finally switches loading off unguarded) → the list shows its empty state while ask 2 is still on its way
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).not.toBeNull(); // mutant (finally switches loading off unguarded) → the list shows its empty state while ask 2 is still on its way
     b.release(); await flush();
     expect(container.textContent).toContain('새 응답 글');
   });

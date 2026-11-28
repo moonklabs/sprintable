@@ -98,25 +98,26 @@ describe('ChatsPage — story #3788(B-③) 세 갈래', () => {
 // story #3790(유나 定) — 판단 순서는 로딩 → 실패 → 0건. 실패했을 때 목록이 비어 있으므로
 // (count===0), 0건 검사가 먼저 서면 실패가 「없다」로 떨어진다 — 그 순서 자체를 고정한다.
 describe('ChatsPage — story #3790 실패 축', () => {
-  it('⭐실패 — count===0이어도 noConversations가 아니라 conversationsLoadFailed를 말한다', async () => {
+  it('⭐실패 — count===0이어도 noConversations를 말하지 않는다 · 이 쪽(우측)은 «대화를 선택» 빈 상태(story 5048 ⑤-⑨: 실패는 목록 칸의 ErrorState가 한 번만 말한다)', async () => {
     await act(async () => { root.render(renderPage(false, 0, true)); });
-    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
     expect(container.textContent).not.toContain(koMessages.chats.noConversations);
-    expect(container.textContent).not.toContain(koMessages.chats.selectConversationPrompt);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed); // one failure, one voice
+    expect(container.textContent).toContain(koMessages.chats.selectConversationPrompt); // the plain «pick a conversation» empty state
   });
 
-  it('실패 — count>0이어도(활성 탭 것이 실패한 것이므로) 여전히 실패를 말한다', async () => {
+  it('실패 — count>0이어도(활성 탭 것이 실패한 것이므로) 이 쪽은 같은 빈 상태 · 알림 역할 0', async () => {
     await act(async () => { root.render(renderPage(false, 5, true)); });
-    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
-    expect(container.textContent).not.toContain(koMessages.chats.selectConversationPrompt);
+    expect(container.textContent).toContain(koMessages.chats.selectConversationPrompt);
+    expect(container.querySelector('[role="alert"]')).toBeNull(); // the rail's ErrorState is the only alert
   });
 
-  // story 5031 (C1 [6]) — ONE retry for one failure: the list (rail) beside this outlet owns the press (chat-list-view.test.tsx); this side says the sentence and nothing more
-  it('⭐실패 — 이 쪽(우측 outlet)은 문장만 말하고 «다시 시도» 단추가 없다(재시도는 목록 칸의 하나뿐)', async () => {
+  // story 5031 (C1 [6]) — ONE retry for one failure: the list (rail) beside this outlet owns the press (chat-list-view.test.tsx); this side says nothing (5048 ⑤-⑨: not even the sentence)
+  it('⭐실패 — 이 쪽(우측 outlet)은 문장도 «다시 시도» 단추도 알림도 없다(재시도는 목록 칸의 하나뿐)', async () => {
     const onRetry = vi.fn();
     await act(async () => { root.render(renderPage(false, 0, true, onRetry)); });
-    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
-    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry)).toHaveLength(0); // (the old second press in this outlet would make it 1 → RED)
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry)).toHaveLength(0);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(onRetry).not.toHaveBeenCalled();
   });
 });

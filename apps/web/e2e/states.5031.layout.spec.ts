@@ -421,7 +421,6 @@ const BASELINE: Record<string, Finding> = {
   'home-default-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['card×1', 'tooltip-trigger×3'] },
   'home-loading-1440': { oldSlots: ['card×2'] },
   'home-empty-1440': { oldSlots: ['card×1'] },
-  'home-error-1440': { oldSlots: ['button×1'] },
   'home-long-1440': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×3'] },
   'home-partial-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['button×1', 'card×1', 'tooltip-trigger×3'] },
   'chats-default-1440': { oldSlots: ['button×5', 'popover-trigger×1'] },
@@ -437,7 +436,6 @@ const BASELINE: Record<string, Finding> = {
   'home-default-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['card×1', 'tooltip-trigger×2'] },
   'home-loading-390': { oldSlots: ['card×2'] },
   'home-empty-390': { oldSlots: ['card×1'] },
-  'home-error-390': { oldSlots: ['button×1'] },
   'home-long-390': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×2'] },
   'home-partial-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['button×1', 'card×1', 'tooltip-trigger×2'] },
   'chats-default-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
@@ -503,7 +501,7 @@ async function expectState(page: Page, place: PlaceId, state: StateId) {
   }
   if (place === 'chats') {
     if (state === 'default') await expect(t('런칭 준비').first()).toBeVisible();
-    if (state === 'loading') await expect(t(messages['common']!['loading']!).first()).toBeVisible();
+    if (state === 'loading') await expect(page.getByRole('status', { name: messages['common']!['loading']! }).first()).toBeVisible(); // story 5048 ⑤-⑨: the list is the ds SkeletonGroup (its name = the loading word) — not the bare word
     if (state === 'empty') await expect(t(messages['chats']!['noConversations']!).first()).toBeVisible();
     if (state === 'error') { await expect(t(messages['chats']!['conversationsLoadFailed']!).first()).toBeVisible(); await expect(page.getByRole('button', { name: messages['common']!['retry']! }), 'ONE retry press for one failure (a button)').toHaveCount(1);
       // the ds Button (md · secondary) gives the phone's 44 by itself (touch floor) — nothing added at the call site; the height is MEASURED here, and printed

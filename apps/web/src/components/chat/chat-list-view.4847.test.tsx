@@ -754,7 +754,7 @@ describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, P
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     await mount();
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
-    expect(container.textContent).toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).not.toBeNull();
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => null })));

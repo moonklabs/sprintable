@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { RotateCw } from 'lucide-react';
 import { Button } from '@/components/ds/button';
+import { ErrorState } from '@/components/ds/error-state';
 import { Chip } from '@/components/ds/chip';
 import { DataText, joinDot } from '@/components/ds/data-text';
 import { Input } from '@/components/ds/input';
@@ -385,14 +386,7 @@ export function AgentRunsList({ agentId }: { agentId?: string } = {}) {
               ))}
             </div>
           ) : loadError ? (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <p className="text-sm font-medium text-ds-ink">{tc('error')}</p>
-              <p className="text-xs text-ds-ink-3">{tc('errorDescription')}</p>
-              <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>
-                <RotateCw className="mr-1.5 size-ds-icon-md" />
-                {tc('retry')}
-              </Button>
-            </div>
+            <ErrorState description={tc('errorDescription')} onRetry={() => setRetryKey((k) => k + 1)} />
           ) : total === 0 && data && !(grouped && (data.failed === null || data.hitl === null)) ? (
             // story #3680 AC3 — 기본 창(넓히지 않은 상태)의 0건은 "실행 없음"과 다른 사실이다("창 밖일 수 있다") — 날짜를 한 번이라도 건드렸으면 일반 문구로.
             isDefaultWindow ? (

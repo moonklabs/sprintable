@@ -12,6 +12,7 @@ import { DataText, joinDot } from '@/components/ds/data-text';
 import { Icon } from '@/components/ds/icon';
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { EmptyState } from '@/components/ds/empty-state';
+import { ErrorState } from '@/components/ds/error-state';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
 import { RowList, RowListItem, type RowAction } from '@/components/ds/row-list';
@@ -326,11 +327,7 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
           {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
         </SkeletonGroup>
       ) : loadError ? (
-        <EmptyState
-          title={tc('error')}
-          description={tc('errorDescription')}
-          action={<Button onClick={() => setRetryKey((k) => k + 1)}>{tc('retry')}</Button>}
-        />
+        <ErrorState description={tc('errorDescription')} onRetry={() => setRetryKey((k) => k + 1)} data-testid="agent-list-load-error" />
       ) : agents.length === 0 ? (
         <EmptyState title={t('noOrgAgents')} description={t('noOrgAgentsCta')} />
       ) : (

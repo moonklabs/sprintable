@@ -9,6 +9,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { IconButton } from '@/components/ds/icon-button';
 import { Button as DsButton } from '@/components/ds/button';
+import { ErrorState } from '@/components/ds/error-state';
+import { ChatListSkeleton } from '@/components/chat/chat-list-skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
@@ -1037,21 +1039,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   );
 
   const myListContent = loading ? (
-    <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
-    </div>
+    <ChatListSkeleton label={tc('loading')} />
   ) : loadError ? (
     // story #3790(유나 定) — 오른쪽 outlet이 실패 배너로 갈라졌는데 이 레일이 「대화가
     // 없습니다」(0건)로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다(docs
     // indexLoadError와 같은 형 — 같은 키를 좌우가 공유). 폭이 좁아 Alert 대신 한 줄 +
     // 텍스트 재시도.
-    <div className="px-2 py-4">
-      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
-      {/* story 5031 (C1 [6]): the ONE retry of a failed list (the outlet beside it says no more than the sentence) — the ds secondary press, so it looks like a press (it was a text link) and a phone's is 44 (touch floor of the ds Button) */}
-      <DsButton type="button" size="md" variant="secondary" onClick={retryMyConversations} className="mt-2">
-        {tc('retry')}
-      </DsButton>
-    </div>
+    // story 5048 ⑤-⑨: the ONE error of a failed list = the ds ErrorState (role=alert · retry = the ds secondary press, 44 on a phone). The outlet beside it is an empty state with no retry and no sentence (chats/page.tsx) — one failure, one voice, one press.
+    <ErrorState title={t('conversationsLoadFailed')} onRetry={retryMyConversations} data-testid="chat-list-load-error" />
   ) : conversations.length === 0 ? (
     // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
     // A person with no project but rooms never gets here — they see their rooms. On an org-wide server a room can be made with no project, so there is somewhere to start: the ordinary empty state.
@@ -1129,20 +1124,13 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const agentConversationList = agentLoading ? (
     // story #3790 — 이 탭은 여태 loading 갈래가 없어 첫 로드 中에도 0건 문구가 잠깐
     // 스쳤다(my 탭과 형을 맞춘다, 실패 축 신설과 같은 정리 범위).
-    <div className="flex h-full items-center justify-center">
-      <p className="text-sm text-muted-foreground">{tc('loading')}</p>
-    </div>
+    <ChatListSkeleton label={tc('loading')} />
   ) : agentForbidden ? (
     <div className="px-2 py-4" data-testid="agent-chats-admin-only">
       <p className="text-xs text-muted-foreground">{t('agentChatsAdminOnly')}</p>
     </div>
   ) : agentLoadError ? (
-    <div className="px-2 py-4">
-      <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
-      <DsButton type="button" size="md" variant="secondary" onClick={retryAgentConversations} className="mt-2">
-        {tc('retry')}
-      </DsButton>
-    </div>
+    <ErrorState title={t('conversationsLoadFailed')} onRetry={retryAgentConversations} data-testid="chat-list-load-error" />
   ) : agentOnlyConvs.length === 0 ? (
     <div className="flex h-full items-center justify-center">
       <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />

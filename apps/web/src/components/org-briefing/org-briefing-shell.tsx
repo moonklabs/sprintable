@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PublishedSection } from './today-sections';
 import { CountBadge } from '@/components/ds/count-badge';
+import { ErrorState } from '@/components/ds/error-state';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
@@ -122,11 +123,7 @@ export function OrgBriefingShell() {
       </div>
 
       {loadError && !model ? (
-        <div className="flex flex-col items-center gap-3 py-10 text-center">
-          <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
-          {/* story 5031 (C1 [6]): a phone's press is 44 (the look is the same: only where a finger is, the touch floor of the ds parts) */}
-          <Button size="sm" variant="outline" onClick={retry} className="touch:min-h-ds-touch touch:min-w-ds-touch">{tc('retry')}</Button>
-        </div>
+        <ErrorState title={t('loadErrorTitle')} onRetry={retry} data-testid="home-load-error" />
       ) : !model || !sources ? (
         <div className="space-y-3" aria-hidden="true">
           <Card className="h-24 animate-pulse bg-ds-surface-sunk" />
