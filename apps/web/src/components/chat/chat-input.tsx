@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
 import { AlertTriangle, ChevronDown, Compass, FolderOpen, Loader2, Terminal, Type, X, Hash } from 'lucide-react';
@@ -484,7 +484,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   // story 5046 (codex): what the choice is at the moment the SEND goes out — after an upload that took a while the agent may not be a host any more (the choice is gone from the screen): the call must not carry a word the screen no longer offers
   const choiceNowRef = useRef<{ shown: boolean; delivery: DeliveryChoiceValue }>({ shown: false, delivery: 'now' });
-  useEffect(() => { choiceNowRef.current = { shown: deliveryChoiceShown, delivery }; });
+  useLayoutEffect(() => { choiceNowRef.current = { shown: deliveryChoiceShown, delivery }; }); // (at commit, before the browser can deliver the next click — not a render behind)
 
   const handleSend = async () => {
     const trimmed = text.trim();

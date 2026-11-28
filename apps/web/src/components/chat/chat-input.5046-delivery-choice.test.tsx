@@ -178,5 +178,12 @@ describe('story 5046 (C13): the choice is for agents a HOST runs — nothing els
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0]![3], 'no delivery word may go out once the screen no longer offers the choice').toBeUndefined();
   });
+
+  it('the send reads the choice that is on the screen at that instant: the ref is made at COMMIT (a layout effect), not a render behind (codex 4th pass — pinned in the source)', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'chat-input.tsx'), 'utf8');
+    expect(src).toContain('useLayoutEffect(() => { choiceNowRef.current = { shown: deliveryChoiceShown, delivery }; });');
+    expect(src).toContain("...(choiceNowRef.current.shown && choiceNowRef.current.delivery === 'after_turn' ? (['after_turn'] as const) : []),");
+    expect(src).not.toContain('useEffect(() => { choiceNowRef.current');
+  });
 });
 
