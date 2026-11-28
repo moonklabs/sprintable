@@ -310,6 +310,54 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
     await settle();
     expect(chip(), 'the failed read is asked again by itself').not.toBeNull();
   });
+  it('⭐reconnect after reconnect while reads keep failing: each new read REPLACES the earlier chain of retries — no second chain, no stray timer (codex, 5th pass)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubFetch(true, true);
+    await mount();
+    const first = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { first.onopen?.(); });
+    await act(async () => { first.onerror?.(); });                                 // (from now on every open of a stream counts as a RECONNECT — the back-off remembers the error)
+    for (let i = 0; i < 40 && FakeEventSource.instances[FakeEventSource.instances.length - 1] === first; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    const next = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    expect(next).not.toBe(first);
+    workingFails = true;
+    const base = workingReads();
+    await act(async () => { next.onopen?.(); });                                   // reconnect 1: its read fails → a retry chain waits (2 s)
+    await settle();
+    expect(workingReads() - base).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    await act(async () => { next.onopen?.(); });                                   // reconnect 2 comes while that chain still waits: it must REPLACE it
+    await settle();
+    expect(workingReads() - base, 'premise: the second reconnect came before the first chain\'s retry fired').toBe(2);
+    const before = workingReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await settle();
+    expect(workingReads() - before, 'one retry (the newest chain\'s), not one per reconnect').toBe(1);
+  });
+  it('⭐an earlier chain\'s read is still IN FLIGHT when a newer reconnect starts its own chain, and it fails later: it must not start a second chain of retries (codex, 5th pass)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubFetch(true, true);
+    await mount();
+    const first = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { first.onopen?.(); });
+    await act(async () => { first.onerror?.(); });
+    for (let i = 0; i < 40 && FakeEventSource.instances[FakeEventSource.instances.length - 1] === first; i += 1) await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    const next = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    workingFails = true;
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { next.onopen?.(); });         // reconnect 1: its read is asked and HELD (it will fail when it lands)
+    await settle();
+    workingGate = null;
+    await act(async () => { next.onopen?.(); });         // reconnect 2: its own chain; its read fails at once → its retry waits (2 s)
+    await settle();
+    await act(async () => { release(); });               // the held read of the OLD chain fails now: it must end there
+    await settle();
+    const before = workingReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    await settle();
+    expect(workingReads() - before, 'one retry (the newest chain\'s) — the old chain must not add its own').toBe(1);
+  });
   it('⭐a read of the room before lands late (the view moved to the next room meanwhile): it does not wipe the new room\'s list (codex)', async () => {
     stubFetch(true, false);                              // room 1: the agent is run by the plugin
     let release!: () => void;
@@ -351,7 +399,7 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
   it('the pins stand in the view: a read is shown only if no event came meanwhile · a reconnect reads the list · the event is the list', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
     expect(view).toContain('if (seq === workingSeqRef.current && ticket === workingReadRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });');
-    expect(view).toContain('readWorkingWithRetry(workingRetryGenRef.current, 0); // story 5046: an event missed while the stream was down');
+    expect(view).toContain('startWorkingRead(); // story 5046: an event missed while the stream was down');
     expect(view).toContain('setWorkingRows({ thread: threadId, rows: payload.working ?? [] });');
     expect(view).not.toContain('hostRunRef');
     expect(view).not.toContain('WorkingReader');
