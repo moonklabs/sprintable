@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { useTranslations } from 'next-intl';
 import { IconButton } from '@/components/ds/icon-button';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
-import { newClientNonce, normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
+import { useSendAttempts } from './use-send-attempts';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import { SupportLauncherClearance } from '@/components/support-widget/support-launcher-clearance';
@@ -165,8 +166,11 @@ export function ThreadPanel({
     }
   });
 
+  const { nonceFor, accepted } = useSendAttempts();
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
-    const body: Record<string, unknown> = { content, thread_id: parentMessage.id, client_nonce: newClientNonce() }; // story #4440
+    // story 5043 (C10): the token belongs to the DRAFT — the same reply sent again after a failed or lost send keeps it (the server makes one message of it); let go when the server accepted
+    const attemptKey = JSON.stringify([parentMessage.id, content, mentionedIds ?? null]);
+    const body: Record<string, unknown> = { content, thread_id: parentMessage.id, client_nonce: nonceFor(attemptKey) }; // story #4440
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
@@ -175,6 +179,7 @@ export function ThreadPanel({
     });
     if (!res.ok) throw new Error('Failed to send thread reply');
     const raw = await res.json() as Record<string, unknown>;
+    accepted(attemptKey);
     const msg = sentMessageFromAnswer(raw); // story #4430 — the send answer's `delivery` on the sender's own line
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
@@ -184,7 +189,7 @@ export function ThreadPanel({
     onReplyAdded?.(parentMessage.id);
     // AC3/AC6: optimistic update 후 render 완료 시 스크롤
     shouldScrollToBottomRef.current = true;
-  }, [conversationId, parentMessage.id, onReplyAdded]);
+  }, [conversationId, parentMessage.id, onReplyAdded, nonceFor, accepted]);
 
   // [SID:4311 PR 3] 원본 + 답글 한 목록 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 내 메시지는 «나»라 셈에서 뺌).
   const senderLabels = actorRowLabels([parentMessage, ...messages].filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));

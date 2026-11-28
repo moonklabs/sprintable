@@ -20,7 +20,7 @@ vi.mock('@/hooks/use-chat-sse', async (importOriginal) => {
   return { ...actual, useChatSse: () => ({ connected: true, polling: false }) };
 });
 
-const probe: { send: ((c: string) => Promise<void>) | null; prefill: { text: string; nonce: number } | null | undefined } = { send: null, prefill: undefined };
+const probe: { send: ((c: string, mentioned?: string[], attachments?: Array<{ url: string }>) => Promise<void>) | null; prefill: { text: string; nonce: number } | null | undefined } = { send: null, prefill: undefined };
 vi.mock('./chat-input', () => ({
   ChatInput: ({ prefillCommand, onDraftChange, onSend }: { prefillCommand?: { text: string; nonce: number } | null; onDraftChange?: (t: string) => void; onSend: (c: string) => Promise<void> }) => {
     const [text, setText] = useState('');
@@ -41,7 +41,7 @@ vi.mock('./chat-input', () => ({
 let container: HTMLDivElement;
 let root: Root;
 let posts: Array<Record<string, unknown>>;
-let postPlan: Array<'ok' | 'lost' | 'server-error'>;
+let postPlan: Array<'ok' | 'lost' | 'server-error' | 'conflict'>;
 
 beforeEach(() => {
   posts = []; postPlan = [];
@@ -57,6 +57,7 @@ beforeEach(() => {
       posts.push(JSON.parse(init.body ?? '{}'));
       const plan = postPlan.shift() ?? 'ok';
       if (plan === 'lost') throw new TypeError('network error'); // the answer never came back
+      if (plan === 'conflict') return { ok: false, status: 409, json: async () => ({ detail: 'client_nonce was already used for another message' }), text: async () => '' };
       if (plan === 'server-error') return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
       return { ok: true, json: async () => ({ data: { id: `m${posts.length}`, content: 'x', created_at: new Date().toISOString(), created_by: 'me-1', conversation_id: 'thread-1' } }) };
     }
@@ -85,9 +86,9 @@ async function mount(props: { composeNotice?: string; composeNoticeId?: string; 
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
-const sendText = async (text: string): Promise<'sent' | 'failed'> => {
+const sendText = async (text: string, mentioned?: string[], attachments?: Array<{ url: string }>): Promise<'sent' | 'failed'> => {
   let out: 'sent' | 'failed' = 'sent';
-  await act(async () => { try { await probe.send!(text); } catch { out = 'failed'; } });
+  await act(async () => { try { await probe.send!(text, mentioned, attachments); } catch { out = 'failed'; } });
   return out;
 };
 const input = () => container.querySelector('[data-testid="mock-input"]') as HTMLTextAreaElement;
@@ -120,6 +121,35 @@ describe('ChatView — one token per draft (5043)', () => {
     expect(posts).toHaveLength(3);
     expect(posts[1]!.client_nonce).not.toBe(posts[0]!.client_nonce);
     expect(posts[2]!.client_nonce).not.toBe(posts[1]!.client_nonce); // reverted (the token is never let go) → the third would be answered with the second → RED
+  });
+});
+
+describe('ChatView — what makes a send «the same draft» (5043)', () => {
+  it('⭐ the same words with other mentions, or other files, are ANOTHER send — a new token (a key of the words alone would hand the server the first send\'s token)', async () => {
+    await mount();
+    postPlan = ['lost', 'lost', 'lost'];
+    await sendText('same words', ['m1']);
+    await sendText('same words', ['m2']);
+    await sendText('same words', ['m2'], [{ url: 'https://files/a.png' }]);
+    expect(new Set(posts.map((b) => b.client_nonce)).size).toBe(3); // reverted (key = words only) → 1 → RED
+  });
+
+  it('⭐ a 409 (the server says the token was used for other words) is a failed send: the box keeps the words, the retry keeps the token', async () => {
+    await mount();
+    postPlan = ['conflict', 'ok'];
+    expect(await sendText('words')).toBe('failed');
+    expect(await sendText('words')).toBe('sent');
+    expect(posts[1]!.client_nonce).toBe(posts[0]!.client_nonce);
+  });
+
+  it('⭐ two callers that interleave (the composer and a card\'s reply button share one send): the first one\'s token survives the second\'s success', async () => {
+    await mount();
+    postPlan = ['lost', 'ok', 'ok'];
+    await sendText('draft A');      // the answer is lost
+    await sendText('card reply B'); // another caller succeeds meanwhile
+    await sendText('draft A');      // the person presses Send again
+    expect(posts[2]!.client_nonce).toBe(posts[0]!.client_nonce); // reverted (ONE slot: B took it) → a new token → RED
+    expect(posts[1]!.client_nonce).not.toBe(posts[0]!.client_nonce);
   });
 });
 

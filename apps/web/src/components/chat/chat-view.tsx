@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { LAYER } from '@/components/ds/layers';
 import { ComposeMovedNotice } from './compose-moved-notice';
+import { useSendAttempts } from './use-send-attempts';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -28,7 +29,7 @@ import { ReadingPanelProvider } from './reading-panel-context';
 import { readingPanelLayout } from './reading-panel-layout';
 import type { ChatMessage, DeliveryMode, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -868,14 +869,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     );
   }, []);
 
-  const sendAttemptRef = useRef<{ key: string; nonce: string } | null>(null);
+  const { nonceFor, accepted } = useSendAttempts();
   const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[], deliveryMode?: DeliveryMode) => {
     // story 5043 (C10): the token belongs to the DRAFT, not to the call — the same words (and files · mentions · delivery) sent again after a send that failed or whose answer was lost carry the same token, so the server answers with
     // the message that is already there instead of making a second copy; other words are another send with a new token. It is let go when the server has accepted the send.
     const attemptKey = JSON.stringify([content, mentionedIds ?? null, attachments?.map((a) => a.url) ?? null, deliveryMode ?? null]);
-    const attempt = sendAttemptRef.current !== null && sendAttemptRef.current.key === attemptKey ? sendAttemptRef.current : { key: attemptKey, nonce: newClientNonce() };
-    sendAttemptRef.current = attempt;
-    const body: Record<string, unknown> = { content, client_nonce: attempt.nonce }; // story #4440 — its echo is dropped here
+    const body: Record<string, unknown> = { content, client_nonce: nonceFor(attemptKey) }; // story #4440 — its echo is dropped here
     if (deliveryMode === 'after_turn') body.delivery_mode = 'after_turn'; // story 5046 (C13): «끝나고 이어서» — «지금» is the server's default, never sent
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     if (attachments && attachments.length > 0) body.attachments = attachments;
@@ -887,7 +886,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (!res.ok) await throwForFailedResponse(res, 'Failed to send message'); // …and so does a send that registers an attachment in such a room
     // Backend: { data: _to_chat_message } or { forked: true, forked_conversation_id, data }
     const raw = await res.json() as Record<string, unknown>;
-    if (sendAttemptRef.current === attempt) sendAttemptRef.current = null; // accepted (a 200 that answers a re-sent token is accepted too): the next send is a new one
+    accepted(attemptKey); // accepted (a 200 that answers a re-sent token is accepted too): the next send is a new one
     // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
     if (raw.forked === true && typeof raw.forked_conversation_id === 'string') {
       // story #4442 (Qadir · PO 00:04Z) — the message belongs to the new group: this tab's lists still hear about it (its
@@ -915,7 +914,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (dropped.length) {
       setReferenceDropHints((prev) => ({ ...prev, [sent.id]: dropped }));
     }
-  }, [threadId, addMessage, apiPrefix, pathname, router]);
+  }, [threadId, addMessage, apiPrefix, pathname, router, nonceFor, accepted]);
 
   const dismissReferenceDropHint = useCallback((messageId: string) => {
     setReferenceDropHints((prev) => {

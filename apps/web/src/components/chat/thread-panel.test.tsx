@@ -36,7 +36,7 @@ vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: () => {} 
 // story #4430 — the reply send is driven through ChatInput's onSend (the real input's typing isn't what these tests watch).
 vi.mock('./chat-input', () => ({
   ChatInput: ({ onSend }: { onSend: (content: string) => Promise<void> | void }) => (
-    <button type="button" data-testid="mock-send" onClick={() => { void onSend('회의록 올렸어요.'); }}>send</button>
+    <button type="button" data-testid="mock-send" onClick={() => { void Promise.resolve(onSend('회의록 올렸어요.')).catch(() => undefined); }}   /* (the real input shows «failed» on a rejected send; here it is simply caught) */>send</button>
   ),
 }));
 
@@ -403,5 +403,28 @@ describe('ThreadPanel — story #4430 a reply\'s send answer puts «not delivere
     const { isEchoOfSentHere } = await import('@/hooks/use-chat-sse');
     expect(typeof posted[0]?.client_nonce).toBe('string');
     expect(isEchoOfSentHere({ client_nonce: posted[0]!.client_nonce })).toBe(true);
+  });
+});
+
+// story 5043 (C10): the token of a thread reply belongs to the DRAFT — the same reply sent again after a failed or lost send keeps it (the server makes one message of it)
+describe('ThreadPanel — a reply sent again keeps its token (story 5043)', () => {
+  it('⭐ lost answer → the same reply again carries the SAME token; after it was accepted the next one is new', async () => {
+    const posted: Record<string, unknown>[] = [];
+    let plan: Array<'lost' | 'ok'> = ['lost', 'ok', 'ok'];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      if (init?.method === 'POST') {
+        posted.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
+        if (plan.shift() === 'lost') throw new TypeError('network error');
+        return { ok: true, json: async () => ({ data: { id: `reply-${posted.length}`, thread_id: 'parent-1', sender: { id: 'member-1', name: '나', type: 'human' }, content: 'x', created_at: '2026-08-08T00:02:00.000Z' } }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await act(async () => { root.render(wrap(<Harness />)); });
+    await flush();
+    const send = async () => { await act(async () => { (container.querySelector('[data-testid="mock-send"]') as HTMLElement).click(); }); await flush(); };
+    await send(); await send(); await send();
+    expect(posted).toHaveLength(3);
+    expect(posted[1]!.client_nonce).toBe(posted[0]!.client_nonce); // reverted (a new token per call) → RED
+    expect(posted[2]!.client_nonce).not.toBe(posted[1]!.client_nonce); // reverted (never let go) → RED
   });
 });
