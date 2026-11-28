@@ -232,7 +232,9 @@ async function resolveApiKeyAuthContext(rawApiKey: string): Promise<AuthContext 
 
 async function resolveHumanAuthContextFromMe(accessToken: string): Promise<AuthContext | null> {
   const { fastapiCall } = await import('@sprintable/storage-api');
-  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string } | null>(
+  // story 5041 (④ lap): a person who belongs to an organisation with NO project gets `project_id: null` from `/me` (it used to be the ORGANISATION's id standing in for a project — which the next call took for a project and
+  // answered «project_ids not in org»). `AuthContext.project_id` stays a string for the 22 routes that read it: none is the empty string — a route that needs a project then says «project required» instead of «not found»
+  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string | null; project_name: string | null } | null>(
     'GET', '/api/v2/me', accessToken
   ).catch(() => null);
   if (!meData) return null;
@@ -240,8 +242,8 @@ async function resolveHumanAuthContextFromMe(accessToken: string): Promise<AuthC
   return {
     id: meData.id,
     org_id: meData.org_id,
-    project_id: meData.project_id,
-    project_name: meData.project_name,
+    project_id: meData.project_id ?? '',
+    project_name: meData.project_name ?? '',
     type: 'human' as const,
   };
 }

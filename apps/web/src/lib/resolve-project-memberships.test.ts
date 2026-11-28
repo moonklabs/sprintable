@@ -4,6 +4,7 @@
 // 전파되고 BE has_project_access가 403 — 「새 프로젝트」 생성이 막혔다.
 import { describe, expect, it } from 'vitest';
 import { resolveProjectMemberships, resolveServerProjectId } from './resolve-project-memberships';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 
 describe('resolveProjectMemberships (story #2885)', () => {
   it('memberships가 비어있지 않으면 그대로 반환한다', () => {
@@ -49,6 +50,19 @@ describe('resolveServerProjectId (story #4762 AC2)', () => {
 
   it('no claim at all + exactly one project → that project', () => {
     expect(resolveServerProjectId(one, { project_id: null, project_name: null })).toBe('p-only');
+  });
+
+  it('story 5041: a person whose organisation has NO project (/me says project_id null) stands on nothing — not on the organisation id — whether the list is empty or not exactly one', () => {
+    expect(resolveServerProjectId([], { project_id: null, project_name: null, org_id: 'org-1' })).toBeUndefined();
+    expect(resolveServerProjectId(two, { project_id: null, project_name: null, org_id: 'org-1' })).toBeUndefined();
+  });
+
+  it('story 5041: with null the person lands on the «no project at all» state (the chats list says «no project yet» and offers the first project) — with the old organisation-id placeholder they did not (an empty shell)', () => {
+    const noProjectAtAll = (projectId: string | undefined) => isNoProjectAtAll({ projectId, projectMemberships: [] });
+    // /me now: no project → no project id → the state the chat list (chat-list-view: `noProjectAtAll`) and the recruit screen (recruit-no-project) draw «create the first project» for
+    expect(noProjectAtAll(resolveServerProjectId([], { project_id: null, project_name: null, org_id: 'org-1' }))).toBe(true);
+    // /me before: the organisation id stood in for a project → a truthy project id → «not at all» was false and the person stood in an empty shell
+    expect(noProjectAtAll(resolveServerProjectId([], { project_id: 'org-1', project_name: null, org_id: 'org-1' }))).toBe(false);
   });
 
   it('a claim that is one of the memberships is kept', () => {

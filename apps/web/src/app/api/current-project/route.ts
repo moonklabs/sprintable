@@ -14,6 +14,11 @@ export async function GET(request: Request) {
     const session = await getServerSession();
     const token = session?.access_token ?? '';
 
+    // story 5041 (④ lap): a person in an organisation with no project has NO current project — said as null (it used to be the organisation's id in the project slot)
+    if (!me.project_id) {
+      return apiSuccess({ project_id: null, project_name: null, org_id: me.org_id });
+    }
+
     let projectName = 'My Project';
     try {
       const proj = await fastapiCall<{ name?: string; id?: string }>(

@@ -11,7 +11,8 @@ class MeResponse(BaseModel):
 
     id: uuid.UUID
     org_id: uuid.UUID
-    project_id: uuid.UUID
+    # story 5041 (④ lap): null = the person's organisation has NO project. It used to be the ORGANISATION's id standing in for one (the field was a required UUID), which the next call took for a project («project_ids not in org»).
+    project_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
     name: str | None  # story #3758 — org_members-only 폴백 분기가 display_name 없으면 None을 정직하게 돌림(email/id 폴백 0)
     email: str | None = None  # E-ONBOARDING S2: User.email 노출

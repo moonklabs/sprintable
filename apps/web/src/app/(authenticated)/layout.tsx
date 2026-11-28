@@ -23,8 +23,8 @@ import { SP_RENEW_TRIED_COOKIE, SP_RENEW_UNCONFIRMED_COOKIE } from '@/lib/auth/c
 interface MemberContext {
   id: string;
   org_id: string;
-  project_id: string;
-  project_name: string;
+  project_id: string | null; // null = the person's organisation has no project (story 5041)
+  project_name: string | null;
   name: string;
   role?: string;
   // story #2103 — BE가 여러 write action(게이트/HITL 승인·거부, 각종 삭제)을 "휴먼 멤버만

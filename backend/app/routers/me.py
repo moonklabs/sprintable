@@ -229,10 +229,12 @@ async def get_me(
                 # canonical member 앵커도 display_name도 없으면 None을 정직하게 돌린다
                 # (member_resolver.py 5자리·#3755와 같은 email/id 폴백 클래스의 독립 자리).
                 name = member_anchor or (user.display_name if user else None)
+                # story 5041 (④ lap): «no project» is said as no project — never the organisation's id in a project's place (the hotfix that added this answer, PR 881, put it there only because the field could not say «none»; the answer
+                # itself — 200, not a 404 that bounced the person to /login — stays)
                 try:
-                    proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
+                    proj_id = uuid.UUID(project_id_str) if project_id_str else None
                 except (ValueError, AttributeError):
-                    proj_id = org_member.org_id
+                    proj_id = None
                 # story #3553(페드루 PO 라이브 재현, PO Test Org db474a4e·772609ea, 2026-09-06) —
                 # 이 폴백(team_member 행 0인 owner/admin — org 소유만으로 접근)은 project_id는
                 # 채우면서 project_name을 통째로 빼먹어 항상 null로 나갔다(일반 경로 211행의
@@ -240,7 +242,7 @@ async def get_me(
                 # project를 가리킬 때만 조회한다(0-project org 폴백=org_member.org_id는 project가
                 # 아니라 조회할 이유가 없다 — project_name=None 그대로가 맞다).
                 project_name: str | None = None
-                if project_id_str:
+                if proj_id is not None:
                     project_name = (await session.execute(
                         select(Project.name).where(Project.id == proj_id, Project.deleted_at.is_(None))
                     )).scalar_one_or_none()
@@ -442,10 +444,12 @@ async def update_me(
                 user = (await session.execute(
                     select(User).where(User.id == uid)
                 )).scalar_one_or_none()
+                # story 5041 (④ lap): «no project» is said as no project — never the organisation's id in a project's place (the hotfix that added this answer, PR 881, put it there only because the field could not say «none»; the answer
+                # itself — 200, not a 404 that bounced the person to /login — stays)
                 try:
-                    proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
+                    proj_id = uuid.UUID(project_id_str) if project_id_str else None
                 except (ValueError, AttributeError):
-                    proj_id = org_member.org_id
+                    proj_id = None
                 return MeResponse(
                     id=org_member.id,
                     org_id=org_member.org_id,
