@@ -57,3 +57,9 @@ export function DeliveryTimingLine({ mode, log, isMine, nameOf }: { mode: Delive
     </div>
   );
 }
+
+/** story 5046 (C13): is the «지금 끼어들기 / 끝나고 이어서» choice drawn for these working agents the message would reach? Only when there is at least one and EVERY one is run by a host (the server's `host_run`):
+ *  a webhook or the channel plugin reads `delivery_mode` nowhere, so «끝나고 이어서» for it would be a promise nothing keeps. A mix, an unknown (an old server sends no `host_run`) or nobody → no choice, the message goes the old way. */
+export function choiceDrawnFor(reached: readonly { hostRun?: boolean }[]): boolean {
+  return reached.length > 0 && reached.every((a) => a.hostRun === true);
+}

@@ -4,8 +4,9 @@
 // Harness as chat-view.4440.test.tsx (the real SSE hook over a fake EventSource, a stubbed fetch). Red when: the default send carries the word (`delivery_mode` must be absent — «지금» is the server's default) ·
 // «끝나고 이어서» is not in the body · the working agent of a 1:1 does not make the choice appear · a message waiting for its record is not read again (and one that has its record keeps being read) ·
 // the line under the bubble is drawn for the record.
-import { RealtimeProvider } from '@/components/realtime-provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -23,6 +24,7 @@ class FakeEventSource {
   readyState = 1;
   constructor(public url: string) { FakeEventSource.instances.push(this); }
   addEventListener(type: string, cb: (e: { data: string }) => void) { (this.listeners[type] ??= []).push(cb); }
+  emit(type: string, data: unknown) { for (const cb of this.listeners[type] ?? []) cb({ data: JSON.stringify(data) }); }
   close() { /* noop */ }
 }
 
@@ -39,19 +41,26 @@ let calls: Call[];
 let listAnswer: () => Record<string, unknown>[];
 let sentAnswer: Record<string, unknown>;
 
-function stubFetch(working = true) {
+/** `hostRun`: what the server's /working says per working agent — `true`/`false` (a host runs it or not), `'absent'` = an old server that has no `host_run` */
+let hostRunNow: boolean | 'absent' = true;
+/** a read of GET /working that is held on its way (a late answer) until the gate opens */
+let workingGate: Promise<void> | null = null;
+/** the next reads of GET /working fail (an error answer) while this is true */
+let workingFails = false;
+function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
+  hostRunNow = hostRun;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
-    if (url.endsWith('/working')) return { ok: true, json: async () => ({ data: working ? [{ member_id: A1 }] : [] }) };
+    if (url.endsWith('/working')) { if (workingGate) await workingGate; if (workingFails) return { ok: false, status: 500, json: async () => ({}) }; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) }; }
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
 
 beforeEach(() => {
-  calls = []; listAnswer = () => []; sentAnswer = { data: {} };
+  calls = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null; workingFails = false;
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -63,7 +72,11 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); vi.useRealTimers(); });
 
-async function mount() {
+let mountedThread = 'thread-1';
+async function mount(threadId = 'thread-1') {
+  mountedThread = threadId;
+  // the provider comes from the SAME module graph as the view (`vi.resetModules()` after each test gives the view fresh modules; a provider imported once at the top would be a different context — the view would never hear the stream in the second test on)
+  const { RealtimeProvider } = await import('@/components/realtime-provider');
   const { ChatView } = await import('./chat-view');
   const { ChatRailProvider } = await import('../../app/(authenticated)/chats/chat-rail-context');
   await act(async () => {
@@ -71,7 +84,7 @@ async function mount() {
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <RealtimeProvider currentTeamMemberId="me-1">
           <ChatRailProvider>
-            <ChatView threadId="thread-1" currentTeamMemberId="me-1" commandTargets={TARGETS} participants={PARTICIPANTS} />
+            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={[...TARGETS]} participants={PARTICIPANTS} />
           </ChatRailProvider>
         </RealtimeProvider>
       </NextIntlClientProvider>,
@@ -88,6 +101,11 @@ const type = async (v: string) => {
 const btn = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label) as HTMLButtonElement;
 const send = async () => { await act(async () => { (container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement).click(); }); await settle(); };
 const posts = () => calls.filter((c) => c.method === 'POST' && c.url.endsWith('/messages'));
+/** an SSE `conversation.working` event as the server sends it: the rows of who works, each with its `host_run` (omitted = an old server that does not say) */
+const emitRows = (rows: Array<{ member_id: string; host_run?: boolean }>) => { for (const es of FakeEventSource.instances) es.emit('conversation.working', { conversation_id: 'thread-1', working: rows.map((r) => ({ state: 'working', ...r })) }); };
+const host = (id = A1) => ({ member_id: id, host_run: true });
+const plugin = (id = A1) => ({ member_id: id, host_run: false });
+const workingReads = () => calls.filter((c) => c.method === 'GET' && c.url.endsWith('/working')).length;
 const listReads = () => calls.filter((c) => c.method === 'GET' && c.url.includes('/messages?')).length;
 
 const mine = (extra: Record<string, unknown> = {}) => ({
@@ -120,6 +138,160 @@ describe('the choice reaches the send body', () => {
     expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
     await send();
     expect('delivery_mode' in posts()[0]!.body!).toBe(false);
+  });
+});
+
+describe('story 5046 (C13): the choice is only for agents a HOST runs — the server says it on every row (GET /working and the SSE event alike)', () => {
+  const chip = () => container.querySelector('[data-testid="delivery-choice"]');
+  it('⭐a working agent the server says is NOT run by a host (a webhook · the channel plugin) → no choice, and the send has no word', async () => {
+    stubFetch(true, false);
+    await mount();
+    await type('hi');
+    expect(chip()).toBeNull();
+    await send();
+    expect('delivery_mode' in posts()[0]!.body!).toBe(false);
+  });
+  it('⭐an old server (no `host_run` on the row) → no choice: the old behaviour, nothing promised', async () => {
+    stubFetch(true, 'absent');
+    await mount();
+    await type('hi');
+    expect(chip()).toBeNull();
+  });
+  it('⭐an agent that starts working after the view opened: the EVENT carries host_run — the choice is drawn from it, with NO second read', async () => {
+    stubFetch(false, true);
+    await mount();
+    const before = workingReads();
+    await act(async () => { emitRows([host()]); });
+    await settle();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    expect(workingReads(), 'the event is the value — nothing is read to complete it').toBe(before);
+  });
+  it('an event row WITHOUT host_run (an old server) never draws the choice', async () => {
+    stubFetch(false, true);
+    await mount();
+    await act(async () => { emitRows([{ member_id: A1 }]); });
+    await settle();
+    await type('hi');
+    expect(chip()).toBeNull();
+  });
+  it('⭐a host agent stops and comes back run by the channel plugin: the newest event is the list — nothing stale is kept', async () => {
+    stubFetch(false, true);
+    await mount();
+    await act(async () => { emitRows([host()]); });
+    await settle();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    await act(async () => { emitRows([]); });
+    await settle();
+    expect(chip()).toBeNull();
+    await act(async () => { emitRows([plugin()]); });
+    await settle();
+    expect(chip()).toBeNull();
+  });
+  it('⭐the stream drops and comes back after an event was MISSED (the agent became a plugin meanwhile): the list is read again whole — it is not left as it was (codex, 8th pass)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();                      // a host runs the working agent
+    const first = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { first.onopen?.(); });       // the stream is up
+    const before = workingReads();
+    stubFetch(true, false);                              // …while the stream is down the agent comes back run by the plugin; its event is missed
+    await act(async () => { first.onerror?.(); });      // the stream drops
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });   // …the multiplexer retries
+    const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    expect(second).not.toBe(first);
+    await act(async () => { second.onopen?.(); });      // …and the stream is back: a RECONNECT
+    await settle();
+    expect(workingReads(), 'a reconnect reads the list again').toBe(before + 1);
+    expect(chip(), 'the choice of the old list must be gone').toBeNull();
+  });
+  it('⭐the first read is still on its way when a NEWER event arrives: the event\'s list stays — the older read cannot bring an agent back when it lands', async () => {
+    stubFetch(true, true);
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await mount();                                       // the first read is asked and held at the gate (the server says: A1 works, run by a host)
+    await act(async () => { emitRows([]); });            // a NEWER event: nobody works
+    await settle();
+    await type('hi');
+    expect(chip()).toBeNull();
+    workingGate = null;
+    await act(async () => { release(); });               // the older read lands now
+    await settle();
+    expect(chip(), 'the held read was asked before the event: its answer (A1 works) is older and is not shown').toBeNull();
+  });
+  it('⭐a reply arrives while a read that began AFTER the last event is on its way (the read a reconnect makes): the older answer does not bring the agent back', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();                       // the first read: A1 works, run by a host
+    const first = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { first.onopen?.(); });
+    await act(async () => { first.onerror?.(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { second.onopen?.(); });       // the reconnect asks for the list — held at the gate, asked AFTER every event so far
+    await settle();
+    await act(async () => { for (const e of FakeEventSource.instances) e.emit('conversation.message_created', { id: 'm-reply', conversation_id: 'thread-1', created_by: A1, sender: { id: A1, name: '미르코', type: 'agent' }, content: '끝났어요', attachments: [], created_at: new Date().toISOString(), reply_count: 0 }); });
+    await settle();
+    expect(chip()).toBeNull();                           // the reply took the agent off the list
+    workingGate = null;
+    await act(async () => { release(); });               // the held read lands (it still says: A1 works)
+    await settle();
+    expect(chip(), 'a read asked for before the reply is older than it — it must not bring the agent back').toBeNull();
+  });
+  it('⭐another room (the view is reused for the next thread): the old room\'s rows are not this room\'s — no choice from them while the new room\'s read is on its way', async () => {
+    stubFetch(true, true);
+    await mount('thread-1');
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    stubFetch(true, false);
+    await mount('thread-2');
+    await settle();
+    await type('hi again');
+    expect(chip(), 'room 1\'s «host» must not decide for room 2').toBeNull();
+    workingGate = null;
+    await act(async () => { release(); });
+    await settle();
+    expect(chip()).toBeNull();
+  });
+  it('⭐the parent builds a NEW target list on every render (it does): a re-render with a fresh list does not hide the working list and asks for no new read', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    const before = workingReads();
+    await mount();
+    await mount();
+    await settle();
+    expect(chip(), 'a fresh target list must not hide the choice').not.toBeNull();
+    expect(workingReads(), 'and must not start another read').toBe(before);
+  });
+  it('⭐a first read that fails is tried again by itself (a room already working when the view opens is not left waiting for an event)', async () => {
+    stubFetch(true, true);
+    workingFails = true;
+    await mount();
+    await type('hi');
+    expect(chip()).toBeNull();                           // nothing answered yet → no choice (the safe side)
+    workingFails = false;
+    await act(async () => { await new Promise((r) => setTimeout(r, 2300)); });   // the retry (after 2 s) is answered
+    await settle();
+    expect(chip()).not.toBeNull();
+  }, 10_000);
+  it('the pins stand in the view: a read is shown only if no event came meanwhile · a reconnect reads the list · the event is the list', () => {
+    const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
+    expect(view).toContain('if (seq === workingSeqRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });');
+    expect(view).toContain('void fetchWorking(); // story 5046: an event missed while the stream was down');
+    expect(view).toContain('setWorkingRows({ thread: threadId, rows: payload.working ?? [] });');
+    expect(view).not.toContain('hostRunRef');
+    expect(view).not.toContain('WorkingReader');
   });
 });
 

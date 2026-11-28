@@ -312,7 +312,7 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
 /** R2(da9d1781): conversation.working SSE payload — `chat_presence.list_working` 목록. */
 export interface SseWorkingPayload {
   conversation_id: string;
-  working: Array<{ member_id: string; state?: string }>;
+  working: Array<{ member_id: string; state?: string; /** story 5046 (C13): a desktop host runs this agent (the server's word, display only — the web draws the «지금 끼어들기 / 끝나고 이어서» choice only for such agents) */ host_run?: boolean }>;
 }
 
 /** story #1977: conversation.read SSE payload — #1976 mark-read 응답과 동일 shape(본인 타 커넥션 전파). */
