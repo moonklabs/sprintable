@@ -493,7 +493,7 @@ describe('ChatsLayout — story #4762 AC2 (no project is an answer, not «loadin
   it('a member id that is not known yet still shows the loading line (that one IS «not known yet»)', async () => {
     await renderWith({ currentTeamMemberId: undefined, projectId: undefined, projectMemberships: [] });
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
-    expect(container.textContent).toContain(koMessages.common.loading);
+    expect(container.querySelector('[data-slot="ds-skeleton-group"]')?.getAttribute('aria-label')).toBe(koMessages.common.loading); // story 5048 ⑤-⑨: the ds SkeletonGroup (was the bare word)
   });
 
   it('a path project that is still being resolved is not called «no project» (no flash of the next-step line) — and the list does not wait for it', async () => {

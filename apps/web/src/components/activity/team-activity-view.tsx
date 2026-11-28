@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ds/button';
 import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ds/empty-state';
+import { ErrorState } from '@/components/ds/error-state';
 import { Input } from '@/components/ds/input';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { FilterSelect, type FilterOption } from './filter-select';
@@ -431,16 +432,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               ))}
             </SkeletonGroup>
           ) : loadError ? (
-            <div className="flex h-64 items-center justify-center" role="alert">
-              <EmptyState
-                title={tc('error')}
-                description={tc('errorDescription')}
-                action={(
-                  <Button onClick={() => setReloadTick((n) => n + 1)}>
-                    {tc('retry')}
-                  </Button>
-                )}
-              />
+            <div className="flex h-64 items-center justify-center">
+              <ErrorState description={tc('errorDescription')} onRetry={() => setReloadTick((n) => n + 1)} />
             </div>
           ) : items.length === 0 ? (
             <div className="flex h-64 items-center justify-center">

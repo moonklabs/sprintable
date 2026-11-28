@@ -532,6 +532,19 @@ describe('OrgBriefingShell — 로드 실패(에러를 삼키지 않는다)', ()
     expect(container.textContent).toContain('불러오지 못했어요');
     expect(container.textContent).not.toContain('모두 확인했어요');
   });
+
+  it('⭐story 5048 ⑤-⑨ — 홈 읽기 실패는 ds ErrorState(role=alert · ds 다시 시도 하나) — 붉은 글 한 줄 + 작은 단추가 아니다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    await mount();
+    const es = container.querySelector('[data-testid="home-load-error"]') as HTMLElement;
+    expect(es.getAttribute('data-slot')).toBe('ds-error-state');
+    expect(es.getAttribute('role')).toBe('alert');
+    expect(es.textContent).toContain('불러오지 못했어요');
+    const retry = [...es.querySelectorAll('button')].filter((b) => b.textContent === '다시 시도');
+    expect(retry).toHaveLength(1);
+    expect(retry[0]!.getAttribute('data-slot')).toBe('ds-button');
+    expect(container.querySelector('p.text-destructive')).toBeNull(); // the old bare red sentence
+  });
 });
 
 // story #4762 (AC1 · AC3) — one press of the instruction line sends when the person has exactly one agent DM; the send button keeps clear of the support button.

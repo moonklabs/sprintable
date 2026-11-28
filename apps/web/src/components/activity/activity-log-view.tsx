@@ -7,6 +7,7 @@ import { Button as DsButton } from '@/components/ds/button';
 import { Icon } from '@/components/ds/icon';
 import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ds/empty-state';
+import { ErrorState } from '@/components/ds/error-state';
 import { Input } from '@/components/ds/input';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { FilterSelect, type FilterOption } from './filter-select';
@@ -354,15 +355,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
             </div>
           ) : loadError ? (
             <div className="flex h-64 items-center justify-center">
-              <EmptyState
-                title={tc('error')}
-                description={tc('errorDescription')}
-                action={
-                  <DsButton onClick={reload} iconStart={<Icon name="refresh" size="md" />}>
-                    {tc('retry')}
-                  </DsButton>
-                }
-              />
+              <ErrorState description={tc('errorDescription')} onRetry={reload} />
             </div>
           ) : loading ? (
             <SkeletonGroup label={tc('loading')} className="space-y-1.5">

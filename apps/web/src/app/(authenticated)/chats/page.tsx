@@ -44,14 +44,12 @@ export default function ChatsPage() {
       <div className="flex h-full items-center justify-center">
         {!conversationsLoading && (
           conversationsLoadError ? (
-            <div className="flex flex-col items-center gap-3 text-center">
-              {/* role/aria-live는 여기(우측) 한 곳에만 — 좌측 레일도 같은 문장을 그리므로
-                  둘 다 붙이면 스크린리더가 같은 문장을 두 번 읽는다.
-                  story 5031 (C1 [6]): and the RETRY is the rail's alone (one press for one failure) — this side says the sentence, nothing more */}
-              <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
-                {t('conversationsLoadFailed')}
-              </p>
-            </div>
+            // story 5048 ⑤-⑨: a failed list is said ONCE, by the rail's ErrorState (the only alert · the only retry — on a phone only the list column is on the screen). This side is the plain «pick a conversation» empty state — it says no second sentence and has no retry/alert of its own.
+            <EmptyState
+              icon={<MessageSquare className="size-ds-icon-lg text-muted-foreground" />}
+              title={t('selectConversationPrompt')}
+              className="w-full max-w-xs"
+            />
           ) : conversationCount === 0 && noProjectAtAll ? null : conversationCount === 0 ? (
             <EmptyState
               icon={<MessageSquare className="size-ds-icon-lg text-muted-foreground" />}

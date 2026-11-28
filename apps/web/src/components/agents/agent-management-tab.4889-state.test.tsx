@@ -115,3 +115,30 @@ describe('팀 목록 불러오는 중(story 4889)', () => {
     await act(async () => { release({ ok: true, json: async () => ({ data: [] }) }); await Promise.resolve(); });
   });
 });
+
+// story 5048 ⑤-⑨ — 에이전트 자리의 «목록 읽기 실패»는 손으로 그린 EmptyState 블록이 아니라 ds ErrorState 한 모양(제목 «문제가 발생했어요» · 설명 · ds «다시 시도» · role=alert).
+describe('팀 목록 읽기 실패(story 5048 ⑤-⑨)', () => {
+  it('⭐읽기가 실패하면 ds ErrorState(role=alert · ds 다시 시도) — 누르면 다시 읽고 성공하면 목록이 선다', async () => {
+    let fail = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { role: 'admin' } }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url.startsWith('/api/team-members?')) return fail ? { ok: false, status: 500, json: async () => null } : { ok: true, json: async () => ({ data: [{ id: 'a-1', name: '복구된 에이전트', role: 'member', is_active: true }] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const es = container.querySelector('[data-testid="agent-list-load-error"]') as HTMLElement;
+    expect(es.getAttribute('data-slot')).toBe('ds-error-state');
+    expect(es.getAttribute('role')).toBe('alert');
+    expect(es.textContent).toContain(koMessages.common.error);
+    expect(es.textContent).toContain(koMessages.common.errorDescription);
+    const retry = [...es.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry) as HTMLButtonElement;
+    expect(retry.getAttribute('data-slot')).toBe('ds-button');
+    fail = false;
+    await act(async () => { retry.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-list-load-error"]')).toBeNull();
+    expect(container.textContent).toContain('복구된 에이전트');
+  });
+});
