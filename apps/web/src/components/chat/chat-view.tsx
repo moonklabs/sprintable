@@ -411,13 +411,19 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
   }, []);
 
+  // story 5031 (C1): reads of the LATEST messages (no `before`) take a ticket; only the newest ticket may say «failed» or end the initial loading — an older read that answers late
+  // (a reconnect / poll that was already in flight when «다시 시도» was pressed) must not bring a failure back over a retry that has succeeded. A success is a merge, so it is always applied.
+  // A read with `before` (older pages) never touches the ticket.
+  const latestReadSeqRef = useRef(0);
   const fetchMessages = useCallback(async (before?: string): Promise<ChatMessage[] | undefined> => {
     let merged: ChatMessage[] | undefined;
+    const seq = before ? null : ++latestReadSeqRef.current;
+    const isNewest = () => seq === null || seq === latestReadSeqRef.current;
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
-      if (!res.ok) { setMessagesLoadFailed(true); return undefined; }
+      if (!res.ok) { if (isNewest()) setMessagesLoadFailed(true); return undefined; }
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
@@ -438,10 +444,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       // 안 서고 finally만 돌아 messages=[]·플래그=false로 「대화를 시작하세요」가
       // 다시 섰다. 이 함수의 계약(undefined 반환=실패, handlePoll이 그대로 소비)을
       // 지키며 던짐도 !res.ok와 동일하게 처리한다.
-      setMessagesLoadFailed(true);
+      if (isNewest()) setMessagesLoadFailed(true);
       return undefined;
     } finally {
-      setLoading(false);
+      if (isNewest()) setLoading(false);
       setLoadingMore(false);
     }
   }, [threadId, apiPrefix]);
@@ -1106,7 +1112,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             )}
             {loading ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+                {/* story 5031 (C1): role=status — pressing «다시 시도» removes the focused button, so the loading must be spoken */}
+                <p role="status" className="text-sm text-muted-foreground">{tc('loading')}</p>
               </div>
             ) : messages.length === 0 && messagesLoadFailed ? (
               <div className="flex h-full items-center justify-center">

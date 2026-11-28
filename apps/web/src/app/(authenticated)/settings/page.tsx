@@ -145,6 +145,9 @@ function isWebhookUrlAllowed(url: string): boolean {
 // the tab from ?tab= (pure · tested in settings-tab.test.ts) with this deployment's gates
 const resolveSettingsTab = (tab: string | null, phoneApp: boolean): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled(), phoneApp });
 
+// story 5031 (C1): what the project tab is given while the list belongs to another organization (one stable value, so nothing downstream sees a new array every render)
+const NO_PROJECTS: ProjectOption[] = [];
+
 export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
@@ -241,9 +244,15 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectsRaw, setProjects] = useState<ProjectOption[]>([]);
   // story 5031 (C1): the project list's read has three honest states — a failed read must not draw as «no projects»
-  const [projectsLoad, setProjectsLoad] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [projectsLoadRaw, setProjectsLoad] = useState<'loading' | 'ok' | 'error'>('loading');
+  // …and both belong to ONE organization (the one the last read was asked for). On an in-place organization switch the first render still holds the previous
+  // organization's values (the effects that clear them run after it), so what is drawn is derived HERE, in the render: another organization's rows or failure never show.
+  const [projectsOrgId, setProjectsOrgId] = useState(orgId);
+  const projectsOfThisOrg = projectsOrgId === orgId;
+  const projects = projectsOfThisOrg ? projectsRaw : NO_PROJECTS;
+  const projectsLoad = projectsOfThisOrg ? projectsLoadRaw : 'loading';
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
@@ -378,6 +387,7 @@ export default function SettingsPage() {
   const projectsSeqRef = useRef(0);
   const refreshProjects = async () => {
     const seq = ++projectsSeqRef.current;
+    setProjectsOrgId(orgId);
     setProjectsLoad('loading');
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
     try {

@@ -4,7 +4,7 @@
 // or a body with no `data` array, so `projects` stayed [] and the pane read as «no projects». The read now has three states (loading · ok · error): a failure says so, with a retry (ds Banner failed
 // + ds Button — the shape of the small-area failures of story 5048), and only a truly empty answer draws the empty look. (boilerplate as page.org-context.4906.test.tsx)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
@@ -26,6 +26,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   projectListUrls = [];
+  commitTexts.length = 0;
   vi.spyOn(console, 'error').mockImplementation(() => {}); // the page logs the failed read (the logging is not what this file pins)
 });
 afterEach(async () => {
@@ -63,9 +64,15 @@ async function mountPage(query: string, projectsImpl: (url: string, call: number
   }));
   await render();
 }
+// what the DOM said at the end of EVERY commit (a layout effect runs in the commit, before the passive effects that clear/refresh the list) — so the very first frame after an organization switch can be read
+const commitTexts: string[] = [];
+function CommitProbe() {
+  useLayoutEffect(() => { commitTexts.push(document.body.textContent ?? ''); });
+  return null;
+}
 async function render() {
   const { default: SettingsPage } = await import('./page');
-  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /></NextIntlClientProvider>); });
+  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /><CommitProbe /></NextIntlClientProvider>); });
   await flush();
 }
 async function switchOrgTo(orgId: string) {
@@ -161,5 +168,39 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
     await flush();
     expect(hasText('둘째조직프로젝트')).toBe(true);
     expect(banner()).toBeNull();
+  });
+
+  it('⭐(e3) a LATE throw for the old organization never writes either (the catch is guarded too)', async () => {
+    let throwOld: (e: unknown) => void = () => {};
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
+      ? new Promise((_resolve, reject) => { throwOld = reject; })
+      : json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])));
+    await switchOrgTo('org-2');
+    await act(async () => { throwOld(new Error('network down')); });
+    await flush();
+    expect(hasText('둘째조직프로젝트')).toBe(true);
+    expect(hasText(T.projectListLoadFailed)).toBe(false);
+  });
+
+  // codex 1: after an in-place organization switch the FIRST commit still carried the previous organization's list and read state (the effects that clear them run after it)
+  it('⭐(f) the first frame after an organization switch holds none of the old organization\'s rows', async () => {
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
+      ? json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])
+      : new Promise(() => {}))); // the new organization's list is still on its way
+    expect(hasText('첫째조직프로젝트')).toBe(true);
+    const mark = commitTexts.length;
+    await switchOrgTo('org-2');
+    expect(commitTexts.length).toBeGreaterThan(mark);
+    expect(commitTexts.slice(mark).some((t) => t.includes('첫째조직프로젝트'))).toBe(false); // reverted (drawn from the raw state) → the first commit still shows it
+  });
+
+  it('⭐(f2) the first frame after an organization switch holds neither the old organization\'s failure nor an «empty» look', async () => {
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1') ? json(null, 500) : new Promise(() => {})));
+    expect(hasText(T.projectListLoadFailed)).toBe(true);
+    const mark = commitTexts.length;
+    await switchOrgTo('org-2');
+    expect(commitTexts.length).toBeGreaterThan(mark);
+    expect(commitTexts.slice(mark).some((t) => t.includes(T.projectListLoadFailed))).toBe(false);
+    expect(commitTexts.slice(mark).some((t) => t.includes(T.projectListEmpty))).toBe(false);
   });
 });
