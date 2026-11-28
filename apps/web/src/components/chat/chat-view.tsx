@@ -281,12 +281,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return () => { cancelled = true; };
   }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
-  // the working list is tagged with the room it was read for: after a switch of room the old room's list is not this room's (a stale `host_run` of another room can never draw the choice here)
-  const [typingState, setTypingState] = useState<{ thread: string; list: { id: string; name: string; hostRun: boolean }[] }>({ thread: threadId, list: [] });
-  const typingAgents = typingState.thread === threadId ? typingState.list : NO_TYPING_AGENTS;
+  // One reader per room × target list (a «generation»), made here so that what it read can be told from what an older generation read: the working list is tagged with the reader that read it, and shown only for the CURRENT one — after a switch of
+  // room (A → B → A) or of the target list the old list, with its `host_run`, is not shown while the new reader has not answered (a stale «host» can never draw the choice).
+  type WorkingReader = { thread: string; running: boolean; again: boolean; fails: number; timer: ReturnType<typeof setTimeout> | null; dead: boolean };
+  const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId, commandTargets]);
+  const [typingState, setTypingState] = useState<{ reader: WorkingReader | null; list: { id: string; name: string; hostRun: boolean }[] }>({ reader: null, list: [] });
+  const typingAgents = typingState.reader === reader ? typingState.list : NO_TYPING_AGENTS;
   // story 5046 (C13): the room's working list has ONE reader (`fetchWorking` below). GET /working is the only source of an agent's `host_run`; the SSE `conversation.working` event says THAT the list changed and who works — never whether a host runs them. There is no per-agent memory: what is drawn is the newest answer.
-  type WorkingReader = { thread: string; running: boolean; again: boolean; fails: number; timer: ReturnType<typeof setTimeout> | null; dead: boolean }; // one per room × target list: closed (dead) when either changes or the view goes
-  const workingReaderRef = useRef<WorkingReader | null>(null);
   const commandTargetsRef = useRef(commandTargets);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -495,8 +496,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
-    setTypingState((prev) => (prev.thread === threadId && prev.list.some((a) => a.id === agentId) ? { thread: prev.thread, list: prev.list.filter((a) => a.id !== agentId) } : prev));
-  }, [threadId]);
+    setTypingState((prev) => (prev.reader === reader && prev.list.some((a) => a.id === agentId) ? { reader: prev.reader, list: prev.list.filter((a) => a.id !== agentId) } : prev));
+    if (reader.running) reader.again = true; // story 5046 (C13): a read still on its way was asked BEFORE this reply — its answer is old (it must not bring the agent back); the reader reads once more
+  }, [reader]);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     clearTyping(msg.created_by); // 답장 도착 → 해당 에이전트 typing 즉시 해제(AC1)
@@ -584,7 +586,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           break;
         }
         st.fails = 0;
-        setTypingState({ thread: st.thread, list: namedWorking(list, true) });
+        setTypingState({ reader: st, list: namedWorking(list, true) });
         break;
       }
     } finally { st.running = false; }
@@ -595,18 +597,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story 5046 (C13): the event shows WHO works at once — with «not a host» (no choice) — and asks the reader for the answer that says whether a host runs them.
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
-    setTypingState({ thread: threadId, list: namedWorking(payload.working ?? [], false) });
-    const st = workingReaderRef.current;
-    if (st) void readWorking(st);
-  }, [threadId, namedWorking, readWorking]);
+    setTypingState({ reader, list: namedWorking(payload.working ?? [], false) });
+    void readWorking(reader);
+  }, [threadId, reader, namedWorking, readWorking]);
 
   useEffect(() => {
     commandTargetsRef.current = commandTargets;
-    const st: WorkingReader = { thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false };
-    workingReaderRef.current = st;
-    void readWorking(st);
-    return () => { st.dead = true; if (st.timer) { clearTimeout(st.timer); st.timer = null; } };
-  }, [readWorking, threadId, commandTargets]);
+    reader.dead = false; // (an effect that runs twice — React's strict mode — opens the same reader again)
+    void readWorking(reader);
+    return () => { reader.dead = true; if (reader.timer) { clearTimeout(reader.timer); reader.timer = null; } };
+  }, [readWorking, reader, commandTargets]);
 
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가

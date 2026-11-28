@@ -287,14 +287,52 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
   }, 10_000);
   it('a room starts with a full retry budget (the budget of the room before is not carried over)', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
-    expect(view).toContain('const st: WorkingReader = { thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false };');
-    expect(view).toContain("return () => { st.dead = true; if (st.timer) { clearTimeout(st.timer); st.timer = null; } };");
+    expect(view).toContain('const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId, commandTargets]);');
+    expect(view).toContain("return () => { reader.dead = true; if (reader.timer) { clearTimeout(reader.timer); reader.timer = null; } };");
+  });
+  it('⭐back to a room (A → B → A): the list read the first time A was open is not shown while A\'s new read is on its way — a stale «host» cannot draw the choice (codex)', async () => {
+    stubFetch(true, true);
+    await mount('thread-1');
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    await mount('thread-2');
+    await settle();
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    stubFetch(true, false);                  // …and room 1's agent is run by the plugin now
+    await mount('thread-1');                 // back to room 1: the read for it is held
+    await settle();
+    await type('hi again');
+    expect(chip(), 'the first visit\'s host_run must not decide now').toBeNull();
+    workingGate = null;
+    await act(async () => { release(); });
+    await settle();
+    expect(chip()).toBeNull();
+  });
+  it('⭐a reply that arrives while a read is on its way: the old answer does not bring the agent back (codex)', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { emitWorking(); });               // a read is asked and held (the server still says «A1 works»)
+    await settle();
+    stubFetch(false, true);                                  // the agent answers: the server now says nobody works
+    const es = FakeEventSource.instances;
+    await act(async () => { for (const e of es) e.emit('conversation.message_created', { id: 'm-reply', conversation_id: 'thread-1', created_by: A1, sender: { id: A1, name: '미르코', type: 'agent' }, content: '끝났어요', attachments: [], created_at: new Date().toISOString(), reply_count: 0 }); });
+    await settle();
+    expect(chip()).toBeNull();                               // the reply took the agent off the list
+    workingGate = null;
+    await act(async () => { release(); });                   // the old read lands: its answer says A1 works — it is old
+    await settle();
+    expect(chip(), 'an answer asked for before the reply must not bring the agent back').toBeNull();
   });
   it('the reader is one place: an event outdates a read on its way (nothing of the old answer is shown) — the pins stand in the view', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
     expect(view).toContain('if (st.running) { st.again = true; return; }');
     expect(view).toContain('if (st.again) continue;');
-    expect(view).toContain('setTypingState({ thread: threadId, list: namedWorking(payload.working ?? [], false) });');
+    expect(view).toContain('setTypingState({ reader, list: namedWorking(payload.working ?? [], false) });');
     expect(view).toContain('if (st.dead) return;');
     expect(view).not.toContain('hostRunRef');
   });
