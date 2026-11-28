@@ -198,6 +198,8 @@ async def create_hypothesis_guided(
         from app.services.project_auth import require_project_access
 
         await require_project_access(session, _agent.id, body.project_id, org_id)  # the agent's own project first (404) — what it may learn about the card's limits comes after
+        if agent_action.has_hidden_characters(body.statement) or agent_action.has_hidden_characters(body.metric):
+            raise HTTPException(status_code=422, detail={"code": "CARD_TEXT_NOT_PLAIN", "message": "the statement and the metric may not hold control, zero-width or direction characters — an approval card must show exactly what runs"})
         _statement = agent_action.card_text(body.statement, "—", 10_000_000)
         _metric = agent_action.card_text(body.metric, "—", 10_000_000)
         if len(_statement) > agent_action.HYPOTHESIS_STATEMENT_MAX or len(_metric) > agent_action.HYPOTHESIS_METRIC_MAX:

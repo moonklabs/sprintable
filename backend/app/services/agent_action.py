@@ -140,6 +140,11 @@ HYPOTHESIS_STATEMENT_MAX = 2000  # a hypothesis the card can carry whole (its la
 HYPOTHESIS_METRIC_MAX = 400
 
 
+def has_hidden_characters(value: Any) -> bool:
+    """text with a character that is not shown as itself (a control character, a zero-width or direction mark: category Cc / Cf other than plain whitespace) — what a card prints for it is not what would run, so an action whose free text the person must read whole refuses it"""
+    return any(not ch.isspace() and unicodedata.category(ch) in ("Cc", "Cf") for ch in str(value or ""))
+
+
 def card_text(value: Any, fallback: str, limit: int = 60) -> str:
     """text a caller typed (or a stored name), as it may stand on an approval card: one line, printable characters only, short — never a line break or control text that could pass for the card's own words"""
     text = "".join(ch if ch.isprintable() else " " for ch in str(value or ""))

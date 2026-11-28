@@ -105,6 +105,12 @@ async def test_the_first_hypothesis_an_agent_creates_is_a_card_that_names_the_st
         assert ok_long.status_code == 202, ok_long.text
         cards = [x for x in await _requests(Session, d["org_id"]) if "word79" in x.title]
         assert len(cards) == 1 and long_statement in cards[0].title and long_metric in cards[0].title, cards[0].title if cards else "no card"
+        # a character the card would not show as itself (a direction mark, a zero-width space, a control character) is refused: what is on the card is what runs — plain whitespace (a line break) is fine
+        for bad in ("lifts \u202esign-ups", "lifts\u200bsign-ups", "lifts\x07sign-ups"):
+            hidden = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": bad})
+            assert hidden.status_code == 422 and hidden.json()["error"]["code"] == "CARD_TEXT_NOT_PLAIN", (bad, hidden.text)
+        hidden_metric = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "metric": "rate\u2066"})
+        assert hidden_metric.status_code == 422 and hidden_metric.json()["error"]["code"] == "CARD_TEXT_NOT_PLAIN", hidden_metric.text
         # only a text far beyond anything the card can store is refused (422, never shown cut)
         far = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": "x" * 2001})
         assert far.status_code == 422 and far.json()["error"]["code"] == "CARD_TEXT_TOO_LONG", far.text
