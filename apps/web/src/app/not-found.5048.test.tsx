@@ -40,4 +40,9 @@ describe('루트 not-found(맨 위 없는 길)', () => {
     expect(a.textContent).toBe(m.cta);
     expect(a.getAttribute('data-slot')).toBe('ds-button');
   });
+
+  it('⭐단추 글은 «홈으로» · «Back to home» — 옛 «대시보드로» · «Back to dashboard»(그 이름의 화면은 없다 · 길은 `/` = 홈)가 아니다', () => {
+    expect(koMessages.notFound.cta).toBe('홈으로');
+    expect(enMessages.notFound.cta).toBe('Back to home');
+  });
 });
