@@ -292,7 +292,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   // The working list is what the server last SAID — a read of GET /working or an SSE event, each row carrying `host_run` — tagged with the room it is for. Nothing is merged or remembered per agent: a newer list replaces the older one whole.
   const [workingRows, setWorkingRows] = useState<{ thread: string; rows: WorkingRow[] }>({ thread: threadId, rows: [] });
-  const workingSeqRef = useRef(0); // bumped by every event and reply: a read of the list that was asked for BEFORE one is older than it and is not shown
+  const workingSeqRef = useRef(0); // bumped by every SSE event (an event carries the whole list): a read that was asked for BEFORE one is older than it and is not shown
+  const workingReadRef = useRef(0); // one number per read, newest wins: a read that is not the newest (an older one landing late — of this room or of the room before) is not shown
   const typingAgents = useMemo(() => namedWorkingAgents(workingRows.thread === threadId ? workingRows.rows : [], commandTargets), [workingRows, threadId, commandTargets]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -501,7 +502,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
-    workingSeqRef.current += 1; // a reply is newer than any read of the list still on its way
+    // (a reply asks for no new read: the server clears the agent's working state with the reply and sends the `conversation.working` event right after — that event is the newer list)
     setWorkingRows((prev) => (prev.thread === threadId && prev.rows.some((a) => a.member_id === agentId) ? { thread: prev.thread, rows: prev.rows.filter((a) => a.member_id !== agentId) } : prev));
   }, [threadId]);
 
@@ -555,11 +556,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이름=commandTargets(없으면 미표시 graceful). 읽는 동안 이벤트나 답글이 오면 그 읽기는 더 옛것이라 보이지 않는다(workingSeqRef).
   const fetchWorking = useCallback(async (): Promise<boolean> => {
     const seq = workingSeqRef.current;
+    const ticket = ++workingReadRef.current;
     try {
       const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
       if (!res.ok) return false;
       const json = await res.json() as { data?: WorkingRow[] };
-      if (seq === workingSeqRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });
+      if (seq === workingSeqRef.current && ticket === workingReadRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });
       return true;
     } catch { return false; }
   }, [threadId]);

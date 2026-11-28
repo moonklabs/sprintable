@@ -54,7 +54,7 @@ function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
-    if (url.endsWith('/working')) { if (workingGate) await workingGate; if (workingFails) return { ok: false, status: 500, json: async () => ({}) }; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) }; }
+    if (url.endsWith('/working')) { const asOf = hostRunNow; if (workingGate) await workingGate; if (workingFails) return { ok: false, status: 500, json: async () => ({}) }; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(asOf === 'absent' ? {} : { host_run: asOf }) }] : [] }) }; }
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
@@ -222,7 +222,7 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
     await settle();
     expect(chip(), 'the held read was asked before the event: its answer (A1 works) is older and is not shown').toBeNull();
   });
-  it('⭐a reply arrives while a read that began AFTER the last event is on its way (the read a reconnect makes): the older answer does not bring the agent back', async () => {
+  it('⭐an agent replies while a reconnect read is on its way: the server\'s event that follows the reply is the newer list — the older read does not bring the agent back', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     stubFetch(true, true);
     await mount();
@@ -235,15 +235,39 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
     const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
     let release!: () => void;
     workingGate = new Promise<void>((r) => { release = r; });
-    await act(async () => { second.onopen?.(); });       // the reconnect asks for the list — held at the gate, asked AFTER every event so far
+    await act(async () => { second.onopen?.(); });       // the reconnect asks for the list — held at the gate
     await settle();
     await act(async () => { for (const e of FakeEventSource.instances) e.emit('conversation.message_created', { id: 'm-reply', conversation_id: 'thread-1', created_by: A1, sender: { id: A1, name: '미르코', type: 'agent' }, content: '끝났어요', attachments: [], created_at: new Date().toISOString(), reply_count: 0 }); });
+    await act(async () => { emitRows([]); });            // …and the event the server sends after it: nobody works
     await settle();
-    expect(chip()).toBeNull();                           // the reply took the agent off the list
+    expect(chip()).toBeNull();
     workingGate = null;
     await act(async () => { release(); });               // the held read lands (it still says: A1 works)
     await settle();
-    expect(chip(), 'a read asked for before the reply is older than it — it must not bring the agent back').toBeNull();
+    expect(chip(), 'a read asked for before the event is older than it — it must not bring the agent back').toBeNull();
+  });
+  it('⭐two reads at once (the first read is slow, a reconnect reads again and is answered first): the OLDER one landing last does not overwrite the newer answer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    stubFetch(true, true);
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await mount();                                       // read 1 held (it will say: A1 is run by a host)
+    const first = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => { first.onopen?.(); });
+    await act(async () => { first.onerror?.(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    const held = workingGate;
+    workingGate = null;
+    stubFetch(true, false);                              // now the agent is run by the plugin
+    await act(async () => { second.onopen?.(); });       // read 2: answered at once — host_run false
+    await settle();
+    await type('hi');
+    expect(chip()).toBeNull();
+    await act(async () => { release(); });               // read 1 lands LAST with the old answer (host true)
+    await settle();
+    expect(held).not.toBeNull();
+    expect(chip(), 'the older read must not overwrite the newer answer').toBeNull();
   });
   it('⭐another room (the view is reused for the next thread): the old room\'s rows are not this room\'s — no choice from them while the new room\'s read is on its way', async () => {
     stubFetch(true, true);
@@ -261,6 +285,21 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
     await act(async () => { release(); });
     await settle();
     expect(chip()).toBeNull();
+  });
+  it('⭐a read of the room before lands late (the view moved to the next room meanwhile): it does not wipe the new room\'s list (codex)', async () => {
+    stubFetch(true, false);                              // room 1: the agent is run by the plugin
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await mount('thread-1');                             // room 1's read is held
+    workingGate = null;
+    stubFetch(true, true);                               // room 2: run by a host
+    await mount('thread-2');                             // room 2's read is answered at once
+    await settle();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    await act(async () => { release(); });               // room 1's late answer lands
+    await settle();
+    expect(chip(), 'the late answer of the room before must not take the new room\'s list away').not.toBeNull();
   });
   it('⭐the parent builds a NEW target list on every render (it does): a re-render with a fresh list does not hide the working list and asks for no new read', async () => {
     stubFetch(true, true);
@@ -287,7 +326,7 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
   }, 10_000);
   it('the pins stand in the view: a read is shown only if no event came meanwhile · a reconnect reads the list · the event is the list', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
-    expect(view).toContain('if (seq === workingSeqRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });');
+    expect(view).toContain('if (seq === workingSeqRef.current && ticket === workingReadRef.current) setWorkingRows({ thread: threadId, rows: json.data ?? [] });');
     expect(view).toContain('void fetchWorking(); // story 5046: an event missed while the stream was down');
     expect(view).toContain('setWorkingRows({ thread: threadId, rows: payload.working ?? [] });');
     expect(view).not.toContain('hostRunRef');
