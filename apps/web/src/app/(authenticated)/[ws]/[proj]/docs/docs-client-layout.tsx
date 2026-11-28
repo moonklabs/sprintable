@@ -22,6 +22,7 @@ import { Input } from '@/components/ds/input';
 import { CountBadge } from '@/components/ds/count-badge';
 import { SectionHeader } from '@/components/ds/section-header';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { ErrorState } from '@/components/ds/error-state';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
@@ -604,16 +605,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
           // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
           // 그 자리에 한 줄 + 텍스트 재시도로.
-          <div className="px-2 py-4">
-            <p className="text-ds-small text-ds-ink-3">{t('indexLoadError')}</p>
-            {/* 유나 정정(10:01Z) — raw 버튼 요소가 DS 게이트 A(verify-no-new-raw-button)를
-                건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
-                content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
-                뜬다). 색은 문구가 아니라 행동에 싣는다(오른쪽 destructive 문구와 대칭). */}
-            <DsButton variant="quiet" onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} className="mt-1">
-              {tc('retry')}
-            </DsButton>
-          </div>
+          <ErrorState size="inline" title={t('indexLoadError')} onRetry={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} />
         ) : tree.length === 0 ? (
           // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
           // (`selectDoc`)를 말하고 오른쪽(DocsIndex)은 "아직 쌓인 문서가 없어요"

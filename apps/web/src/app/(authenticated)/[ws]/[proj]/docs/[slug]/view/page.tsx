@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { DocToc } from '@/components/docs/doc-toc';
 import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
@@ -116,10 +117,12 @@ export default function DocViewPage() {
   // 자체 제목은 이 시점에 아직 모른다 — 지어내지 않는다).
   if (doc === null) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <>
         <h1 className="sr-only">{t('title')}</h1>
-        <p className="text-ds-small text-ds-ink-3">{t('loading')}</p>
-      </div>
+        <SkeletonGroup label={t('loading')} className="flex flex-col gap-3 p-6">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
+        </SkeletonGroup>
+      </>
     );
   }
 

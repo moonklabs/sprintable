@@ -438,6 +438,13 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
     expect(container.textContent).toContain('불러오지 못했어요');
+    // story 5048 ⑤: 두 열 모두 ds ErrorState — 목록 열(좁은 aside)은 inline, 본문 열은 기본 · 둘 다 ds Button 다시 시도
+    const rail = container.querySelector('aside [data-slot="ds-error-state"]');
+    expect(rail?.getAttribute('data-size')).toBe('inline');
+    expect(rail?.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
+    const sizes = [...container.querySelectorAll('[data-slot="ds-error-state"]')].map((e) => e.getAttribute('data-size'));
+    expect(sizes.filter((z) => z === 'default')).toHaveLength(1); // 본문 열
+    expect(sizes.filter((z) => z === 'inline').length).toBeGreaterThanOrEqual(1); // 목록 열(좁은 열이 둘로 그려지는 자리도 있다)
   });
 
   // story #4310 AC3 — 트리 요청이 응답 없이 걸려도 fetchWithAuth 시간 제한(30s) 뒤 실패 문구 + 다시 시도(망 오류와 같은 갈래).
