@@ -12,7 +12,7 @@
   "notFound": {
     "title": "Page not found",
     "description": "The page you're looking for doesn't exist or has moved",
-    "cta": "Back to dashboard"
+    "cta": "Back to home"
   },
   "common": {
     "backgroundJobSlow": "This is taking a while — it keeps processing even if you close this page.",
