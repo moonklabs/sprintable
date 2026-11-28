@@ -47,6 +47,7 @@ let hostRunNow: boolean | 'absent' = true;
 let workingGate: Promise<void> | null = null;
 /** the next reads of GET /working fail (an error answer) while this is true */
 let workingFails = false;
+let membersAnswer: Array<Record<string, unknown>> = []; // what the @-picker's member list answers
 function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
   hostRunNow = hostRun;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -54,13 +55,14 @@ function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
+    if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: membersAnswer }) };
     if (url.endsWith('/working')) { const asOf = hostRunNow; if (workingGate) await workingGate; if (workingFails) return { ok: false, status: 500, json: async () => ({}) }; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(asOf === 'absent' ? {} : { host_run: asOf }) }] : [] }) }; }
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
 
 beforeEach(() => {
-  calls = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null; workingFails = false;
+  calls = []; membersAnswer = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null; workingFails = false;
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -73,7 +75,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); vi.useRealTimers(); });
 
 let mountedThread = 'thread-1';
-async function mount(threadId = 'thread-1') {
+async function mount(threadId = 'thread-1', participants: typeof PARTICIPANTS | Array<Record<string, unknown>> = PARTICIPANTS) {
   mountedThread = threadId;
   // the provider comes from the SAME module graph as the view (`vi.resetModules()` after each test gives the view fresh modules; a provider imported once at the top would be a different context — the view would never hear the stream in the second test on)
   const { RealtimeProvider } = await import('@/components/realtime-provider');
@@ -84,7 +86,7 @@ async function mount(threadId = 'thread-1') {
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <RealtimeProvider currentTeamMemberId="me-1">
           <ChatRailProvider>
-            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={[...TARGETS]} participants={PARTICIPANTS} />
+            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={[...TARGETS]} participants={participants as typeof PARTICIPANTS} />
           </ChatRailProvider>
         </RealtimeProvider>
       </NextIntlClientProvider>,
@@ -357,6 +359,28 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs — the se
     await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
     await settle();
     expect(workingReads() - before, 'one retry (the newest chain\'s) — the old chain must not add its own').toBe(1);
+  });
+  it('⭐a host and an agent this room cannot NAME (not in the target list) are both mentioned and both work: the choice is NOT drawn — the unknown row counts, as a non-host (codex, 6th pass)', async () => {
+    const A2 = 'a2222222-2222-4222-8222-222222222222';
+    stubFetch(false, true);
+    membersAnswer = [{ id: A1, name: '미르코', type: 'agent', runtime_type: 'claude-code' }, { id: A2, name: '아라', type: 'agent', runtime_type: 'claude-code' }];
+    await mount('thread-1', [...PARTICIPANTS, { member_id: A2, name: '아라', type: 'agent', runtime_type: 'claude-code' }]);
+    await act(async () => { emitRows([host(), plugin(A2)]); });
+    await settle();
+    const pick = async (q: string) => {
+      await type(`${textarea().value}${q}`);
+      await settle();                                    // the picker's member list is read
+      await act(async () => { textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    };
+    await pick('@미르');
+    await pick('@아라');
+    expect(textarea().value, 'premise: both are mentioned').toContain('@아라');
+    expect(textarea().value).toContain('@미르코');
+    await type(`${textarea().value}hi`);
+    expect(chip(), 'the unknown row must fail the choice closed').toBeNull();
+    await act(async () => { emitRows([host()]); });      // the unknown one stops: only the host is left → the choice IS drawn (the premise of the test is the host alone would draw it)
+    await settle();
+    expect(chip()).not.toBeNull();
   });
   it('⭐a read of the room before lands late (the view moved to the next room meanwhile): it does not wipe the new room\'s list (codex)', async () => {
     stubFetch(true, false);                              // room 1: the agent is run by the plugin

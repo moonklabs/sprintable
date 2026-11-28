@@ -98,6 +98,7 @@ interface MessageGroup {
 const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 /** one row of the room's working list as the server tells it — by GET /working and by the SSE `conversation.working` event alike; `host_run` (a desktop host runs this agent) rides on the row itself */
 type WorkingRow = { member_id: string; host_run?: boolean };
+const NO_WORKING_ROWS: WorkingRow[] = [];
 const NO_TYPING_AGENTS: { id: string; name: string; hostRun: boolean }[] = []; // (one array for «none», so a room with no list does not make a new one every render)
 /** the working list as the screen needs it: names from the CURRENT target list (put on when drawn — the parent rebuilds that list on every render, so nothing may be read or remembered by it), `hostRun` true ONLY for a row that says so */
 function namedWorkingAgents(rows: readonly WorkingRow[], targets: ReadonlyArray<{ agentId: string; agentName?: string }> | undefined): { id: string; name: string; hostRun: boolean }[] {
@@ -294,7 +295,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const [workingRows, setWorkingRows] = useState<{ thread: string; rows: WorkingRow[] }>({ thread: threadId, rows: [] });
   const workingSeqRef = useRef(0); // bumped by every SSE event (an event carries the whole list): a read that was asked for BEFORE one is older than it and is not shown
   const workingReadRef = useRef(0); // one number per read, newest wins: a read that is not the newest (an older one landing late — of this room or of the room before) is not shown
-  const typingAgents = useMemo(() => namedWorkingAgents(workingRows.thread === threadId ? workingRows.rows : [], commandTargets), [workingRows, threadId, commandTargets]);
+  const workingNow = workingRows.thread === threadId ? workingRows.rows : NO_WORKING_ROWS;
+  const typingAgents = useMemo(() => namedWorkingAgents(workingNow, commandTargets), [workingNow, commandTargets]);
+  // story 5046 (codex 6th): what the COMPOSER judges is every row the server said — a row whose name this room cannot put (an agent that is not in the target list) is not shown in the «…is typing» line, but it still counts as a working agent that may be reached by a mention, and it is not a host (name '' · no runtime): the choice must not be drawn over it
+  const composerWorking = useMemo(() => workingNow.map((w) => {
+    const tg = (commandTargets ?? []).find((x) => x.agentId === w.member_id);
+    return { id: w.member_id, name: tg?.agentName ?? '', runtimeType: tg?.runtimeType ?? null, hostRun: w.host_run === true && !!tg?.agentName };
+  }), [workingNow, commandTargets]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -1323,7 +1330,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               prefillCommand={prefillCommand}
               incomingFiles={incomingFiles}
               onDraftChange={handleDraftChange}
-              workingAgents={typingAgents.map((a) => ({ id: a.id, name: a.name, runtimeType: (commandTargets ?? []).find((tg) => tg.agentId === a.id)?.runtimeType ?? null, hostRun: a.hostRun }))}
+              workingAgents={composerWorking}
             />
           </SupportLauncherClearance>
 
