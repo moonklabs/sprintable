@@ -3121,14 +3121,14 @@ async def send_message(
     conversation_id: uuid.UUID,
     body: HttpSendMessageRequest,
     background_tasks: BackgroundTasks,
-    response: Response,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI; LAST and optional so a direct call of this function (tests) is unchanged
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
     out = await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
-    if isinstance(out, SendReplay):
+    if isinstance(out, SendReplay) and response is not None:
         response.status_code = 200  # story 5043: the SAME message answered again (nothing new was made) — not a «created»
     return out
 
