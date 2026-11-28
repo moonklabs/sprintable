@@ -160,4 +160,7 @@ class ConversationMessageNonce(Base):
     sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     client_nonce: Mapped[str] = mapped_column(String(64), primary_key=True)
     message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("conversation_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    # SHA-256 (hex) of the words AS THE SEND CAME (before the server rewrites a bare story number into a link): the same token for OTHER words is refused (409) — also after the message was deleted — and a retry whose words the server
+    # rewrote the first time still matches
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"), nullable=False)

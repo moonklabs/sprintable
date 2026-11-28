@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column("sender_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("client_nonce", sa.String(length=64), nullable=False),
         sa.Column("message_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("content_sha256", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("clock_timestamp()"), nullable=False),
         sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["message_id"], ["conversation_messages.id"], ondelete="CASCADE"),

@@ -122,6 +122,38 @@ async def _nonce_rows(Session, conv_id, sender_id):
         return sorted([(r.client_nonce, r.message_id) for r in rows])
 
 
+async def _dm_with_outsider(world):
+    """a one-to-one room of the two humans plus a third person of the project who can be mentioned into a fork"""
+    from sqlalchemy import select
+    from app.models.conversation import Conversation, ConversationParticipant
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
+    Session, org, members = world["Session"], world["org"], world["members"]
+    async with Session() as s:
+        outsider_user = User(id=uuid.uuid4(), email=f"c-{uuid.uuid4().hex[:8]}@test.local", hashed_password="x")
+        s.add(outsider_user)
+        await s.flush()
+        outsider = Member(id=uuid.uuid4(), org_id=org.id, type="human", user_id=outsider_user.id, name="C")
+        s.add(outsider)
+        await s.flush()
+        room = (await s.execute(select(Conversation).where(Conversation.id == world["rooms"][0].id))).scalar_one()
+        s.add(ProjectAccess(project_id=room.project_id, member_id=outsider.id, permission="granted", role="member"))
+        dm = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=room.project_id, type="dm", created_by=members[0].id)
+        s.add(dm)
+        await s.flush()
+        s.add_all([ConversationParticipant(conversation_id=dm.id, member_id=m.id) for m in members])
+        await s.commit()
+        return dm.id, outsider.id
+
+
+async def _groups_of(Session, member_id):
+    from sqlalchemy import func, select
+    from app.models.conversation import Conversation
+    async with Session() as s:
+        return (await s.execute(select(func.count()).select_from(Conversation).where(Conversation.type == "group", Conversation.created_by == member_id))).scalar_one()
+
+
 async def _post(client, conv_id, content, nonce=None):
     body: dict = {"content": content}
     if nonce is not None:
@@ -273,7 +305,7 @@ async def test_the_table_is_the_one_the_migration_says(world):
         pk = (await s.execute(text("select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum)) from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum = any(c.conkey) where c.conname='pk_conversation_message_nonces' and c.contype='p'"))).scalar_one()
         fks = (await s.execute(text("select confrelid::regclass::text, confdeltype::text from pg_constraint where conrelid='conversation_message_nonces'::regclass and contype='f' order by 1"))).all()
         on_messages = (await s.execute(text("select count(*) from information_schema.columns where table_name='conversation_messages' and column_name='client_nonce'"))).scalar_one()
-    assert [(c[0], c[1], c[2], c[3]) for c in cols] == [("conversation_id", "uuid", None, "NO"), ("sender_id", "uuid", None, "NO"), ("client_nonce", "character varying", 64, "NO"), ("message_id", "uuid", None, "NO"), ("created_at", "timestamp with time zone", None, "NO")]
+    assert [(c[0], c[1], c[2], c[3]) for c in cols] == [("conversation_id", "uuid", None, "NO"), ("sender_id", "uuid", None, "NO"), ("client_nonce", "character varying", 64, "NO"), ("message_id", "uuid", None, "NO"), ("content_sha256", "character varying", 64, "NO"), ("created_at", "timestamp with time zone", None, "NO")]
     assert pk == "conversation_id,sender_id,client_nonce"
     assert fks == [("conversation_messages", "c"), ("conversations", "c")]   # (c = ON DELETE CASCADE)
     assert on_messages == 0, "the big messages table was touched"
@@ -419,3 +451,92 @@ def test_only_THIS_primary_key_is_the_nonce_conflict_by_the_databases_own_words(
     assert not _is_nonce_conflict(_err("23505", "some_other_unique"))
     assert not _is_nonce_conflict(_err("23503", "pk_conversation_message_nonces"))
     assert not _is_nonce_conflict(IntegrityError("stmt", {}, Exception("pk_conversation_message_nonces in the text only")))
+
+
+# ── the second codex lens (the nonce table) ──
+
+@with_world
+async def test_a_person_taken_out_of_the_fork_is_not_handed_its_words_through_the_original_dm(world):
+    """the fork authorization: the replay at the DM must apply the FORK room's own seat rule."""
+    from sqlalchemy import delete
+    from app.models.conversation import ConversationParticipant
+    c, Session, members = world["client"], world["Session"], world["members"]
+    dm_id, outsider_id = await _dm_with_outsider(world)
+    body = {"content": "words for the fork", "mentioned_ids": [str(outsider_id)], "client_nonce": "nonce-fork-seat"}
+    first = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)
+    assert first.status_code == 201 and first.json().get("forked") is True, first.text
+    fork_id = uuid.UUID(first.json()["forked_conversation_id"])
+    async with Session() as s:
+        await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == fork_id, ConversationParticipant.member_id == members[0].id))
+        await s.commit()
+    again = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)
+    assert again.status_code == 403, again.text   # (reverted: no fork seat check → 200 with the fork's words → RED)
+    assert "words for the fork" not in again.text
+
+
+@with_world
+async def test_the_race_road_of_a_FORK_send_leaves_no_second_fork_and_answers_with_the_forked_keys(world):
+    import app.routers.conversations as conv_router
+    c, Session, members = world["client"], world["Session"], world["members"]
+    monkeypatch = pytest.MonkeyPatch()
+    dm_id, outsider_id = await _dm_with_outsider(world)
+    body = {"content": "fork race", "mentioned_ids": [str(outsider_id)], "client_nonce": "nonce-fork-race"}
+    first = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)
+    assert first.status_code == 201 and first.json().get("forked") is True
+    before = await _groups_of(Session, members[0].id)
+    real, seen = conv_router._replay_of_nonce, {"n": 0}
+
+    async def _blind_once(*a, **k):
+        seen["n"] += 1
+        return None if seen["n"] == 1 else await real(*a, **k)
+
+    monkeypatch.setattr(conv_router, "_replay_of_nonce", _blind_once)
+    try:
+        lost = await c.post(f"/api/v2/conversations/{dm_id}/messages", json=body)   # (the early look finds nothing → the fork is made → the token row meets the key → everything of this call is undone)
+    finally:
+        monkeypatch.undo()
+    assert seen["n"] == 2 and lost.status_code == 200, lost.text
+    assert lost.json()["data"]["id"] == first.json()["data"]["id"]
+    assert lost.json().get("forked") is True and lost.json()["forked_conversation_id"] == first.json()["forked_conversation_id"]
+    assert await _groups_of(Session, members[0].id) == before, "the loser left a fork room behind"
+
+
+@with_world
+async def test_a_retry_of_words_the_server_REWROTE_is_the_same_message_not_a_409(world):
+    """a bare story number («#24») is rewritten into a link before it is stored: the retry carries the original words and must still match."""
+    from tests.test_2629_bare_story_ref_promotion import _seed_story
+    c, Session, org, room = world["client"], world["Session"], world["org"], world["rooms"][0]
+    async with Session() as s:
+        await _seed_story(s, org.id, room.project_id, number=24, title="the board")
+    first = await _post(c, room.id, "see #24 please", nonce="nonce-rewrite")
+    assert first.status_code == 201, first.text
+    assert first.json()["data"]["content"] != "see #24 please", "the server did not rewrite the words (the test would prove nothing)"
+    again = await _post(c, room.id, "see #24 please", nonce="nonce-rewrite")
+    assert again.status_code == 200, again.text   # (reverted: compared with the STORED words → 409 → RED)
+    assert again.json()["data"]["id"] == first.json()["data"]["id"]
+
+
+@with_world
+async def test_other_words_with_the_token_of_a_DELETED_message_are_still_refused(world):
+    from sqlalchemy import update
+    from datetime import datetime, timezone
+    from app.models.conversation import ConversationMessage
+    c, Session, room = world["client"], world["Session"], world["rooms"][0]
+    first = await _post(c, room.id, "first words", nonce="nonce-del2")
+    async with Session() as s:
+        await s.execute(update(ConversationMessage).where(ConversationMessage.id == uuid.UUID(first.json()["data"]["id"])).values(content="", deleted_at=datetime.now(timezone.utc)))
+        await s.commit()
+    other = await _post(c, room.id, "OTHER words", nonce="nonce-del2")
+    assert other.status_code == 409, other.text   # (reverted: the check is skipped for a deleted message → 200 → RED)
+
+
+@with_world
+async def test_the_stored_row_carries_the_digest_of_the_words_as_they_came(world):
+    import hashlib
+    from sqlalchemy import select
+    from app.models.conversation import ConversationMessageNonce
+    c, Session, room = world["client"], world["Session"], world["rooms"][0]
+    assert (await _post(c, room.id, "digest me", nonce="nonce-sha")).status_code == 201
+    async with Session() as s:
+        row = (await s.execute(select(ConversationMessageNonce).where(ConversationMessageNonce.client_nonce == "nonce-sha"))).scalar_one()
+    assert row.content_sha256 == hashlib.sha256(b"digest me").hexdigest()
