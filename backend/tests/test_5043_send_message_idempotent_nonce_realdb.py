@@ -271,7 +271,7 @@ async def test_the_table_is_the_one_the_migration_says(world):
     async with world["Session"]() as s:
         cols = (await s.execute(text("select column_name, data_type, character_maximum_length, is_nullable from information_schema.columns where table_name='conversation_message_nonces' order by ordinal_position"))).all()
         pk = (await s.execute(text("select string_agg(a.attname, ',' order by array_position(c.conkey, a.attnum)) from pg_constraint c join pg_attribute a on a.attrelid=c.conrelid and a.attnum = any(c.conkey) where c.conname='pk_conversation_message_nonces' and c.contype='p'"))).scalar_one()
-        fks = (await s.execute(text("select confrelid::regclass::text, confdeltype from pg_constraint where conrelid='conversation_message_nonces'::regclass and contype='f' order by 1"))).all()
+        fks = (await s.execute(text("select confrelid::regclass::text, confdeltype::text from pg_constraint where conrelid='conversation_message_nonces'::regclass and contype='f' order by 1"))).all()
         on_messages = (await s.execute(text("select count(*) from information_schema.columns where table_name='conversation_messages' and column_name='client_nonce'"))).scalar_one()
     assert [(c[0], c[1], c[2], c[3]) for c in cols] == [("conversation_id", "uuid", None, "NO"), ("sender_id", "uuid", None, "NO"), ("client_nonce", "character varying", 64, "NO"), ("message_id", "uuid", None, "NO"), ("created_at", "timestamp with time zone", None, "NO")]
     assert pk == "conversation_id,sender_id,client_nonce"
