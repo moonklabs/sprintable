@@ -236,7 +236,7 @@ function answers(place: PlaceId, state: StateId): Record<string, Answer> {
     if (state === 'default') a['GET /api/team-members'] = { data: AGENTS };
     if (state === 'loading') a['GET /api/team-members'] = ok({ data: AGENTS }, { __delay: HOLD });
     if (state === 'error') a['GET /api/team-members'] = fail();
-    if (state === 'long') a['GET /api/team-members'] = { data: [agent('l1', LONG_AGENT, { device_name: 'a-computer-with-a-rather-long-device-name-too' }), agent('l2', LONG_KO), ...AGENTS.slice(0, 2)] };
+    if (state === 'long') a['GET /api/team-members'] = { data: [agent('l1', LONG_AGENT, { device_name: 'a-computer-with-a-rather-long-device-name-too' }), agent('l2', LONG_KO, { is_active: false }), ...AGENTS.slice(0, 2)] };
   }
   if (place === 'settings') {
     if (state === 'loading') a['GET /api/me'] = ok(ME, { __delay: HOLD });
@@ -326,6 +326,22 @@ const measure = (page: Page) => page.evaluate((keySrc) => {
   // each press is brought to the middle of the view first (a row half behind the sticky instruction strip / the tab bar, or one far down a long list, is not «unreachable»: it is scrolled) — only by the scroll boxes a PERSON can scroll
   // (`overflow-y: auto | scroll`: the shell's `#scroller`, a list's own box), never by `scrollIntoView()`: that also scrolls `overflow:hidden` boxes (a `truncate` slot), which would bring a CLIPPED press into reach and make it look pressable
   // (codex 6062 round 2, MEDIUM 1). What was scrolled is put back, and every element's scroll position is compared before / after the measure (`scrollDrift`).
+  // THE AGENTS' ROWS (a phone): the name link is stretched over the whole row (`touch:after:absolute touch:after:inset-0`), so the row's parts that are NOT presses of their own — a status chip · the decorative leading · the subtitle — must answer as that link,
+  // while the «⋯» and the checkbox (presses of their own, above it) answer as themselves (codex PR-B round 1: a status chip above the link swallowed the tap; the decorative leading `z-10` too). Asked at the centre of each part with elementFromPoint.
+  const rowPress = { asked: { chip: 0, deco: 0, subtitle: 0, actions: 0, checkbox: 0 }, failures: [] as string[] };
+  for (const w of document.querySelectorAll('[data-testid^="agent-row-"]:not([data-testid="agent-row-list"])')) { // (agent-row-list is the list's own box)
+    const row = w.querySelector('[data-slot="ds-list-row"]'); const link = row?.querySelector('a[href]');
+    if (!row || !link) continue;
+    const id = w.getAttribute('data-testid');
+    const centre = (e: Element) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); };
+    const asLink = (kind: keyof typeof rowPress.asked, e: Element | null) => { if (!e) return; rowPress.asked[kind]++; const h = centre(e); if (!(h && (h === link || link.contains(h)))) rowPress.failures.push(`${id} ${kind} → ${h ? h.tagName.toLowerCase() : 'nothing'} (not the name link)`); };
+    const asSelf = (kind: keyof typeof rowPress.asked, e: Element | null) => { if (!e) return; rowPress.asked[kind]++; const h = centre(e); if (!(h && (h === e || e.contains(h)))) rowPress.failures.push(`${id} ${kind} → ${h ? h.tagName.toLowerCase() : 'nothing'} (not itself)`); };
+    for (const chip of row.querySelectorAll('[data-slot="ds-chip"], [data-testid="agent-state-mark"]')) asLink('chip', chip);
+    asLink('deco', row.querySelector('[data-slot="ds-list-row-leading"] > span[aria-hidden="true"]'));
+    asLink('subtitle', row.querySelector('[data-slot="ds-list-row-subtitle"]'));
+    asSelf('actions', row.querySelector('[data-slot="ds-row-actions-trigger"]'));
+    asSelf('checkbox', row.querySelector('[role="checkbox"]'));
+  }
   const scrollOf = () => { const m = new Map<Element, string>(); for (const el of document.querySelectorAll('*')) if (el.scrollTop || el.scrollLeft) m.set(el, `${el.scrollTop},${el.scrollLeft}`); return m; };
   const scrollBefore = scrollOf();
   const scrolled = new Map<Element, number>();
@@ -406,7 +422,7 @@ const measure = (page: Page) => page.evaluate((keySrc) => {
     h1, lit, dupTitle, stripLines, descMidBreak,
     overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
-    small, unreached, covered, trouble, scrollDrift, descChecked, tiny, oldSlots, chromeOldSlots,
+    small, unreached, covered, trouble, scrollDrift, descChecked, rowPress, tiny, oldSlots, chromeOldSlots,
   };
 }, pressKey.toString());
 
@@ -481,6 +497,12 @@ async function assertScene(page: Page, place: PlaceId, key: string, phone: boole
   if (place === 'agents') expect(m.descChecked, `${key}: the agents list's description was not found as a text node — the word-break check did not look (scenes without one are listed in NO_DESC)`).toBe(!NO_DESC.has(key));
   expect(m.descMidBreak, `${key}: the agents list's description breaks INSIDE a word`).toBe(base.descMidBreak ?? false);
   expect(m.scrollDrift, `${key}: the measure left a scroll position changed`).toEqual([]);
+  if (phone && place === 'agents' && (key.startsWith('agents-default') || key.startsWith('agents-long'))) {
+    // the check must have LOOKED at every kind of part (a fixture without a chip / a decorative leading / a checkbox would measure nothing): the default scene has a chip (inactive · not connected), the decorative leading (non-desktop runtimes), a checkbox (desktop runtime), the «⋯» and the subtitle
+    const a = m.rowPress.asked;
+    expect([a.chip > 0, a.deco > 0, a.subtitle > 0, a.actions > 0, a.checkbox > 0], `${key}: the agents rows' pass-through check asked ${JSON.stringify(a)} (chip · deco · subtitle · actions · checkbox — every kind must be asked at least once)`).toEqual([true, true, true, true, true]);
+    expect(m.rowPress.failures, `${key}: a part of an agent row that does not answer as it should (chip · decorative leading · subtitle → the name link; «⋯» · checkbox → themselves)`).toEqual([]);
+  }
   expect(m.oldSlots, `${key}: old (non-ds) parts drawn in the body`).toEqual(base.oldSlots ?? []);
   expect(m.tiny, `${key}: text under 12 px`).toEqual(base.tiny ?? []);
   if (phone) expect(m.small, `${key}: presses whose pressable run (where the finger reaches them) is under 44 px`).toEqual(base.small ?? []);

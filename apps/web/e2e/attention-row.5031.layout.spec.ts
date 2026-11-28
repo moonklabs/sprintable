@@ -2,11 +2,10 @@
  * story 5031 (PR-B) — the attention queue's row keeps its ONE link over the whole row, measured in Chromium with the REAL `AttentionRow` (bundled with esbuild, not copied) and the real Tailwind build of globals.css; no server.
  *
  * The row is a ds `ListRow` whose title is a real `<a href>` stretched over the row by `after:absolute after:inset-0` (the whole row IS the link: a plain click goes through the app's router, ⌘-click / middle click stay the browser's).
- * Its `trailing` box (the actor's avatar · the verb «검토 ›») is NOT pressable by itself. The ds `ListRow`'s `trailing` box is `relative` (so a press at the right of a row — a status · «⋯» — can stand ABOVE such a stretched link, the agents rows on a phone):
- * a positioned box later in the order paints above the earlier `::after`, so without `pointer-events-none` on the trailing's non-pressable parts a click on the avatar or on the verb would hit THEM, not the link, and the row would stop navigating there.
- *
- * What is measured, at 390 and 1440: five points of the row, each asked with `document.elementFromPoint` — the title text · the avatar · the verb · the empty gap between the title column and the trailing box · the row's bottom padding — every one must answer as the row's link (or something in it);
- * and two real clicks (avatar · verb) must reach the link's own handler (`onNavigate` gets the row's href). A press that answers as something else is a press that does not navigate.
+ * Its `trailing` box holds the actor's avatar and the verb «검토 ›». The ds `ListRow`'s `trailing` box is `relative` (so a press at the right of a row — a status · «⋯» — can stand ABOVE such a stretched link, the agents rows on a phone): a positioned box later in the order paints above the earlier `::after`,
+ * so unless the BOX says `pointer-events-none` a click on it (its gaps, the verb) would hit the box, not the link, and the row would stop navigating there.
+ * What the row did BEFORE this change (develop, measured with the same page: ds trailing not positioned) and must still do: the title text · the verb · the gap before the trailing box · the row's bottom padding answer as the row's link; the AVATAR answers as itself — it is `relative` on its own, so it was always above the stretched link, and its mouse-hover tooltip (the agent's identity) opens.
+ * Measured at 390 and 1440 with `document.elementFromPoint` (title · avatar · verb · gap · padding), a real click on the verb (must reach the link's handler) and a real hover on the avatar (the tooltip must open — a `pointer-events-none` on the avatar would kill it).
  * No text width is written anywhere here (a text's width differs Mac ↔ Linux).
  */
 import { readFileSync } from 'node:fs';
@@ -115,17 +114,24 @@ const probes = (page: Page) => page.evaluate((verb) => {
   const text = link.getBoundingClientRect();
   return {
     link: { name: 'the title text', x: text.left + 8, y: text.top + text.height / 2 },
-    avatar: { name: 'the avatar', ...c(avatar) },
+    avatar: { name: 'the avatar (answers as itself: its tooltip)', ...c(avatar) },
     verb: { name: 'the verb «검토 ›»', ...c(verbEl) },
     gap: { name: 'the empty gap before the trailing box', x: T.left - 6, y: R.top + R.height / 2 },
     padding: { name: "the row's bottom padding", x: R.left + R.width / 2, y: R.bottom - 3 },
   };
 }, ITEM.actionLabel);
 
+/** what answers at each asked point: ok = the link (or something in it) for the row's own parts, the avatar (or something in it) for the avatar */
 async function answers(page: Page, pts: Record<string, { name: string; x: number; y: number }>) {
   return page.evaluate((p) => {
     const link = document.querySelector('[data-slot="ds-list-row"] a[href]')!;
-    return Object.fromEntries(Object.entries(p).map(([k, v]) => { const h = document.elementFromPoint(v.x, v.y); return [k, { name: v.name, link: !!h && (h === link || link.contains(h)), at: h ? `${h.tagName.toLowerCase()}${h.closest('[data-avatar]') ? ' in the avatar' : ''}` : 'nothing' }]; }));
+    const avatar = document.querySelector('[data-slot="ds-list-row"] [data-avatar]')!;
+    return Object.fromEntries(Object.entries(p).map(([k, v]) => {
+      const h = document.elementFromPoint(v.x, v.y);
+      const asLink = !!h && (h === link || link.contains(h));
+      const asAvatar = !!h && (h === avatar || avatar.contains(h));
+      return [k, { name: v.name, ok: k === 'avatar' ? asAvatar : asLink, at: h ? `${h.tagName.toLowerCase()}${asAvatar ? ' in the avatar' : ''}${asLink ? ' in the link' : ''}` : 'nothing' }];
+    }));
   }, pts);
 }
 
@@ -133,31 +139,37 @@ for (const width of [390, 1440]) {
   test.describe(`the attention row · ${width}`, () => {
     if (width < 500) test.use({ hasTouch: true, isMobile: true });
 
-    test('every part of the row answers as the row\'s link (title · avatar · verb · gap · padding)', async ({ page }) => {
+    test('every part of the row answers as before (title · verb · gap · padding → the link; the avatar → itself)', async ({ page }) => {
       await open(page, width);
       const pts = await probes(page);
       const got = await answers(page, pts);
       // the evidence picture: each asked point marked (green = the link answers, red = something else), taken BEFORE the check
       await page.evaluate(({ pts: p, got: g }) => {
         for (const [k, v] of Object.entries(p as Record<string, { x: number; y: number }>)) {
-          const ok = (g as Record<string, { link: boolean }>)[k]!.link;
+          const ok = (g as Record<string, { ok: boolean }>)[k]!.ok;
           const d = document.createElement('div');
           d.style.cssText = `position:fixed;left:${v.x - 6}px;top:${v.y - 6}px;width:12px;height:12px;border-radius:50%;background:${ok ? '#16a34a' : '#dc2626'};opacity:.85;z-index:99999;pointer-events:none`;
           document.body.appendChild(d);
         }
       }, { pts, got });
       await shot(page, page.locator('#frame'), `attention-row-press-${width}`);
-      const wrong = Object.values(got).filter((a) => !a.link).map((a) => `${a.name} → ${a.at}`);
-      expect(wrong, 'parts of the row that do NOT answer as its link (a press there would not navigate)').toEqual([]);
+      const wrong = Object.values(got).filter((a) => !a.ok).map((a) => `${a.name} → ${a.at}`);
+      expect(wrong, 'parts of the row that do not answer as they did before the ds trailing box became positioned (link: title · verb · gap · padding; the avatar: itself)').toEqual([]);
     });
 
-    test('a real click on the avatar and on the verb reaches the link (the row navigates)', async ({ page }) => {
+    test('a real click on the verb reaches the link (the row navigates)', async ({ page }) => {
       await open(page, width);
       const pts = await probes(page);
-      await page.mouse.click(pts.avatar.x, pts.avatar.y);
       await page.mouse.click(pts.verb.x, pts.verb.y);
       const navigated = await page.evaluate(() => (window as unknown as { __navigated: string[] }).__navigated);
-      expect(navigated, 'the link handler got both clicks (avatar, verb)').toEqual([ITEM.href, ITEM.href]);
+      expect(navigated, 'the link handler got the click on the verb').toEqual([ITEM.href]);
+    });
+
+    test('hovering the avatar opens its tooltip (the avatar stays hoverable above the stretched link)', async ({ page }) => {
+      await open(page, width);
+      const pts = await probes(page);
+      await page.mouse.move(pts.avatar.x, pts.avatar.y);
+      await expect(page.locator('[data-slot="tooltip-content"]'), 'the avatar tooltip opens on hover').toHaveCount(1);
     });
   });
 }

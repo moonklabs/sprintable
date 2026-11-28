@@ -76,7 +76,8 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const when = item.enteredStateAtMs !== null ? formatViewerRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : null;
-  const actor = item.actor ? <Avatar name={item.actor.name} actorType={item.actor.isAgent ? 'agent' : 'human'} size={22} /> : null;
+  // the avatar stays what it was: `relative` on its own, so ABOVE the stretched link — hoverable (its identity tooltip), the BOX around it is what `pointer-events-none` lets the click through (className below)
+  const actor = item.actor ? <Avatar name={item.actor.name} actorType={item.actor.isAgent ? 'agent' : 'human'} size={22} className={navigable ? 'pointer-events-auto' : undefined} /> : null;
   const claim = (
     navigable ? (
       <a
