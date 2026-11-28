@@ -132,6 +132,33 @@ describe('ChannelPostsEngagementPage — 담당자 후보(story #4005)', () => {
     const alert = container.querySelector('[data-testid="engagement-members-retry"]');
     expect(alert).not.toBeNull();
     expect(container.textContent).toContain(koMessages.content.engagementAssigneeLoadFailed);
+    // story 5048 ⑤: a PART of the screen failing is a ds Banner failed + ds Button retry (was a ui destructive Alert + outline sm Button)
+    const banner = alert!.closest('[data-slot="ds-banner"]');
+    expect(banner?.getAttribute('data-tone')).toBe('failed');
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect((alert as HTMLElement).className).toContain('h-ds-control-sm');
+  });
+
+  it('⭐story 5048 ⑤ — 목록을 못 불러오면(영역 전체) ds ErrorState가 뜨고 표 · 빈 상태는 안 뜬다', async () => {
+    stubFetch({});
+    const base = globalThis.fetch as unknown as (u: RequestInfo | URL) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => (String(input).startsWith(`/api/organizations/${ORG_ID}/engagement/items`)
+      ? Promise.resolve({ ok: false, status: 500, json: async () => ({ data: null, error: {} }) })
+      : base(input))));
+    await mount();
+    const err = container.querySelector('[data-slot="ds-error-state"]');
+    expect(err).not.toBeNull();
+    expect(err!.getAttribute('role')).toBe('alert');
+    expect(err!.textContent).toContain(koMessages.content.engagementLoadFailed);
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
+    // 상태 토글처럼 되살릴 길: 「다시 시도」는 목록을 다시 읽는다
+    const retry = [...err!.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry) as HTMLButtonElement;
+    expect(retry).toBeDefined();
+    const fetchMock = globalThis.fetch as unknown as { mock: { calls: unknown[] } };
+    const before = fetchMock.mock.calls.length;
+    await act(async () => { retry.click(); });
+    await flush();
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
   });
 
   it('⭐「다시 시도」 클릭 시 재조회하고 성공하면 오류 배너가 사라진다', async () => {

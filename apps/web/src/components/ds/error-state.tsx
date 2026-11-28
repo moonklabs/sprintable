@@ -30,7 +30,7 @@ export function ErrorState({ title, description, onRetry, retryLabel, children, 
   const t = useTranslations('common');
   const inline = size === 'inline';
   return (
-    <div {...rest} role="alert" data-slot="ds-error-state" data-size={size} className={stateBlockClass(inline, className)}>
+    <div {...rest} role="alert" aria-live="assertive" aria-atomic="true" data-slot="ds-error-state" data-size={size} className={stateBlockClass(inline, className)}>
       <Icon name="error" size={inline ? 'sm' : 'lg'} className="text-ds-failed" />
       <p className="m-0 break-keep text-ds-card-title font-semibold text-ds-ink [overflow-wrap:anywhere]">{title ?? t('error')}</p>
       {description ? <p className="m-0 max-w-sm break-keep text-ds-small text-ds-ink-2 [overflow-wrap:anywhere]">{description}</p> : null}

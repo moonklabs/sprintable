@@ -6,6 +6,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { memberOptionLabels } from '@/lib/member-display';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ErrorState } from '@/components/ds/error-state';
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -407,20 +410,13 @@ export default function ChannelPostsEngagementPage() {
       ) : null}
 
       {membersLoadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{t('engagementAssigneeLoadFailed')}</span>
-            <Button size="sm" variant="outline" onClick={() => void loadMembers()} data-testid="engagement-members-retry">
-              {tc('retry')}
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <Banner tone="failed" action={<DsButton variant="secondary" onClick={() => void loadMembers()} data-testid="engagement-members-retry">{tc('retry')}</DsButton>}>
+          {t('engagementAssigneeLoadFailed')}
+        </Banner>
       ) : null}
 
       {loadError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{t('engagementLoadFailed')}</AlertDescription>
-        </Alert>
+        <ErrorState title={t('engagementLoadFailed')} onRetry={() => void loadPage(null, true)} />
       ) : loading ? (
         <p className="text-sm text-muted-foreground">{t('channelPostsCalendarLoading')}</p>
       ) : items.length === 0 ? (
