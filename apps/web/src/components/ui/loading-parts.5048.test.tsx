@@ -47,3 +47,33 @@ describe('길 로딩 공용 부품 — ds SkeletonGroup 한 모양', () => {
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(1); // 한 곳에 상태 하나
   });
 });
+
+// 자리 높이(도착 화면과 어긋나 튀지 않게 — story #4274) — 옛 ui/skeleton 때의 높이 그대로(codex 지적: 개수만이 아니라 높이도 고정).
+const heightsOf = () => Array.from(bars()).map((b) => (b.className.match(/(?<![\w:-])h-[\w.]+/g) ?? []).join('+') || (b.getAttribute('data-variant') ?? ''));
+describe('길 로딩 공용 부품 — 막대 높이 그대로', () => {
+  it('⭐PageSkeleton rows: 제목 h-8 · 설명 h-4 · 줄 h-14 ×5', async () => {
+    await render(<PageSkeleton />);
+    expect(heightsOf()).toEqual(['h-8', 'h-4', 'h-14', 'h-14', 'h-14', 'h-14', 'h-14']);
+    expect(group().innerHTML).toContain('md:h-9.5');
+  });
+  it('⭐PageSkeleton cards: 카드 h-24 ×4', async () => {
+    await render(<PageSkeleton variant="cards" />);
+    expect(heightsOf().slice(2)).toEqual(['h-24', 'h-24', 'h-24', 'h-24']);
+  });
+  it('⭐WorkspaceFrameLoading: 줄 h-12 ×5', async () => {
+    await render(<WorkspaceFrameLoading />);
+    expect(heightsOf()).toEqual(['h-12', 'h-12', 'h-12', 'h-12', 'h-12']);
+  });
+  it('⭐EpicsSkeleton: 글 막대는 16(h-4 · size=small) — ds 기본 body(20)가 아니다(카드마다 +4가 되지 않게)', async () => {
+    await render(<EpicsSkeleton />);
+    const texts = Array.from(bars()).filter((b) => b.getAttribute('data-variant') === 'text');
+    expect(texts).toHaveLength(6);
+    for (const t of texts) expect(t.className).toContain('h-4');
+  });
+  it('⭐chats/loading: 머리 막대 h-5 · 아바타 원 h-10 w-10 · 제목 h-4 · 둘째 줄 h-3', async () => {
+    await render(<ChatsLoading />);
+    const h = heightsOf();
+    expect(h[0]).toBe('h-5');
+    expect(h.slice(1, 4)).toEqual(['h-10', 'h-4', 'h-3']);
+  });
+});

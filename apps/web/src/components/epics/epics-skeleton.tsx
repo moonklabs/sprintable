@@ -16,7 +16,7 @@ export function EpicsSkeleton() {
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i} className="space-y-3 p-4">
             <Skeleton className="h-5 w-3/4" />
-            <Skeleton variant="text" className="w-full" />
+            <Skeleton variant="text" size="small" className="w-full" />
             <Skeleton className="h-2 w-full" />
             <div className="flex gap-2">
               <Skeleton variant="circle" className="size-6" />
