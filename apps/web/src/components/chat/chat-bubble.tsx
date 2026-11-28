@@ -744,8 +744,10 @@ export function ChatBubble({
             tabIndex={isMine ? undefined : 0}
             onClick={isMine ? undefined : handleOpenProfilePopover}
             onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
-            className={`flex-shrink-0 ${isMine ? '' : 'cursor-pointer'}`}
+            className={`relative flex-shrink-0 ${isMine ? '' : 'cursor-pointer'}`}
           >
+            {/* story 5048 T0 AC4 2차 고침 — the 28 px avatar is a press (opens the person's card): on touch its PRESS area is 44 — a transparent band inside it reaches 8 px out on every side (the avatar's own drawing is unchanged). */}
+            {!isMine && <span aria-hidden="true" data-testid="chat-bubble-avatar-hit" className="absolute -inset-2 hidden touch:block" />}
             {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임).
                 story #2901(3335)+#2921 S4(3339) 합성(유나 확定 5규칙, avatar-unification-design-memo-2921) —
                 Avatar가 정본(사본 분화 금지) — shape(에이전트=circle·human=square)·idle blue 링·
@@ -1079,6 +1081,8 @@ export function ChatBubble({
               className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MoreHorizontal className="size-ds-icon-sm" aria-hidden="true" />
+              {/* story 5048 T0 AC4 2차 고침 — the button is drawn 32 px (the «⋯» is 16): its PRESS area is 44 on touch — a transparent band inside it reaches 6 px out on every side, so a press on the band IS a press on the button. Nothing is moved: it overlaps the 4 px gap and the reply twin's first 2 px, where the later one (the reply) wins. */}
+              <span aria-hidden="true" data-testid="chat-bubble-menu-hit" className="absolute -inset-1.5" />
             </Button>
             {onOpenThread && (
               <Button
