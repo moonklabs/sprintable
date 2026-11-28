@@ -84,7 +84,7 @@ async function mount(threadId = 'thread-1') {
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <RealtimeProvider currentTeamMemberId="me-1">
           <ChatRailProvider>
-            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={TARGETS} participants={PARTICIPANTS} />
+            <ChatView threadId={threadId} currentTeamMemberId="me-1" commandTargets={[...TARGETS]} participants={PARTICIPANTS} />
           </ChatRailProvider>
         </RealtimeProvider>
       </NextIntlClientProvider>,
@@ -287,7 +287,7 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
   }, 10_000);
   it('a room starts with a full retry budget (the budget of the room before is not carried over)', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
-    expect(view).toContain('const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId, commandTargets]);');
+    expect(view).toContain('const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId]);');
     expect(view).toContain("return () => { reader.dead = true; if (reader.timer) { clearTimeout(reader.timer); reader.timer = null; } };");
   });
   it('⭐back to a room (A → B → A): the list read the first time A was open is not shown while A\'s new read is on its way — a stale «host» cannot draw the choice (codex)', async () => {
@@ -328,11 +328,23 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     await settle();
     expect(chip(), 'an answer asked for before the reply must not bring the agent back').toBeNull();
   });
+  it('⭐the parent builds a NEW target list on every render (it does): a re-render with a fresh list does not hide the working list and asks for no new read (codex: no read per presence tick)', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(chip()).not.toBeNull();
+    const before = workingReads();
+    await mount();                       // the same room, rendered again — `mount` hands the view a FRESH copy of the target list each time
+    await mount();
+    await settle();
+    expect(chip(), 'a fresh target list must not hide the choice').not.toBeNull();
+    expect(workingReads(), 'and must not start another read').toBe(before);
+  });
   it('the reader is one place: an event outdates a read on its way (nothing of the old answer is shown) — the pins stand in the view', () => {
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
     expect(view).toContain('if (st.running) { st.again = true; return; }');
     expect(view).toContain('if (st.again) continue;');
-    expect(view).toContain('setTypingState({ reader, list: namedWorking(payload.working ?? [], false) });');
+    expect(view).toContain('setTypingState({ reader, list: payload.working ?? [], hostKnown: false });');
     expect(view).toContain('if (st.dead) return;');
     expect(view).not.toContain('hostRunRef');
   });

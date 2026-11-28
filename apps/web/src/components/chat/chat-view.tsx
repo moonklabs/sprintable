@@ -97,6 +97,12 @@ interface MessageGroup {
 // 50/page × 10 = ~500개. 그 안에 없으면 no-op(graceful).
 const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 const NO_TYPING_AGENTS: { id: string; name: string; hostRun: boolean }[] = []; // (one array for «none», so a room that has no list does not make a new one every render)
+/** the working list as the screen needs it: names from the CURRENT target list (made when drawn, so a target list that changes — the parent rebuilds it on every render — never needs a new read), `hostRun` true ONLY for an answer of GET /working that says so */
+function namedWorkingAgents(list: ReadonlyArray<{ member_id: string; host_run?: boolean }>, hostKnown: boolean, targets: ReadonlyArray<{ agentId: string; agentName?: string }> | undefined): { id: string; name: string; hostRun: boolean }[] {
+  return list
+    .map((w) => ({ id: w.member_id, name: (targets ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostKnown && w.host_run === true }))
+    .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name);
+}
 
 // story #3493 — 날짜 구분선(day divider)은 "기록"도 "약속"도 아니다(개별 시각이 decay하는
 // 값이 아니라, 그 날 하루 전체를 대표하는 고정 달력 라벨 — formatRelativeTime을 쓰면 그룹
@@ -281,14 +287,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return () => { cancelled = true; };
   }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
-  // One reader per room × target list (a «generation»), made here so that what it read can be told from what an older generation read: the working list is tagged with the reader that read it, and shown only for the CURRENT one — after a switch of
-  // room (A → B → A) or of the target list the old list, with its `host_run`, is not shown while the new reader has not answered (a stale «host» can never draw the choice).
+  // One reader per room (a «generation»), made here so that what it read can be told from what an older generation read: the working list is tagged with the reader that read it, and shown only for the CURRENT one — after a switch of
+  // room (A → B → A) the old list, with its `host_run`, is not shown while the new reader has not answered (a stale «host» can never draw the choice). The target list is NOT part of it: the parent rebuilds that on every render.
   type WorkingReader = { thread: string; running: boolean; again: boolean; fails: number; timer: ReturnType<typeof setTimeout> | null; dead: boolean };
-  const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId, commandTargets]);
-  const [typingState, setTypingState] = useState<{ reader: WorkingReader | null; list: { id: string; name: string; hostRun: boolean }[] }>({ reader: null, list: [] });
-  const typingAgents = typingState.reader === reader ? typingState.list : NO_TYPING_AGENTS;
+  const reader = useMemo<WorkingReader>(() => ({ thread: threadId, running: false, again: false, fails: 0, timer: null, dead: false }), [threadId]);
+  const [typingState, setTypingState] = useState<{ reader: WorkingReader | null; list: Array<{ member_id: string; host_run?: boolean }>; hostKnown: boolean }>({ reader: null, list: [], hostKnown: false });
+  const typingAgents = useMemo(() => (typingState.reader === reader ? namedWorkingAgents(typingState.list, typingState.hostKnown, commandTargets) : NO_TYPING_AGENTS), [typingState, reader, commandTargets]);
   // story 5046 (C13): the room's working list has ONE reader (`fetchWorking` below). GET /working is the only source of an agent's `host_run`; the SSE `conversation.working` event says THAT the list changed and who works — never whether a host runs them. There is no per-agent memory: what is drawn is the newest answer.
-  const commandTargetsRef = useRef(commandTargets);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
   const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
@@ -496,7 +501,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
-    setTypingState((prev) => (prev.reader === reader && prev.list.some((a) => a.id === agentId) ? { reader: prev.reader, list: prev.list.filter((a) => a.id !== agentId) } : prev));
+    setTypingState((prev) => (prev.reader === reader && prev.list.some((a) => a.member_id === agentId) ? { ...prev, list: prev.list.filter((a) => a.member_id !== agentId) } : prev));
     if (reader.running) reader.again = true; // story 5046 (C13): a read still on its way was asked BEFORE this reply — its answer is old (it must not bring the agent back); the reader reads once more
   }, [reader]);
 
@@ -559,9 +564,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
-  const namedWorking = useCallback((list: ReadonlyArray<{ member_id: string; host_run?: boolean }>, hostKnown: boolean) => list
-    .map((w) => ({ id: w.member_id, name: (commandTargetsRef.current ?? []).find((tg) => tg.agentId === w.member_id)?.agentName, hostRun: hostKnown && w.host_run === true }))
-    .filter((a): a is { id: string; name: string; hostRun: boolean } => !!a.name), []);
   // One read at a time. An event (or a changed target list) that comes while a read is on its way sets `again`: that read's answer is OLD — nothing of it is shown, the reader reads once more. A failed read is tried again (2 s · 4 s · 6 s);
   // until an answer is shown no choice is drawn (the safe side: the message goes the old way). A reader belongs to ONE room and ONE target list: when either changes (or the view goes) it is closed — what it still has on its way is never shown, no retry
   // timer is left, and the new reader starts with a full retry budget.
@@ -586,27 +588,26 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           break;
         }
         st.fails = 0;
-        setTypingState({ reader: st, list: namedWorking(list, true) });
+        setTypingState({ reader: st, list, hostKnown: true });
         break;
       }
     } finally { st.running = false; }
-  }, [namedWorking]);
+  }, []);
 
   // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 typing 갱신(payload 가
   // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
   // story 5046 (C13): the event shows WHO works at once — with «not a host» (no choice) — and asks the reader for the answer that says whether a host runs them.
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
-    setTypingState({ reader, list: namedWorking(payload.working ?? [], false) });
+    setTypingState({ reader, list: payload.working ?? [], hostKnown: false });
     void readWorking(reader);
-  }, [threadId, reader, namedWorking, readWorking]);
+  }, [threadId, reader, readWorking]);
 
   useEffect(() => {
-    commandTargetsRef.current = commandTargets;
     reader.dead = false; // (an effect that runs twice — React's strict mode — opens the same reader again)
     void readWorking(reader);
     return () => { reader.dead = true; if (reader.timer) { clearTimeout(reader.timer); reader.timer = null; } };
-  }, [readWorking, reader, commandTargets]);
+  }, [readWorking, reader]);
 
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
   // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
