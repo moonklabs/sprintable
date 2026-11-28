@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ErrorState } from '@/components/ds/error-state';
 import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useDirectRoad } from '@/components/chat/use-direct-road';
@@ -214,7 +215,7 @@ function Choose({ t, read, only, onReload, onPick }: { t: T; read: Read; only: R
   const computers = useMemo(() => (read.kind === 'ready' ? read.computers.filter((c) => projectsOf(c).length > 0) : []), [read]);
   if (read.kind === 'reading') return <div aria-busy="true" data-testid="phone-files-reading"><Loader2 className="size-ds-icon-sm animate-spin text-muted-foreground" aria-hidden /></div>;
   if (read.kind === 'old_app') return <Card className="break-keep p-4" data-testid="phone-files-old-app"><p className="text-sm text-foreground">{t('oldApp')}</p></Card>;
-  if (read.kind === 'failed') return <Line t={t} text={t('readFailed')} testId="phone-files-read-failed" onRetry={onReload} />;
+  if (read.kind === 'failed') return <ErrorState data-testid="phone-files-read-failed" title={t('readFailed')} retryLabel={t('retry')} onRetry={onReload} />;
   if (read.kind === 'no_phone') return <Card className="break-keep p-4" data-testid="phone-files-no-mac"><p className="text-sm text-foreground">{t('noMac')}</p></Card>;
   if (!read.remoteOn) return <Card className="break-keep p-4" data-testid="phone-files-remote-off"><p className="text-sm text-foreground">{t('remoteOff')}</p></Card>;
   if (computers.length === 0) return <Card className="break-keep p-4" data-testid="phone-files-no-project"><p className="text-sm text-foreground">{t('noProjectOnMac')}</p></Card>;

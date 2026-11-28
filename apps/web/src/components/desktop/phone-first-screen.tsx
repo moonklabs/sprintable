@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ErrorState } from '@/components/ds/error-state';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
@@ -83,10 +84,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false,
 
   if (read.kind === 'failed') {
     return (
-      <Card className="break-keep flex flex-col gap-3 p-6" data-testid="onboarding-phone-read-failed">
-        <p role="alert" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
-        <div><Button variant="outline" onClick={reload}>{t('result.retry')}</Button></div>
-      </Card>
+      <ErrorState data-testid="onboarding-phone-read-failed" title={t('result.readFailed')} retryLabel={t('result.retry')} onRetry={reload} />
     );
   }
 
@@ -217,10 +215,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
       {rc === null ? (
         // who may turn it on is not known yet (still reading → nothing drawn) or could not be read (a line and one retry — never a dead end)
         readFailed ? (
-          <div className="space-y-2" data-testid="onboarding-phone-off-read-failed">
-            <p role="alert" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
-            <div><Button variant="outline" onClick={onTurnedOn}>{t('result.retry')}</Button></div>
-          </div>
+          <ErrorState data-testid="onboarding-phone-off-read-failed" size="inline" title={t('result.readFailed')} retryLabel={t('result.retry')} onRetry={onTurnedOn} />
         ) : null
       ) : (
         <p className="text-sm text-muted-foreground">{canChange ? t(computer ? 'off.bodyOwnerComputer' : 'off.bodyOwner') : t(computer ? 'off.bodyOtherComputer' : 'off.bodyOther')}</p>

@@ -193,6 +193,8 @@ describe('[4983] outside and before', () => {
     fetchWithAuth.mockImplementation(async () => new Response('x', { status: 500 }));
     await screen();
     expect(byId('phone-files-read-failed')?.textContent).toContain(ko.readFailed);
+    expect(byId('phone-files-read-failed')?.getAttribute('data-slot')).toBe('ds-error-state'); // story 5048 ⑤ (④)
+    expect(byId('phone-files-read-failed')?.getAttribute('role')).toBe('alert');
     server();
     await press(container.querySelector('[data-testid="phone-files-read-failed"] button'));
     expect(byId('phone-files-choose')).not.toBeNull();

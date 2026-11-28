@@ -5,6 +5,8 @@ import { useFormatter, useTranslations } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { DesktopEmptyState } from '@/components/desktop/desktop-empty-state';
 import {
@@ -181,10 +183,9 @@ export function DesktopDevices() {
           <p className="text-xs text-muted-foreground">{t('description')}</p>
           <p aria-live="polite" className="break-keep text-xs text-foreground" data-testid="desktop-devices-done">{doneText}</p>
           {loadFailed ? (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="desktop-devices-load-failed">
-              {t('loadFailed')}
-              <Button variant="outline" size="sm" onClick={() => load()}>{t('retry')}</Button>
-            </p>
+            <div data-testid="desktop-devices-load-failed">
+              <Banner tone="failed" action={<DsButton variant="secondary" onClick={() => load()}>{t('retry')}</DsButton>}>{t('loadFailed')}</Banner>
+            </div>
           ) : computers === null ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-ds-icon-sm animate-spin" />
