@@ -129,3 +129,61 @@ def test_one_helper_serves_the_route_and_the_event():
     assert "with_host_run(" in (APP / "services" / "presence_events.py").read_text(encoding="utf-8")
     for p in ("routers/conversations.py", "services/presence_events.py"):
         assert "client_kind" not in (APP / p).read_text(encoding="utf-8"), p
+
+
+async def test_when_redis_cannot_answer_a_row_that_only_waits_to_expire_is_not_a_live_host(monkeypatch):
+    """codex (security lens): with Redis presence on but ANSWERING NOTHING (an outage), the old rule reads «any row» as alive — a stale host row would then read as host-run. For the display-only flag a stale row does not count"""
+    from app.core.config import settings
+    from app.routers.agent_gateway import _SESSION_FRESH_TTL
+    from app.services import agent_push_reach, presence_online
+
+    monkeypatch.setattr(settings, "presence_online_redis_enabled", True)
+    monkeypatch.setattr(settings, "redis_url", "redis://unreachable.invalid:6379/0")
+
+    async def _no_answer(_agent):
+        return None
+
+    monkeypatch.setattr(presence_online, "is_online", _no_answer)
+    engine, Session, w = await _world()
+    try:
+        await _row(Session, w.g_p, "host", age_sec=_SESSION_FRESH_TTL + 60)   # a stale host row
+        await _row(Session, w.g_2, "host")                                    # a fresh host row
+        async with Session() as s:
+            got = await agent_push_reach.host_run_agent_ids(s, {w.g_p, w.g_2})
+        assert got == {w.g_2}, got
+        # …and the reach decision keeps its old reading (any row) — only the display-only flag is stricter
+        async with Session() as s:
+            live = await agent_push_reach._agents_with_live_stream(s, sorted({w.g_p, w.g_2}))
+        assert live == {w.g_p, w.g_2}, live
+    finally:
+        await engine.dispose()
+
+
+async def test_when_redis_answers_online_the_row_is_not_judged_by_its_age(monkeypatch):
+    """with Redis answering, `last_seen_at` is not kept fresh (the stream does not touch it): an online host with an old row is still a host"""
+    from app.core.config import settings
+    from app.routers.agent_gateway import _SESSION_FRESH_TTL
+    from app.services import agent_push_reach, presence_online
+
+    monkeypatch.setattr(settings, "presence_online_redis_enabled", True)
+    monkeypatch.setattr(settings, "redis_url", "redis://unreachable.invalid:6379/0")
+
+    async def _online(_agent):
+        return True
+
+    monkeypatch.setattr(presence_online, "is_online", _online)
+    engine, Session, w = await _world()
+    try:
+        await _row(Session, w.g_p, "host", age_sec=_SESSION_FRESH_TTL + 600)
+        async with Session() as s:
+            assert await agent_push_reach.host_run_agent_ids(s, {w.g_p}) == {w.g_p}
+    finally:
+        await engine.dispose()
+
+
+def test_the_presence_list_is_read_before_a_database_connection_is_taken():
+    src = (APP / "services" / "presence_events.py").read_text(encoding="utf-8")
+    body = src.split("async def emit_conversation_working")[1].split("async def emit_presence")[0]
+    assert body.index("await chat_presence.list_working(") < body.index("async with async_session_factory()"), "the Redis read must come first"
+    assert body.count("chat_presence.list_working(") == 1
+

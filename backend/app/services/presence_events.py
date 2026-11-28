@@ -34,6 +34,8 @@ async def emit_conversation_working(org_id, conversation_id) -> None:
 
         from app.core.database import async_session_factory
 
+        # story 5046 (codex): the list comes from Redis — read it BEFORE a database connection is taken (no connection held across presence I/O)
+        working_now = await chat_presence.list_working(str(conversation_id))
         async with async_session_factory() as session:
             # story #4500: this org's conversation (its id can come from Redis) · this org's members only
             import uuid
@@ -45,7 +47,7 @@ async def emit_conversation_working(org_id, conversation_id) -> None:
                 session, uuid.UUID(str(conversation_id)), uuid.UUID(str(org_id)),
             )}
             # story 5046 (C13): the list carries `host_run` per agent (the same answer GET /working gives) — the web draws its choice from the value it is handed
-            working = await with_host_run(session, await chat_presence.list_working(str(conversation_id)))
+            working = await with_host_run(session, working_now)
 
         await push_to_org_members(
             str(org_id),
