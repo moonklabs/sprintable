@@ -43,6 +43,8 @@ let sentAnswer: Record<string, unknown>;
 
 /** `hostRun`: what the server's /working says per working agent — `true`/`false` (a host runs it or not), `'absent'` = an old server that has no `host_run` */
 let hostRunNow: boolean | 'absent' = true;
+/** a read of GET /working that is held on its way (a late answer) until the gate opens */
+let workingGate: Promise<void> | null = null;
 function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
   hostRunNow = hostRun;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -50,13 +52,13 @@ function stubFetch(working = true, hostRun: boolean | 'absent' = true) {
     calls.push({ url, method, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
     if (method === 'POST' && url.endsWith('/messages')) return { ok: true, status: 201, json: async () => sentAnswer };
     if (url.includes('/messages?')) return { ok: true, json: async () => ({ data: listAnswer(), meta: { next_cursor: null, has_more: false } }) };
-    if (url.endsWith('/working')) return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) };
+    if (url.endsWith('/working')) { if (workingGate) await workingGate; return { ok: true, json: async () => ({ data: working ? [{ member_id: A1, ...(hostRunNow === 'absent' ? {} : { host_run: hostRunNow }) }] : [] }) }; }
     return { ok: true, json: async () => ({ data: [] }) };
   }));
 }
 
 beforeEach(() => {
-  calls = []; listAnswer = () => []; sentAnswer = { data: {} };
+  calls = []; listAnswer = () => []; sentAnswer = { data: {} }; workingGate = null;
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -187,6 +189,23 @@ describe('story 5046 (C13): the choice is only for agents a HOST runs (the serve
     const view = fs.readFileSync(path.join(__dirname, 'chat-view.tsx'), 'utf8');
     expect(view).toContain('const seq = ++workingFetchSeqRef.current;');
     expect(view).toContain('if (seq !== workingFetchSeqRef.current) return;');
+  });
+  it('⭐a read still on its way when SSE says «stopped» does not bring the agent back when it lands (codex: the choice must not come alive again)', async () => {
+    stubFetch(true, true);
+    await mount();
+    await type('hi');
+    expect(container.querySelector('[data-testid="delivery-choice"]')).not.toBeNull();
+    let release!: () => void;
+    workingGate = new Promise<void>((r) => { release = r; });
+    await act(async () => { emitWorking([A1, 'a2222222-2222-4222-8222-222222222222']); }); // an agent not known yet → a read is asked, and held at the gate
+    await settle();
+    await act(async () => { emitWorking([]); });                                            // …then SSE says nobody works any more
+    await settle();
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
+    workingGate = null;
+    await act(async () => { release(); });                                                  // the old read lands now
+    await settle();
+    expect(container.querySelector('[data-testid="delivery-choice"]')).toBeNull();
   });
   it('an agent the room already knows (host_run known) is not read again for each event', async () => {
     stubFetch(true, true);

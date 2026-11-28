@@ -574,6 +574,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // working 목록을 실음). 마운트 1회 fetch 로 초기 상태만(이벤트는 변경 시 push). 재연결 시도 catch-up.
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
     if (payload.conversation_id !== threadId) return;
+    workingFetchSeqRef.current += 1; // this event is newer than any read still on its way: that read's answer is old when it lands (it must not bring back an agent the event says stopped)
     const now = new Set((payload.working ?? []).map((w) => w.member_id));
     for (const id of [...hostRunRef.current.keys()]) if (!now.has(id)) hostRunRef.current.delete(id); // stopped working → forgotten (it may start again run by something else)
     for (const id of [...hostRunAskedRef.current]) if (!now.has(id)) hostRunAskedRef.current.delete(id);
