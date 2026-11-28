@@ -341,7 +341,6 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
             const actions = rowActions(agent, index);
             const common = {
               'data-testid': `agent-row-${agent.id}`,
-              leadingClassName: 'relative z-10',
               leading: isAdmin ? (
                 isDesktopRuntime(agent.runtime_type) ? (
                   <Checkbox
@@ -356,9 +355,7 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
                 ) : <span className="size-4 shrink-0" aria-hidden />
               ) : undefined,
               title: (
-                // story 5031 (C1 [6]): where a finger is, the name link presses the WHOLE row (a `::after` laid over the row — the row (ListRow) is the `relative` box; the title slot's `truncate` clips a box widened by padding / negative margin
-                // but not an absolutely positioned one whose containing block is outside it). The look is the same, the row is not taller; the checkbox (leading, z-10 below) and the «⋯» (a press of its own) stay above it.
-                <Link href={detailHref} className="block min-w-0 hover:underline touch:after:absolute touch:after:inset-0">
+                <Link href={detailHref} className="block min-w-0 hover:underline">
                   <RowName label={label} id={agent.id} />
                 </Link>
               ),
