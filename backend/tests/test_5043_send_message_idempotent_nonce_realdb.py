@@ -322,21 +322,26 @@ async def test_a_DM_send_that_forks_a_group_is_found_again_by_its_token_where_it
 
 @with_world
 async def test_a_person_who_lost_the_seat_is_refused_as_before_not_handed_the_old_message(world):
-    """the replay runs AFTER the seat checks: A sent, A was taken out of the room AND lost the project's access (so the room cannot be joined again), A sends the same token again → 403, not 200 with the old message."""
+    """the replay runs AFTER the seat checks: A sent in a one-to-one room (no way to join it again), A was taken out of it, A sends the same token again → 403 (the seat rule), not 200 with the old message."""
     from sqlalchemy import delete
-    from app.models.conversation import ConversationParticipant
-    from app.models.project_access import ProjectAccess
-    c, Session, room, me = world["client"], world["Session"], world["rooms"][0], world["members"][0]
-    first = await _post(c, room.id, "mine", nonce="nonce-left")
-    assert first.status_code == 201
+    from app.models.conversation import Conversation, ConversationParticipant
+    c, Session, org, members = world["client"], world["Session"], world["org"], world["members"]
     async with Session() as s:
-        await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == room.id, ConversationParticipant.member_id == me.id))
-        await s.execute(delete(ProjectAccess).where(ProjectAccess.member_id == me.id))
+        dm = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=world["rooms"][0].project_id, type="dm", created_by=members[0].id)
+        s.add(dm)
+        await s.flush()
+        s.add_all([ConversationParticipant(conversation_id=dm.id, member_id=m.id) for m in members])
         await s.commit()
-    again = await _post(c, room.id, "mine", nonce="nonce-left")
+        dm_id = dm.id
+    first = await _post(c, dm_id, "mine", nonce="nonce-left")
+    assert first.status_code == 201, first.text
+    async with Session() as s:
+        await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == dm_id, ConversationParticipant.member_id == members[0].id))
+        await s.commit()
+    again = await _post(c, dm_id, "mine", nonce="nonce-left")
     assert again.status_code == 403, again.text   # (reverted: the replay before the seat check → 200 with the old message → RED)
     assert "mine" not in again.text
-    assert len(await _rows(Session, room.id, me.id)) == 1
+    assert len(await _rows(Session, dm_id, members[0].id)) == 1
 
 
 @with_world
