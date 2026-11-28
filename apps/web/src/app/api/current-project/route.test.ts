@@ -36,6 +36,13 @@ describe('/api/current-project (cookies + dynamic import)', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).data).toMatchObject({ project_id: 'p1', org_id: 'org-1', project_name: 'Alpha' });
   });
+  it('GET: a person in an organisation with NO project has no current project — project_id null, and no project is looked up (story 5041: it used to be the organisation id in the project slot)', async () => {
+    h.getAuthContext.mockResolvedValue({ ...me(), project_id: '' });
+    const res = await GET(new Request('http://localhost/api/current-project'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ project_id: null, project_name: null, org_id: 'org-1' });
+    expect(h.fastapiCall).not.toHaveBeenCalled();
+  });
   it('GET: fastapiCall 실패해도 200 + 기본 이름(fallback)', async () => {
     h.fastapiCall.mockRejectedValue(new Error('be down'));
     const res = await GET(new Request('http://localhost/api/current-project'));

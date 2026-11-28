@@ -56,6 +56,16 @@ describe('getAuthContext — SaaS 모드', () => {
     expect(result?.id).toBe('member-2');
   });
 
+  it('story 5041: /me says project_id null (the organisation has no project) → the context carries NO project (an empty string, never the organisation id), and the person is still known', async () => {
+    getServerSessionMock.mockResolvedValue({ access_token: 'valid-token', org_id: 'org-1', project_id: '' });
+    fastapiCallMock.mockResolvedValue({ id: 'member-3', org_id: 'org-1', project_id: null, project_name: null });
+
+    const result = await getOrgProjectAuthContext(new Request('http://localhost'));
+
+    expect(result).toMatchObject({ id: 'member-3', org_id: 'org-1', project_id: '', type: 'human' });
+    expect(result?.project_id).not.toBe('org-1');
+  });
+
   it('세션 없음 → null 반환', async () => {
     getServerSessionMock.mockResolvedValue(null);
 

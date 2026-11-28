@@ -51,6 +51,11 @@ describe('resolveServerProjectId (story #4762 AC2)', () => {
     expect(resolveServerProjectId(one, { project_id: null, project_name: null })).toBe('p-only');
   });
 
+  it('story 5041: a person whose organisation has NO project (/me says project_id null) stands on nothing — not on the organisation id — whether the list is empty or not exactly one', () => {
+    expect(resolveServerProjectId([], { project_id: null, project_name: null, org_id: 'org-1' })).toBeUndefined();
+    expect(resolveServerProjectId(two, { project_id: null, project_name: null, org_id: 'org-1' })).toBeUndefined();
+  });
+
   it('a claim that is one of the memberships is kept', () => {
     expect(resolveServerProjectId(two, { project_id: 'p-two', project_name: 'second' })).toBe('p-two');
   });
