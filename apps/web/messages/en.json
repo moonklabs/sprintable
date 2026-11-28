@@ -2258,6 +2258,7 @@
     "projectManagement": "Projects",
     "projectManagementDescription": "Review every project in this organization and create new ones without leaving Settings.",
     "projectListEmpty": "No projects in this organization yet",
+    "projectListLoadFailed": "Couldn't load the project list.",
     "currentProjectBadge": "Current",
     "projectNamePlaceholder": "Project name",
     "projectDescriptionPlaceholder": "Project description (optional)",

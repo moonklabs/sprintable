@@ -8,6 +8,7 @@ import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Field } from '@/components/ds/field';
 import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { SettingsSection } from './settings-section';
 import { Tag } from './settings-parts';
@@ -20,6 +21,10 @@ export interface ProjectRow {
 
 export interface ProjectsSectionProps {
   projects: ProjectRow[];
+  /** story 5031 (C1): the list's read — a failed read is NOT an empty list. Default `ok` (the rows given are the whole truth). */
+  loadState?: 'loading' | 'ok' | 'error';
+  /** asks the page to read the list again (the «다시 시도» of the failure banner) */
+  onRetry?: () => void;
   currentProjectId: string | null;
   isAdmin: boolean;
   /** the row being edited (null = none) and its two draft fields */
@@ -48,10 +53,17 @@ export interface ProjectsSectionProps {
 export function ProjectsSection(p: ProjectsSectionProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const loadState = p.loadState ?? 'ok';
   return (
     <SettingsSection title={t('projectManagement')} description={t('projectManagementDescription')} id="projects">
+      {/* story 5031 (C1): a failed read says so (with a retry) instead of drawing «no projects»; rows we already hold stay below it */}
+      {loadState === 'error' ? (
+        <Banner tone="failed" action={p.onRetry ? <Button variant="secondary" size="md" onClick={p.onRetry}>{tc('retry')}</Button> : undefined}>
+          {t('projectListLoadFailed')}
+        </Banner>
+      ) : null}
       {p.projects.length > 0 ? (
-        <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line" data-testid="settings-projects-list">
+        <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line" data-testid="settings-projects-list" aria-busy={loadState === 'loading'}>
           {p.projects.map((project) => (
             <div key={project.id} className="px-3 py-2.5">
               {p.editingId === project.id ? (
@@ -100,9 +112,13 @@ export function ProjectsSection(p: ProjectsSectionProps) {
             </div>
           ))}
         </div>
-      ) : (
+      ) : loadState === 'loading' ? (
+        <SkeletonGroup label={tc('loading')} className="space-y-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}
+        </SkeletonGroup>
+      ) : loadState === 'ok' ? (
         <p className="rounded-ds-control border border-dashed border-ds-line px-3 py-6 text-ds-body text-ds-ink-3">{t('projectListEmpty')}</p>
-      )}
+      ) : null}
 
       {/* story #2105 — a result is read out the moment it appears: an error is an alert, a success a status (the ds Banner's own roles); the page clears it before each try, so every try is read again */}
       {p.message ? <Banner tone={p.message.type === 'success' ? 'info' : 'failed'}>{p.message.text}</Banner> : null}

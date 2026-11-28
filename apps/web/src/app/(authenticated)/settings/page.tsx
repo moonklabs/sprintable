@@ -145,6 +145,9 @@ function isWebhookUrlAllowed(url: string): boolean {
 // the tab from ?tab= (pure · tested in settings-tab.test.ts) with this deployment's gates
 const resolveSettingsTab = (tab: string | null, phoneApp: boolean): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled(), phoneApp });
 
+// story 5031 (C1): what the project tab is given while the list belongs to another organization (one stable value, so nothing downstream sees a new array every render)
+const NO_PROJECTS: ProjectOption[] = [];
+
 export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
@@ -241,16 +244,37 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectsRaw, setProjects] = useState<ProjectOption[]>([]);
+  // story 5031 (C1): the project list's read has three honest states — a failed read must not draw as «no projects»
+  const [projectsLoadRaw, setProjectsLoad] = useState<'loading' | 'ok' | 'error'>('loading');
+  // …and both belong to ONE organization (the one the last read was asked for). On an in-place organization switch the first render still holds the previous
+  // organization's values (the effects that clear them run after it), so what is drawn is derived HERE, in the render: another organization's rows or failure never show.
+  const [projectsOrgId, setProjectsOrgId] = useState(orgId);
+  const projectsOfThisOrg = projectsOrgId === orgId;
+  const projects = projectsOfThisOrg ? projectsRaw : NO_PROJECTS;
+  const projectsLoad = projectsOfThisOrg ? projectsLoadRaw : 'loading';
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDescription, setNewProjectDescription] = useState('');
-  const [creatingProject, setCreatingProject] = useState(false);
-  const [projectActionMessage, setProjectActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  // story 5031 (C1, codex 4): the «in flight» flags of a press (create · save · delete) are stored WITH the organization that raised them: a completion that is ignored because the person has left that organization
+  // clears only ITS OWN flag (`stored organization === mine`), never the one an equal press in the organization now on screen has raised; and a flag raised in another organization is not drawn here.
+  const [creatingRaw, setCreatingRaw] = useState<{ orgId: typeof orgId } | null>(null);
+  const creatingProject = creatingRaw !== null && creatingRaw.orgId === orgId;
+  const setCreatingProject = (on: boolean) => setCreatingRaw((cur) => (on ? { orgId } : cur && cur.orgId === orgId ? null : cur));
+  // story 5031 (C1, codex 3): everything the project tab holds ABOUT a project — the line that says how the last press went, the row being edited, the project whose delete is being asked — belongs to the
+  // organization it was made in. It is stored WITH that organization and drawn only while it is the one on screen (derived in the render, like `projects`): after an in-place switch the first frame must not hold
+  // another organization's delete confirmation (its «확인» would send DELETE for a project of the organization just left) or its success line.
+  const [projectActionMessageRaw, setProjectActionMessageRaw] = useState<{ type: 'success' | 'error'; text: string; orgId: typeof orgId } | null>(null);
+  const projectActionMessage = projectActionMessageRaw && projectActionMessageRaw.orgId === orgId ? { type: projectActionMessageRaw.type, text: projectActionMessageRaw.text } : null;
+  const setProjectActionMessage = (m: { type: 'success' | 'error'; text: string } | null) => setProjectActionMessageRaw((cur) => (m ? { ...m, orgId } : cur && cur.orgId === orgId ? null : cur));
+  const [editingProjectRaw, setEditingProjectRaw] = useState<{ id: string; orgId: typeof orgId } | null>(null);
+  const editingProjectId = editingProjectRaw && editingProjectRaw.orgId === orgId ? editingProjectRaw.id : null;
+  const setEditingProjectId = (id: string | null) => setEditingProjectRaw((cur) => (id ? { id, orgId } : cur && cur.orgId === orgId ? null : cur));
   const [editProjectName, setEditProjectName] = useState('');
   const [editProjectDescription, setEditProjectDescription] = useState('');
-  const [savingProject, setSavingProject] = useState(false);
+  const [savingRaw, setSavingRaw] = useState<{ orgId: typeof orgId } | null>(null);
+  const savingProject = savingRaw !== null && savingRaw.orgId === orgId;
+  const setSavingProject = (on: boolean) => setSavingRaw((cur) => (on ? { orgId } : cur && cur.orgId === orgId ? null : cur));
   const [memberProjectId, setMemberProjectId] = useState('');
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
   // story #4311 — 휴먼 웹훅 줄은 이름만 보이니 같은 이름 구성원이 갈리게 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
@@ -259,8 +283,12 @@ export default function SettingsPage() {
   const [adminChecked, setAdminChecked] = useState(false);
   const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-  const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
+  const [deletingRaw, setDeletingRaw] = useState<{ id: string; orgId: typeof orgId } | null>(null);
+  const deletingProjectId = deletingRaw && deletingRaw.orgId === orgId ? deletingRaw.id : null;
+  const setDeletingProjectId = (id: string | null) => setDeletingRaw((cur) => (id ? { id, orgId } : cur && cur.orgId === orgId ? null : cur));
+  const [deleteProjectConfirmRaw, setDeleteProjectConfirmRaw] = useState<{ id: string; orgId: typeof orgId } | null>(null);
+  const deleteProjectConfirmId = deleteProjectConfirmRaw && deleteProjectConfirmRaw.orgId === orgId ? deleteProjectConfirmRaw.id : null;
+  const setDeleteProjectConfirmId = (id: string | null) => setDeleteProjectConfirmRaw((cur) => (id ? { id, orgId } : cur && cur.orgId === orgId ? null : cur));
 
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
@@ -374,18 +402,38 @@ export default function SettingsPage() {
   // codex 2라운드 — 조직을 바꾸면(router.refresh, 이 화면은 다시 안 뜬다) 옛 조직의 프로젝트 행이 남아 편집 · 삭제(프로젝트 id만 보낸다)가 옛 조직으로 갈 수 있고,
   // 옛 조직 응답이 늦게 와 새 목록을 덮을 수도 있다 → 요청마다 번호를 달아 가장 최근 것만 반영하고, 조직이 바뀌면 목록을 비운다(아래 effect).
   const projectsSeqRef = useRef(0);
+  // the ticket of the newest project read whose answer was APPLIED (a success or a failure). A read answers only for the organization it was asked for, and an older read answering after a newer one has
+  // already been applied is dropped — but an older answer that arrives while the newer read is still OUT is applied (two reads at the first load must not leave the tab on loading when the second hangs).
+  const appliedProjectsSeqRef = useRef(0);
+  // the organization the screen is on NOW (kept by an effect that runs before the ones below): a handler that started in an organization the person has since left must leave this screen alone
+  const orgIdRef = useRef(orgId);
+  useEffect(() => { orgIdRef.current = orgId; }, [orgId]);
   const refreshProjects = async () => {
+    if (orgIdRef.current !== orgId) return; // asked from a closure of an organization that is no longer shown: it must not take the ticket or turn the list back
     const seq = ++projectsSeqRef.current;
+    const answersNow = () => orgIdRef.current === orgId && seq >= appliedProjectsSeqRef.current;
+    setProjectsOrgId(orgId);
+    setProjectsLoad('loading');
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
-    const res = await fetch(endpoint);
-    if (!res.ok || seq !== projectsSeqRef.current) return;
+    try {
+      const res = await fetch(endpoint);
+      if (!answersNow()) return;
+      if (!res.ok) { appliedProjectsSeqRef.current = seq; setProjectsLoad('error'); return; }
 
-    const json = await res.json();
-    if (!json?.data || seq !== projectsSeqRef.current) return;
+      const json = await res.json();
+      if (!answersNow()) return;
+      if (!Array.isArray(json?.data)) { appliedProjectsSeqRef.current = seq; setProjectsLoad('error'); return; }
 
-    const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
-    setProjects(nextProjects);
-    setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
+      appliedProjectsSeqRef.current = seq;
+      const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+      setProjects(nextProjects);
+      setProjectsLoad('ok');
+      setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
+    } catch (err) {
+      // a thrown fetch / unreadable body is a failed read too (a read that no longer answers stays silent)
+      if (answersNow()) { appliedProjectsSeqRef.current = seq; setProjectsLoad('error'); }
+      throw err;
+    }
   };
 
   const refreshMemberData = async (projectId: string) => {
@@ -400,9 +448,13 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    projectsSeqRef.current += 1; // anything still in flight for the previous organization is stale now
+    // (a read still in flight for the previous organization no longer answers — `refreshProjects` checks the organization; the failure of the previous organization is reset by the read the new organization starts at once — it sets `loading` — in the effect below)
     setProjects([]);
     setMemberProjectId('');
+    // what was asked or being edited in the organization just left is dropped for good (the render already hides it; this keeps it from coming back if the person returns)
+    setDeleteProjectConfirmRaw(null);
+    setEditingProjectRaw(null);
+    setProjectActionMessageRaw(null);
   }, [orgId]);
 
   // Fetch org and project context
@@ -613,12 +665,14 @@ export default function SettingsPage() {
 
   const handleUpdateProject = async () => {
     if (!editingProjectId || !editProjectName.trim()) return;
+    if (orgIdRef.current !== orgId) return; // asked from a closure of an organization that is no longer shown: no request at all
     setSavingProject(true);
     const res = await fetch(`/api/projects/${editingProjectId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
     });
+    if (orgIdRef.current !== orgId) { setSavingProject(false); return; } // the person left this organization while it saved: nothing of it belongs on the screen now
     if (res.ok) {
       const json = await res.json();
       setProjects((prev) => prev.map((p) => p.id === editingProjectId ? { ...p, name: json.data.name, description: json.data.description } : p));
@@ -650,6 +704,7 @@ export default function SettingsPage() {
       return;
     }
 
+    if (orgIdRef.current !== orgId) return; // asked from a closure of an organization that is no longer shown: no request at all
     setCreatingProject(true);
     setProjectActionMessage(null);
 
@@ -667,6 +722,9 @@ export default function SettingsPage() {
       data?: ProjectOption;
       error?: { code?: string; message?: string; limit?: number };
     } | null;
+
+    // the person switched organization while this was in flight: the project was made in the old one — its row, its message and its redirect do not belong to the organization shown now
+    if (orgIdRef.current !== orgId) { setCreatingProject(false); return; }
 
     if (!res.ok) {
       // story #2485 — EE plan_limits.check_project_create_limit()이 실제로 이 code를
@@ -700,6 +758,8 @@ export default function SettingsPage() {
     setProjectActionMessage({ type: 'success', text: t('projectCreated', { name: project.name }) });
 
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
+    // the person may have switched organization while the list was read again: no refresh and, above all, no jump to the new project of the organization just left
+    if (orgIdRef.current !== orgId) { setCreatingProject(false); return; }
     router.refresh();
     setCreatingProject(false);
     // a WHOLE-PAGE load, not router.push: a client push would supersede the pending router.refresh() above and `/chats?p=<new>` could meet the old (stale) project memberships — and the v3 chat screen reads its
@@ -712,10 +772,13 @@ export default function SettingsPage() {
   };
 
   const handleDeleteProject = async (projectId: string) => {
+    // BEFORE any request: a delete asked from a closure of an organization that is no longer shown (the project is the other organization's) is never sent
+    if (orgIdRef.current !== orgId) { setDeleteProjectConfirmId(null); return; }
     setDeletingProjectId(projectId);
     setProjectActionMessage(null);
 
     const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+    if (orgIdRef.current !== orgId) { setDeletingProjectId(null); setDeleteProjectConfirmId(null); return; } // left the organization meanwhile: nothing of it belongs on the screen now
     if (res.ok) {
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       setProjectActionMessage({ type: 'success', text: t('projectDeleted') });
@@ -952,6 +1015,8 @@ export default function SettingsPage() {
             <TabsContent value="projects">
               <ProjectsSection
                 projects={projects}
+                loadState={projectsLoad}
+                onRetry={() => { void refreshProjects().catch((err) => { console.error('프로젝트 목록 다시 불러오기 실패', err); }); }}
                 currentProjectId={currentProjectId}
                 isAdmin={isAdmin}
                 editingId={editingProjectId}
