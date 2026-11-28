@@ -186,6 +186,8 @@ async def test_decide_agent_forbidden_403():
                 )
             assert ei.value.status_code == 403
             assert ei.value.detail["code"] == "DECISION_HUMAN_ONLY"
+            # story 5041 A2 (PO 11-28): a loop decision stays a person's own choice — one of the «그대로 막음» lines — and the refusal SAYS whose it is (a person's; an agent cannot), like the gate approval's refusal
+            assert "휴먼" in ei.value.detail["message"] and "에이전트 불가" in ei.value.detail["message"], ei.value.detail["message"]
     finally:
         await eng.dispose()
 

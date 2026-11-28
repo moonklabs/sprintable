@@ -1458,6 +1458,8 @@ async def test_adopt_requires_human_403():
 
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "ADOPTION_REQUIRES_HUMAN"
+        # story 5041 A2 (PO 11-28): adopting the next hypothesis stays a person's own choice — one of the «그대로 막음» lines — and the refusal SAYS whose it is
+        assert "사람만" in resp.json()["error"]["message"], resp.json()
     finally:
         app.dependency_overrides.clear()
 
