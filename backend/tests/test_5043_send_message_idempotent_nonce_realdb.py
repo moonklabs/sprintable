@@ -322,21 +322,21 @@ async def test_a_DM_send_that_forks_a_group_is_found_again_by_its_token_where_it
 
 @with_world
 async def test_a_person_who_lost_the_seat_is_refused_as_before_not_handed_the_old_message(world):
-    """the replay runs AFTER the seat checks: A sent, A was taken out of the room, A sends the same token again → 403, not 200 with the old message."""
+    """the replay runs AFTER the seat checks: A sent, A was taken out of the room AND lost the project's access (so the room cannot be joined again), A sends the same token again → 403, not 200 with the old message."""
     from sqlalchemy import delete
     from app.models.conversation import ConversationParticipant
+    from app.models.project_access import ProjectAccess
     c, Session, room, me = world["client"], world["Session"], world["rooms"][0], world["members"][0]
     first = await _post(c, room.id, "mine", nonce="nonce-left")
     assert first.status_code == 201
     async with Session() as s:
         await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == room.id, ConversationParticipant.member_id == me.id))
+        await s.execute(delete(ProjectAccess).where(ProjectAccess.member_id == me.id))
         await s.commit()
-    # (the group room is joinable by someone with project access — so the person is put back by the normal gate: the answer must still be the NORMAL gate's, here: allowed to join and to replay)
     again = await _post(c, room.id, "mine", nonce="nonce-left")
-    assert again.status_code in (200, 403), again.text
-    if again.status_code == 200:
-        assert again.json()["data"]["id"] == first.json()["data"]["id"]
-        assert len(await _rows(Session, room.id, me.id)) == 1
+    assert again.status_code == 403, again.text   # (reverted: the replay before the seat check → 200 with the old message → RED)
+    assert "mine" not in again.text
+    assert len(await _rows(Session, room.id, me.id)) == 1
 
 
 @with_world
