@@ -79,7 +79,7 @@ async def test_emit_conversation_working_publishes_shape():
     assert args[0] == str(org)
     assert args[1] == "conversation.working"
     assert args[2]["conversation_id"] == str(conv)
-    assert args[2]["working"] == [{"member_id": "m1"}]
+    assert args[2]["working"] == [{"member_id": "m1", "host_run": False}]  # story 5046 (C13): every item also says whether a host runs the agent (here: no stream row → no)
     # ⭐핵심 회귀가드 — member_ids가 명시(참가자만)이지 None(org 전체)이 아니어야 한다.
     assert kwargs["member_ids"] == {participant_id}
 
