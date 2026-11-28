@@ -87,8 +87,8 @@ SPECS: dict[str, ActionSpec] = {s.key: s for s in (
     _spec("sprint.delete", "sprint_delete", "DELETE", rf"^/api/v2/sprints/{_UUID}$", "no"),
     _spec("sprint.close", "sprint_close", "POST", rf"^/api/v2/sprints/{_UUID}/close$", "partly"),
     # story 5041 B3 — the two big deletions: always a card (no `auto` slot), and the card says how much goes with it, in numbers
-    _spec("org.delete", "org_delete", "DELETE", rf"^/api/v2/organizations/{_UUID}$", "no", takes_body=True),
-    _spec("project.delete", "project_delete", "DELETE", rf"^/api/v2/projects/{_UUID}$", "no"),
+    _spec("org.delete", "org_delete", "DELETE", rf"^/api/v2/organizations/{_UUID}$", "no", takes_body=True, label_cap=320),
+    _spec("project.delete", "project_delete", "DELETE", rf"^/api/v2/projects/{_UUID}$", "no", label_cap=320),
     # story 5041 B5 — two decisions an agent may ASK for (rows 98 · 101): the road demands a person, so there is no `auto` slot
     _spec("goal.activate", "goal_activate", "POST", rf"^/api/v2/(?:goals|epics)/{_UUID}/transition$", "partly", takes_body=True),
     # the statement is free text of any length (the hypothesis model has no limit): the card carries it — and the metric — WHOLE; the one hard bound (`HYPOTHESIS_STATEMENT_MAX` · `HYPOTHESIS_METRIC_MAX`) only protects what is stored on the card
