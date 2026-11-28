@@ -338,6 +338,11 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
             const actions = rowActions(agent, index);
             const common = {
               'data-testid': `agent-row-${agent.id}`,
+              // the checkbox (only a desktop runtime's row has one, for an admin) stands above the stretched link; the decorative placeholder of the other rows is not a press and takes no `z-10`
+              leadingClassName: isAdmin && isDesktopRuntime(agent.runtime_type) ? 'relative z-10' : undefined,
+              // a phone: the name link is stretched over the row, so its keyboard-focus ring (clipped by the title slot's `truncate`) is drawn on the ROW, with the attention queue's tokens (`a` here is the name link alone)
+              // a phone: the row's right-hand box (status chips · gaps) is not a press — it lets a tap through to the stretched name link; only the «⋯» trigger (a press of its own) takes the tap itself
+              className: 'touch:[&>[data-slot=ds-list-row-trailing]]:pointer-events-none touch:[&>[data-slot=ds-list-row-trailing]_[data-slot=ds-row-actions-trigger]]:pointer-events-auto touch:has-[a:focus-visible]:ring-2 touch:has-[a:focus-visible]:ring-inset touch:has-[a:focus-visible]:ring-ds-action',
               leading: isAdmin ? (
                 isDesktopRuntime(agent.runtime_type) ? (
                   <Checkbox
@@ -352,7 +357,9 @@ export function AgentManagementTab({ onAddAgent, compact = false }: AgentManagem
                 ) : <span className="size-4 shrink-0" aria-hidden />
               ) : undefined,
               title: (
-                <Link href={detailHref} className="block min-w-0 hover:underline">
+                // story 5031 (C1 [6] · PR-B): where a finger is, the name link presses the WHOLE row — a `::after` laid over the row (the row (ListRow) is the `relative` box; the title slot's `truncate` clips a box widened by padding / a negative margin,
+                // but not an absolutely positioned one whose containing block is outside it). The look is the same, the row is not taller; the checkbox (leading, z-10 above) and the «⋯» (the ListRow's trailing box is `relative`) stay above it.
+                <Link href={detailHref} className="block min-w-0 hover:underline touch:after:absolute touch:after:inset-0">
                   <RowName label={label} id={agent.id} />
                 </Link>
               ),

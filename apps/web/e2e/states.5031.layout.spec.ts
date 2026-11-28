@@ -29,7 +29,7 @@
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
  *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
  *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 except the pinned ones below (home «대화 열기» / «다시 시도», the chats retry = ds button — the finger REACHES them, measured by `elementFromPoint`) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
- *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' name links are pressed 20 px high at 390 (`small: ['… h20']`): ListRow's title slot is `truncate` (overflow hidden), so a link widened by padding / a negative margin is clipped (codex 6062 MEDIUM 1, reproduced) and a stretched `::after` needs ds changes (a trailing box above it) — not fixed in this PR, PO's call · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN w24']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN w24']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -236,7 +236,7 @@ function answers(place: PlaceId, state: StateId): Record<string, Answer> {
     if (state === 'default') a['GET /api/team-members'] = { data: AGENTS };
     if (state === 'loading') a['GET /api/team-members'] = ok({ data: AGENTS }, { __delay: HOLD });
     if (state === 'error') a['GET /api/team-members'] = fail();
-    if (state === 'long') a['GET /api/team-members'] = { data: [agent('l1', LONG_AGENT, { device_name: 'a-computer-with-a-rather-long-device-name-too' }), agent('l2', LONG_KO), ...AGENTS.slice(0, 2)] };
+    if (state === 'long') a['GET /api/team-members'] = { data: [agent('l1', LONG_AGENT, { device_name: 'a-computer-with-a-rather-long-device-name-too' }), agent('l2', LONG_KO, { is_active: false }), ...AGENTS.slice(0, 2)] };
   }
   if (place === 'settings') {
     if (state === 'loading') a['GET /api/me'] = ok(ME, { __delay: HOLD });
@@ -326,6 +326,22 @@ const measure = (page: Page) => page.evaluate((keySrc) => {
   // each press is brought to the middle of the view first (a row half behind the sticky instruction strip / the tab bar, or one far down a long list, is not «unreachable»: it is scrolled) — only by the scroll boxes a PERSON can scroll
   // (`overflow-y: auto | scroll`: the shell's `#scroller`, a list's own box), never by `scrollIntoView()`: that also scrolls `overflow:hidden` boxes (a `truncate` slot), which would bring a CLIPPED press into reach and make it look pressable
   // (codex 6062 round 2, MEDIUM 1). What was scrolled is put back, and every element's scroll position is compared before / after the measure (`scrollDrift`).
+  // THE AGENTS' ROWS (a phone): the name link is stretched over the whole row (`touch:after:absolute touch:after:inset-0`), so the row's parts that are NOT presses of their own — a status chip · the decorative leading · the subtitle — must answer as that link,
+  // while the «⋯» and the checkbox (presses of their own, above it) answer as themselves (codex PR-B round 1: a status chip above the link swallowed the tap; the decorative leading `z-10` too). Asked at the centre of each part with elementFromPoint.
+  const rowPress = { asked: { chip: 0, deco: 0, subtitle: 0, actions: 0, checkbox: 0 }, failures: [] as string[] };
+  for (const w of document.querySelectorAll('[data-testid^="agent-row-"]:not([data-testid="agent-row-list"])')) { // (agent-row-list is the list's own box)
+    const row = w.querySelector('[data-slot="ds-list-row"]'); const link = row?.querySelector('a[href]');
+    if (!row || !link) continue;
+    const id = w.getAttribute('data-testid');
+    const centre = (e: Element) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); };
+    const asLink = (kind: keyof typeof rowPress.asked, e: Element | null) => { if (!e) return; rowPress.asked[kind]++; const h = centre(e); if (!(h && (h === link || link.contains(h)))) rowPress.failures.push(`${id} ${kind} → ${h ? h.tagName.toLowerCase() : 'nothing'} (not the name link)`); };
+    const asSelf = (kind: keyof typeof rowPress.asked, e: Element | null) => { if (!e) return; rowPress.asked[kind]++; const h = centre(e); if (!(h && (h === e || e.contains(h)))) rowPress.failures.push(`${id} ${kind} → ${h ? h.tagName.toLowerCase() : 'nothing'} (not itself)`); };
+    for (const chip of row.querySelectorAll('[data-slot="ds-chip"], [data-testid="agent-state-mark"]')) asLink('chip', chip);
+    asLink('deco', row.querySelector('[data-slot="ds-list-row-leading"] > span[aria-hidden="true"]'));
+    asLink('subtitle', row.querySelector('[data-slot="ds-list-row-subtitle"]'));
+    asSelf('actions', row.querySelector('[data-slot="ds-row-actions-trigger"]'));
+    asSelf('checkbox', row.querySelector('[role="checkbox"]'));
+  }
   const scrollOf = () => { const m = new Map<Element, string>(); for (const el of document.querySelectorAll('*')) if (el.scrollTop || el.scrollLeft) m.set(el, `${el.scrollTop},${el.scrollLeft}`); return m; };
   const scrollBefore = scrollOf();
   const scrolled = new Map<Element, number>();
@@ -406,7 +422,7 @@ const measure = (page: Page) => page.evaluate((keySrc) => {
     h1, lit, dupTitle, stripLines, descMidBreak,
     overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
-    small, unreached, covered, trouble, scrollDrift, descChecked, tiny, oldSlots, chromeOldSlots,
+    small, unreached, covered, trouble, scrollDrift, descChecked, rowPress, tiny, oldSlots, chromeOldSlots,
   };
 }, pressKey.toString());
 
@@ -443,11 +459,11 @@ const BASELINE: Record<string, Finding> = {
   'chats-empty-390': { oldSlots: ['popover-trigger×1'] },
   'chats-error-390': { oldSlots: ['popover-trigger×1'] },
   'chats-long-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
-  'agents-default-390': { stripLines: 2, small: ['SPAN w24', '댄 어윈 h20', '민 h20', '리뷰 에이전트 h20', '문서 에이전트 h20'] },
+  'agents-default-390': { stripLines: 2, small: ['SPAN w24'] },
   'agents-loading-390': { stripLines: 2 },
   'agents-empty-390': { stripLines: 2 },
   'agents-error-390': { stripLines: 2 },
-  'agents-long-390': { stripLines: 2, small: ['a-very-long-agent-name-that- h20', '가가가가가가가가가가가가가가가가가가가가가가가가가가가가 h20', 'SPAN w24', '댄 어윈 h20', '민 h20'] },
+  'agents-long-390': { stripLines: 2, small: ['SPAN w24'] },
   'settings-loading-390': { h1: 0 },
   'settings-empty-390': { h1: 0 },
   'settings-error-390': { h1: 0 },
@@ -481,6 +497,12 @@ async function assertScene(page: Page, place: PlaceId, key: string, phone: boole
   if (place === 'agents') expect(m.descChecked, `${key}: the agents list's description was not found as a text node — the word-break check did not look (scenes without one are listed in NO_DESC)`).toBe(!NO_DESC.has(key));
   expect(m.descMidBreak, `${key}: the agents list's description breaks INSIDE a word`).toBe(base.descMidBreak ?? false);
   expect(m.scrollDrift, `${key}: the measure left a scroll position changed`).toEqual([]);
+  if (phone && place === 'agents' && (key.startsWith('agents-default') || key.startsWith('agents-long'))) {
+    // the check must have LOOKED at every kind of part (a fixture without a chip / a decorative leading / a checkbox would measure nothing): the default scene has a chip (inactive · not connected), the decorative leading (non-desktop runtimes), a checkbox (desktop runtime), the «⋯» and the subtitle
+    const a = m.rowPress.asked;
+    expect([a.chip > 0, a.deco > 0, a.subtitle > 0, a.actions > 0, a.checkbox > 0], `${key}: the agents rows' pass-through check asked ${JSON.stringify(a)} (chip · deco · subtitle · actions · checkbox — every kind must be asked at least once)`).toEqual([true, true, true, true, true]);
+    expect(m.rowPress.failures, `${key}: a part of an agent row that does not answer as it should (chip · decorative leading · subtitle → the name link; «⋯» · checkbox → themselves)`).toEqual([]);
+  }
   expect(m.oldSlots, `${key}: old (non-ds) parts drawn in the body`).toEqual(base.oldSlots ?? []);
   expect(m.tiny, `${key}: text under 12 px`).toEqual(base.tiny ?? []);
   if (phone) expect(m.small, `${key}: presses whose pressable run (where the finger reaches them) is under 44 px`).toEqual(base.small ?? []);
@@ -557,6 +579,30 @@ test('pressKey: only the side under 44 is in a `small` key — a text link\'s wi
   expect(pressKey('SPAN', 24, 44)).toBe('SPAN w24');
   expect(pressKey('x', 24, 20)).toBe('x 24x20');
 });
+
+// the agents' rows (codex PR-B round 2): the name link is stretched over the row on a phone, so the keyboard-focus ring belongs on the ROW there (the link's own ring is clipped by the title slot's `truncate`); on a pointer device (no stretch) the row gets no ring from the link.
+// Measured, not drawn: the row root's inset ring (a `box-shadow`) exists or not while the name link has `:focus-visible`; the row's height is the only size read (no text width).
+for (const width of WIDTHS) {
+  test.describe(`the agents row · keyboard focus on the name link · ${width}`, () => {
+    if (width < 500) test.use({ hasTouch: true, isMobile: true });
+    test(width < 500 ? 'the focus ring is on the WHOLE row' : 'the row gets no ring from the link (pointer devices)', async ({ page }) => {
+      await open(page, 'agents', 'default', width);
+      await settle(page);
+      await page.keyboard.press('Tab'); // keyboard modality: so a focus() is a :focus-visible one
+      await page.locator('[data-testid="agent-row-a2"] a[href]').focus();
+      const m = await page.evaluate(() => {
+        const a = document.querySelector('[data-testid="agent-row-a2"] a[href]') as HTMLElement;
+        const row = a.closest('[data-slot="ds-list-row"]') as HTMLElement;
+        return { focusVisible: a.matches(':focus-visible'), shadow: getComputedStyle(row).boxShadow, rowH: row.getBoundingClientRect().height, links: row.querySelectorAll('a[href]').length };
+      });
+      await shot(page, page.locator('[data-testid="agent-row-a2"]'), `states-agents-focus-ring-${width}`);
+      expect(m.focusVisible, 'the name link has keyboard focus (:focus-visible)').toBe(true);
+      expect(m.links, 'the name link is the only link of an agent row (a ring on `a:focus-visible` is then THE name link)').toBe(1);
+      const ringOnRow = m.shadow !== 'none' && m.shadow.includes('inset');
+      if (width < 500) { expect(ringOnRow, `the row root draws the inset ring (box-shadow: ${m.shadow})`).toBe(true); expect(m.rowH, 'the ring is the row (its height)').toBeGreaterThanOrEqual(44); } else expect(ringOnRow, `no ring on the row at a pointer device (box-shadow: ${m.shadow})`).toBe(false);
+    });
+  });
+}
 
 // the shell's own chrome (measured once: it is the same in every scene)
 test('the shell chrome (top bar · icon rail · phone tab bar): the non-ds parts it draws are exactly the listed ones', async ({ page }) => {
