@@ -73,12 +73,12 @@ async def _room(*, with_project: bool, with_agent: bool = False, with_third: boo
     return engine, Session, org, sender_id, sender_user, other_id, conv_id
 
 
-async def _send(Session, app, user, org_id, conv_id, content, monkeypatch, thread_id=None):
+async def _send(Session, app, user, org_id, conv_id, content, monkeypatch, thread_id=None, nonce="nonce-4847"):
     pushes: list[tuple[str, dict]] = []
     monkeypatch.setattr("app.routers.conversations._push_to_agent", lambda pid, payload: pushes.append((str(pid), payload)))
     await _setup_app_human(app, Session, user, org_id)
     async with _client_for(app) as client:
-        resp = await client.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": content, "client_nonce": "nonce-4847", **({"thread_id": str(thread_id)} if thread_id else {})})
+        resp = await client.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": content, "client_nonce": nonce, **({"thread_id": str(thread_id)} if thread_id else {})})
     app.dependency_overrides.clear()
     assert resp.status_code == 201, resp.text
     return pushes
@@ -139,7 +139,7 @@ async def test_03_the_card_goes_to_the_rooms_other_people_too(monkeypatch):
         assert who == {str(sender_id), str(other_id)}, "the person who typed it and the room's other person — the recipients of an ordinary message"
         other_card = next(p for pid, p in _cards(pushes) if pid == str(other_id))
         assert other_card["server_command"]["command"] == "assign" and other_card["event_type"] == "conversation.message_created"
-        plain = await _send(Session, app, sender_user, org.id, conv_id, "just a line", monkeypatch)
+        plain = await _send(Session, app, sender_user, org.id, conv_id, "just a line", monkeypatch, nonce="nonce-4847-plain")   # (a token is ONE send's own — story 5043: the same token again in the same room is the same message)
         assert _cards(plain) == [], "a plain line makes no card push"
     finally:
         await engine.dispose()

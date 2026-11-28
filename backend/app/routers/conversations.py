@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
@@ -29,7 +30,7 @@ from app.dependencies.auth import (
     get_verified_org_id_no_project_gate,
 )
 from app.dependencies.database import get_db, get_read_db
-from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.conversation import Conversation, ConversationMessage, ConversationMessageNonce, ConversationParticipant
 from app.models.doc import Doc
 from app.models.event import Event
 from app.models.gate import Gate
@@ -3124,9 +3125,13 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI; LAST and optional so a direct call of this function (tests) is unchanged
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
-    return await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
+    out = await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
+    if isinstance(out, SendReplay) and response is not None:
+        response.status_code = 200  # story 5043: the SAME message answered again (nothing new was made) — not a «created»
+    return out
 
 
 class ShowCardRequest(BaseModel):
@@ -3270,6 +3275,65 @@ async def report_message_delivery(
     return {"via": line["via"], "at": line["at"]}
 
 
+class SendReplay(dict):
+    """story 5043: the answer of a send whose (room · sender · `client_nonce`) already has its message — that message again (same id), nothing new made, no event sent a second time."""
+
+
+_NONCE_PK = "pk_conversation_message_nonces"
+
+
+def _is_nonce_conflict(exc: IntegrityError) -> bool:
+    """story 5043: THIS primary key and nothing else — by the database's own structured answer (SQLSTATE 23505 and the constraint's exact name), never by a word in the message text."""
+    orig = exc.orig
+    cause = getattr(orig, "__cause__", None) or orig
+    state = getattr(cause, "sqlstate", None) or getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    name = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
+    return state == "23505" and name == _NONCE_PK
+
+
+def _content_sha(content: str) -> str:
+    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+
+
+async def _replay_of_nonce(db: AsyncSession, conversation_id: uuid.UUID, org_id: uuid.UUID, sender, nonce: str, request_sha: str | None = None) -> SendReplay | None:
+    """story 5043: the message this sender already made in this room with this token, answered as the send's own answer (`data` as the first answer had it) — or None. The first call's side effects (events · notes · wake)
+    happened once, with the first call; the second one only reads."""
+    found = (await db.execute(
+        select(ConversationMessage, ConversationMessageNonce.content_sha256)
+        .join(ConversationMessageNonce, ConversationMessageNonce.message_id == ConversationMessage.id)
+        .join(Conversation, Conversation.id == ConversationMessageNonce.conversation_id)
+        .where(
+            Conversation.org_id == org_id,
+            ConversationMessageNonce.conversation_id == conversation_id,
+            ConversationMessageNonce.sender_id == sender.id,
+            ConversationMessageNonce.client_nonce == nonce,
+        )
+    )).first()
+    if found is None:
+        return None
+    existing, first_sha = found
+    if request_sha is not None and first_sha != request_sha:
+        # the token of ONE send used for other words: not an answer to this call (a client that reuses a token for new words is wrong) — said, not answered with the first words as if they were these. By the digest of the words as they
+        # CAME (the server may have rewritten them in the stored message), and also after the message was deleted
+        raise HTTPException(status_code=409, detail="client_nonce was already used for another message")
+    if existing.conversation_id != conversation_id:
+        # the send was asked of a DM and forked a group: the message lives in the fork — the room's own seat rule applies to it (a person taken out of the fork is not handed its words through the DM)
+        in_fork = (await db.execute(
+            select(ConversationParticipant.id).where(ConversationParticipant.conversation_id == existing.conversation_id, ConversationParticipant.member_id == sender.id)
+        )).scalar_one_or_none()
+        if in_fork is None:
+            raise HTTPException(status_code=403, detail="Not a participant")
+    from app.services.mention_parser import fetch_stored_references
+
+    refs = (await fetch_stored_references(db, org_id=org_id, source_type="chat_message", source_ids=[existing.id])).get(existing.id, [])
+    out = SendReplay({"data": _msg_payload(existing, sender, references=refs)})
+    if existing.conversation_id != conversation_id:
+        # the send was asked of a DM and forked a group: the message lives in the fork, as the first answer said
+        out["forked"] = True
+        out["forked_conversation_id"] = str(existing.conversation_id)
+    return out
+
+
 async def send_message_core(
     conversation_id: uuid.UUID,
     body: SendMessageRequest,
@@ -3299,6 +3363,13 @@ async def send_message_core(
     if after_commit is not None and sender.type != "agent":
         raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
+    # story 5043 (C10): a send that comes again with the token of a message this sender already made in this room is that message — answered, not made twice (the first answer may have been lost on its way back). Only a PERSON's send
+    # (an agent's send never carries a token, and the circuit-breaker gate below is the agents'); and only AFTER the room's seat checks below — a person who has since lost the seat (left · removed · the project channel's access gone) is
+    # refused as before, not handed their old message.
+    replayable = bool(body.client_nonce) and after_commit is None and sender.type != "agent"
+    request_sha = _content_sha(body.content)  # the words as the send CAME — the server rewrites a bare story number in `body.content` below
+    requested_conversation_id = conversation_id  # (a DM send that forks a group changes `conversation_id` below; the token stays with the room it was asked of)
+
     # 참여자 검증
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
@@ -3314,6 +3385,10 @@ async def send_message_core(
             db, is_project_channel=True, project_id=conv.project_id, org_id=org_id, member_ids={sender.id},
         ):
             raise HTTPException(status_code=403, detail="Not a participant")
+    if participant is not None and replayable:
+        replay = await _replay_of_nonce(db, requested_conversation_id, org_id, sender, body.client_nonce, request_sha)
+        if replay is not None:
+            return replay
     if participant is None and as_system_publisher:
         # story #4764 — the server's own event publisher posting into the assigner <-> assignee DM without joining it (the DM stays the
         # two of them). Only the server path can ask: `after_commit` is never set by an HTTP endpoint, and the sender must be the org's
@@ -3334,6 +3409,10 @@ async def send_message_core(
             and await has_project_access(db, uuid.UUID(auth.user_id), conv.project_id, org_id)
         )
         if may_join:
+            if replayable:  # a person who may still join (project access) and sent this token before: that message, before anything is written
+                replay = await _replay_of_nonce(db, requested_conversation_id, org_id, sender, body.client_nonce, request_sha)
+                if replay is not None:
+                    return replay
             db.add(ConversationParticipant(conversation_id=conversation_id, member_id=sender.id))
             await db.flush()
         else:
@@ -3585,11 +3664,29 @@ async def send_message_core(
     )
     db.add(msg)
 
+    # story 5043: the message is written FIRST (the guarded flush), the thread count after it — the count's UPDATE would flush the pending insert itself (autoflush) outside the guard
+    try:
+        await db.flush()
+        if replayable:
+            # the token's row names the message (and the room the send was ASKED of — a fork stores the message elsewhere): the primary key stands for ONE
+            db.add(ConversationMessageNonce(conversation_id=requested_conversation_id, sender_id=sender.id, client_nonce=body.client_nonce, message_id=msg.id, content_sha256=request_sha))
+            await db.flush()
+    except IntegrityError as exc:
+        # two sends of the SAME token at the same moment — the other one made the row first (the partial unique index stands for ONE). This call made nothing: its whole transaction is undone (a fork · a seat) and the answer is the
+        # row that is there. Any other integrity error is not this one's to take.
+        if not replayable or not _is_nonce_conflict(exc):
+            raise
+        # (this call passed every seat check above before it wrote anything; the rollback only takes ITS writes away)
+        await db.rollback()
+        sender = await _resolve_room_member(auth, org_id, db, conversation_id)
+        again = await _replay_of_nonce(db, requested_conversation_id, org_id, sender, body.client_nonce, request_sha)
+        if again is None:
+            raise
+        return again
+
     # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
     if root_msg is not None:
         await _bump_thread_counters(db, body.thread_id)
-
-    await db.flush()
 
     # story #1993(E-KNOWLEDGE-LINK S1): org 지식 연결 레이어 — mentions 정규화 테이블 write-path.
     # insert-only(메시지 불변 전제 — 재조정 불필요). 기존 mentioned_ids(멤버 알림) 파이프라인과
