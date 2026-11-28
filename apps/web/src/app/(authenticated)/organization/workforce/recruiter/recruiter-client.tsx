@@ -22,6 +22,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
 import { Stepper } from '@/components/ds/stepper'; // story 4889 (W3)
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
@@ -686,11 +688,10 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           </div>
         </div>
       ) : runtimeCapabilitiesError ? (
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-ds-surface-sunk p-3">
-          <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
-          <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
-          <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
-        </div>
+        <Banner tone="failed" action={<DsButton variant="secondary" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</DsButton>}>
+          <p className="m-0 font-medium">{t('runtimeLoadError')}</p>
+          <p className="m-0 text-ds-small text-ds-ink-2">{t('runtimeLoadErrorNote')}</p>
+        </Banner>
       ) : (
         <>
           {/* story 4680 (D2 · Yuna G-1): inside the app, what it found on this computer comes first and is the default; nothing found →
@@ -1265,10 +1266,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {roleError ? (
                 // story #2105 2차 — 로드 실패도 결과다(#2096/#2105 1차와 동일 원칙). fetchRoleTemplates가
                 // 재시도 전 setRoleError(false)를 먼저 호출해 매 시도마다 언마운트→리마운트된다.
-                <div role="alert" aria-live="assertive" aria-atomic="true" className="flex items-center gap-2">
-                  <p className="text-sm text-destructive">{t('roleLoadError')}</p>
-                  <Button variant="ghost" size="sm" onClick={() => void fetchRoleTemplates()}>{t('retry')}</Button>
-                </div>
+                <Banner tone="failed" action={<DsButton variant="secondary" onClick={() => void fetchRoleTemplates()}>{t('retry')}</DsButton>}>
+                  {t('roleLoadError')}
+                </Banner>
               ) : !roleTemplates ? (
                 <p className="text-sm text-muted-foreground">{t('roleLoading')}</p>
               ) : (
