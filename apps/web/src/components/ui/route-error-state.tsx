@@ -1,6 +1,8 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ds/button';
+import { ErrorState } from '@/components/ds/error-state';
 
 interface RouteErrorStateProps {
   reset: () => void;
@@ -11,10 +13,15 @@ interface RouteErrorStateProps {
   secondaryHref?: string;
   secondaryLabel?: string;
   compact?: boolean;
-  /** 한국어 낱말 단위 줄바꿈(`break-keep`) — 기본 꺼짐(기존 호출부 무변). */
+  /** 한국어 낱말 단위 줄바꿈 — `ErrorState`가 늘 하므로 이제 효과 없음(호출부 무변을 위해 받기만 한다). */
   breakKeep?: boolean;
 }
 
+/**
+ * story 5048 ⑤-⑥ — 길(라우트) 오류 경계의 한 모양: ds `ErrorState`(옛: 손으로 그린 테두리 카드 + raw `<button>` + `bg-brand`).
+ * 바깥 틀(전체 화면 `min-h-screen` · compact `min-h-[50vh]` + 좌우 여백 16 — story #4221)과 API는 그대로 — 호출부 5곳은 안 건드린다.
+ * 다시 시도 = `reset` · 보조 링크 = 실제 목적지(조용한 ds 단추 · `<a>`).
+ */
 export function RouteErrorState({
   reset,
   error,
@@ -23,45 +30,27 @@ export function RouteErrorState({
   secondaryHref,
   secondaryLabel,
   compact = false,
-  breakKeep = false,
 }: RouteErrorStateProps) {
   const t = useTranslations('common');
 
   return (
-    // story #4221(유나) — compact는 페이지 안 여백 없는 자리에 놓여 390에서 카드가 x=0에 붙었다(모든 compact 호출부 공통) →
-    // compact 자체가 좌우 여백을 가진다(호출부 래퍼 금지 — 이중 여백).
     <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh] px-4' : 'min-h-screen bg-ds-background'}`}>
-      {/* story #2969 §2 C행(doc proofline-system-layer-2969, PR-6) — rounded-2xl→rounded-lg
-          (§1.1 퇴역). 이 표면은 인라인(오버레이 아님·portal/backdrop 없음)이라 shadow-lg
-          제거(§1.2, doc 요약행 "route-error(인라인이면 제거)") — border(compact variant는
-          이미 있음)만으로 경계. */}
-      <div className={`space-y-4 rounded-lg bg-card text-center ${compact ? 'w-full max-w-lg border p-6' : 'w-full max-w-sm border p-8'}`}>
-        <div className="space-y-2">
-          <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-foreground${breakKeep ? ' break-keep' : ''}`}>
-            {title ?? t('error')}
-          </p>
-          <p className={`text-sm text-muted-foreground${breakKeep ? ' break-keep' : ''}`}>
+      <ErrorState
+        title={title ?? t('error')}
+        description={(
+          <>
             {description ?? t('errorDescription')}
-          </p>
-          {error?.message ? <p className="text-xs text-muted-foreground">{error.message}</p> : null}
-        </div>
-        <div className="flex justify-center gap-3">
-          <button
-            onClick={reset}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-ds-ink-2"
-          >
-            {t('retry')}
-          </button>
-          {secondaryHref ? (
-            <a
-              href={secondaryHref}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-ds-surface-high"
-            >
-              {secondaryLabel ?? t('goToLogin')}
-            </a>
-          ) : null}
-        </div>
-      </div>
+            {error?.message ? <span className="mt-1 block text-micro text-ds-ink-3">{error.message}</span> : null}
+          </>
+        )}
+        onRetry={reset}
+      >
+        {secondaryHref ? (
+          <Button asChild variant="quiet">
+            <a href={secondaryHref}>{secondaryLabel ?? t('goToLogin')}</a>
+          </Button>
+        ) : null}
+      </ErrorState>
     </div>
   );
 }
