@@ -120,12 +120,12 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     server.holdOrg = ORG_B;
     await switchTo(ORG_B, PB1.projectId);
     expect(listCalls(fetchMock)).toEqual(['/api/conversations?limit=30&offset=0', '/api/conversations?limit=30&offset=0']); // asked again (reverted → still one)
-    expect(container.textContent).toContain(koMessages.common.loading); // …and says so while it waits
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).not.toBeNull(); // …and says so while it waits
     expect(container.textContent).not.toContain('에이 조직 방'); // the old organization's room is gone at once, not left until the answer
     await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('비 조직 방');
     expect(container.textContent).not.toContain('에이 조직 방');
-    expect(container.textContent).not.toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).toBeNull();
   });
 
   it('⭐① 조직만 바뀌고 화면에 건넨 프로젝트는 그대로여도(셸이 두 값을 한 번에 못 건넬 때) 다시 묻는다', async () => {
@@ -153,7 +153,7 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     server.holdOrg = ORG_A; // the first ask (organization A) hangs
     const fetchMock = stubServer();
     await mountIn(ORG_A, PA1.projectId);
-    expect(container.textContent).toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).not.toBeNull();
     server.holdOrg = null;
     await switchTo(ORG_B, PB1.projectId); // B asks, is answered at once
     expect(container.textContent).toContain('비 조직 방');
@@ -161,7 +161,7 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }); // …now A's answer arrives (A's rooms)
     expect(container.textContent).toContain('비 조직 방');
     expect(container.textContent).not.toContain('에이 조직 방');
-    expect(container.textContent).not.toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).toBeNull();
   });
 
   // codex (round 1 on 1d5dcb35): with a stored filter the first version cleared it in an EFFECT and returned before asking — in the gap before the re-render an answer of the old ask could still pass the stale guard.
@@ -179,7 +179,7 @@ describe('ChatListView — 조직을 바꾸면 목록이 새 조직의 방이다
     await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('비 조직 방');
     expect(container.textContent).not.toContain('에이 조직 방');
-    expect(container.textContent).not.toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).toBeNull();
   });
 
   it('⭐① StrictMode(개발 서버)에서도 같다 — 조직 전환 뒤 물음은 옛 프로젝트 id 없이 한 번, 저장은 비워진다', async () => {
@@ -265,7 +265,7 @@ describe('ChatListView — 같은 조직 안에서 현재 프로젝트만 바뀔
     await switchTo(ORG_A, PA2.projectId);
     expect(listCalls(fetchMock)).toHaveLength(1);
     expect(container.textContent).toContain('에이 조직 방'); // the list it had, untouched
-    expect(container.textContent).not.toContain(koMessages.common.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.common.loading}"]`)).toBeNull();
   });
 
   it('⭐② 에이전트 탭만 새 프로젝트로 다시 묻는다(조직 전체 목록은 그대로) — 새 대화의 프로젝트 기본값도 새 프로젝트다', async () => {
