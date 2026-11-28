@@ -162,7 +162,7 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     mockOrgSyncPending = true;
     await mount(vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
     expect(replaceMock).not.toHaveBeenCalled();
-    expect(container.textContent).toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).not.toBeNull();
   });
 
   it('404(진짜 없음)면 목록으로 replace한다', async () => {
@@ -195,7 +195,7 @@ describe('EpicDetailPage — 진짜 권한없음 403 정직 종결 (story #2587 
     mockOrgSyncPending = false;
     await mount(vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
     // 영구 로딩이 아니다 — loading 문구가 안 뜬다(빠져나왔다).
-    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).toBeNull();
     // 자동으로 목록에 튕겨내지도 않는다(오판 네비게이션 금지, #2545와 같은 원칙).
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain(koMessages.goals.forbiddenTitle);
@@ -218,7 +218,7 @@ describe('EpicDetailPage — 진짜 권한없음 403 정직 종결 (story #2587 
       root.render(wrap(GoalsRouteProvider, <EpicDetailPage />));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).not.toBeNull();
 
     mockOrgSyncPending = false;
     const { bumpOrgSyncVersion } = await import('@/lib/project-context-client');
@@ -226,7 +226,7 @@ describe('EpicDetailPage — 진짜 권한없음 403 정직 종결 (story #2587 
       bumpOrgSyncVersion();
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    expect(container.querySelector(`[data-slot="ds-skeleton-group"][aria-label="${koMessages.goals.loading}"]`)).toBeNull();
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain(koMessages.goals.forbiddenTitle);
   });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { Button } from '@/components/ui/button';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import {
@@ -139,7 +140,9 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
 
         <div className="focus-inset max-h-64 overflow-y-auto py-1">
           {agents === null ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">{t('loading')}</p>
+            <SkeletonGroup label={t('loading')} className="flex flex-col gap-2 px-3 py-3">
+              {[0, 1, 2].map((i) => <Skeleton key={i} variant="text" />)}
+            </SkeletonGroup>
           ) : agents.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">{t('steerNoAgents')}</p>
           ) : (

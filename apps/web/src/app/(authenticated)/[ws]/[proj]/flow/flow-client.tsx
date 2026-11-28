@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
 import { ExceptionStream } from '@/components/glance/exception-stream';
@@ -287,10 +287,9 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // NextActionsStrip으로 옮겼고, memberMap은 그 안(GoalStemCard의 담당자 이름 표시)의
           // 재료라 그대로 살아 있다.
           loading ? (
-            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-              <Loader2 className="size-ds-icon-sm animate-spin" aria-hidden="true" />
-              {t('loading')}
-            </div>
+            <SkeletonGroup label={t('loading')} className="flex flex-col gap-3 py-6">
+              {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
+            </SkeletonGroup>
           ) : (
             <NextMakerScreen
               projectId={projectId}

@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -354,7 +355,11 @@ export default function EpicDetailPage() {
   }, [id, router, wsSlug, projSlug, projectId, orgSyncVersion, orgSyncPending]);
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('loading')}</div>;
+    return (
+      <SkeletonGroup label={t('loading')} className="flex flex-col gap-3 p-6">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
+      </SkeletonGroup>
+    );
   }
   if (forbidden) {
     return (
