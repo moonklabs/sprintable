@@ -3640,15 +3640,12 @@ async def send_message_core(
     )
     db.add(msg)
 
-    # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
-    if root_msg is not None:
-        await _bump_thread_counters(db, body.thread_id)
-
+    # story 5043: the message is written FIRST (the guarded flush), the thread count after it — the count's UPDATE would flush the pending insert itself (autoflush) outside the guard
     try:
         await db.flush()
     except IntegrityError as exc:
-        # story 5043: two sends of the SAME token at the same moment — the other one made the row first (the partial unique index stands for ONE). This call made nothing: its whole transaction is undone (a fork · a seat ·
-        # a thread count it did first go with it) and the answer is the row that is there. Any other integrity error is not this one's to take.
+        # two sends of the SAME token at the same moment — the other one made the row first (the partial unique index stands for ONE). This call made nothing: its whole transaction is undone (a fork · a seat) and the answer is the
+        # row that is there. Any other integrity error is not this one's to take.
         if not body.client_nonce or after_commit is not None or not _is_nonce_conflict(exc):
             raise
         # (this call passed every seat check above before it wrote anything; the rollback only takes ITS writes away)
@@ -3658,6 +3655,10 @@ async def send_message_core(
         if again is None:
             raise
         return again
+
+    # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
+    if root_msg is not None:
+        await _bump_thread_counters(db, body.thread_id)
 
     # story #1993(E-KNOWLEDGE-LINK S1): org 지식 연결 레이어 — mentions 정규화 테이블 write-path.
     # insert-only(메시지 불변 전제 — 재조정 불필요). 기존 mentioned_ids(멤버 알림) 파이프라인과
