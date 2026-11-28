@@ -255,6 +255,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const [attachNeedsProject, setAttachNeedsProject] = useState(false); // story 4847 — the failure is «this room has no project» (a coded refusal), not a plain failure
   const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
+  // story 5043 (C10): the guard against a second send is a FLAG, not the state above — two presses in one breath (a double click · Enter held) both ran before the state was drawn and made two messages (the live walk)
+  const sendingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mentionedIdsRef = useRef<string[]>([]);
@@ -488,8 +490,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
+    if ((!trimmed && pendingFiles.length === 0) || sending || sendingRef.current || disabled) return;
 
+    sendingRef.current = true;
     setSending(true);
     setUploadFailed(false); setAttachNeedsProject(false);
     setSendFailed(false);
@@ -529,6 +532,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       onMentionIdsChange?.([]);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
