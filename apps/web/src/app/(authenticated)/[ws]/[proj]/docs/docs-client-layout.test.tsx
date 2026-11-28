@@ -158,7 +158,9 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     calls.length = 0;
     await act(async () => { retry.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(calls.some((u) => u.includes('tags='))).toBe(true);
+    const retried = calls.map((u) => new URL(u, 'http://x').searchParams.get('tags')).filter((v) => v !== null);
+    expect(retried.length).toBeGreaterThan(0);
+    expect(retried.every((v) => v === '스펙')).toBe(true); // 고른 그 태그 그대로(다른 값이나 빈 값이 아님)
   });
 
   // story #3784(페드루 재검토 10:11Z) — 이미 트리가 있는 상태에서 태그를 토글하면
@@ -463,7 +465,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     expect(rail?.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
     // 한 번 실패에 «알림»은 본문 열 하나뿐 — 목록 열은 조용히(스크린리더가 같은 말을 두 번 읽지 않는다)
     expect([...container.querySelectorAll('[data-slot="ds-error-state"]')].filter((e) => e.getAttribute('role') === 'alert')).toHaveLength(1);
-    expect(rail?.getAttribute('role')).toBe('status');
+    expect(rail?.hasAttribute('role')).toBe(false); // role=status도 정중한 알림이라 같은 말을 한 번 더 읽는다 — 아예 안 단다
     const sizes = [...container.querySelectorAll('[data-slot="ds-error-state"]')].map((e) => e.getAttribute('data-size'));
     expect(sizes.filter((z) => z === 'default')).toHaveLength(1); // 본문 열
     expect(sizes.filter((z) => z === 'inline').length).toBeGreaterThanOrEqual(1); // 목록 열(좁은 열이 둘로 그려지는 자리도 있다)
