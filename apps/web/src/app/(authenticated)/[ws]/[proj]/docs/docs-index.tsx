@@ -7,6 +7,7 @@ import { Button } from '@/components/ds/button';
 import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
 import { Card } from '@/components/ds/card';
+import { ErrorState } from '@/components/ds/error-state';
 import { EmptyState } from '@/components/ds/empty-state';
 import { ListRow } from '@/components/ds/list-row';
 import { DocStatusChip } from '@/components/docs/doc-status-chip';
@@ -44,7 +45,6 @@ const UNCATEGORIZED = '__uncategorized__';
 
 export function DocsIndex() {
   const t = useTranslations('docs');
-  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
@@ -110,13 +110,7 @@ export function DocsIndex() {
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
         {/* 페이지 h1은 늘 정확히 하나(story #3946) — 오류 · 빈 상태에도 시각 변화 없이(sr-only) 제목 h1을 둔다. */}
         <h1 className="sr-only">{t('title')}</h1>
-        <div role="alert" aria-live="assertive" aria-atomic="true">
-          <EmptyState
-            icon="error"
-            title={t('indexLoadError')}
-            action={<Button variant="secondary" onClick={() => void fetchTree()}>{tc('retry')}</Button>}
-          />
-        </div>
+        <ErrorState title={t('indexLoadError')} onRetry={() => void fetchTree()} />
       </div>
     );
   }

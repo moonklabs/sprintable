@@ -91,6 +91,16 @@ describe('ds ErrorState', () => {
     expect(err().querySelectorAll('button')).toHaveLength(1);
   });
 
+  it('⭐announce={false}면 role도 aria-live/atomic도 없다(완전히 조용히 — role=status도 정중한 알림이라 두 번 읽힌다) · 모양은 그대로 — 같은 화면에 두 군데 설 때 한 쪽만 읽히게(③b)', async () => {
+    await render(<ErrorState title="x" announce={false} />);
+    expect(err().hasAttribute('role')).toBe(false);
+    expect(err().hasAttribute('aria-live')).toBe(false);
+    expect(err().hasAttribute('aria-atomic')).toBe(false);
+    expect(err().getAttribute('data-slot')).toBe('ds-error-state');
+    await render(<ErrorState title="x" />);
+    expect(err().getAttribute('role')).toBe('alert'); // 기본은 그대로 알림
+  });
+
   it('data-* · aria 속성은 루트로 넘어간다(호출처 시험 id · kind) — 단 role은 부품이 정한다', async () => {
     await render(<ErrorState title="x" data-testid="load-error" data-kind="failed" />);
     expect(err().getAttribute('data-testid')).toBe('load-error');

@@ -279,7 +279,8 @@ describe('DocsIndex — 오류 · 빈 상태에도 h1이 정확히 하나 (4892)
     expect(h1s.length).toBe(1);
     expect(h1s[0]!.className).toContain('sr-only');
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    expect(container.querySelector('[data-slot="ds-empty-state"] button')?.getAttribute('data-slot')).toBe('ds-button');
+    expect(container.querySelector('[data-slot="ds-error-state"] button')?.getAttribute('data-slot')).toBe('ds-button'); // story 5048 ⑤: the whole-area error is the ds ErrorState
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
   });
 
   it('⭐빈 상태(0건): h1 1개(sr-only) + ds EmptyState + 첫 문서 만들기 ds Button', async () => {

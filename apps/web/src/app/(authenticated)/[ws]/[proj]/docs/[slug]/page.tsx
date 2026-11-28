@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
@@ -442,9 +443,9 @@ export default function DocSlugPage() {
 
   if (docLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-ds-small text-ds-ink-3">{t('loading')}</p>
-      </div>
+      <SkeletonGroup label={t('loading')} className="flex flex-col gap-3 p-6">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
+      </SkeletonGroup>
     );
   }
 

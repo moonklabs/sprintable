@@ -153,6 +153,7 @@ describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
     const { default: DocViewPage } = await import('./page');
     await act(async () => { root.render(wrap(<DocViewPage />)); });
     const h1s = [...container.querySelectorAll('h1')];
+    expect(container.querySelector('[data-slot="ds-skeleton-group"]')?.getAttribute('aria-label')).toBe(koMessages.docs.loading); // story 5048 ⑤: the loading place is the ds SkeletonGroup (was a bare word)
     expect(h1s).toHaveLength(1);
     expect(h1s[0]!.className).toContain('sr-only');
   });
