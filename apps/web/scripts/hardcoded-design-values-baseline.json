@@ -2,10 +2,10 @@
   "_comment": [
     "story 5048 ③d — 박힌 디자인 값 래칫 기준선(verify-no-hardcoded-design-values.ts). 분류 · 측정은 hardcoded-design-values.ts.",
     "이 숫자는 «허용»이 아니라 «아직 못 걷은 빚의 크기»다 — 늘면 RED(새 박힌 값 · 옛 별칭 색의 새 사용), strict 분류는 줄어도 RED(기준선을 같이 줄일 것).",
-    "측정일 2026-11-27, develop = ④ 아이콘 크기 마무리(#6054) 뒤. 이미 시험이 막는 분류는 뺐다(중복 0): 알파 배경 → styles/alpha-bg.5048.test.ts · 알파 테두리 · 링 · 글자 → styles/alpha-line-text.5048.test.ts · 아이콘 크기 → styles/icon-size-steps.5048.test.ts · 색 값 직접 → styles/color-literals.5048.test.ts · 글자 든 고정 높이 → styles/fixed-height-text.5048.test.ts · 4의 배수 임의 크기 → styles/arbitrary-px-grid.5048.test.ts.",
+    "측정일 2026-11-28, develop = ⑤ 호출처 옮기기(에러 · 로딩 한 모양 #6061~#6067) 뒤 — old-alias-color를 6097 → 6084로 한 번 내림(PO 11-28: 중간 PR은 기준선을 안 건드리고 ⑤ 마지막 옮기기 PR에서 실측으로). 이미 시험이 막는 분류는 뺐다(중복 0): 알파 배경 → styles/alpha-bg.5048.test.ts · 알파 테두리 · 링 · 글자 → styles/alpha-line-text.5048.test.ts · 아이콘 크기 → styles/icon-size-steps.5048.test.ts · 색 값 직접 → styles/color-literals.5048.test.ts · 글자 든 고정 높이 → styles/fixed-height-text.5048.test.ts · 4의 배수 임의 크기 → styles/arbitrary-px-grid.5048.test.ts.",
     "arbitrary-size 143: 4의 배수가 아닌 값(15 · 18 · 22 · 30 …) + 민 nav/* `w-[216px]` 2 — 허용 목록이 아니라 정리 대상. arbitrary-radius 13 · inline-style-px 11(`chat-view --reading-w` clamp 포함). 이 값은 선생님 지침 [5] «임의 수치 금지»를 줄기만 하게 막는 것이다.",
     "direct-shadow 90: 정의 한 곳에서 none이라 보이진 않음 — 호출부 클래스를 지우는 일은 화면 손댈 때 같이. arbitrary-radius · direct-shadow는 키트 결(모서리 규칙 · 그림자 0).",
-    "old-alias-color 6097 · editorial-text 375: 값은 이미 ds를 따라옴 — «새 사용 0»만 지키고(늘면 RED) 줄어드는 건 경고만(큰 수라 strict 아님).",
+    "old-alias-color 6084 · editorial-text 375: 값은 이미 ds를 따라옴 — «새 사용 0»만 지키고(늘면 RED) 줄어드는 건 경고만(큰 수라 strict 아님).",
     "이 PR은 기존 수를 줄이지 않는다(래칫만) — 줄이는 일은 화면을 손댈 때 같이."
   ],
   "counts": {
@@ -13,7 +13,7 @@
     "arbitrary-text-size": 2,
     "arbitrary-radius": 13,
     "direct-shadow": 90,
-    "old-alias-color": 6097,
+    "old-alias-color": 6084,
     "editorial-text": 375,
     "inline-style-px": 11
   }
