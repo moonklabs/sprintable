@@ -142,6 +142,25 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(calls.some((u) => u.includes('tags='))).toBe(true);
   });
 
+  it('⭐story 5048 ⑤ — 태그를 고른 채 목록이 실패하면 목록 열 «다시 시도»는 그 태그를 그대로 실어 다시 읽는다(옛 텍스트 재시도와 같은 인자)', async () => {
+    const calls: string[] = [];
+    stubFetch({ onCall: (url) => calls.push(url) });
+    await mount();
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('태그'));
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 태그를 누르는 순간부터 읽기는 모두 실패한다
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { calls.push(String(url)); return { ok: false, json: async () => null }; }));
+    const tagChip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#스펙');
+    await act(async () => { tagChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const retry = [...container.querySelectorAll('aside [data-slot="ds-error-state"] button')].find((b) => b.textContent?.includes('다시 시도')) as HTMLButtonElement;
+    expect(retry).toBeDefined();
+    calls.length = 0;
+    await act(async () => { retry.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.some((u) => u.includes('tags='))).toBe(true);
+  });
+
   // story #3784(페드루 재검토 10:11Z) — 이미 트리가 있는 상태에서 태그를 토글하면
   // fetchTree가 cursor 없이 재호출된다(:201 effect, selectedTags deps). 그 재호출이
   // pending인 동안에도 «지금 보여줄 게 없다»는 거짓이므로 로딩 화면으로 전체를 갈아끼우면
