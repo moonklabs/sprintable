@@ -63,7 +63,7 @@ export function ProjectsSection(p: ProjectsSectionProps) {
         </Banner>
       ) : null}
       {p.projects.length > 0 ? (
-        <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line" data-testid="settings-projects-list">
+        <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line" data-testid="settings-projects-list" aria-busy={loadState === 'loading'}>
           {p.projects.map((project) => (
             <div key={project.id} className="px-3 py-2.5">
               {p.editingId === project.id ? (

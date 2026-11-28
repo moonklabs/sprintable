@@ -415,6 +415,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // (a reconnect / poll that was already in flight when «다시 시도» was pressed) must not bring a failure back over a retry that has succeeded. A success is a merge, so it is always applied.
   // A read with `before` (older pages) never touches the ticket.
   const latestReadSeqRef = useRef(0);
+  // …and the ticket of the newest read whose answer was APPLIED. A read of the latest messages that answers after a NEWER read has already been applied (a poll that was in flight when «다시 시도» was pressed,
+  // answering after the retry) carries an older snapshot: applying it would put the older newest-50 over the newer ones (`mergeBackfilledMessages` trusts `data` where they overlap) and its cursor over the newer cursor.
+  // It is dropped — but only then: an older answer that arrives while the newer read is still OUT is applied (a slow server must not starve the screen of every answer).
+  const appliedReadSeqRef = useRef(0);
   const fetchMessages = useCallback(async (before?: string): Promise<ChatMessage[] | undefined> => {
     let merged: ChatMessage[] | undefined;
     const seq = before ? null : ++latestReadSeqRef.current;
@@ -429,6 +433,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
       const meta = Array.isArray(raw) ? null : raw.meta as { next_cursor?: string; has_more?: boolean } | undefined;
       const data = rawData.map(normalizeToMessage);
+      // a success is `[]`, not `undefined` (`handlePoll` reads `undefined` as a failure); nothing to mark read in an empty list
+      if (seq !== null && seq < appliedReadSeqRef.current) return [];
+      if (seq !== null) appliedReadSeqRef.current = seq;
       if (before) {
         setMessages((prev) => { merged = [...data, ...prev]; return merged; });
       } else {

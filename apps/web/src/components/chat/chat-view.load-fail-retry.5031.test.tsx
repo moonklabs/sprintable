@@ -36,6 +36,7 @@ beforeEach(() => {
   root = createRoot(container);
   messageReads = 0;
   useChatSseMock.mockReturnValue({ connected: true, polling: false }); // the live link is UP: nothing else will ask again
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} }); // a list with messages mounts the top sentinel's observer
   vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url === 'string' && url.includes('/messages?')) { messageReads += 1; return messagesAnswer() as never; }
@@ -144,5 +145,76 @@ describe('[SID:5031] ChatView — a failed first read of the messages has a retr
     await settle();
     expect(container.textContent).toContain(koMessages.chats.messagesLoadFailed);
     expect(retry()).toBeDefined();
+  });
+
+  // codex 2 (HIGH): a SUCCESS of an older read that answers after a newer read has been applied must not put its older snapshot over the newer messages / cursor.
+  const msg = (id: string, text: string, at: string) => ({ id, thread_id: 'thread-1', sender: { id: 'u-2', name: '지원', type: 'human' }, content: text, attachments: [], created_at: at });
+  const page = (data: unknown[], more: boolean, cursor: string | null): Answer => ({ ok: true, json: async () => ({ data, meta: { next_cursor: cursor, has_more: more } }) });
+  const M1 = msg('m1', '첫째줄메시지', '2026-11-28T01:00:00+00:00');
+  const M2 = msg('m2', '둘째줄새메시지', '2026-11-28T02:00:00+00:00');
+  const older = () => [...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === koMessages.chats.viewPreviousMessages);
+
+  it('⭐① the retry succeeded with a NEWER message; the older poll then answers with its older snapshot: the newer message and the newer cursor stay', async () => {
+    const poll = deferredAnswer();
+    const plan: Array<() => unknown> = [fail500, () => poll.promise, () => page([M1, M2], true, 'cursor-B')];
+    messagesAnswer = () => plan[messageReads - 1]!();
+    await mount();
+    await pollNow();
+    await act(async () => { retry()!.click(); });
+    await settle();
+    expect(container.textContent).toContain('둘째줄새메시지');
+    expect(older()).toBe(true); // B's has_more
+    await act(async () => { poll.release(page([M1], false, null)); }); // the OLD read answers late, with the snapshot from before M2
+    await settle();
+    expect(container.textContent).toContain('둘째줄새메시지'); // reverted → the older snapshot replaces the list
+    expect(older()).toBe(true); // …and B's cursor/has_more stays
+  });
+
+  it('② the other order (the older read answers first, then the retry): both apply, the newer one stands', async () => {
+    const poll = deferredAnswer();
+    const retried = deferredAnswer();
+    const plan: Array<() => unknown> = [fail500, () => poll.promise, () => retried.promise];
+    messagesAnswer = () => plan[messageReads - 1]!();
+    await mount();
+    await pollNow();
+    await act(async () => { retry()!.click(); });
+    await act(async () => { poll.release(page([M1], false, null)); });
+    await settle();
+    await act(async () => { retried.release(page([M1, M2], true, 'cursor-B')); });
+    await settle();
+    expect(container.textContent).toContain('첫째줄메시지');
+    expect(container.textContent).toContain('둘째줄새메시지');
+    expect(older()).toBe(true);
+  });
+
+  it('⭐③ no starvation: an older read that answers while a NEWER read is still out is applied (nothing newer has landed yet)', async () => {
+    const poll = deferredAnswer();
+    const retried = deferredAnswer(); // the newer read stays out for the whole test
+    const plan: Array<() => unknown> = [fail500, () => poll.promise, () => retried.promise];
+    messagesAnswer = () => plan[messageReads - 1]!();
+    await mount();
+    await pollNow();
+    await act(async () => { retry()!.click(); });
+    await act(async () => { poll.release(page([M1, M2], false, null)); });
+    await settle();
+    // the retry's loading line still stands (its read is out), but the older answer was applied: the failure flag is off and the messages are held — once loading ends they show
+    await act(async () => { retried.release(fail500()); }); // the newest read fails → loading ends; the list from the older answer is what is there
+    await settle();
+    expect(container.textContent).toContain('둘째줄새메시지'); // reverted to «drop while a newer is out» → the older answer was thrown away and the list is empty again
+  });
+
+  it('④ a dropped answer still counts as a SUCCESS for the poll (`[]`, not `undefined`)', async () => {
+    const poll = deferredAnswer();
+    const plan: Array<() => unknown> = [fail500, () => poll.promise, () => page([M1, M2], true, 'cursor-B')];
+    messagesAnswer = () => plan[messageReads - 1]!();
+    await mount();
+    const opts = useChatSseMock.mock.calls[useChatSseMock.mock.calls.length - 1][0] as { onPoll: () => Promise<boolean> };
+    let pollResult: boolean | undefined;
+    await act(async () => { void opts.onPoll().then((ok) => { pollResult = ok; }); });
+    await act(async () => { retry()!.click(); });
+    await settle();
+    await act(async () => { poll.release(page([M1], false, null)); });
+    await settle();
+    expect(pollResult).toBe(true); // reverted to `return undefined` → the poll would read this as a failure
   });
 });

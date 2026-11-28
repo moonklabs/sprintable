@@ -20,6 +20,7 @@ const C = koMessages.common;
 let container: HTMLDivElement;
 let root: Root;
 let projectListUrls: string[];
+let projectPostImpl: (() => unknown) | null = null; // a project create (POST) the test holds in flight
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -27,6 +28,7 @@ beforeEach(() => {
   root = createRoot(container);
   projectListUrls = [];
   commitTexts.length = 0;
+  projectPostImpl = null;
   vi.spyOn(console, 'error').mockImplementation(() => {}); // the page logs the failed read (the logging is not what this file pins)
 });
 afterEach(async () => {
@@ -60,6 +62,7 @@ async function mountPage(query: string, projectsImpl: (url: string, call: number
       projectListUrls.push(url);
       return projectsImpl(url, projectListUrls.length) as ReturnType<typeof json>;
     }
+    if (url === '/api/projects' && method === 'POST' && projectPostImpl) return projectPostImpl() as ReturnType<typeof json>;
     return json(null, 404);
   }));
   await render();
@@ -202,5 +205,38 @@ describe('[SID:5031] settings › projects tab › a failed read is an error wit
     expect(commitTexts.length).toBeGreaterThan(mark);
     expect(commitTexts.slice(mark).some((t) => t.includes(T.projectListLoadFailed))).toBe(false);
     expect(commitTexts.slice(mark).some((t) => t.includes(T.projectListEmpty))).toBe(false);
+  });
+
+  // codex 2 (MEDIUM): a create started in organization A that finishes after the person switched to B ran A's closure of `refreshProjects` (it took the shared ticket and turned the list back to A) — B's read was dropped, B's tab stuck on loading, and A's success line stood under B.
+  const typeInto = async (input: HTMLInputElement, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const nameBox = () => [...document.querySelectorAll('input')].filter((i) => i.placeholder === T.projectNamePlaceholder || (i.labels?.[0]?.textContent ?? '').trim() === T.projectNamePlaceholder).slice(-1)[0] as HTMLInputElement;
+  const pressCreate = async () => {
+    const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.trim() === T.createProjectAction) as HTMLButtonElement;
+    await act(async () => { b.click(); });
+  };
+
+  it('⭐(g) a create that finishes AFTER the switch to another organization neither drops the new organization\'s read nor leaves its success line there', async () => {
+    let finishCreate: (v: unknown) => void = () => {};
+    let releaseNew: (v: unknown) => void = () => {};
+    projectPostImpl = () => new Promise((resolve) => { finishCreate = resolve; });
+    await mountPage('tab=projects', (url) => (url.includes('org_id=org-1')
+      ? json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])
+      : new Promise((resolve) => { releaseNew = resolve; })));
+    await typeInto(nameBox(), '새프로젝트');
+    await pressCreate(); // started in org-1 (its closure holds org-1)
+    await switchOrgTo('org-2'); // org-2's read is out
+    await act(async () => { finishCreate({ ok: true, status: 201, json: async () => ({ data: { id: 'p-new', name: '새프로젝트' } }) }); }); // the org-1 create ends now
+    await flush();
+    await act(async () => { releaseNew(json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])); });
+    await flush();
+    expect(hasText('둘째조직프로젝트')).toBe(true); // reverted → the org-1 closure took the ticket: org-2's answer is dropped and the tab stays on loading
+    expect(hasText('새프로젝트')).toBe(false); // …and org-1's row / «만들었어요» line is not shown under org-2
+    expect(hasText(T.projectCreated.replace('{name}', '새프로젝트'))).toBe(false);
+    expect(projectListUrls.filter((u) => u.includes('org_id=org-1'))).toHaveLength(1); // no org-1 re-read after the switch
   });
 });

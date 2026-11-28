@@ -385,7 +385,11 @@ export default function SettingsPage() {
   // codex 2라운드 — 조직을 바꾸면(router.refresh, 이 화면은 다시 안 뜬다) 옛 조직의 프로젝트 행이 남아 편집 · 삭제(프로젝트 id만 보낸다)가 옛 조직으로 갈 수 있고,
   // 옛 조직 응답이 늦게 와 새 목록을 덮을 수도 있다 → 요청마다 번호를 달아 가장 최근 것만 반영하고, 조직이 바뀌면 목록을 비운다(아래 effect).
   const projectsSeqRef = useRef(0);
+  // the organization the screen is on NOW (kept by an effect that runs before the ones below): a handler that started in an organization the person has since left must leave this screen alone
+  const orgIdRef = useRef(orgId);
+  useEffect(() => { orgIdRef.current = orgId; }, [orgId]);
   const refreshProjects = async () => {
+    if (orgIdRef.current !== orgId) return; // asked from a closure of an organization that is no longer shown: it must not take the ticket (that would drop the shown organization's read) or turn the list back
     const seq = ++projectsSeqRef.current;
     setProjectsOrgId(orgId);
     setProjectsLoad('loading');
@@ -642,6 +646,7 @@ export default function SettingsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
     });
+    if (orgIdRef.current !== orgId) { setSavingProject(false); return; } // the person left this organization while it saved: nothing of it belongs on the screen now
     if (res.ok) {
       const json = await res.json();
       setProjects((prev) => prev.map((p) => p.id === editingProjectId ? { ...p, name: json.data.name, description: json.data.description } : p));
@@ -691,6 +696,9 @@ export default function SettingsPage() {
       error?: { code?: string; message?: string; limit?: number };
     } | null;
 
+    // the person switched organization while this was in flight: the project was made in the old one — its row, its message and its redirect do not belong to the organization shown now
+    if (orgIdRef.current !== orgId) { setCreatingProject(false); return; }
+
     if (!res.ok) {
       // story #2485 — EE plan_limits.check_project_create_limit()이 실제로 이 code를
       // 낸다(verbatim proxy — mapApiError 경유 아님, 그라운딩 확認). 그 외 code는
@@ -739,6 +747,7 @@ export default function SettingsPage() {
     setProjectActionMessage(null);
 
     const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+    if (orgIdRef.current !== orgId) { setDeletingProjectId(null); setDeleteProjectConfirmId(null); return; } // left the organization meanwhile: nothing of it belongs on the screen now
     if (res.ok) {
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
       setProjectActionMessage({ type: 'success', text: t('projectDeleted') });
