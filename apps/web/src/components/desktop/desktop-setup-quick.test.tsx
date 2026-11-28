@@ -309,6 +309,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { orgId: null, role: 'owner', projects: [] });
     expect(assign).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid=setup-invite-check-failed]')!.textContent).toContain('초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요');
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')!.getAttribute('data-slot')).toBe('ds-error-state'); // story 5048 ⑤ (④)
     expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
     invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
     await act(async () => { buttonOf('다시 확인')!.click(); });

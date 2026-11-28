@@ -31,6 +31,11 @@ export function compareToBaseline(actual: Counts, baseline: Counts): Comparison 
   return { increased, stale, slack };
 }
 
+/** 큰 수 분류가 줄었을 때 verify가 찍는 한 줄 — 어느 숫자로 내리면 되는지까지 말한다(story 5048 ⑤ · PO 11-28: «기준선을 N으로 내릴 수 있음»). */
+export function slackLine(s: Drift): string {
+  return `  ℹ ${s.id}: 기준선을 ${s.actual}으로 내릴 수 있음(지금 ${s.baseline} → 실측 ${s.actual} · hardcoded-design-values-baseline.json의 \`${s.id}\` 한 줄)`;
+}
+
 export function loadBaseline(): Counts {
   const raw = JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) as { counts: Counts };
   return raw.counts;
@@ -43,7 +48,7 @@ function main(): number {
   const { increased, stale, slack } = compareToBaseline(actual, baseline);
   const label = (id: string) => CATEGORIES.find((c) => c.id === id)!;
   console.log('[5048 ③d] 박힌 디자인 값 — ' + CATEGORIES.map((c) => `${c.id} ${actual[c.id]}`).join(' · '));
-  for (const s of slack) console.log(`  ℹ ${s.id}: 기준선 ${s.baseline} → 실측 ${s.actual}(줄었음 — 다음 정리 때 기준선을 줄이면 됨)`);
+  for (const s of slack) console.log(slackLine(s));
   if (increased.length === 0 && stale.length === 0) { console.log('OK: 새 박힌 값 0 (기준선 이하).'); return 0; }
   for (const d of increased) {
     const c = label(d.id);

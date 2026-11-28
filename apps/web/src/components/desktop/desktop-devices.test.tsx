@@ -88,6 +88,9 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }));
     await render();
     expect(q('desktop-devices-load-failed')[0].textContent).toContain('목록을 불러오지 못했어요');
+    const banner = q('desktop-devices-load-failed')[0].querySelector('[data-slot="ds-banner"]'); // story 5048 ⑤ (④): a PART of the sheet = ds Banner failed + ds Button retry
+    expect(banner?.getAttribute('data-tone')).toBe('failed');
+    expect(banner?.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
     await click([...document.querySelectorAll('button')].find((b) => b.textContent === '다시 시도')!);
     await act(async () => { await Promise.resolve(); });
     expect(q('desktop-device-row')).toHaveLength(2);

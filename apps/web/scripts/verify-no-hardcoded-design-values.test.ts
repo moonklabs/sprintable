@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CATEGORIES, measureContent, measureTree } from './hardcoded-design-values';
-import { compareToBaseline, loadBaseline } from './verify-no-hardcoded-design-values';
+import { compareToBaseline, loadBaseline, slackLine } from './verify-no-hardcoded-design-values';
 
 const only = (counts: Record<string, number>, id: string) => Object.fromEntries(Object.entries(counts).filter(([k, v]) => v > 0 && k !== id));
 
@@ -50,6 +50,12 @@ describe('비교 — 늘면 RED · strict 분류는 줄어도 RED · 큰 수 분
   it('strict 분류가 줄면 stale(RED — 기준선을 같이 줄일 것)', () => {
     const r = compareToBaseline({ ...base, 'arbitrary-radius': 9 }, base);
     expect(r.stale.map((d) => d.id)).toEqual(['arbitrary-radius']);
+  });
+  it('⭐줄었을 때 verify가 찍는 한 줄은 «기준선을 N으로 내릴 수 있음»(N = 실측)이다', () => {
+    const line = slackLine({ id: 'old-alias-color', baseline: 6097, actual: 6084 });
+    expect(line).toContain('기준선을 6084으로 내릴 수 있음');
+    expect(line).toContain('old-alias-color');
+    expect(line).toContain('6097');
   });
   it('큰 수 분류(옛 별칭 색 · 작은 글자 정의)가 줄면 slack(경고만)', () => {
     const r = compareToBaseline({ ...base, 'old-alias-color': 9, 'editorial-text': 9 }, base);
