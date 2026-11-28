@@ -461,6 +461,9 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     const rail = container.querySelector('aside [data-slot="ds-error-state"]');
     expect(rail?.getAttribute('data-size')).toBe('inline');
     expect(rail?.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
+    // 한 번 실패에 «알림»은 본문 열 하나뿐 — 목록 열은 조용히(스크린리더가 같은 말을 두 번 읽지 않는다)
+    expect([...container.querySelectorAll('[data-slot="ds-error-state"]')].filter((e) => e.getAttribute('role') === 'alert')).toHaveLength(1);
+    expect(rail?.getAttribute('role')).toBe('status');
     const sizes = [...container.querySelectorAll('[data-slot="ds-error-state"]')].map((e) => e.getAttribute('data-size'));
     expect(sizes.filter((z) => z === 'default')).toHaveLength(1); // 본문 열
     expect(sizes.filter((z) => z === 'inline').length).toBeGreaterThanOrEqual(1); // 목록 열(좁은 열이 둘로 그려지는 자리도 있다)

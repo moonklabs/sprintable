@@ -605,7 +605,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
           // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
           // 그 자리에 한 줄 + 텍스트 재시도로.
-          <ErrorState size="inline" title={t('indexLoadError')} onRetry={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} />
+          <ErrorState size="inline" announce={false} title={t('indexLoadError')} onRetry={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} />
         ) : tree.length === 0 ? (
           // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
           // (`selectDoc`)를 말하고 오른쪽(DocsIndex)은 "아직 쌓인 문서가 없어요"
