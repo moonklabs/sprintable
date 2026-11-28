@@ -107,7 +107,7 @@ export function OrgBriefingShell() {
       <div className="flex items-baseline justify-between gap-3">
         <div>
           {/* story 5031 (C1 [6]): from lg the top bar's path already says «홈» (org › 홈) — the page's h1 stays (ONE h1, the heading a screen reader lands on) but is not drawn a second time; the phone's bar has no path, so there it is drawn as before */}
-          <h1 className="text-lg font-semibold tracking-tight text-foreground lg:sr-only">{t('title')}</h1>
+          <h1 className="text-ds-title text-ds-ink lg:sr-only">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground"><ViewerDate value={today} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>
         </div>
         {model && model.badge > 0 ? (

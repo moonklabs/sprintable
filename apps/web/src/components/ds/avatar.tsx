@@ -114,7 +114,9 @@ export function Avatar({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={avatarUrl} alt={a11yName ?? ''} className="h-full w-full object-cover" onError={() => setImgError(true)} />
         ) : name?.trim() ? (
+          // data-slot: 이니셜 글자는 «동그라미(사각) 크기의 0.4배»로 같이 크고 작아지는 그림 속 글자다 — 글자 단계(12 · 13 · 14 · 16 · 20)를 읽는 계산 값 탐침(story 5048 AC4)이 이것을 단계 검사에서 빼고 따로 센다.
           <span
+            data-slot="ds-avatar-initials"
             className="flex h-full w-full items-center justify-center bg-ds-surface-high font-semibold text-ds-ink-2"
             style={{ fontSize: initSize }}
             role={a11yName ? 'img' : undefined}

@@ -201,3 +201,18 @@ describe('avatarSizes (story 5048 T0 ②b)', () => {
     expect(avatarSizes).toEqual({ sm: 40, md: 48, lg: 64, xl: 128 });
   });
 });
+
+// story 5048 AC4 2차 고침 — 이니셜 글자는 동그라미 크기에 비례(0.4배)하는 «그림 속 글자»라 글자 단계 검사 대상이 아니다. 그래서 계산 값 탐침이 따로 셀 수 있게 표지(`data-slot`)를 단다.
+describe('[SID:5048] 이니셜 글자 표지', () => {
+  it.each([[24, 10], [40, 16], [72, 29]])('⭐크기 %s의 이니셜 글자는 %spx(0.4배)이고 data-slot="ds-avatar-initials"로 표지된다', async (size, px) => {
+    await act(async () => { root.render(wrap(<Avatar name="친절 오호" actorType="human" size={size} />)); });
+    const el = container.querySelector('[data-slot="ds-avatar-initials"]') as HTMLElement;
+    expect(el).not.toBeNull();
+    expect(el.style.fontSize).toBe(`${px}px`);
+  });
+  it('이니셜이 아닌 단(사진 · 아이콘)에는 표지가 없다', async () => {
+    await act(async () => { root.render(wrap(<Avatar name={null} actorType="human" size={40} />)); });
+    expect(container.querySelector('[data-slot="ds-avatar-initials"]')).toBeNull();
+  });
+});
+
