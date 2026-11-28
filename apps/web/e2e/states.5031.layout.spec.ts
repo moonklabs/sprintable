@@ -29,7 +29,7 @@
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
  *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
  *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 except the pinned ones below (home «대화 열기» / «다시 시도», the chats retry = ds button — the finger REACHES them, measured by `elementFromPoint`) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
- *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' name links are pressed 20 px high at 390 (`small: ['… h20']`): ListRow's title slot is `truncate` (overflow hidden), so a link widened by padding / a negative margin is clipped (codex 6062 MEDIUM 1, reproduced) and a stretched `::after` needs ds changes (a trailing box above it) — not fixed in this PR, PO's call · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN w24']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN w24']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -443,11 +443,11 @@ const BASELINE: Record<string, Finding> = {
   'chats-empty-390': { oldSlots: ['popover-trigger×1'] },
   'chats-error-390': { oldSlots: ['popover-trigger×1'] },
   'chats-long-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
-  'agents-default-390': { stripLines: 2, small: ['SPAN w24', '댄 어윈 h20', '민 h20', '리뷰 에이전트 h20', '문서 에이전트 h20'] },
+  'agents-default-390': { stripLines: 2, small: ['SPAN w24'] },
   'agents-loading-390': { stripLines: 2 },
   'agents-empty-390': { stripLines: 2 },
   'agents-error-390': { stripLines: 2 },
-  'agents-long-390': { stripLines: 2, small: ['a-very-long-agent-name-that- h20', '가가가가가가가가가가가가가가가가가가가가가가가가가가가가 h20', 'SPAN w24', '댄 어윈 h20', '민 h20'] },
+  'agents-long-390': { stripLines: 2, small: ['SPAN w24'] },
   'settings-loading-390': { h1: 0 },
   'settings-empty-390': { h1: 0 },
   'settings-error-390': { h1: 0 },

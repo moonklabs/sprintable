@@ -109,6 +109,9 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
         </>
       ) : undefined}
       className={cn(
+        // story 5031 (PR-B): the ds ListRow's trailing box is `relative` (it stands above a link stretched over a row — the agents' rows), so it would also stand above THIS row's stretched link (`after:absolute after:inset-0`, above). Nothing in it is a press of its own
+        // (the avatar · the verb), so the BOX is `pointer-events-none`: a click on it goes through to the row's link, as it always did. A row WITHOUT a link has no overlay and keeps its avatar hoverable.
+        navigable && '[&>[data-slot=ds-list-row-trailing]]:pointer-events-none',
         'border-l-2 border-l-transparent last:border-b-0 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-ds-action',
         'motion-safe:transition-colors motion-safe:duration-700',
         // story #3052(2984-S4) — "최근 변경" 신호는 fill(배경 wash) 대신 왼쪽 막대로(질감 없음). 색 신호 자체는 KEEP.

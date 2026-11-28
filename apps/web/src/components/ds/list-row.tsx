@@ -46,7 +46,8 @@ export function ListRow({ leading, leadingClassName, title, subtitle, trailing, 
         <div className={cn('truncate text-ds-ink', density === 'chat' ? 'text-ds-body' : 'text-ds-body font-semibold')}>{title}</div>
         {subtitle ? <div data-slot="ds-list-row-subtitle" className={cn('truncate font-sans tabular-nums text-ds-ink-3', density === 'chat' ? 'text-ds-small' : 'text-ds-mono-md')}>{subtitle}</div> : null}
       </div>
-      {trailing ? <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
+      {/* `relative`: the right-hand presses (a status · «⋯») stand ABOVE a press laid over the whole row by a title link's `::after` (a stretched link — the agents' rows on a phone, the attention queue's rows): a positioned box later in the order paints above an earlier positioned one; nothing is drawn differently. A row whose trailing box has no press of its own must then make the BOX `pointer-events-none` (the `ds-list-row-trailing` slot) so a click on it still reaches the row's link (attention-queue-view). */}
+      {trailing ? <div data-slot="ds-list-row-trailing" className="relative ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
     </>
   );
   return (
