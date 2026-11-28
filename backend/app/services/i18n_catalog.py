@@ -1311,6 +1311,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "agent_action.screen.prompt": {"ko": "이 일은 사람이 화면에서 직접 해야 해요. 아래에서 화면을 열어 주세요.", "en": "A person does this on the screen themselves. Open the screen below."},
     "agent_action.screen.channel_connections": {"ko": "채널 연결은 화면에서 직접 해요", "en": "Connect channels on the screen yourself"},
     "agent_action.screen.generation_connectors": {"ko": "생성 커넥터는 화면에서 직접 설정해요", "en": "Set up generation connectors on the screen yourself"},
+    "agent_action.screen.desktop_setups": {"ko": "데스크톱 연결은 화면에서 직접 확인해요", "en": "Check desktop connections on the screen yourself"},
     "agent_action.blocked": {"ko": "이 동작은 사용자 설정으로 막혀 있어요 — 에이전트는 할 수 없어요.", "en": "This action is blocked by the user's setting — an agent cannot do it."},
     "agent_action.result.approved": {"ko": "승인되어 실행했어요 — {what}", "en": "Approved and done — {what}"},
     "agent_action.result.rejected": {"ko": "거절됐어요 — {what}", "en": "Refused — {what}"},

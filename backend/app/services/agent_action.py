@@ -364,6 +364,7 @@ def _what(spec: ActionSpec, target_label: str, locale: str) -> str:
 SCREENS: dict[str, str] = {
     "channel_connections": "/organization/channels",
     "generation_connectors": "/organization/generation-connectors",
+    "desktop_setups": "/desktop",
 }
 
 
