@@ -29,7 +29,7 @@
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
  *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
  *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 except the pinned ones below (home «대화 열기» / «다시 시도», the chats retry = ds button — the finger REACHES them, measured by `elementFromPoint`) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
- *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' name links are pressed 20 px high at 390 (`small: ['… 248x20']`): ListRow's title slot is `truncate` (overflow hidden), so a link widened by padding / a negative margin is clipped (codex 6062 MEDIUM 1, reproduced) and a stretched `::after` needs ds changes (a trailing box above it) — not fixed in this PR, PO's call · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN 24x44']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' name links are pressed 20 px high at 390 (`small: ['… h20']`): ListRow's title slot is `truncate` (overflow hidden), so a link widened by padding / a negative margin is clipped (codex 6062 MEDIUM 1, reproduced) and a stretched `::after` needs ds changes (a trailing box above it) — not fixed in this PR, PO's call · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN w24']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -39,6 +39,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { Plugin } from 'esbuild';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin, STUBS } from './support/layout-stubs';
+import { pressKey } from './support/press-key';
 import { tailwindCandidates } from './support/tailwind-candidates';
 import { shellClasses, shot } from './support/shell-scene';
 
@@ -302,7 +303,8 @@ async function open(page: Page, place: PlaceId, state: StateId, width: number) {
 }
 
 // ── the measures ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-const measure = (page: Page) => page.evaluate(() => {
+const measure = (page: Page) => page.evaluate((keySrc) => {
+  const pressKey = new Function(`return (${keySrc})`)() as (label: string, w: number, h: number) => string;
   const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]') && (e as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility?.() !== false; };
   const label = (e: Element) => ((e.getAttribute('data-testid') || e.getAttribute('aria-label') || e.textContent || e.tagName) as string).trim().replace(/\s+/g, ' ').slice(0, 28);
   // a disabled control is not pressed by a finger (it does nothing, and a disabled button answers hit tests as what is under it): it is left out of the whole press check — size · corners · covered — the same way (codex 6062 round 2, MEDIUM 3)
@@ -355,7 +357,7 @@ const measure = (page: Page) => page.evaluate(() => {
   // nothing but what it was: every element's scroll position after the measure is the one before it
   const scrollAfter = scrollOf();
   const scrollDrift = [...new Set([...scrollBefore.keys(), ...scrollAfter.keys()])].filter((el) => (scrollBefore.get(el) ?? '0,0') !== (scrollAfter.get(el) ?? '0,0')).map((el) => `${(el.id && `#${el.id}`) || el.getAttribute('data-testid') || el.tagName} ${scrollBefore.get(el) ?? '0,0'} -> ${scrollAfter.get(el) ?? '0,0'}`);
-  const small = reached.filter((x) => x.w < 43.5 || x.h < 43.5).map((x) => `${label(x.e)} ${Math.round(x.w)}x${Math.round(x.h)}`);
+  const small = reached.filter((x) => x.w < 43.5 || x.h < 43.5).map((x) => pressKey(label(x.e), x.w, x.h)); // only the side under 44 is in the key (a text's width differs Mac ↔ Linux)
   // a press whose own centre answers as something else is not reachable either
   const unreached = reached.flatMap((x) => (x.covered ? [`${label(x.e)} centre (covered by something else)`] : x.missed));
   const covered = reached.filter((x) => x.covered).map((x) => label(x.e));
@@ -406,12 +408,12 @@ const measure = (page: Page) => page.evaluate(() => {
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
     small, unreached, covered, trouble, scrollDrift, descChecked, tiny, oldSlots, chromeOldSlots,
   };
-});
+}, pressKey.toString());
 
 type Finding = { h1?: number; dupTitle?: true; stripLines?: number; descMidBreak?: true; small?: string[]; unreached?: string[]; tiny?: string[]; oldSlots?: string[] };
 /**
  * What the real screens do TODAY, exactly, per scene (a scene with no entry is clean): the scene is red if a listed finding is gone (a fix landed → shrink the list) or a new one shows — nothing is loosened silently.
- * `h1` is the number of visible h1 where it is not 1 · `dupTitle` the body title that the bar's path already says · `small` (phone only) presses under 44 · `tiny` text under 12 px · `oldSlots` non-ds parts in the BODY.
+ * `h1` is the number of visible h1 where it is not 1 · `dupTitle` the body title that the bar's path already says · `small` (phone only) presses under 44 — keyed by the side that is under 44 only (`h20` · `w24` · `24x20`, see support/press-key.ts: a text's width differs Mac ↔ Linux) · `tiny` text under 12 px · `oldSlots` non-ds parts in the BODY.
  * Written from a collect run (STATES_COLLECT=<file> makes every scene write what it measured instead of asserting); every line is a finding in the report.
  */
 // <BASELINE-BEGIN>
@@ -443,11 +445,11 @@ const BASELINE: Record<string, Finding> = {
   'chats-empty-390': { oldSlots: ['popover-trigger×1'] },
   'chats-error-390': { oldSlots: ['popover-trigger×1'] },
   'chats-long-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
-  'agents-default-390': { stripLines: 2, small: ['SPAN 24x44', '댄 어윈 224x20', '민 248x20', '리뷰 에이전트 106x20', '문서 에이전트 248x20'] },
+  'agents-default-390': { stripLines: 2, small: ['SPAN w24', '댄 어윈 h20', '민 h20', '리뷰 에이전트 h20', '문서 에이전트 h20'] },
   'agents-loading-390': { stripLines: 2 },
   'agents-empty-390': { stripLines: 2 },
   'agents-error-390': { stripLines: 2 },
-  'agents-long-390': { stripLines: 2, small: ['a-very-long-agent-name-that- 248x20', '가가가가가가가가가가가가가가가가가가가가가가가가가가가가 248x20', 'SPAN 24x44', '댄 어윈 224x20', '민 248x20'] },
+  'agents-long-390': { stripLines: 2, small: ['a-very-long-agent-name-that- h20', '가가가가가가가가가가가가가가가가가가가가가가가가가가가가 h20', 'SPAN w24', '댄 어윈 h20', '민 h20'] },
   'settings-loading-390': { h1: 0 },
   'settings-empty-390': { h1: 0 },
   'settings-error-390': { h1: 0 },
@@ -550,6 +552,13 @@ for (const width of WIDTHS) {
     }
   });
 }
+
+test('pressKey: only the side under 44 is in a `small` key — a text link\'s width (letters) differs 2 px Mac ↔ Linux and must not decide', () => {
+  expect(pressKey('리뷰 에이전트', 108, 20)).toBe(pressKey('리뷰 에이전트', 106, 20)); // the CI value and the Mac value are the same key
+  expect(pressKey('리뷰 에이전트', 108, 20)).toBe('리뷰 에이전트 h20');
+  expect(pressKey('SPAN', 24, 44)).toBe('SPAN w24');
+  expect(pressKey('x', 24, 20)).toBe('x 24x20');
+});
 
 // the shell's own chrome (measured once: it is the same in every scene)
 test('the shell chrome (top bar · icon rail · phone tab bar): the non-ds parts it draws are exactly the listed ones', async ({ page }) => {
