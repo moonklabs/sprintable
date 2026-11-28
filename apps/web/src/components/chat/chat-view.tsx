@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { LAYER } from '@/components/ds/layers';
 import { ComposeMovedNotice } from './compose-moved-notice';
+import { useSendAttempts } from './use-send-attempts';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -28,7 +29,7 @@ import { ReadingPanelProvider } from './reading-panel-context';
 import { readingPanelLayout } from './reading-panel-layout';
 import type { ChatMessage, DeliveryMode, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, sentMessageFromAnswer, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -223,8 +224,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story 4946 — files dropped on the room (not on the composer's strip) go to the composer as attachments, once per drop
   const [incomingFiles, setIncomingFiles] = useState<{ nonce: number; files: File[] } | null>(null);
   const roomDrop = useRoomFileDrop(useCallback((files: File[]) => setIncomingFiles((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, files })), []));
+  // story 5043 (C10) — the moved line is seeded ONCE: a hand-over (`?compose=…&composeNote=<id>`) that this tab already sent or cleared is never put back into the box. The address keeps carrying `compose=` after a send, and a
+  // remount of the room (a reload · the room drawn again once its data is in) would seed the SAME words again — the live walk saw the sent draft come back into the box next to a message that was already sent (the person presses Send again:
+  // a second copy). The memory is the one the note already keeps (per room + the hand-over's own id, below), read here before the first seed.
+  const composeDoneKey = composeNoticeId ? `sprintable:compose-note-done:${threadId}:${composeNoticeId}` : null;
   const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(
-    () => (initialComposeText ? { text: initialComposeText, nonce: 0 } : null),
+    () => {
+      if (!initialComposeText) return null;
+      if (composeDoneKey) { try { if (window.sessionStorage.getItem(composeDoneKey)) return null; } catch { /* storage unreadable: seeded as before */ } }
+      return { text: initialComposeText, nonce: 0 };
+    },
   );
   const handleFillComposer = useCallback((text: string) => {
     setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -236,7 +245,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // Once the person has sent or cleared the moved line the note is DONE for that hand-over: the marked URL (`?compose=…&composeNote=<id>`) stays in the address bar, and a reload / a visit back to it re-seeds the
   // composer (3831) — without this the note would come back and say «not sent» about a line that was sent (a duplicate-send nudge). The memory is per room + the hand-over's OWN id (never the words, never a hash of
   // them): a later hand-over of the same text into the same room has a new id and is a new note; a picked room (no id) writes nothing. Browser storage, per tab; unreadable → just no memory.
-  const noticeDoneKey = composeNoticeId ? `sprintable:compose-note-done:${threadId}:${composeNoticeId}` : null;
+  const noticeDoneKey = composeDoneKey;
   useEffect(() => {
     if (!noticeDoneKey) return;
     try { if (window.sessionStorage.getItem(noticeDoneKey)) setComposeNoticeOpen(false); } catch { /* storage unreadable: the note simply has no memory */ }
@@ -245,6 +254,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (draft.trim()) { sawDraftRef.current = true; return; }
     if (!sawDraftRef.current) return;
     setComposeNoticeOpen(false);
+    setPrefillCommand((p) => (p !== null && p.nonce === 0 ? null : p)); // story 5043: the moved line is not seeded again by a remount of the box (the later fills — a picked candidate — have their own nonce and stay)
     if (noticeDoneKey) { try { window.sessionStorage.setItem(noticeDoneKey, '1'); } catch { /* as above */ } }
   }, [noticeDoneKey]);
   const [loading, setLoading] = useState(true);
@@ -859,8 +869,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     );
   }, []);
 
+  const { nonceFor, accepted } = useSendAttempts();
   const handleSend = useCallback(async (content: string, mentionedIds?: string[], attachments?: SendAttachment[], deliveryMode?: DeliveryMode) => {
-    const body: Record<string, unknown> = { content, client_nonce: newClientNonce() }; // story #4440 — its echo is dropped here
+    // story 5043 (C10): the token belongs to the DRAFT, not to the call — the same words (and files · mentions · delivery) sent again after a send that failed or whose answer was lost carry the same token, so the server answers with
+    // the message that is already there instead of making a second copy; other words are another send with a new token. It is let go when the server has accepted the send.
+    const attemptKey = JSON.stringify([content, mentionedIds ?? null, attachments?.map((a) => a.url) ?? null, deliveryMode ?? null]);
+    const body: Record<string, unknown> = { content, client_nonce: nonceFor(attemptKey) }; // story #4440 — its echo is dropped here
     if (deliveryMode === 'after_turn') body.delivery_mode = 'after_turn'; // story 5046 (C13): «끝나고 이어서» — «지금» is the server's default, never sent
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
     if (attachments && attachments.length > 0) body.attachments = attachments;
@@ -872,6 +886,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (!res.ok) await throwForFailedResponse(res, 'Failed to send message'); // …and so does a send that registers an attachment in such a room
     // Backend: { data: _to_chat_message } or { forked: true, forked_conversation_id, data }
     const raw = await res.json() as Record<string, unknown>;
+    accepted(attemptKey); // accepted (a 200 that answers a re-sent token is accepted too): the next send is a new one
     // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
     if (raw.forked === true && typeof raw.forked_conversation_id === 'string') {
       // story #4442 (Qadir · PO 00:04Z) — the message belongs to the new group: this tab's lists still hear about it (its
@@ -899,7 +914,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (dropped.length) {
       setReferenceDropHints((prev) => ({ ...prev, [sent.id]: dropped }));
     }
-  }, [threadId, addMessage, apiPrefix, pathname, router]);
+  }, [threadId, addMessage, apiPrefix, pathname, router, nonceFor, accepted]);
 
   const dismissReferenceDropHint = useCallback((messageId: string) => {
     setReferenceDropHints((prev) => {
