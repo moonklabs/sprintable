@@ -194,6 +194,12 @@ async def test_http_publish_passes_request_locale_or_none(monkeypatch, locale, a
         return {}
 
     monkeypatch.setattr(events_module, "_publish_registry_event_core", _fake_core)
+
+    # story 5041 B4b: the road first asks who is calling (an agent's publish of a people-only event is a card) — this test has no caller at all (auth=None) and is about the locale only: «a person»
+    async def _a_person(*_a, **_k):
+        return None
+
+    monkeypatch.setattr("app.services.agent_action.calling_agent", _a_person)
     headers = [(b"accept-language", accept_language.encode())] if accept_language else []
     request = Request({"type": "http", "method": "POST", "path": "/", "headers": headers, "query_string": b""})
     body = SimpleNamespace(

@@ -480,6 +480,7 @@ async def update_agent_run(
 
 @router.post("/{id}/cancel", response_model=AgentRunResponse)
 async def cancel_agent_run(
+    request: Request,
     id: uuid.UUID,
     body: CancelAgentRun,
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -503,6 +504,24 @@ async def cancel_agent_run(
     existing = await repo.get(id)
     if existing is None or existing.org_id != org_id:
         raise HTTPException(status_code=404, detail="Agent run not found")
+    # (the agent's own project check is the gate's — it asks the AGENT's identity; `has_project_access` below is a person's)
+    # story 5041 B4b — an AGENT's request to stop a run is a card a person presses (their session: the road still asks that person to be an organisation owner / admin or the work item's assignee), or what the
+    # user's setting says. The road's actor is always a person, so there is no `auto` slot. The card is filed under the run's own project, which the agent must be able to see (404 otherwise).
+    from app.services import agent_action
+
+    _agent = await agent_action.calling_agent(repo.session, auth, org_id, request)
+    if _agent is not None:
+        from app.models.member import Member
+
+        _run_agent = (await repo.session.execute(select(Member.name).where(Member.id == existing.agent_id))).scalar_one_or_none()
+        _decision = await agent_action.gate_agent_call(
+            request, repo.session, auth=auth, agent=_agent, org_id=org_id, project_id=existing.project_id, action_key="agent_run.cancel",
+            target_label=f"{agent_action.card_text(_run_agent, '—', 60)} — {agent_action.card_text(body.reason, '—', 80)}",
+        )
+        if _decision is None:  # never (no auto slot) — and were it ever, the agent keeps the road's own refusal
+            raise HTTPException(status_code=403, detail="Only a human can request this action.")
+        return _decision
+
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), existing.project_id, org_id):
         raise HTTPException(status_code=404, detail="Agent run not found")
 

@@ -335,8 +335,10 @@ async def test_an_agent_key_cannot_confirm(world):
         code2, _ = await _code(c, "d4424 second")
         r = await c.post("/api/v2/desktop/setup-codes/confirm", json={**_ROLES, "code": code2}, headers={"Authorization": f"Bearer {key}"})
         assert (r.status_code, r.json()["error"]["code"]) == (403, "person_session_required"), r.text
+        # story 5041 B4b: an agent key's «disconnect this line» is no longer a bare 403 — for a line of THIS organisation it is an approval card a person presses (202, nothing disconnected by the ask; see
+        # test_5041_b4b_cards_realdb); a line that is not this organisation's (here: an id nobody has) is the road's own «not found», the same answer a person gets
         r = await c.delete(f"/api/v2/desktop/setups/{uuid.uuid4()}", headers={"Authorization": f"Bearer {key}"})
-        assert (r.status_code, r.json()["error"]["code"]) == (403, "person_session_required"), r.text
+        assert (r.status_code, r.json()["error"]["code"]) == (404, "setup_not_found"), r.text
 
 
 # ─── AC2 ───────────────────────────────────────────────────────────────────────
