@@ -361,8 +361,8 @@
   --chart-4: oklch(0.37 0.013 285.805);
   --chart-5: oklch(0.274 0.006 286.033);
   /* story #2969 §1.1(PR-T, 유나 확定 2026-08-23) — 0.625rem(10px, shadcn 기본값)→0.25rem(4px).
-     전 표면 균일 soft round(default 결)를 크리스프로. 파생 스케일(sm~4xl)은 이 값의 calc()라
-     자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신
+     전 표면 균일 soft round(default 결)를 크리스프로. (옛 설명 «파생 스케일(sm~4xl)은 이 값의 calc()라 자동 추종»은 story 5048 AC4 2차 고침으로 바뀜 —
+     파생 단은 이제 calc가 아니라 ds 눈금 토큰 이름이다: 위 `--radius-sm|md|xl…` 줄.) 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신
      `.proof-surface`(story #7d7634ee, 옛 `.proof-cut` 컷코너 폐지 후 계승)를 쓴다(적용
      표면 목록=doc proofline-system-layer-2969 §1.4가 원 정본, 재질은 doc ea94dac4가 갱신). */
   /* story 5048 T0 ①(선생님 11-26 «키트 결 그대로» · 모서리 단계 8): 0.25rem → 0.5rem(8px). 일반 `rounded-lg` = 8 — 아직 ds 이름(`rounded-ds-*`)으로 안 옮긴 부품이 한 값으로 따라온다(`rounded-sm` · `-md` · `-xl` …은 위 «ds 눈금» 줄이 4 · 8 · 12 · 16으로 잇는다 — 2차 고침). */
