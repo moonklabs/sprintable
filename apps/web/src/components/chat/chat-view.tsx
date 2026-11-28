@@ -565,18 +565,28 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       return true;
     } catch { return false; }
   }, [threadId]);
+  // A read that is asked for again when it fails (2 s · 4 s · 6 s) — the first read and the read a reconnect makes alike. Without it a newer read that FAILS would leave nothing: the older read that succeeded was set aside for it.
+  // A retry belongs to the room (and the view's life) it was asked in: the generation number ends it when the room changes or the view goes.
+  const workingRetryGenRef = useRef(0);
+  const workingRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readWorkingWithRetry = useCallback((gen: number, attempt: number): void => {
+    void fetchWorking().then((ok) => {
+      if (ok || attempt >= 3 || gen !== workingRetryGenRef.current) return;
+      workingRetryTimerRef.current = setTimeout(() => { workingRetryTimerRef.current = null; if (gen === workingRetryGenRef.current) readWorkingWithRetry(gen, attempt + 1); }, 2000 * (attempt + 1));
+    });
+  }, [fetchWorking]);
 
   // story #3081(정본 ③) — backfill이 놓친 신규 메시지를 채워도 이 fetchMessages 경로는
   // addMessage(SSE 실시간 수신)와 달리 markRead를 안 태웠다 — 활성 뷰어가 하단을 보고
   // 있어도 배지가 안 꺼지는 갭. fetchMessages가 반환하는 실 데이터(merged 결과)로
   // 최신 메시지를 판별해 addMessage와 동일 조건(isNearBottom)으로 mark-read한다.
   const handleReconnect = useCallback(() => {
-    void fetchWorking(); // story 5046: an event missed while the stream was down: the working list is read again whole (it is not left as it was)
+    readWorkingWithRetry(workingRetryGenRef.current, 0); // story 5046: an event missed while the stream was down: the working list is read again whole (it is not left as it was) — and again if that read fails
     void fetchMessages().then((latest) => {
       const markReadIso = resolveBackfillMarkReadIso(latest, isNearBottom());
       if (markReadIso) markRead(markReadIso);
     });
-  }, [fetchMessages, fetchWorking, isNearBottom, markRead]);
+  }, [fetchMessages, readWorkingWithRetry, isNearBottom, markRead]);
 
   // R2(da9d1781): 1.5s working 폴 제거 → conversation.working SSE 이벤트로 목록 갱신(payload 가 working 목록을 실음 — story 5046: 행마다 host_run도). 이벤트의 값이 곧 목록이다(합치지 않고 통째로 바꿈).
   const handleWorking = useCallback((payload: SseWorkingPayload) => {
@@ -585,17 +595,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setWorkingRows({ thread: threadId, rows: payload.working ?? [] });
   }, [threadId]);
 
-  // the first read (and again after a failure: 2 s · 4 s · 6 s) — a room that is already working when the view opens is not left waiting for an event
+  // the first read — a room that is already working when the view opens is not left waiting for an event
   useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const run = async (attempt: number): Promise<void> => {
-      const ok = await fetchWorking();
-      if (!ok && !cancelled && attempt < 3) timer = setTimeout(() => { void run(attempt + 1); }, 2000 * (attempt + 1));
-    };
-    void run(0);
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [fetchWorking]);
+    const gen = ++workingRetryGenRef.current;
+    readWorkingWithRetry(gen, 0);
+    return () => { workingRetryGenRef.current += 1; if (workingRetryTimerRef.current) { clearTimeout(workingRetryTimerRef.current); workingRetryTimerRef.current = null; } };
+  }, [readWorkingWithRetry]);
 
 
   // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
