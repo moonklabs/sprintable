@@ -99,8 +99,8 @@ async def test_the_first_hypothesis_an_agent_creates_is_a_card_that_names_the_st
         reqs = await _requests(Session, d["org_id"])
         assert len(reqs) == 1 and reqs[0].hitl_metadata["action_key"] == "hypothesis.guided_create"
         # codex: what is on the card is what runs — a statement or metric too long to be shown whole is refused (422), never shown cut
-        long_one = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": "x" * 71})
-        long_two = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "metric": "m" * 31})
+        long_one = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "statement": "x" * 61})
+        long_two = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**body, "metric": "m" * 25})
         for r in (long_one, long_two):
             assert r.status_code == 422 and r.json()["error"]["code"] == "CARD_TEXT_TOO_LONG", r.text
         assert len(await _requests(Session, d["org_id"])) == 1
@@ -154,6 +154,32 @@ async def test_neither_has_an_auto_slot_block_refuses_and_a_project_the_agent_ca
             assert r.status_code == 403 and r.json()["error"]["code"] == "AGENT_ACTION_BLOCKED", r.text
         assert await _requests(Session, d["org_id"]) == []
         assert await _goal_status(Session, d["goal_id"]) != "active"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_card_shows_the_target_exactly_as_it_runs_and_the_agents_project_comes_before_the_size_check():
+    from app.main import app
+    from app.models.project import Project
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            d = await _seed(s)
+            hidden = Project(id=uuid.uuid4(), org_id=d["org_id"], name="Not the agent's")
+            s.add(hidden)
+            await s.commit()
+        base = {"project_id": str(d["project_id"]), "statement": "exact target", "metric": "rate", "target": 0.123456789, "direction": "down"}
+        ok = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", base)
+        assert ok.status_code == 202, ok.text
+        reqs = await _requests(Session, d["org_id"])
+        assert len(reqs) == 1 and "0.123456789" in reqs[0].title and "down" in reqs[0].title, reqs[0].title
+        # an agent that cannot see the project is told so (404/403), not how long a statement may be
+        out = await _as_agent(app, Session, d, "POST", "/api/v2/hypotheses/guided", {**base, "project_id": str(hidden.id), "statement": "x" * 200})
+        assert out.status_code in (403, 404), out.text
+        assert len(await _requests(Session, d["org_id"])) == 1
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
