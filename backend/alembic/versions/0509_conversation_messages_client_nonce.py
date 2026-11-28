@@ -25,12 +25,21 @@ branch_labels = None
 depends_on = None
 
 
+def _index_shape_ok(indexdef: str) -> bool:
+    """the index that stands under the name is the one this migration means (an `IF NOT EXISTS` must not accept a look-alike): unique · over (room · sender · token) · only where the token is set."""
+    flat = " ".join(indexdef.split())
+    return "UNIQUE INDEX" in flat and "(conversation_id, sender_id, client_nonce)" in flat and "WHERE (client_nonce IS NOT NULL)" in flat
+
+
 def upgrade() -> None:
     op.execute("ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS client_nonce varchar(64)")
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_conversation_messages_client_nonce "
         "ON conversation_messages (conversation_id, sender_id, client_nonce) WHERE client_nonce IS NOT NULL"
     )
+    got = op.get_bind().exec_driver_sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_conversation_messages_client_nonce'").scalar()
+    if got is None or not _index_shape_ok(got):
+        raise RuntimeError(f"uq_conversation_messages_client_nonce exists but is not the index this migration means: {got!r}")
 
 
 def downgrade() -> None:

@@ -3278,7 +3278,19 @@ class SendReplay(dict):
     """story 5043: the answer of a send whose (room · sender · `client_nonce`) already has its message — that message again (same id), nothing new made, no event sent a second time."""
 
 
-async def _replay_of_nonce(db: AsyncSession, conversation_id: uuid.UUID, org_id: uuid.UUID, sender, nonce: str) -> SendReplay | None:
+_NONCE_INDEX = "uq_conversation_messages_client_nonce"
+
+
+def _is_nonce_conflict(exc: IntegrityError) -> bool:
+    """story 5043: THIS unique index and nothing else — by the database's own structured answer (SQLSTATE 23505 and the constraint's exact name), never by a word in the message text."""
+    orig = exc.orig
+    cause = getattr(orig, "__cause__", None) or orig
+    state = getattr(cause, "sqlstate", None) or getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    name = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
+    return state == "23505" and name == _NONCE_INDEX
+
+
+async def _replay_of_nonce(db: AsyncSession, conversation_id: uuid.UUID, org_id: uuid.UUID, sender, nonce: str, content: str | None = None) -> SendReplay | None:
     """story 5043: the message this sender already made in this room with this token, answered as the send's own answer (`data` as the first answer had it) — or None. The first call's side effects (events · notes · wake)
     happened once, with the first call; the second one only reads."""
     existing = (await db.execute(
@@ -3290,6 +3302,9 @@ async def _replay_of_nonce(db: AsyncSession, conversation_id: uuid.UUID, org_id:
     )).scalar_one_or_none()
     if existing is None:
         return None
+    if content is not None and existing.deleted_at is None and existing.content != content:
+        # the token of ONE send used for other words: not an answer to this call (a client that reuses a token for new words is wrong) — said, not answered with the first words as if they were these
+        raise HTTPException(status_code=409, detail="client_nonce was already used for another message")
     from app.services.mention_parser import fetch_stored_references
 
     refs = (await fetch_stored_references(db, org_id=org_id, source_type="chat_message", source_ids=[existing.id])).get(existing.id, [])
@@ -3325,11 +3340,10 @@ async def send_message_core(
     if after_commit is not None and sender.type != "agent":
         raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
-    # story 5043 (C10): a send that comes again with the token of a message this sender already made in this room is that message — answered, not made twice (the first answer may have been lost on its way back)
-    if body.client_nonce and after_commit is None:
-        replay = await _replay_of_nonce(db, conversation_id, org_id, sender, body.client_nonce)
-        if replay is not None:
-            return replay
+    # story 5043 (C10): a send that comes again with the token of a message this sender already made in this room is that message — answered, not made twice (the first answer may have been lost on its way back). Only a PERSON's send
+    # (an agent's send never carries a token, and the circuit-breaker gate below is the agents'); and only AFTER the room's seat checks below — a person who has since lost the seat (left · removed · the project channel's access gone) is
+    # refused as before, not handed their old message.
+    replayable = bool(body.client_nonce) and after_commit is None and sender.type != "agent"
 
     # 참여자 검증
     participant = (await db.execute(
@@ -3346,6 +3360,10 @@ async def send_message_core(
             db, is_project_channel=True, project_id=conv.project_id, org_id=org_id, member_ids={sender.id},
         ):
             raise HTTPException(status_code=403, detail="Not a participant")
+    if participant is not None and replayable:
+        replay = await _replay_of_nonce(db, conversation_id, org_id, sender, body.client_nonce, body.content)
+        if replay is not None:
+            return replay
     if participant is None and as_system_publisher:
         # story #4764 — the server's own event publisher posting into the assigner <-> assignee DM without joining it (the DM stays the
         # two of them). Only the server path can ask: `after_commit` is never set by an HTTP endpoint, and the sender must be the org's
@@ -3366,6 +3384,10 @@ async def send_message_core(
             and await has_project_access(db, uuid.UUID(auth.user_id), conv.project_id, org_id)
         )
         if may_join:
+            if replayable:  # a person who may still join (project access) and sent this token before: that message, before anything is written
+                replay = await _replay_of_nonce(db, conversation_id, org_id, sender, body.client_nonce, body.content)
+                if replay is not None:
+                    return replay
             db.add(ConversationParticipant(conversation_id=conversation_id, member_id=sender.id))
             await db.flush()
         else:
@@ -3627,11 +3649,12 @@ async def send_message_core(
     except IntegrityError as exc:
         # story 5043: two sends of the SAME token at the same moment — the other one made the row first (the partial unique index stands for ONE). This call made nothing: its whole transaction is undone (a fork · a seat ·
         # a thread count it did first go with it) and the answer is the row that is there. Any other integrity error is not this one's to take.
-        if not body.client_nonce or after_commit is not None or "uq_conversation_messages_client_nonce" not in str(exc.orig):
+        if not body.client_nonce or after_commit is not None or not _is_nonce_conflict(exc):
             raise
+        # (this call passed every seat check above before it wrote anything; the rollback only takes ITS writes away)
         await db.rollback()
         sender = await _resolve_room_member(auth, org_id, db, conversation_id)
-        again = await _replay_of_nonce(db, conversation_id, org_id, sender, body.client_nonce)
+        again = await _replay_of_nonce(db, conversation_id, org_id, sender, body.client_nonce, body.content)
         if again is None:
             raise
         return again

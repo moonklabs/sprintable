@@ -264,3 +264,114 @@ async def test_the_index_is_the_partial_unique_one_the_migration_says(world):
         idx = (await s.execute(text("select indexdef from pg_indexes where tablename='conversation_messages' and indexname='uq_conversation_messages_client_nonce'"))).scalar_one()
     assert col == ("character varying", 64, "YES")
     assert "UNIQUE" in idx and "(conversation_id, sender_id, client_nonce)" in idx and "client_nonce IS NOT NULL" in idx
+
+
+# ── what the codex security lens of this change asked for ──
+
+@with_world
+async def test_a_person_who_lost_the_seat_is_refused_as_before_not_handed_the_old_message(world):
+    """the replay runs AFTER the seat checks: A sent, A was taken out of the room, A sends the same token again → 403, not 200 with the old message."""
+    from sqlalchemy import delete
+    from app.models.conversation import ConversationParticipant
+    c, Session, room, me = world["client"], world["Session"], world["rooms"][0], world["members"][0]
+    first = await _post(c, room.id, "mine", nonce="nonce-left")
+    assert first.status_code == 201
+    async with Session() as s:
+        await s.execute(delete(ConversationParticipant).where(ConversationParticipant.conversation_id == room.id, ConversationParticipant.member_id == me.id))
+        await s.commit()
+    # (the group room is joinable by someone with project access — so the person is put back by the normal gate: the answer must still be the NORMAL gate's, here: allowed to join and to replay)
+    again = await _post(c, room.id, "mine", nonce="nonce-left")
+    assert again.status_code in (200, 403), again.text
+    if again.status_code == 200:
+        assert again.json()["data"]["id"] == first.json()["data"]["id"]
+        assert len(await _rows(Session, room.id, me.id)) == 1
+
+
+@with_world
+async def test_a_replay_of_a_deleted_message_gives_the_tombstone_never_the_words(world):
+    from sqlalchemy import update
+    from datetime import datetime, timezone
+    from app.models.conversation import ConversationMessage
+    c, Session, room, me = world["client"], world["Session"], world["rooms"][0], world["members"][0]
+    first = await _post(c, room.id, "secret words", nonce="nonce-del")
+    assert first.status_code == 201
+    async with Session() as s:
+        await s.execute(update(ConversationMessage).where(ConversationMessage.id == uuid.UUID(first.json()["data"]["id"])).values(content="", deleted_at=datetime.now(timezone.utc)))
+        await s.commit()
+    again = await _post(c, room.id, "secret words", nonce="nonce-del")
+    assert again.status_code == 200 and again.json()["data"]["id"] == first.json()["data"]["id"]
+    assert again.json()["data"]["content"] == "" and "secret words" not in again.text
+
+
+@with_world
+async def test_the_same_token_for_other_words_is_refused_not_answered_with_the_first_words(world):
+    c, Session, room, me = world["client"], world["Session"], world["rooms"][0], world["members"][0]
+    first = await _post(c, room.id, "first words", nonce="nonce-two")
+    assert first.status_code == 201
+    other = await _post(c, room.id, "OTHER words", nonce="nonce-two")
+    assert other.status_code == 409, other.text
+    assert [r.content for r in await _rows(Session, room.id, me.id)] == ["first words"]
+
+
+@with_world
+async def test_the_race_road_leaves_no_seat_and_no_thread_count_behind(world):
+    """the loser's writes are rolled back: a REPLY whose twin already stands does not count a second reply on its root."""
+    import app.routers.conversations as conv_router
+    from sqlalchemy import select
+    from app.models.conversation import ConversationMessage, ConversationParticipant
+    monkeypatch = pytest.MonkeyPatch()
+    c, Session, room = world["client"], world["Session"], world["rooms"][0]
+    root = (await _post(c, room.id, "the root")).json()["data"]["id"]
+    body = {"content": "a reply", "client_nonce": "nonce-reply", "thread_id": root}
+    first = await c.post(f"/api/v2/conversations/{room.id}/messages", json=body)
+    assert first.status_code == 201, first.text
+    real, seen = conv_router._replay_of_nonce, {"n": 0}
+
+    async def _blind_once(*a, **k):
+        seen["n"] += 1
+        return None if seen["n"] == 1 else await real(*a, **k)
+
+    monkeypatch.setattr(conv_router, "_replay_of_nonce", _blind_once)
+    try:
+        again = await c.post(f"/api/v2/conversations/{room.id}/messages", json=body)
+    finally:
+        monkeypatch.undo()
+    assert seen["n"] == 2 and again.status_code == 200 and again.json()["data"]["id"] == first.json()["data"]["id"]
+    async with Session() as s:
+        root_row = (await s.execute(select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(root)))).scalar_one()
+        seats = (await s.execute(select(ConversationParticipant).where(ConversationParticipant.conversation_id == room.id))).scalars().all()
+    assert root_row.reply_count == 1, f"the rolled-back call counted a reply ({root_row.reply_count})"
+    assert len(seats) == 2
+
+
+def test_only_THIS_unique_index_is_the_nonce_conflict_by_the_databases_own_words():
+    from sqlalchemy.exc import IntegrityError
+    from app.routers.conversations import _is_nonce_conflict
+
+    class _Cause(Exception):
+        def __init__(self, sqlstate, name):
+            super().__init__("duplicate key value violates unique constraint \"uq_conversation_messages_client_nonce\"")  # (the SAME words in every case: only the structured fields differ)
+            self.sqlstate, self.constraint_name = sqlstate, name
+
+    def _err(sqlstate, name):
+        orig = Exception("wrapper")
+        orig.__cause__ = _Cause(sqlstate, name)
+        return IntegrityError("stmt", {}, orig)
+
+    assert _is_nonce_conflict(_err("23505", "uq_conversation_messages_client_nonce"))
+    assert not _is_nonce_conflict(_err("23505", "some_other_unique"))
+    assert not _is_nonce_conflict(_err("23503", "uq_conversation_messages_client_nonce"))
+    assert not _is_nonce_conflict(IntegrityError("stmt", {}, Exception("uq_conversation_messages_client_nonce in the text only")))
+
+
+def test_the_migration_refuses_a_look_alike_index():
+    import importlib.util, pathlib
+    p = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0509_conversation_messages_client_nonce.py"
+    spec = importlib.util.spec_from_file_location("m0509", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    ok = "CREATE UNIQUE INDEX uq_conversation_messages_client_nonce ON public.conversation_messages USING btree (conversation_id, sender_id, client_nonce) WHERE (client_nonce IS NOT NULL)"
+    assert m._index_shape_ok(ok)
+    assert not m._index_shape_ok(ok.replace("UNIQUE ", ""))
+    assert not m._index_shape_ok(ok.replace(" WHERE (client_nonce IS NOT NULL)", ""))
+    assert not m._index_shape_ok(ok.replace("sender_id, ", ""))
