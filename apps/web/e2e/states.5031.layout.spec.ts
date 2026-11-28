@@ -28,7 +28,7 @@
  *   · h1: home 1 · chats 1 · agents 1 · settings 1 at 1440 and on the phone's list; the settings PANE on a phone has 0 (its title is a span in the pane head) — pinned `h1: 0`, becomes 1 when fixed.
  *   · dupTitle: the settings navigation's h1 «설정» says what the bar's path already says («설정 › 프로필») — the title twice (report only, not fixed in this PR). The HOME body's h1 is `lg:sr-only` from lg now (still THE one h1; the bar's crumb is the only visible «홈») — measured on DRAWN h1s, so the home entry is gone from BASELINE and a drawn h1 again goes RED.
  *   · the 5031 screen fixes this spec guards (not BASELINE any more): every press ≥ 44 at 390 (home «대화 열기» / «다시 시도», agent name links, the chats retry = ds button) · chats error = ONE retry press (a button; the outlet says the sentence only) · agents «전체 보기» strip on ONE line at 1440 (the caption stands above it).
- *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
+ *   · still pinned (known limits): avatar initials at 10 px (tiny) · old non-ds parts (oldSlots) · agents at 390: the five tabs wrap onto 2 lines (`stripLines: 2`; 5035 «no hidden tab» keeps the wrap — «채용» stands alone on line 2) · the agents rows' checkbox (an admin's row of a desktop runtime) is a 24 px wide press (`small: ['SPAN 24x44']` — found when the fixture got a desktop-runtime agent; not fixed here, reported) · (the agents list's description no longer breaks INSIDE a word («관 / 리해요») since 6058's PageHead — `descMidBreak` is a guard now: a mid-word break goes RED, no BASELINE entry).
  * Names `states-{place}-{state}-{width}.png` → CAPTURE_OUT when set, else this test's output folder.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -189,7 +189,7 @@ const run = (id: string, agent: string, title: string) => ({ run_id: id, agent: 
 const room = (id: string, title: string, over: Record<string, unknown> = {}) => ({ id, type: 'group', title, latest_message: null, updated_at: '2026-11-27T01:00:00Z', unread_count: 0, project_id: 'p1', project_name: '스프린터블', ...over });
 const ROOMS = [room('r1', '런칭 준비'), room('r2', '디자인 리뷰', { unread_count: 3 }), room('r3', '주간 회고'), room('r4', '결제 연동'), room('r5', '민 · 개발 에이전트', { type: 'dm' })];
 const agent = (id: string, name: string, over: Record<string, unknown> = {}) => ({ id, name, role: 'engineer', is_active: true, verified: true, type: 'agent', ...over });
-const AGENTS = [agent('a1', '댄 어윈', { client_version: '2.1.0' }), agent('a2', '민'), agent('a3', '리뷰 에이전트', { is_active: false, verified: false }), agent('a4', '문서 에이전트')];
+const AGENTS = [agent('a1', '댄 어윈', { client_version: '2.1.0', runtime_type: 'claude-code' }), agent('a2', '민'), agent('a3', '리뷰 에이전트', { is_active: false, verified: false }), agent('a4', '문서 에이전트')];
 const ME = { data: { id: 'me-1', user_id: 'u-1', name: '송윤재', email: 'yoonjae@example.com', role: 'owner', org_id: 'org-1', type: 'human' } };
 
 /** the answers every scene has; a scene overrides what it is about */
@@ -250,6 +250,21 @@ const CTX = {
   orgMemberships: [{ orgId: 'org-1', orgName: '올리베이라', orgSlug: 'acme', role: 'owner' }],
   projectMemberships: [{ projectId: 'p1', projectName: '스프린터블', projectSlug: 'sprintable', orgId: 'org-1' }],
 };
+/**
+ * «the scene has settled» = the fonts are IN (none failed) and the geometry of the screen is the same on two reads in a row (the entrance of the lists · the first paint) — bounded polling, no fixed wait (a fixed 400 ms was a guess at «long enough»).
+ * The signature is the rounded boxes of every press · heading and the scroller's height; two equal reads are the pass count, the 8 s is only the safety stop.
+ */
+async function settle(page: Page) {
+  await page.evaluate(() => document.fonts.ready);
+  const failed = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'error').map((f) => `${f.family} ${f.unicodeRange.slice(0, 24)}`));
+  expect(failed, 'a product font failed to load (the measures would come from the fallback font)').toEqual([]);
+  let prev = '';
+  await expect.poll(async () => {
+    const sig = await page.evaluate(() => [...document.querySelectorAll('button, a[href], input, h1, [data-testid]')].map((e) => { const r = e.getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`; }).join('|') + `#${document.getElementById('scroller')?.scrollHeight}`);
+    const same = sig === prev; prev = sig; return same;
+  }, { message: 'the scene never held still', timeout: 8000, intervals: [100, 100, 200, 300] }).toBe(true);
+}
+
 async function open(page: Page, place: PlaceId, state: StateId, width: number) {
   const { js, css } = await build();
   const api = { ...BASE, ...answers(place, state) };
@@ -260,6 +275,8 @@ async function open(page: Page, place: PlaceId, state: StateId, width: number) {
     if (url.pathname === '/') {
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-background text-foreground"><div id="root"></div></body></html>` });
     }
+    // the product's own font files (globals.css `@font-face` → /fonts/*.woff2) are SERVED, not answered by the catch-all below (it handed back JSON, so the faces settled as FAILED and every width came from the fallback font — a measure that would differ between a Mac and a Linux runner; codex 6062 round 1, MEDIUM 2)
+    if (url.pathname.startsWith('/fonts/')) return route.fulfill({ path: path.join(WEB, 'public', 'fonts', path.basename(url.pathname)), contentType: 'font/woff2', headers: { 'access-control-allow-origin': '*' } });
     const hit = api[`${route.request().method()} ${url.pathname}`] ?? api[url.pathname];
     if (hit === undefined) return route.fulfill({ status: 200, contentType: 'application/json', body: '{"data":[]}' });
     const { __status, body, __delay } = (hit && typeof hit === 'object' && '__status' in (hit as object) ? hit : { __status: 200, body: hit }) as { __status: number; body: unknown; __delay?: number };
@@ -284,14 +301,54 @@ async function open(page: Page, place: PlaceId, state: StateId, width: number) {
 const measure = (page: Page) => page.evaluate(() => {
   const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]') && (e as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility?.() !== false; };
   const label = (e: Element) => ((e.getAttribute('data-testid') || e.getAttribute('aria-label') || e.textContent || e.tagName) as string).trim().replace(/\s+/g, ' ').slice(0, 28);
-  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea')].filter(shown);
-  const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${label(e)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
+  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea, [role="checkbox"], [role="switch"]')].filter(shown);
+  // PRESSABLE, not drawn: what a finger reaches is where `elementFromPoint` answers the press itself (or something in it) — a box widened by padding / a negative margin that an ancestor's overflow clips (a `truncate` parent) is still 44 by getBoundingClientRect and is NOT pressable there (codex 6062 round 1, MEDIUM 1).
+  // So the press' size is the run of points around its centre that hit it (1 px steps; a `::after` that widens the press counts, a clipped box does not); the four inner corners + the centre of its drawn box must hit it too.
+  const hits = (e: Element, x: number, y: number) => { const h = document.elementFromPoint(x, y); return !!h && (e === h || e.contains(h) || (h.closest('label')?.contains(e) ?? false)); };
+  const reach = (e: Element) => {
+    const r = e.getBoundingClientRect(); const cx = r.left + r.width / 2; const cy = r.top + r.height / 2;
+    if (cx < 0 || cy < 0 || cx >= innerWidth || cy >= innerHeight || !hits(e, cx, cy)) return { w: r.width, h: r.height, covered: true };
+    let t = cy, b = cy, l = cx, rt = cx;
+    for (let i = 0; i < 300 && t - 1 >= 0 && hits(e, cx, t - 1); i++) t--;
+    for (let i = 0; i < 300 && b + 1 < innerHeight && hits(e, cx, b + 1); i++) b++;
+    for (let i = 0; i < 300 && l - 1 >= 0 && hits(e, l - 1, cy); i++) l--;
+    for (let i = 0; i < 300 && rt + 1 < innerWidth && hits(e, rt + 1, cy); i++) rt++;
+    return { w: rt - l + 1, h: b - t + 1, covered: false };
+  };
+  // each press is brought to the middle of the view first (a row half behind the sticky instruction strip / the tab bar is not «unreachable»: it is scrolled) and put back after
+  const scrollerEl = document.getElementById('scroller');
+  const scrollWas = scrollerEl ? scrollerEl.scrollTop : 0;
+  const reached = presses.map((e) => {
+    const r0 = e.getBoundingClientRect();
+    e.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const x = reach(e);
+    const r = e.getBoundingClientRect();
+    // the corners are asked 3 px inside the box, or further in where the box is rounded (a point in the cut-off corner of a pill is not the press)
+    const inset = Math.max(3, parseFloat(getComputedStyle(e).borderTopLeftRadius) * 0.3 + 1 || 0);
+    const pts: [string, number, number][] = [['top-left', r.left + inset, r.top + inset], ['top-right', r.right - inset, r.top + inset], ['bottom-left', r.left + inset, r.bottom - inset], ['bottom-right', r.right - inset, r.bottom - inset], ['centre', r.left + r.width / 2, r.top + r.height / 2]];
+    // only a press that CLAIMS ≥ 44 by its drawn box is asked (a smaller one is `small` already); a point outside the viewport is not asked
+    const missed = x.covered || r.width < 43.5 || r.height < 43.5 ? [] : pts.filter(([, px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight && !hits(e, px, py)).map(([n]) => `${label(e)} ${n}`);
+    return { e, ...x, missed, r0: { x: r0.left, y: r0.top, w: r0.width, h: r0.height } };
+  });
+  if (scrollerEl) scrollerEl.scrollTop = scrollWas;
+  const small = reached.filter((x) => x.w < 43.5 || x.h < 43.5).map((x) => `${label(x.e)} ${Math.round(x.w)}x${Math.round(x.h)}`);
+  // a press whose own centre answers as something else is not reachable either — unless it is disabled (a disabled button is not asked to be pressed)
+  const isDisabled = (e: Element) => (e as HTMLButtonElement).disabled === true || e.getAttribute('aria-disabled') === 'true' || !!e.closest('[aria-disabled="true"], fieldset:disabled');
+  const unreached = reached.flatMap((x) => (x.covered && !isDisabled(x.e) ? [`${label(x.e)} centre (covered by something else)`] : x.missed));
+  const covered = reached.filter((x) => x.covered).map((x) => label(x.e));
+  // the presses whose reach is not what their box says — drawn on the evidence picture of a red scene (assertScene)
+  const trouble = reached.filter((x) => x.w < 43.5 || x.h < 43.5 || x.missed.length > 0 || (x.covered && !isDisabled(x.e))).map((x) => ({ label: label(x.e), ...x.r0, reachH: Math.round(x.h) }));
   const leaves = [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && shown(e) && !e.closest('[data-slot="ds-chip"]'));
   const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 20)} ${getComputedStyle(e).fontSize}`);
   const ALLOWED = ['textarea', 'sidebar-wrapper', 'sidebar-inset', 'sidebar-gap', 'sidebar-container', 'sidebar', 'tabs', 'tabs-list', 'tabs-trigger', 'tabs-content'];
-  const oldIn = (root: Element | null) => [...new Set([...(root?.querySelectorAll('[data-slot]') ?? [])].map((e) => e.getAttribute('data-slot')!).filter((x) => !x.startsWith('ds-') && !ALLOWED.includes(x)))].sort();
-  const oldSlots = oldIn(document.getElementById('cell'));
-  const chromeOldSlots = [...new Set(['[data-testid="top-bar"]', '[data-testid="nav-rail"]', '[data-testid="mobile-tab-bar"]'].flatMap((q) => oldIn(document.querySelector(q))))].sort();
+  // old (non-ds) parts by name AND how many of each are drawn («card×3»): a new instance of an old part is a new finding too, not only a new kind (codex 6062 round 1, LOW)
+  const oldIn = (roots: (Element | null)[]) => {
+    const count = new Map<string, number>();
+    for (const e of roots.flatMap((root) => [...(root?.querySelectorAll('[data-slot]') ?? [])])) { const n = e.getAttribute('data-slot')!; if (!n.startsWith('ds-') && !ALLOWED.includes(n)) count.set(n, (count.get(n) ?? 0) + 1); }
+    return [...count].map(([n, c]) => `${n}×${c}`).sort();
+  };
+  const oldSlots = oldIn([document.getElementById('cell')]);
+  const chromeOldSlots = oldIn(['[data-testid="top-bar"]', '[data-testid="nav-rail"]', '[data-testid="mobile-tab-bar"]'].map((q) => document.querySelector(q)));
   const scroller = document.getElementById('scroller')!;
   const lit = [...document.querySelectorAll('[data-testid="nav-rail"] [aria-current="page"], [data-testid="mobile-tab-bar"] [aria-current="page"]')].filter(shown).map((e) => (e.getAttribute('aria-label') || e.textContent || '').trim().replace(/\s+/g, ' '));
   const h1 = [...document.querySelectorAll('h1')].filter(shown).map((e) => (e.textContent || '').trim().slice(0, 30));
@@ -322,11 +379,11 @@ const measure = (page: Page) => page.evaluate(() => {
     h1, lit, dupTitle, stripLines, descMidBreak,
     overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     scrollerOverflowX: scroller.scrollWidth > scroller.clientWidth + 1,
-    small, tiny, oldSlots, chromeOldSlots,
+    small, unreached, covered, trouble, tiny, oldSlots, chromeOldSlots,
   };
 });
 
-type Finding = { h1?: number; dupTitle?: true; stripLines?: number; descMidBreak?: true; small?: string[]; tiny?: string[]; oldSlots?: string[] };
+type Finding = { h1?: number; dupTitle?: true; stripLines?: number; descMidBreak?: true; small?: string[]; unreached?: string[]; tiny?: string[]; oldSlots?: string[] };
 /**
  * What the real screens do TODAY, exactly, per scene (a scene with no entry is clean): the scene is red if a listed finding is gone (a fix landed → shrink the list) or a new one shows — nothing is loosened silently.
  * `h1` is the number of visible h1 where it is not 1 · `dupTitle` the body title that the bar's path already says · `small` (phone only) presses under 44 · `tiny` text under 12 px · `oldSlots` non-ds parts in the BODY.
@@ -334,36 +391,36 @@ type Finding = { h1?: number; dupTitle?: true; stripLines?: number; descMidBreak
  */
 // <BASELINE-BEGIN>
 const BASELINE: Record<string, Finding> = {
-  'home-default-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
-  'home-loading-1440': { oldSlots: ['card'] },
-  'home-empty-1440': { oldSlots: ['card'] },
-  'home-error-1440': { oldSlots: ['button'] },
-  'home-long-1440': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
-  'chats-default-1440': { oldSlots: ['button', 'popover-trigger'] },
-  'chats-loading-1440': { oldSlots: ['popover-trigger'] },
-  'chats-empty-1440': { oldSlots: ['popover-trigger'] },
-  'chats-error-1440': { oldSlots: ['popover-trigger'] },
-  'chats-long-1440': { oldSlots: ['button', 'popover-trigger'] },
+  'home-default-1440': { tiny: ['민 10px', '리 10px'], oldSlots: ['card×1', 'tooltip-trigger×3'] },
+  'home-loading-1440': { oldSlots: ['card×2'] },
+  'home-empty-1440': { oldSlots: ['card×1'] },
+  'home-error-1440': { oldSlots: ['button×1'] },
+  'home-long-1440': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×3'] },
+  'chats-default-1440': { oldSlots: ['button×5', 'popover-trigger×1'] },
+  'chats-loading-1440': { oldSlots: ['popover-trigger×1'] },
+  'chats-empty-1440': { oldSlots: ['popover-trigger×1'] },
+  'chats-error-1440': { oldSlots: ['popover-trigger×1'] },
+  'chats-long-1440': { oldSlots: ['button×5', 'popover-trigger×1'] },
   'settings-default-1440': { dupTitle: true },
   'settings-loading-1440': { dupTitle: true },
   'settings-empty-1440': { dupTitle: true },
   'settings-error-1440': { dupTitle: true },
   'settings-long-1440': { dupTitle: true },
-  'home-default-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['card', 'tooltip-trigger'] },
-  'home-loading-390': { oldSlots: ['card'] },
-  'home-empty-390': { oldSlots: ['card'] },
-  'home-error-390': { oldSlots: ['button'] },
-  'home-long-390': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card', 'tooltip-trigger'] },
-  'chats-default-390': { oldSlots: ['button', 'popover-trigger'] },
-  'chats-loading-390': { oldSlots: ['popover-trigger'] },
-  'chats-empty-390': { oldSlots: ['popover-trigger'] },
-  'chats-error-390': { oldSlots: ['popover-trigger'] },
-  'chats-long-390': { oldSlots: ['button', 'popover-trigger'] },
-  'agents-default-390': { stripLines: 2 },
+  'home-default-390': { tiny: ['민 10px', '리 10px'], oldSlots: ['card×1', 'tooltip-trigger×2'] },
+  'home-loading-390': { oldSlots: ['card×2'] },
+  'home-empty-390': { oldSlots: ['card×1'] },
+  'home-error-390': { oldSlots: ['button×1'] },
+  'home-long-390': { tiny: ['가 10px', 'AB 10px'], oldSlots: ['card×1', 'tooltip-trigger×2'] },
+  'chats-default-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
+  'chats-loading-390': { oldSlots: ['popover-trigger×1'] },
+  'chats-empty-390': { oldSlots: ['popover-trigger×1'] },
+  'chats-error-390': { oldSlots: ['popover-trigger×1'] },
+  'chats-long-390': { oldSlots: ['button×5', 'popover-trigger×1'] },
+  'agents-default-390': { stripLines: 2, small: ['SPAN 24x44'] },
   'agents-loading-390': { stripLines: 2 },
   'agents-empty-390': { stripLines: 2 },
   'agents-error-390': { stripLines: 2 },
-  'agents-long-390': { stripLines: 2 },
+  'agents-long-390': { stripLines: 2, small: ['SPAN 24x44'] },
   'settings-loading-390': { h1: 0 },
   'settings-empty-390': { h1: 0 },
   'settings-error-390': { h1: 0 },
@@ -371,14 +428,20 @@ const BASELINE: Record<string, Finding> = {
 };
 // <BASELINE-END>
 /** the shell's OWN chrome (top bar · icon rail · phone tab bar) draws non-ds parts too — measured once, not in every scene (the same in all of them) */
-const CHROME_OLD = ['button', 'dropdown-menu-trigger', 'popover-trigger'];
+const CHROME_OLD = ['button×2', 'dropdown-menu-trigger×1', 'popover-trigger×1'];
 
 async function assertScene(page: Page, place: PlaceId, key: string, phone: boolean) {
   const m = await measure(page);
   // STATES_COLLECT=<file>: write what the scene measured instead of asserting it — how BASELINE is filled (and re-filled after a fix)
-  if (process.env['STATES_COLLECT']) { appendFileSync(process.env['STATES_COLLECT'], `${JSON.stringify({ key, ...m })}\n`); return; }
+  // (a collect run is a MEASURING run, never a verdict: on CI — or with CI set in the environment — the variable is ignored, so an inherited one cannot turn the scenes green without asserting)
+  if (process.env['STATES_COLLECT'] && !process.env['CI']) { appendFileSync(process.env['STATES_COLLECT'], `${JSON.stringify({ key, ...m })}\n`); return; }
   const base = BASELINE[key] ?? {};
   const label = PLACES.find((p) => p.id === place)!.label;
+  if (phone && m.trouble.length > 0) { // a red press scene leaves a second picture: each press whose reach is not its box, outlined in red with the height a finger reaches
+    await page.evaluate((ts) => { for (const t of ts) { const d = document.createElement('div'); d.setAttribute('data-evidence', ''); d.textContent = `${t.reachH}px reached`; d.style.cssText = `position:fixed;left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;outline:2px dashed red;color:red;font:10px/1 sans-serif;z-index:99999;pointer-events:none`; document.body.appendChild(d); } }, m.trouble);
+    await shot(page, page, `states-press-${key}`);
+    await page.evaluate(() => document.querySelectorAll('[data-evidence]').forEach((e) => e.remove()));
+  }
   expect(m.overflowX, `${key}: the page scrolls sideways`).toBe(false);
   expect(m.scrollerOverflowX, `${key}: the shell's scroller scrolls sideways`).toBe(false);
   expect(m.lit.filter((l) => l.includes(label)), `${key}: the place's icon is lit (rail from lg · tab bar below) — lit: ${m.lit.join(' | ')}`).toHaveLength(1);
@@ -389,7 +452,8 @@ async function assertScene(page: Page, place: PlaceId, key: string, phone: boole
   expect(m.descMidBreak, `${key}: the agents list's description breaks INSIDE a word`).toBe(base.descMidBreak ?? false);
   expect(m.oldSlots, `${key}: old (non-ds) parts drawn in the body`).toEqual(base.oldSlots ?? []);
   expect(m.tiny, `${key}: text under 12 px`).toEqual(base.tiny ?? []);
-  if (phone) expect(m.small, `${key}: presses under 44 px`).toEqual(base.small ?? []);
+  if (phone) expect(m.small, `${key}: presses whose pressable run (where the finger reaches them) is under 44 px`).toEqual(base.small ?? []);
+  if (phone) expect(m.unreached, `${key}: a press whose drawn box (4 inner corners + centre) is not what a finger reaches`).toEqual(base.unreached ?? []);
 }
 
 // ── the scenes ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -442,7 +506,7 @@ for (const width of WIDTHS) {
       for (const state of STATES) {
         test(`${p.label} · ${state} · ${width}`, async ({ page }) => {
           const { errs } = await open(page, p.id, state, width);
-          await page.waitForTimeout(400); // the entrance of the scene settles (fonts · the first paint of the lists)
+          await settle(page); // the fonts are in and the boxes hold still on two reads in a row
           await shot(page, page, `states-${p.id}-${state}-${width}`); // taken BEFORE the checks: a red scene still leaves its picture
           try { await expectState(page, p.id, state); } catch (e) {
             throw new Error(`${(e as Error).message}\n--- the page says: ${(await page.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').slice(0, 700)}\n--- page errors: ${errs.join(' | ') || 'none'}`, { cause: e });
@@ -458,6 +522,6 @@ for (const width of WIDTHS) {
 // the shell's own chrome (measured once: it is the same in every scene)
 test('the shell chrome (top bar · icon rail · phone tab bar): the non-ds parts it draws are exactly the listed ones', async ({ page }) => {
   await open(page, 'home', 'default', 1440);
-  await page.waitForTimeout(300);
+  await settle(page);
   expect((await measure(page)).chromeOldSlots, 'the chrome draws other non-ds parts than CHROME_OLD').toEqual(CHROME_OLD);
 });

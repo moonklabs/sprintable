@@ -116,7 +116,7 @@ describe('ChatsPage — story #3790 실패 축', () => {
     const onRetry = vi.fn();
     await act(async () => { root.render(renderPage(false, 0, true, onRetry)); });
     expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
-    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry)).toHaveLength(0); // reverted (the old second press) → 1
+    expect([...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.common.retry)).toHaveLength(0); // (the old second press in this outlet would make it 1 → RED)
     expect(onRetry).not.toHaveBeenCalled();
   });
 });
